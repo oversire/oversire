@@ -26,7 +26,7 @@ This guide is for the adapter in the app. The cloud has its own guide for webhoo
 
 1. Copy the template folder of your layer, for example `Sources/Providers/TrackerTemplate` to `Sources/Providers/TrackerLinear`.
 2. Rename the types and the file: `TemplateTracker` to `LinearTracker`.
-3. Change the `ProviderID` constant to the vendor name, for example `"linear"`. The id goes into the config file and into the event ids. Do not change it after a release.
+3. Rename the `ProviderID` extension constant (`trackerTemplate`) to the vendor name, for example `.linear`, and set its value to `"linear"`. The id goes into the config file and into the event ids. Do not change it after a release.
 4. Add the target and its test target to `Package.swift`:
 
 ```swift
@@ -34,7 +34,8 @@ This guide is for the adapter in the app. The cloud has its own guide for webhoo
 .testTarget(name: "TrackerLinearTests", dependencies: ["TrackerLinear", "OverSireTestKit"]),
 ```
 
-5. Run `swift build`. The copy builds before you change a call.
+5. Make the folder `Tests/TrackerLinearTests` with one test file. `swift build` fails when a test target has no folder.
+6. Run `swift build`. The copy builds before you change a call.
 
 ## 2. Fill in the descriptor
 
@@ -57,9 +58,28 @@ public static let descriptor = ProviderDescriptor(
 - `fields` are the inputs on the Providers page. The page keeps a `.secret` field in the Keychain. `config.secretKeys` holds its key, and `env.secrets` reads it. The other fields are in `config.values`.
 - `symbol` is an SF Symbol name.
 - `auth` tells the user how to sign in: `.token`, `.cli("gh")`, `.localApp` or `.cloudApp`.
+- The template init takes `token: String?` and does not check it. Change the init to match your `make`, as in the example.
+- `ConfigField(key:label:kind:required:help:)`: `required` is `true` by default. `help` is the hint under the input. `docsURL` is optional.
 - `make` must not do I/O. The app calls it on first use of the account.
 
 ## 3. Implement the base protocol
+
+The types are in `Sources/OverSireCore`:
+
+| Types | File |
+|---|---|
+| `Provider`, `Capability`, `Identity`, `Cursor`, `EventPage`, `PollPolicy` | `Provider/Provider.swift` |
+| `ProviderError` | `Provider/Errors.swift` |
+| `HTTPTransport`, `CommandRunner`, `SecretReader` | `Provider/IO.swift` |
+| `ProviderEvent`, `EventKind`, `SubjectRef` | `Events.swift` |
+| `AccountID`, `PersonRef` | `Identity.swift` |
+| `ProjectRef`, `ItemRef`, `RepoRef`, `RunRef` and the other refs | `Refs.swift` |
+| `Item`, `ItemDetail`, `StatusOption`, `StatusCategory`, `KeyFormat` | `Tracker.swift` |
+| `Repo`, `ChangeRequest` | `CodeHost.swift` |
+| `Pipeline`, `Run`, `Job`, `Failure` | `CI.swift` |
+| `Workspace`, `RuntimeSession`, `LaunchRequest` | `Runtime.swift` |
+
+`parseISO` in `ISODate.swift` reads vendor dates.
 
 Each adapter implements `Provider`:
 
@@ -73,6 +93,7 @@ Rules for `poll(since:)`:
 
 - `since` is `nil` on the first poll. Then set a baseline. Give no events, or only recent events.
 - The `Cursor` is yours. Put any string in it, for example a date, an ETag or a JSON object. The app stores it and gives it back.
+- A `ProviderEvent` needs a `kind` and a `subject`, for example `kind: .item` and `subject: .item(ItemRef(...))`. The subject tells the app what to read again.
 - Two polls must not give the same event again. Make each event id stable, for example `"linear-<account>-<item>-<updatedAt>"`.
 - Use an ETag or an `updated_since` filter when the vendor has one. A poll with no change must cost little.
 - Set `busy: true` when a subject is in progress, for example a running build. The app then polls at the active interval.
@@ -90,6 +111,11 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 - `projects`, `statuses`, `items`, `detail`, `comments`, `create`, `update`, `comment`.
 - Map each vendor status to a `StatusCategory`. The suite needs at least one done status and one open status.
 - `items` gives the newest activity first.
+- `TrackerConformance` uses the first project that is not closed. It checks these:
+  - `create` returns a key that `keyFormat` finds in a title, and in lower case in a branch name.
+  - `items` lists the new item, and `items(limit: 1)` gives one item or none.
+  - `detail` shows the title from `update`.
+  - `comments` contains the body of the new comment.
 
 ### Code host
 
@@ -141,21 +167,28 @@ let t = LinearTracker(account: AccountID(provider: .linear, id: "acme"), team: "
 
 For a CLI, use `ReplayCommandRunner` in the same way. For a small test, `RecordedHTTP` gives answers that you write in the test.
 
+With no test account, write a small `HTTPTransport` in the test target. It keeps the data in memory and answers the JSON calls of the adapter, and a 401 for a bad token. The suites then run against it.
+
 ## 7. Run the conformance suite
 
 `OverSireTestKit` has one suite for the base protocol and one suite for each layer. A new adapter must pass both.
 
 ```swift
+// The closures are @Sendable. Use a static or a free function, not a method of the test case.
+static func makeTracker(_ fixtures: String) -> LinearTracker { ... }
+
 func testConformance() async {
     let base = await ProviderConformance.run { scenario in
         // .unauthorized: give the adapter a fixture set with a 401 answer.
-        makeTracker(scenario == .normal ? "linear" : "linear-401")
+        Self.makeTracker(scenario == .normal ? "linear" : "linear-401")
     }
     XCTAssertTrue(base.passed, base.description)
-    let layer = await TrackerConformance.run { makeTracker("linear") }
+    let layer = await TrackerConformance.run { Self.makeTracker("linear") }
     XCTAssertTrue(layer.passed, layer.description)
 }
 ```
+
+In the `.unauthorized` scenario, `probe()` must throw `ProviderError.unauthorized`. `poll` can throw any error.
 
 - `ProviderConformance.run` checks the probe, two polls, the cursor, the event ids and the refused token.
 - `ProviderConformance.capabilities(p)` checks only the capabilities. It does no I/O.
@@ -178,7 +211,7 @@ Then add the import of the target at the top of the file, and add the target to 
 
 ## 9. Check
 
-1. `swift build` and `swift test`.
+1. `swift build` and `swift test`. For a fast loop, run `swift test --filter TrackerLinearTests`.
 2. `.build/debug/oversire --selftest`.
 3. This command must give no output. Only the app imports AppKit:
 
