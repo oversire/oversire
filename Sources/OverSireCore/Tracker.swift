@@ -415,7 +415,7 @@ public struct IntakeDetail: Sendable {
 }
 
 /// A typed write to an item. Nil fields stay as they are.
-public struct ItemPatch: Hashable, Sendable {
+public struct ItemPatch: Hashable, Sendable, Codable {
     public var title: String?
     public var status: String?        // status option id
     public var priority: String?      // priority option id

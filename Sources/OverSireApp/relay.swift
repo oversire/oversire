@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 import Network
 import Security
 
@@ -92,47 +93,6 @@ final class SecretStore {
 }
 
 // ─── Relay HTTP API ──────────────────────────────────────────────────────────
-
-struct RelayEvent: Decodable {
-    let seq: Int
-    let deliveryId: String
-    let repo: String
-    let kind: String
-    let action: String?
-    let runId: Int?
-    let jobId: Int?
-    let prNumber: Int?
-    let org: String?          // "plane:<slug>" for Plane events
-    let projectId: String?
-    let itemId: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case seq, deliveryId, repo, kind, action, runId, jobId, prNumber, org, projectId, itemId
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        seq = try c.decode(Int.self, forKey: .seq)
-        deliveryId = try c.decode(String.self, forKey: .deliveryId)
-        repo = try c.decode(String.self, forKey: .repo)
-        kind = try c.decode(String.self, forKey: .kind)
-        action = try c.decodeIfPresent(String.self, forKey: .action)
-        runId = try c.decodeIfPresent(Int.self, forKey: .runId)
-        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
-        prNumber = try c.decodeIfPresent(Int.self, forKey: .prNumber)
-        org = try c.decodeIfPresent(String.self, forKey: .org)
-        projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
-        itemId = try c.decodeIfPresent(String.self, forKey: .itemId)
-    }
-}
-
-struct RelayEventsPage: Decodable {
-    let events: [RelayEvent]
-    let head: Int
-    let next: Int
-    let more: Bool
-    let truncated: Bool
-}
 
 struct RelayDevice: Decodable {
     let id: String
@@ -268,7 +228,7 @@ struct RelayAPI {
     }
     func whoami() -> Result<WhoAmI, RelayFailure> { send("GET", "/v1/whoami") }
     func health() -> Result<RelayHealth, RelayFailure> { send("GET", "/v1/health") }
-    func events(after: Int) -> Result<RelayEventsPage, RelayFailure> { send("GET", "/v1/events?after=\(after)&limit=500") }
+    func events(after: Int) -> Result<CloudEventsPage, RelayFailure> { send("GET", "/v1/events?after=\(after)&limit=500") }
     func ack(_ seq: Int) -> Bool { (try? send("POST", "/v1/ack", body: ["seq": seq], as: OK.self).get()) != nil }
     func registerSelf(name: String, repos: [String], orgs: [String] = []) -> Result<OK, RelayFailure> {
         send("PUT", "/v1/devices/self", body: ["name": name, "repos": repos, "orgs": orgs])
@@ -756,36 +716,6 @@ final class CloudSetup {
 
 // ─── Live client ─────────────────────────────────────────────────────────────
 
-// Keeps the last delivery IDs, so a replayed event is handled once.
-struct RecentIDs {
-    let capacity: Int
-    private var order: [String] = []
-    private var set = Set<String>()
-
-    init(capacity: Int = 2000) { self.capacity = capacity }
-
-    func contains(_ id: String) -> Bool { set.contains(id) }
-
-    mutating func insert(_ id: String) {
-        guard set.insert(id).inserted else { return }
-        order.append(id)
-        if order.count > capacity { set.remove(order.removeFirst()) }
-    }
-}
-
-// 1, 2, 4 … 60 s, with up to 20% jitter.
-struct Backoff {
-    private(set) var attempt = 0
-
-    mutating func next(jitter: Double = Double.random(in: 0...0.2)) -> TimeInterval {
-        let base = min(60, pow(2, Double(attempt)))
-        attempt += 1
-        return base * (1 + jitter)
-    }
-
-    mutating func reset() { attempt = 0 }
-}
-
 // The consumer of relay events. GHActionsBar implements it.
 protocol RelaySink: AnyObject {
     func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, String)], done: @escaping (Bool) -> Void)
@@ -804,25 +734,35 @@ struct RelayApplyPlan {
     var wantsProjectRefresh: Bool { !plane.isEmpty }
 }
 
-func relayApplyPlan(_ events: [RelayEvent], knownRepos: [String]) -> RelayApplyPlan {
+func relayApplyPlan(_ signals: [CloudSignal], knownRepos: [String]) -> RelayApplyPlan {
     let byLower = Dictionary(knownRepos.map { ($0.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
     var plan = RelayApplyPlan()
-    for e in events {
-        switch e.kind {
-        case "workflow_run", "workflow_job", "pull_request", "pull_request_review":
-            if let r = byLower[e.repo], !plan.repos.contains(r) { plan.repos.append(r) }
-            if e.kind.hasPrefix("pull_request") { plan.includePRs = true }
-            if e.kind == "workflow_run", e.action == "completed", let id = e.runId, let r = byLower[e.repo] {
-                plan.completedRuns.append((r, String(id)))
+    func repo(_ path: String?) -> String? {
+        guard let r = path.flatMap({ byLower[$0.lowercased()] }) else { return nil }
+        if !plan.repos.contains(r) { plan.repos.append(r) }
+        return r
+    }
+    func plane(_ slug: String, _ project: String?) {
+        if plan.plane.contains(where: { $0.workspace == slug && ($0.project == nil || $0.project == project) }) { return }
+        if project == nil { plan.plane.removeAll { $0.workspace == slug } }
+        plan.plane.append((slug, project))
+    }
+    for s in signals {
+        switch s {
+        case .resync(let a):
+            if a.provider == .plane { plane(a.id, nil) }
+        case .event(let e):
+            if e.kind == .change { plan.includePRs = true }
+            switch e.subject {
+            case .run(let r):
+                if let path = repo(r.repo?.path), e.kind == .run, e.action == "completed" { plan.completedRuns.append((path, r.id)) }
+            case .job(let j): _ = repo(j.run.repo?.path)
+            case .change(let c): _ = repo(c.repo.path)
+            case .repo(let r): _ = repo(r.path)
+            case .project(let p) where p.account.provider == .plane: plane(p.account.id, p.id)
+            case .item(let i) where i.project.account.provider == .plane: plane(i.project.account.id, i.project.id)
+            default: break
             }
-        case "plane":
-            guard let org = e.org, org.hasPrefix("plane:") else { break }
-            let slug = String(org.dropFirst(6))
-            if plan.plane.contains(where: { $0.workspace == slug && ($0.project == nil || $0.project == e.projectId) }) { break }
-            if e.projectId == nil { plan.plane.removeAll { $0.workspace == slug } }
-            plan.plane.append((slug, e.projectId))
-        default:
-            break
         }
     }
     return plan
@@ -928,7 +868,7 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
 
     private func scheduleReconnect() {
         guard canRun else { return }
-        let delay = backoff.next()
+        let delay = backoff.next().timeInterval
         let w = DispatchWorkItem { [weak self] in self?.connect() }
         reconnectWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
@@ -1005,7 +945,7 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
         syncing = true
         let api = self.api, start = cursor
         syncQ.async { [weak self] in
-            var after = start, events: [RelayEvent] = [], truncated = false, failure: RelayFailure?
+            var after = start, events: [CloudEvent] = [], truncated = false, failure: RelayFailure?
             while true {
                 switch api.events(after: after) {
                 case .failure(let f): failure = f
@@ -1023,7 +963,7 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
-    private func apply(events: [RelayEvent], truncated: Bool, upTo next: Int, failure: RelayFailure?) {
+    private func apply(events: [CloudEvent], truncated: Bool, upTo next: Int, failure: RelayFailure?) {
         if let f = failure {
             syncing = false
             if case .unauthorized = f { state = .error(f.description) }
@@ -1052,7 +992,8 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
             return
         }
         guard !fresh.isEmpty else { finish(true); return }
-        let plan = relayApplyPlan(fresh, knownRepos: REPOS)
+        let now = Date()
+        let plan = relayApplyPlan(fresh.compactMap { $0.signal(at: now) }, knownRepos: REPOS)
         guard plan.wantsRepoRefresh || plan.wantsProjectRefresh else { finish(true); return }
         guard let sink = sink else { finish(false); return }
         let group = DispatchGroup()

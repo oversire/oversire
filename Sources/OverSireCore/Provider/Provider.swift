@@ -122,3 +122,10 @@ public struct RateBudget: Hashable, Sendable {
 public protocol RateReporting: Provider {
     func budget() async throws -> RateBudget
 }
+
+extension Duration {
+    public var timeInterval: TimeInterval {
+        let c = components
+        return TimeInterval(c.seconds) + TimeInterval(c.attoseconds) / 1e18
+    }
+}

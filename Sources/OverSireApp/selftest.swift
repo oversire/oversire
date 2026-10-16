@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 
 
 // Runnable check: `oversire --selftest` exercises the report math without a UI.
@@ -142,16 +143,6 @@ func runSelfTest() {
     check(bar.prevStatuses["b1"] == "completed", "partial transitions keep other repos")
     check(bar.prevStatuses["a2"] == "completed" && bar.prevStatuses["a1"] == nil, "partial transitions replace refreshed repo")
 
-    var ids = RecentIDs(capacity: 2)
-    ids.insert("x"); ids.insert("y"); ids.insert("x"); ids.insert("z")
-    check(!ids.contains("x") && ids.contains("y") && ids.contains("z"), "dedupe buffer evicts oldest")
-
-    var bo = Backoff()
-    let delays = (0..<8).map { _ in bo.next(jitter: 0) }
-    check(delays == [1, 2, 4, 8, 16, 32, 60, 60], "backoff \(delays)")
-    bo.reset()
-    check(bo.next(jitter: 0.2) == 1.2, "backoff jitter")
-
     check(CloudSetup.normalize("cloud.example.dev/") == "https://cloud.example.dev", "cloud URL gets https")
     check(CloudSetup.normalize("http://x.dev") == nil, "cloud URL must be https")
     check(CloudSetup.normalize("  ") == nil, "empty cloud URL")
@@ -281,8 +272,8 @@ func runSelfTest() {
     notifier.handle([("a", .reopened)], in: mine, settings: settings)
     check(notes[2].body == "Reopened", "a new window after 2 minutes")
 
-    func relayEvent(_ json: String) -> RelayEvent {
-        try! JSONDecoder().decode(RelayEvent.self, from: Data(json.utf8))
+    func relayEvent(_ json: String) -> CloudSignal? {
+        try! JSONDecoder().decode(CloudEvent.self, from: Data(json.utf8)).signal(at: Date())
     }
     let plan = relayApplyPlan([
         relayEvent(#"{"seq":1,"deliveryId":"a","repo":"o/kept","kind":"workflow_run","action":"completed","runId":9}"#),
@@ -293,7 +284,7 @@ func runSelfTest() {
         relayEvent(#"{"seq":6,"deliveryId":"f","repo":"","org":"plane:beta","kind":"plane","action":"project.updated"}"#),
         relayEvent(#"{"seq":7,"deliveryId":"g","repo":"","org":"plane:beta","kind":"plane","action":"workitem.created","projectId":"P3"}"#),
         relayEvent(#"{"seq":8,"deliveryId":"h","repo":"","org":"acme","kind":"plane","projectId":"P9"}"#),
-    ], knownRepos: ["O/Kept"])
+    ].compactMap { $0 }, knownRepos: ["O/Kept"])
     check(plan.repos == ["O/Kept"] && plan.completedRuns.count == 1
             && plan.completedRuns[0].0 == "O/Kept" && plan.completedRuns[0].1 == "9", "relay plan keeps known repos")
     check(plan.includePRs, "pull request events refresh PRs")

@@ -84,6 +84,43 @@ public enum ChangeAction: Hashable, Sendable, CustomStringConvertible {
     }
 }
 
+// JSON: {"type": "merge", "method": "squash"}, {"type": "approve", "body": "LGTM"}.
+extension ChangeAction: Codable {
+    private enum CodingKeys: String, CodingKey { case type, body, method }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        switch try c.decode(String.self, forKey: .type) {
+        case "approve": self = .approve(try c.decodeIfPresent(String.self, forKey: .body))
+        case "request-changes": self = .requestChanges(try c.decode(String.self, forKey: .body))
+        case "comment": self = .comment(try c.decode(String.self, forKey: .body))
+        case "merge": self = .merge(try c.decode(MergeMethod.self, forKey: .method))
+        case "close": self = .close
+        case let t: throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown change action \(t)")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .approve(let b):
+            try c.encode("approve", forKey: .type)
+            try c.encodeIfPresent(b, forKey: .body)
+        case .requestChanges(let b):
+            try c.encode("request-changes", forKey: .type)
+            try c.encode(b, forKey: .body)
+        case .comment(let b):
+            try c.encode("comment", forKey: .type)
+            try c.encode(b, forKey: .body)
+        case .merge(let m):
+            try c.encode("merge", forKey: .type)
+            try c.encode(m, forKey: .method)
+        case .close:
+            try c.encode("close", forKey: .type)
+        }
+    }
+}
+
 /// Which change requests to list.
 public struct ChangeFilter: Hashable, Sendable {
     public var mine: Bool

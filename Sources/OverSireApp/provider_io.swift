@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireSync
 
 // The real I/O behind the adapters: URLSession, Process and the Keychain.
 
@@ -76,4 +77,47 @@ struct KeychainSecrets: SecretReader {
     let service: String
 
     func secret(_ key: String) -> String? { SecretStore(service: service).get(key) }
+}
+
+/// The cloud socket over URLSessionWebSocketTask.
+struct URLSessionWebSockets: WebSocketConnecting {
+    func connect(_ request: URLRequest) async throws -> any WebSocketConnection {
+        let socket = URLSessionWebSocket(task: URLSession.shared.webSocketTask(with: request))
+        socket.task.resume()
+        // A ping waits for the handshake, so a bad token fails here.
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            socket.task.sendPing { e in e.map { c.resume(throwing: socket.mapped($0)) } ?? c.resume() }
+        }
+        return socket
+    }
+}
+
+final class URLSessionWebSocket: WebSocketConnection, @unchecked Sendable {
+    let task: URLSessionWebSocketTask
+
+    init(task: URLSessionWebSocketTask) { self.task = task }
+
+    func receive() async throws -> String {
+        do {
+            switch try await task.receive() {
+            case .string(let s): return s
+            case .data(let d): return String(decoding: d, as: UTF8.self)
+            @unknown default: return ""
+            }
+        } catch {
+            throw mapped(error)
+        }
+    }
+
+    func send(_ text: String) async throws {
+        do { try await task.send(.string(text)) } catch { throw mapped(error) }
+    }
+
+    func close() { task.cancel(with: .goingAway, reason: nil) }
+
+    // 4001: the cloud removed this Mac.
+    func mapped(_ error: Error) -> ProviderError {
+        if task.closeCode.rawValue == 4001 || (task.response as? HTTPURLResponse)?.statusCode == 401 { return .unauthorized }
+        return .transport(error.localizedDescription)
+    }
 }

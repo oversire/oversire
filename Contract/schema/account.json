@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oversire.dev/contract/account.json",
+  "title": "AccountConfig",
+  "description": "One connected vendor account. Secrets are never in this object, only the names of their Keychain or vault keys.",
+  "x-oversire-schema": 1,
+  "type": "object",
+  "properties": {
+    "account": { "$ref": "refs.json#/$defs/AccountID" },
+    "values": { "type": "object", "additionalProperties": { "type": "string" } },
+    "secretKeys": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["account", "values", "secretKeys"],
+  "additionalProperties": false
+}

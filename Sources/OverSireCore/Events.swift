@@ -63,3 +63,17 @@ public struct ProviderEvent: Hashable, Sendable, Codable {
         self.summary = summary
     }
 }
+
+public enum SourceHealth: Hashable, Sendable {
+    case off
+    case connecting
+    case live
+    case failed(String)
+}
+
+/// A stream of provider events: polling, the cloud, or a merge of both.
+public protocol EventSource: Sendable {
+    /// One consumer. A second call ends the first stream.
+    func events() -> AsyncStream<ProviderEvent>
+    func health() async -> SourceHealth
+}
