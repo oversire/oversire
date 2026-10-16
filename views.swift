@@ -228,7 +228,7 @@ enum SettingsTab: Int, CaseIterable {
     case general, actions, projects, ai, live
 }
 
-// Back button plus General / Actions / Projects / AI / Live updates.
+// Back button plus General / Actions / Projects / AI / Cloud.
 class SettingsNav: NSView {
     init(w: CGFloat, selected: SettingsTab) {
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: 44))
@@ -237,7 +237,7 @@ class SettingsNav: NSView {
         back.bezelStyle = .inline; back.font = .systemFont(ofSize: 12)
         back.frame = NSRect(x: 8, y: 10, width: 56, height: 24)
         addSubview(back)
-        let seg = NSSegmentedControl(labels: ["General", "Actions", "Projects", "AI", "Live updates"], trackingMode: .selectOne,
+        let seg = NSSegmentedControl(labels: ["General", "Actions", "Projects", "AI", "Cloud"], trackingMode: .selectOne,
                                      target: self, action: #selector(tabChanged(_:)))
         seg.selectedSegment = selected.rawValue
         seg.font = .systemFont(ofSize: 11, weight: .medium)

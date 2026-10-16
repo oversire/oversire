@@ -13,7 +13,6 @@ on:
       - 'screenshots/**'
       - 'assets/**'
       - 'LICENSE'
-      - 'worker/test/**'
       - 'update.sh'
   workflow_dispatch:
 

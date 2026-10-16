@@ -18,7 +18,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                      writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json", store: projectStore, accounts: PlaneAccounts()))
     lazy var ciAssist = CIAssist(path: NSTemporaryDirectory() + "oversire-uishots/ci.json")
     lazy var aiChecks = AgentJudge(path: NSTemporaryDirectory() + "oversire-uishots/checks.json", agents: agentIndex, queue: queue)
-    let relay = RelayClient(secrets: SecretStore(service: "com.oversire.app.relay"))
+    let relay = RelayClient(secrets: SecretStore(service: "com.oversire.app.cloud"))
     private let dir: String
     struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: PR }
 
@@ -30,7 +30,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             let acc = PlaneAccounts()
             return ProjectSettingsVC(catalog: ProjectCatalog(accounts: acc, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, accounts: acc, cfg: PROJECTS_CFG)
         case .ai: return AISettingsVC()
-        case .live: return RelaySettingsVC(deployer: RelayDeployer(), client: relay)
+        case .live: return CloudSettingsVC(setup: CloudSetup(), client: relay)
         default: return nil
         }
     }

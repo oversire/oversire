@@ -250,7 +250,7 @@ final class ProjectSettingsVC: NSViewController {
     }
 
     func isLive(_ slug: String) -> Bool {
-        let st = (NSApp.delegate as? GHActionsBar)?.relayDeployer.hooks.statuses["plane:\(slug)"]
+        let st = (NSApp.delegate as? GHActionsBar)?.cloudSetup.hooks.statuses["plane:\(slug)"]
         if case .live = st { return true }
         if case .waiting = st { return true }
         return false
@@ -307,7 +307,7 @@ final class ProjectSettingsVC: NSViewController {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let app = NSApp.delegate as? GHActionsBar
-        app?.relayDeployer.removePlaneHook(slug)
+        app?.cloudSetup.removePlaneHook(slug)
         accounts.remove(slug)
         cfg.workspaces = PROJECTS_CFG.workspaces
         cfg.allOf.removeAll { $0 == slug }

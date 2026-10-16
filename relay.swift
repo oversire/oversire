@@ -2,41 +2,28 @@ import Cocoa
 import Network
 import Security
 
-// ─── Relay configuration ─────────────────────────────────────────────────────
-// Optional push path: GitHub webhooks → Cloudflare Worker "oversire-relay" → this Mac.
+// ─── Cloud configuration ─────────────────────────────────────────────────────
+// Optional push path: GitHub and Plane webhooks → OverSire cloud (oversire/cloud) → this Mac.
 
 struct RelayConfig: Codable {
     var enabled = false
     var workerURL = ""
-    var deviceID = ""            // 16 uppercase hex chars, made once for each Mac
-    var accountID = ""
+    var deviceID = ""            // from /v1/whoami; the cloud owns the device tokens
     var reconcileInterval: TimeInterval?
-    var oldOrgHooks: [String: Int]?   // GitHub org hooks of relay v2, org → hook id, still to delete
 }
 
 var RELAY = RelayConfig()
-let RELAY_DIR = (CONFIG_DIR as NSString).appendingPathComponent("relay")
-let RELAY_BUNDLED_VERSION = 3    // keep equal to RELAY_VERSION in worker/wrangler.jsonc
-let RELAY_WORKER_NAME = "oversire-relay"
+// v3 is a Cat Eye relay that a migrated user deployed. It has no /v1/whoami.
+let CLOUD_MIN_VERSION = 3
+let CLOUD_APPS: Set<String> = ["oversire-cloud", "cat-eye-relay"]
 let RELAY_EVENTS = ["workflow_run", "workflow_job", "pull_request", "pull_request_review"]
 let FREE_ROWS_PER_DAY = 100_000
 
-func randomHex(_ bytes: Int) -> String {
-    var b = [UInt8](repeating: 0, count: bytes)
-    _ = SecRandomCopyBytes(kSecRandomDefault, bytes, &b)
-    return b.map { String(format: "%02x", $0) }.joined()
-}
-
 private let secretPattern = try! NSRegularExpression(pattern: "\\b[0-9a-fA-F]{64}\\b")
-private let ansiPattern = try! NSRegularExpression(pattern: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]")
 
 // Hides device tokens and the webhook secret (32 random bytes as hex) in log text.
 func maskSecrets(_ s: String) -> String {
     secretPattern.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "••••")
-}
-
-func stripANSI(_ s: String) -> String {
-    ansiPattern.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
 }
 
 // Free plan: 100k rows written per day. Projects today's count to a full UTC day.
@@ -53,155 +40,6 @@ struct WriteQuota {
     var warn: Bool { fraction >= 0.7 }
 }
 
-// ─── Toolchain: node, npm, brew, wrangler ────────────────────────────────────
-
-struct CommandResult {
-    let status: Int32
-    let output: String
-    var ok: Bool { status == 0 }
-}
-
-final class Toolchain {
-    let dir: String
-    private(set) var node: String?
-
-    init(dir: String = RELAY_DIR) { self.dir = dir }
-
-    var brew: String? {
-        ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"].first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-    var npm: String? { node.map { (($0 as NSString).deletingLastPathComponent as NSString).appendingPathComponent("npm") } }
-    var wranglerJS: String { (dir as NSString).appendingPathComponent("node_modules/wrangler/bin/wrangler.js") }
-    var hasWrangler: Bool { FileManager.default.fileExists(atPath: wranglerJS) }
-
-    // Fixed paths and version managers first, then the user's login shell.
-    @discardableResult
-    func findNode() -> String? {
-        let fm = FileManager.default
-        let home = NSHomeDirectory() as NSString
-        var fixed = ["/opt/homebrew/bin/node", "/usr/local/bin/node",
-                     home.appendingPathComponent(".volta/bin/node"), home.appendingPathComponent(".asdf/shims/node")]
-        let nvm = home.appendingPathComponent(".nvm/versions/node")
-        let versions = ((try? fm.contentsOfDirectory(atPath: nvm)) ?? [])
-            .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
-        fixed += versions.map { "\(nvm)/\($0)/bin/node" }
-        if let p = fixed.first(where: { fm.isExecutableFile(atPath: $0) }) { node = p; return p }
-        let shell = getpwuid(getuid()).flatMap { String(validatingUTF8: $0.pointee.pw_shell) } ?? "/bin/zsh"
-        let res = run(shell, ["-lic", "command -v node"], cwd: nil)
-        node = res.output.split(separator: "\n").map(String.init).last { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) }
-        return node
-    }
-
-    // Returns the version (e.g. "22.19.0") if it is at least 20.
-    func nodeVersion() -> (version: String, ok: Bool)? {
-        guard let node = node ?? findNode() else { return nil }
-        let res = run(node, ["--version"], cwd: nil)
-        guard res.ok else { return nil }
-        let v = res.output.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "v", with: "")
-        let major = Int(v.split(separator: ".").first ?? "") ?? 0
-        return (v, major >= 20)
-    }
-
-    func wranglerVersion() -> String? {
-        guard hasWrangler, let node = node ?? findNode() else { return nil }
-        let res = run(node, [wranglerJS, "--version"], cwd: dir)
-        guard res.ok else { return nil }
-        return res.output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-            .last { $0.first?.isNumber == true }
-    }
-
-    // Copies the Worker source from the app bundle into the working folder.
-    func syncBundle() -> Bool {
-        guard let res = Bundle.main.resourcePath else { return false }
-        let src = (res as NSString).appendingPathComponent("worker")
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: src) else { return false }
-        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        for item in ["src", "wrangler.jsonc", "package.json"] {
-            let to = (dir as NSString).appendingPathComponent(item)
-            try? fm.removeItem(atPath: to)
-            do { try fm.copyItem(atPath: (src as NSString).appendingPathComponent(item), toPath: to) } catch { return false }
-        }
-        return true
-    }
-
-    func installNode(onLine: @escaping (String) -> Void) -> CommandResult {
-        guard let brew = brew else { return CommandResult(status: 1, output: "Homebrew not found") }
-        let res = run(brew, ["install", "node"], cwd: nil, onLine: onLine)
-        findNode()
-        return res
-    }
-
-    func installWrangler(update: Bool = false, onLine: @escaping (String) -> Void) -> CommandResult {
-        guard syncBundle() else { return CommandResult(status: 1, output: "Relay files are missing from the app bundle") }
-        guard let npm = npm ?? (findNode() != nil ? self.npm : nil) else { return CommandResult(status: 1, output: "npm not found") }
-        let args = update ? ["install", "--omit=dev", "wrangler@4"] : ["install", "--omit=dev"]
-        return run(npm, args, cwd: dir, onLine: onLine)
-    }
-
-    func wrangler(_ args: [String], stdin: String? = nil, onLine: ((String) -> Void)? = nil) -> CommandResult {
-        guard let node = node ?? findNode(), hasWrangler else { return CommandResult(status: 127, output: "wrangler is not installed") }
-        return run(node, [wranglerJS] + args, cwd: dir, stdin: stdin, onLine: onLine)
-    }
-
-    // Allowlisted env. node must be on PATH for npm scripts and wrangler.
-    var env: [String: String] {
-        let pe = ProcessInfo.processInfo.environment
-        var e: [String: String] = [:]
-        for k in ["HOME", "LANG", "USER", "TMPDIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"] { if let v = pe[k] { e[k] = v } }
-        if e["HOME"] == nil { e["HOME"] = NSHomeDirectory() }
-        let nodeDir = node.map { ($0 as NSString).deletingLastPathComponent }
-        e["PATH"] = ([nodeDir].compactMap { $0 } + ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]).joined(separator: ":")
-        e["NO_COLOR"] = "1"
-        e["WRANGLER_SEND_METRICS"] = "false"
-        if !RELAY.accountID.isEmpty { e["CLOUDFLARE_ACCOUNT_ID"] = RELAY.accountID }
-        return e
-    }
-
-    // Runs a command and streams its output line by line. Blocks: call it off the main thread.
-    func run(_ exe: String, _ args: [String], cwd: String?, stdin: String? = nil,
-             onLine: ((String) -> Void)? = nil) -> CommandResult {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: exe)
-        proc.arguments = args
-        proc.environment = env
-        if let cwd = cwd { proc.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-        let out = Pipe()
-        proc.standardOutput = out
-        proc.standardError = out
-        let inPipe = Pipe()
-        proc.standardInput = stdin == nil ? FileHandle.nullDevice : inPipe
-
-        let lock = NSLock()
-        var all = Data()
-        var partial = ""
-        func emit(_ chunk: String, flush: Bool) {
-            partial += chunk
-            var lines = partial.components(separatedBy: CharacterSet.newlines)
-            partial = flush ? "" : lines.removeLast()
-            for l in lines where !l.trimmingCharacters(in: .whitespaces).isEmpty { onLine?(stripANSI(l)) }
-        }
-        let done = DispatchSemaphore(value: 0)
-        out.fileHandleForReading.readabilityHandler = { h in
-            let d = h.availableData
-            if d.isEmpty { h.readabilityHandler = nil; done.signal(); return }
-            lock.lock(); all.append(d); emit(String(decoding: d, as: UTF8.self), flush: false); lock.unlock()
-        }
-        do { try proc.run() } catch {
-            out.fileHandleForReading.readabilityHandler = nil
-            return CommandResult(status: 127, output: error.localizedDescription)
-        }
-        if let s = stdin {
-            inPipe.fileHandleForWriting.write(Data(s.utf8))
-            try? inPipe.fileHandleForWriting.close()
-        }
-        proc.waitUntilExit()
-        _ = done.wait(timeout: .now() + 5)
-        lock.lock(); emit("", flush: true); let text = stripANSI(String(decoding: all, as: UTF8.self)); lock.unlock()
-        return CommandResult(status: proc.terminationStatus, output: text)
-    }
-}
-
 // ─── Keychain ────────────────────────────────────────────────────────────────
 
 final class SecretStore {
@@ -209,7 +47,7 @@ final class SecretStore {
     static let webhookSecret = "WEBHOOK_SECRET"
     let service: String
 
-    init(service: String = "com.oversire.app.relay") { self.service = service }
+    init(service: String = "com.oversire.app.cloud") { self.service = service }
 
     private func query(_ key: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -379,11 +217,11 @@ enum RelayFailure: Error, CustomStringConvertible {
 
     var description: String {
         switch self {
-        case .notConfigured: return "Relay is not set up"
-        case .unauthorized: return "This Mac's token was rejected"
-        case .http(let c): return "Relay answered HTTP \(c)"
+        case .notConfigured: return "Cloud is not set up"
+        case .unauthorized: return "The cloud rejected the token"
+        case .http(let c): return "Cloud answered HTTP \(c)"
         case .network(let m): return m
-        case .decode: return "Unexpected relay response"
+        case .decode: return "Unexpected cloud response"
         }
     }
 }
@@ -421,11 +259,13 @@ struct RelayAPI {
     struct OK: Decodable {}
     struct Discovery: Decodable { let app: String; let version: String? }
     struct Secret: Decodable { let secret: String }
+    struct WhoAmI: Decodable { let deviceId: String }
 
     func discover() -> Discovery? {
-        guard case .success(let d) = send("GET", "/", as: Discovery.self), d.app == RELAY_WORKER_NAME else { return nil }
+        guard case .success(let d) = send("GET", "/", as: Discovery.self), CLOUD_APPS.contains(d.app) else { return nil }
         return d
     }
+    func whoami() -> Result<WhoAmI, RelayFailure> { send("GET", "/v1/whoami") }
     func health() -> Result<RelayHealth, RelayFailure> { send("GET", "/v1/health") }
     func events(after: Int) -> Result<RelayEventsPage, RelayFailure> { send("GET", "/v1/events?after=\(after)&limit=500") }
     func ack(_ seq: Int) -> Bool { (try? send("POST", "/v1/ack", body: ["seq": seq], as: OK.self).get()) != nil }
@@ -542,27 +382,10 @@ final class HookManager {
         return s
     }
 
-    func patchSecret(repo: String, hookId: Int, secret: String) -> Bool {
-        let body: [String: Any] = ["config": ["url": RELAY.workerURL + "/webhook", "content_type": "json",
-                                              "secret": secret, "insecure_ssl": "0"]]
-        return gh(["api", "-X", "PATCH", "repos/\(repo)/hooks/\(hookId)", "--jq", ".id"], body: body)?.ok == true
-    }
-
     func delete(repo: String, hookId: Int) -> Bool {
         let ok = gh(["api", "-X", "DELETE", "repos/\(repo)/hooks/\(hookId)"])?.ok == true
         lock.lock(); _statuses[repo] = nil; lock.unlock()
         return ok
-    }
-
-    enum OrgDelete { case deleted, noScope, failed(String) }
-
-    // GitHub gives 404 for a missing hook and for a missing scope. Only the hint of gh tells them apart.
-    func deleteOrgHook(org: String, hookId: Int) -> OrgDelete {
-        guard let r = gh(["api", "-X", "DELETE", "orgs/\(org)/hooks/\(hookId)"]) else { return .failed("gh failed to start") }
-        if r.ok { return .deleted }
-        if r.err.contains("admin:org_hook") { return .noScope }
-        if r.err.lowercased().contains("not found") { return .deleted }
-        return .failed(String(r.err.prefix(80)))
     }
 
     static func planeKey(_ slug: String) -> String { "plane:\(slug)" }
@@ -643,30 +466,22 @@ func relativeAgo(_ d: Date) -> String {
     return "\(s / 86400)d ago"
 }
 
-// ─── Deployer: login, deploy, join, retention, devices, remove ───────────────
-
-struct CFAccount: Equatable { let id: String; let name: String }
+// ─── Cloud setup: connect, hooks, retention, devices ─────────────────────────
+// The cloud repo deploys the Worker and issues device tokens. This Mac only connects.
 
 struct SetupState {
-    var node: String?
-    var nodeOK = false
-    var hasBrew = false
-    var wrangler: String?
-    var email: String?
-    var accounts: [CFAccount] = []
-    var relayVersion: Int?
+    var version: Int?
     var joined = false
     var joinError: String?
     var health: RelayHealth?
 
-    var needsRelayUpdate: Bool { (relayVersion ?? 0) < RELAY_BUNDLED_VERSION }
+    var tooOld: Bool { version.map { $0 < CLOUD_MIN_VERSION } ?? false }
 }
 
-final class RelayDeployer {
-    let tools = Toolchain()
+final class CloudSetup {
     let secrets = SecretStore()
     let hooks = HookManager()
-    private let work = DispatchQueue(label: "com.oversire.app.relay.setup")
+    private let work = DispatchQueue(label: "com.oversire.app.cloud.setup")
 
     // Main thread only.
     private(set) var log: [String] = []
@@ -676,32 +491,6 @@ final class RelayDeployer {
     var onLog: (() -> Void)?
 
     var api: RelayAPI { RelayAPI(base: RELAY.workerURL, token: secrets.get(SecretStore.deviceToken)) }
-
-    // MARK: Output parsers (pure, covered by --selftest)
-
-    static func parseWorkerURL(_ out: String) -> String? {
-        let re = try! NSRegularExpression(pattern: "https://\(RELAY_WORKER_NAME)\\.[A-Za-z0-9-]+\\.workers\\.dev")
-        guard let m = re.firstMatch(in: out, range: NSRange(out.startIndex..., in: out)),
-              let r = Range(m.range, in: out) else { return nil }
-        return String(out[r])
-    }
-
-    static func parseWhoami(_ out: String) -> (email: String?, accounts: [CFAccount])? {
-        guard let start = out.firstIndex(of: "{"),
-              let obj = try? JSONSerialization.jsonObject(with: Data(out[start...].utf8)) as? [String: Any],
-              obj["loggedIn"] as? Bool == true else { return nil }
-        let accts = (obj["accounts"] as? [[String: Any]] ?? []).compactMap { a -> CFAccount? in
-            guard let id = a["id"] as? String else { return nil }
-            return CFAccount(id: id, name: a["name"] as? String ?? id)
-        }
-        return (obj["email"] as? String, accts)
-    }
-
-    static func parseSecretNames(_ out: String) -> [String]? {
-        guard let start = out.firstIndex(of: "["),
-              let arr = try? JSONSerialization.jsonObject(with: Data(out[start...].utf8)) as? [[String: Any]] else { return nil }
-        return arr.compactMap { $0["name"] as? String }
-    }
 
     // MARK: Plumbing
 
@@ -733,26 +522,14 @@ final class RelayDeployer {
 
     // MARK: Inspect
 
-    // Collects the state of all setup steps. Blocking.
+    // Blocking.
     func inspect() -> SetupState {
         var s = SetupState()
-        tools.findNode()
-        s.hasBrew = tools.brew != nil
-        if let v = tools.nodeVersion() { s.node = v.version; s.nodeOK = v.ok }
-        s.wrangler = tools.wranglerVersion()
-        if s.wrangler != nil, let who = RelayDeployer.parseWhoami(tools.wrangler(["whoami", "--json"]).output) {
-            s.email = who.email
-            s.accounts = who.accounts
-            if who.accounts.count == 1, RELAY.accountID != who.accounts[0].id {
-                DispatchQueue.main.async { RELAY.accountID = who.accounts[0].id; saveConfig() }
-            }
-        }
-        if !RELAY.workerURL.isEmpty {
-            s.relayVersion = api.discover().flatMap { Int($0.version ?? "") }
-            switch api.health() {
-            case .success(let h): s.joined = true; s.health = h
-            case .failure(let f): s.joinError = secrets.get(SecretStore.deviceToken) == nil ? nil : f.description
-            }
+        guard !RELAY.workerURL.isEmpty else { return s }
+        s.version = api.discover().flatMap { Int($0.version ?? "") }
+        switch api.health() {
+        case .success(let h): s.joined = true; s.health = h
+        case .failure(let f): s.joinError = secrets.get(SecretStore.deviceToken) == nil ? nil : f.description
         }
         return s
     }
@@ -764,132 +541,55 @@ final class RelayDeployer {
         }
     }
 
-    // MARK: Steps
+    // MARK: Connect
 
-    func installNode() -> Bool { tools.installNode(onLine: append).ok }
-    func installWrangler(update: Bool = false) -> Bool { tools.installWrangler(update: update, onLine: append).ok }
-    func login() -> Bool { tools.wrangler(["login"], onLine: append).ok }
-    func logout() -> Bool { tools.wrangler(["logout"], onLine: append).ok }
-
-    // Deploys the bundled Worker. A second Mac deploys the same version, which
-    // is harmless and gives it the workers.dev URL.
-    func deploy() -> Bool {
-        guard tools.syncBundle() else { append("Relay files are missing from the app bundle"); return false }
-        let res = tools.wrangler(["deploy"], onLine: append)
-        if res.output.contains("workers.dev subdomain") {
-            append("Register a workers.dev subdomain in the Cloudflare dashboard (Workers & Pages), then try again.")
-            if let u = URL(string: "https://dash.cloudflare.com/?to=/:account/workers-and-pages") { NSWorkspace.shared.open(u) }
-            return false
-        }
-        guard res.ok, let url = RelayDeployer.parseWorkerURL(res.output) else { return false }
-        DispatchQueue.main.sync { RELAY.workerURL = url; saveConfig() }
-        guard ensureWebhookSecret() else { return false }
-        // A new workers.dev route can take a few seconds to answer.
-        for _ in 0..<15 {
-            if RelayAPI(base: url, token: nil).discover() != nil { return true }
-            Thread.sleep(forTimeInterval: 2)
-        }
-        append("The relay does not answer at \(url) yet. Click Check again in a minute.")
-        return false
+    static func normalize(_ url: String) -> String? {
+        var u = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        while u.hasSuffix("/") { u.removeLast() }
+        if !u.contains("://") { u = "https://" + u }
+        guard let c = URLComponents(string: u), c.scheme == "https", let h = c.host, !h.isEmpty else { return nil }
+        return u
     }
 
-    // Deploys the bundled Worker over an older one, then moves this Mac to it:
-    // registers again, adds the Plane webhooks and deletes the old GitHub org hooks.
-    func updateRelay() -> Bool {
-        if case .success(let h) = api.health() {
-            let old = Dictionary(h.oldOrgHooks.compactMap { o in o.hookId.map { (o.org, $0) } }, uniquingKeysWith: { a, _ in a })
-            if !old.isEmpty {
-                onMain { RELAY.oldOrgHooks = (RELAY.oldOrgHooks ?? [:]).merging(old) { a, _ in a }; saveConfig() }
-            }
+    // Checks the URL and the token, then registers this Mac. Blocking.
+    func connect(url raw: String, token: String) -> Bool {
+        guard let url = CloudSetup.normalize(raw) else { append("Enter an https URL"); return false }
+        let open = RelayAPI(base: url, token: nil)
+        guard let d = open.discover() else { append("No OverSire cloud answers at \(url)"); return false }
+        guard Int(d.version ?? "") ?? 0 >= CLOUD_MIN_VERSION else { append("The cloud at \(url) is too old"); return false }
+        let api = RelayAPI(base: url, token: token)
+        var id = onMain { RELAY.deviceID }
+        switch api.whoami() {
+        case .success(let w): id = w.deviceId
+        case .failure(.unauthorized): append("The cloud rejected the token"); return false
+        case .failure(let f):
+            // A v3 relay has no whoami. Its health call still checks the token.
+            if case .failure(let h) = api.health() { append(h.description); return false }
+            if id.isEmpty { append("Device ID unknown (\(f.description)). Hooks of other Macs stay.") }
         }
-        guard deploy() else { return false }
-        let orgs = trackedOrgs()
-        if case .failure(let f) = api.registerSelf(name: Host.current().localizedName ?? "Mac", repos: onMain { REPOS }, orgs: orgs) {
-            append("Register this Mac: \(f.description)")
-        }
-        let slugs = onMain { trackedWorkspaces() }
-        if !slugs.isEmpty { _ = installPlaneHooks(slugs) }
-        _ = deleteOldOrgHooks()
-        return true
-    }
-
-    // Keeps the hooks that it cannot delete, to try again later.
-    func deleteOldOrgHooks() -> Bool {
-        let pending = onMain { RELAY.oldOrgHooks ?? [:] }
-        guard !pending.isEmpty else { return true }
-        var left = pending
-        var noScope = false
-        for (org, id) in pending.sorted(by: { $0.key < $1.key }) {
-            switch hooks.deleteOrgHook(org: org, hookId: id) {
-            case .deleted: left[org] = nil; append("\(org): old GitHub org hook deleted")
-            case .noScope: noScope = true
-            case .failed(let e): append("\(org): old GitHub org hook not deleted (\(e))")
-            }
-        }
-        if noScope {
-            append("Old GitHub org hooks need the admin:org_hook scope. Run: gh auth refresh -h github.com -s admin:org_hook")
-        }
-        onMain { RELAY.oldOrgHooks = left.isEmpty ? nil : left; saveConfig() }
-        return left.isEmpty
-    }
-
-    // An older relay than the app bundles updates without a click. That needs wrangler and a Cloudflare login.
-    func updateIfOld(then: ((Bool) -> Void)? = nil) {
-        guard !RELAY.workerURL.isEmpty else { return }
-        work.async {
-            guard let v = self.api.discover().flatMap({ Int($0.version ?? "") }) else { return }
-            guard v < RELAY_BUNDLED_VERSION else {
-                if self.onMain({ RELAY.oldOrgHooks != nil }) { _ = self.deleteOldOrgHooks() }
-                return
-            }
-            self.tools.findNode()
-            guard self.tools.wranglerVersion() != nil,
-                  RelayDeployer.parseWhoami(self.tools.wrangler(["whoami", "--json"]).output) != nil else {
-                self.append("Relay v\(v) is old. Log in to Cloudflare in Settings → Live updates to update it.")
-                return
-            }
-            DispatchQueue.main.async {
-                self.perform("Update relay v\(v) to v\(RELAY_BUNDLED_VERSION)", self.updateRelay) { ok in
-                    self.refreshState { then?(ok) }
-                }
-            }
-        }
-    }
-
-    // The first Mac makes the webhook secret. Later Macs read it from the relay after they join.
-    func ensureWebhookSecret() -> Bool {
-        let list = tools.wrangler(["secret", "list"])
-        guard list.ok, let names = RelayDeployer.parseSecretNames(list.output) else {
-            append(list.output); return false
-        }
-        if names.contains(SecretStore.webhookSecret) { return true }
-        let secret = randomHex(32)
-        guard tools.wrangler(["secret", "put", SecretStore.webhookSecret], stdin: secret, onLine: append).ok else { return false }
-        secrets.set(SecretStore.webhookSecret, secret)
-        return true
-    }
-
-    func joinThisMac() -> Bool {
-        var id = RELAY.deviceID
-        if id.isEmpty { id = randomHex(8).uppercased() }
-        let token = randomHex(32)
-        guard tools.wrangler(["secret", "put", "DEVICE_\(id)"], stdin: token, onLine: append).ok else { return false }
         secrets.set(SecretStore.deviceToken, token)
-        DispatchQueue.main.sync { RELAY.deviceID = id; saveConfig() }
-        // A new secret takes a few seconds to reach the edge.
-        let orgs = trackedOrgs()
-        for _ in 0..<15 {
-            if case .success = api.registerSelf(name: Host.current().localizedName ?? "Mac", repos: REPOS, orgs: orgs) {
-                if let s = api.webhookSecret() { secrets.set(SecretStore.webhookSecret, s) }
-                return true
-            }
-            Thread.sleep(forTimeInterval: 2)
+        onMain { RELAY.workerURL = url; RELAY.deviceID = id; RELAY.enabled = true; saveConfig() }
+        if case .failure(let f) = api.registerSelf(name: Host.current().localizedName ?? "Mac", repos: onMain { REPOS }, orgs: trackedOrgs()) {
+            append("Register this Mac: \(f.description)"); return false
         }
-        append("The relay did not accept the new token in time. Try again.")
-        return false
+        if let s = api.webhookSecret() { secrets.set(SecretStore.webhookSecret, s) }
+        return true
     }
 
-    // Repos with a hook on the relay. Nil until the first health read. Main thread only.
+    // Removes this Mac's token and settings. The hooks stay, because other Macs can use them.
+    func disconnect() {
+        secrets.delete(SecretStore.deviceToken)
+        secrets.delete(SecretStore.webhookSecret)
+        UserDefaults.standard.removeObject(forKey: "relayCursor")
+        RELAY = RelayConfig()
+        saveConfig()
+        state = SetupState()
+        onChange?()
+    }
+
+    // MARK: Hooks
+
+    // Repos with a hook on the cloud. Nil until the first health read. Main thread only.
     private(set) var hookedRepos: Set<String>?
 
     func refreshHookedRepos(done: @escaping () -> Void) {
@@ -923,7 +623,7 @@ final class RelayDeployer {
 
     private func onMain<T>(_ f: () -> T) -> T { Thread.isMainThread ? f() : DispatchQueue.main.sync(execute: f) }
 
-    // Plane workspaces register as "plane:<slug>". The relay sends them to this Mac only.
+    // Plane workspaces register as "plane:<slug>". The cloud sends them to this Mac only.
     func trackedOrgs() -> [String] { onMain { trackedWorkspaces() }.map(HookManager.planeKey) }
 
     func registerRepos() {
@@ -963,10 +663,7 @@ final class RelayDeployer {
     }
 
     func installPlaneHooks(_ slugs: [String]) -> Bool {
-        guard case .success(let h) = api.health() else { append("Relay health check failed"); return false }
-        guard Int(h.version ?? "") ?? 0 >= RELAY_BUNDLED_VERSION else {
-            append("The relay is too old for Plane webhooks. Update the relay first."); return false
-        }
+        guard case .success(let h) = api.health() else { append("Cloud health check failed"); return false }
         let api = self.api, url = RELAY.workerURL
         var ok = true
         for slug in slugs {
@@ -1021,6 +718,7 @@ final class RelayDeployer {
     }
 
     // Deletes the hooks of repos that no device tracks any more.
+    // Without a device ID every device counts as another Mac, so nothing is deleted.
     func pruneHooks(removed: [String]) {
         guard !removed.isEmpty, !RELAY.workerURL.isEmpty else { return }
         let api = self.api
@@ -1041,59 +739,8 @@ final class RelayDeployer {
         }
     }
 
-    func removeDevice(_ id: String) -> Bool {
-        let res = tools.wrangler(["secret", "delete", "DEVICE_\(id)"], onLine: append)
-        return api.removeDevice(id) && res.ok
-    }
-
-    // New secret on the Worker, then on every hook this Mac can administer.
-    func rotateWebhookSecret() -> Bool {
-        guard case .success(let h) = api.health() else { append("Relay health check failed"); return false }
-        let secret = randomHex(32)
-        guard tools.wrangler(["secret", "put", SecretStore.webhookSecret], stdin: secret, onLine: append).ok else { return false }
-        secrets.set(SecretStore.webhookSecret, secret)
-        var ok = true
-        for hook in h.hooks {
-            guard let id = hook.hookId else { continue }
-            if hooks.patchSecret(repo: hook.repo, hookId: id, secret: secret) {
-                append("\(hook.repo): updated")
-            } else {
-                ok = false
-                append("\(hook.repo): not updated. Click Repair on a Mac with admin access to this repo.")
-            }
-        }
-        // Plane hooks have their own secrets. They do not change.
-        return ok
-    }
-
-    // Deletes all hooks, the Worker and the Keychain items. Affects all Macs.
-    func removeRelay() -> Bool {
-        if case .success(let h) = api.health() {
-            for hook in h.hooks {
-                guard let id = hook.hookId else { continue }
-                append("\(hook.repo): \(hooks.delete(repo: hook.repo, hookId: id) ? "hook deleted" : "hook not deleted")")
-            }
-            for hook in h.planeHooks {
-                guard let id = hook.hookId else { continue }
-                guard let client = onMain({ planeClient(hook.workspace) }) else {
-                    append("\(hook.workspace): no token. Delete the webhook in Plane → Workspace settings → Webhooks.")
-                    continue
-                }
-                append("\(hook.workspace): \(hooks.deletePlane(client, hookId: id) ? "Plane hook deleted" : "Plane hook not deleted")")
-            }
-        }
-        guard tools.wrangler(["delete", RELAY_WORKER_NAME], onLine: append).ok else { return false }
-        secrets.delete(SecretStore.deviceToken)
-        secrets.delete(SecretStore.webhookSecret)
-        UserDefaults.standard.removeObject(forKey: "relayCursor")
-        DispatchQueue.main.sync {
-            let account = RELAY.accountID
-            RELAY = RelayConfig()
-            RELAY.accountID = account
-            saveConfig()
-        }
-        return true
-    }
+    // The token of the device stays valid until the cloud deletes its DEVICE_<id> secret.
+    func removeDevice(_ id: String) -> Bool { api.removeDevice(id) }
 
     func describe(_ s: HookStatus) -> String {
         switch s {

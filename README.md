@@ -52,8 +52,8 @@ OverSire is built on three principles:
 - **Intake** — each project header shows two number chips: the items that are not done, and a purple chip such as `⇣ 38` for the intake items that wait for triage. A project with no items or no intake shows 0. Click the intake chip to open the intake window. Each row shows the key, for example `TREBI-264`. Type in the filter field (⌘F) to find titles or keys. Click an item to see its description and images. **‹ Intake** or Esc goes back to the list. ↑ and ↓ go to the previous and next item. **Accept** makes the item a work item. **Decline** asks first, then closes the item. The **…** menu has **Snooze** (1 day to 1 month), **Mark as duplicate**, **Copy work item link** and **Delete**
 - **Progress bar** — each project header shows a bar of its items by status. A project without items shows an empty bar
 - **macOS notifications** — mentions, comments, status, assignment, closed items, and intake items that are new, changed or closed. "My items" means you are an assignee or the author. Your own comments are skipped
-- **Two update sources** — a workspace with a Plane webhook and live updates on is **Live**. A workspace without a webhook, or the relay off, is **Polled**
-- **Poll interval** — Settings → Projects → "Poll projects without live updates every" is 2, 5, 10, 15, or 30 minutes. The default is 5. Live projects use the same interval only while the relay is disconnected
+- **Two update sources** — a workspace with a Plane webhook and live updates on is **Live**. A workspace without a webhook, or the cloud off, is **Polled**
+- **Poll interval** — Settings → Projects → "Poll projects without live updates every" is 2, 5, 10, 15, or 30 minutes. The default is 5. Live projects use the same interval only while the cloud is disconnected
 
 To add a workspace:
 
@@ -259,7 +259,7 @@ Config lives in `~/.config/oversire/config.json` (managed via the Settings panel
 | `repoColors` | (set by the app) | The palette slot (0–11) of each repo chip. The app gives each new repo the least used slot. Change a number to change a color |
 | `autoUpdate` | `true` | Install new releases automatically, written by **Settings → Updates** |
 | `notifications` | all `true` | macOS notification switches in **Settings → Notifications**. `failed` includes timeouts and startup failures; `other` covers skipped and other completed conclusions |
-| `relay` | none | Live updates settings, written by **Settings → Live updates** (see below) |
+| `relay` | none | Cloud settings, written by **Settings → Cloud (beta)** (see below) |
 | `projects.workspaces` | `[]` | Plane workspaces: `slug` and `host`. The tokens are in the Keychain. Add them in Settings → Projects |
 | `projects.picked` | `[]` | Projects to track, as `slug/project-uuid` |
 | `projects.allOf` | `[]` | Workspace slugs whose projects are all tracked, including ones added later |
@@ -279,32 +279,21 @@ A release build (from the [releases page](https://github.com/oversire/oversire/r
 
 **Settings → Updates** shows the current version. Use it to turn off automatic installs, or to check now. Builds from source have a `-dev` version and do not update themselves. Use `./update.sh` for those.
 
-## Live updates (optional)
+## Cloud (beta, optional)
 
-By default, OverSire polls GitHub. Live updates add a push path: GitHub sends webhooks to a small Cloudflare Worker in your own Cloudflare account, and the Worker tells each Mac about changes in about one second. Polling stays on as a slow fallback (every 10 minutes by default).
+By default, OverSire polls GitHub and Plane. OverSire cloud adds a push path: GitHub and Plane send webhooks to the cloud, and the cloud tells each Mac about changes in about one second. Polling stays on as a slow fallback (every 10 minutes by default).
 
-Set it up from **Settings → Live updates → Set up**. The panel does these steps, and you can run each step again safely:
+The cloud runs from the private `oversire/cloud` repo. Its README tells how to deploy it and how to make a device token for each Mac.
 
-1. Node.js 20 or later (installs with Homebrew if needed).
-2. A local copy of wrangler in `~/.config/oversire/relay`.
-3. Cloudflare login (`wrangler login` opens your browser).
-4. Deploy the `oversire-relay` Worker to `workers.dev`.
-5. Join this Mac. Each Mac gets its own token, kept in the Keychain and as a Worker secret.
-6. Install a webhook on each tracked repo (`gh` must have admin access to the repo; other repos stay on polling).
-7. Connect.
+To connect a Mac, open **Settings → Cloud (beta)**. Enter the cloud URL and the device token, then click **Connect**. OverSire keeps the token in the Keychain. Then click **Install hooks**. OverSire adds a webhook to each tracked repo (`gh` must have admin access to the repo; other repos stay on polling).
 
-Each Plane workspace gets one webhook to `https://<worker>/plane/<slug>`. **Settings → Live updates → Plane webhooks** shows one row per workspace. OverSire adds the webhook when you add a workspace, and deletes it when you remove the workspace. The relay keeps the secret of each webhook and checks the `X-Plane-Signature` of each delivery. A workspace without a webhook polls every `pollMinutes` (5 by default). Note: Plane sends no webhook event for changes made through its v1 API. OverSire refreshes after its own changes. Plane has no intake webhook events. An intake item is also a work item, so its changes come as work item events. OverSire then reads the intake list again.
+Each Plane workspace gets one webhook to `https://<cloud>/plane/<slug>`. **Settings → Cloud (beta) → Plane webhooks** shows one row per workspace. OverSire adds the webhook when you add a workspace, and deletes it when you remove the workspace. The cloud keeps the secret of each webhook and checks the `X-Plane-Signature` of each delivery. A workspace without a webhook polls every `pollMinutes` (5 by default). Note: Plane sends no webhook event for changes made through its v1 API. OverSire refreshes after its own changes. Plane has no intake webhook events. An intake item is also a work item, so its changes come as work item events. OverSire then reads the intake list again.
 
-**Relay updates:** at launch, and when you open Settings → Live updates, OverSire compares the relay version with the version in the app. If the relay is older and wrangler is logged in, OverSire deploys the new relay, joins this Mac again and adds the Plane webhooks. Relay v3 removes the GitHub org webhooks of older relays. OverSire deletes those webhooks on GitHub. This needs the `admin:org_hook` scope. If `gh` does not have it, run `gh auth refresh -h github.com -s admin:org_hook`. OverSire then deletes the webhooks at the next launch.
+A Cat Eye relay (v3) that you deployed before also works. OverSire moves its URL and token on the first start.
 
-On a second Mac, log in to the same Cloudflare account and click **Set up**. It joins the same relay. You do not need a pairing code.
-
-- **Cost:** the Cloudflare free plan is enough for up to about 1,000 events per hour.
-- **Retention:** the relay keeps events for 24 hours by default (1 hour to 30 days). A Mac that was offline reads the events it missed. After a longer gap, it does one full refresh.
-- **Privacy:** the relay keeps only repo names, Plane workspace slugs, event types and IDs (run, job, pull request, project, work item). It does not log payloads, titles, bodies, or user names. Each webhook is verified with an HMAC secret.
-- **Remove:** **Remove relay…** deletes the webhooks, the Worker and the Keychain items.
-
-The Worker source is in [`worker/`](worker/).
+- **Retention:** the cloud keeps events for 24 hours by default (1 hour to 30 days). A Mac that was offline reads the events it missed. After a longer gap, it does one full refresh.
+- **Privacy:** the cloud keeps only repo names, Plane workspace slugs, event types and IDs (run, job, pull request, project, work item). It does not log payloads, titles, bodies, or user names. Each webhook is verified with an HMAC secret.
+- **Disconnect:** **Disconnect** deletes the token from the Keychain. The webhooks stay, because other Macs can use them.
 
 ## Using the PRs tab
 
@@ -338,7 +327,7 @@ The Markdown renderer uses [markdown-it](https://github.com/markdown-it/markdown
 - Fetches runs via `gh api repos/OWNER/REPO/actions/runs` and PRs via `gh pr list --search review-requested:@me`, for every configured repo, all concurrently.
 - The 10-second poll runs only while the popover is open. Closed, OverSire falls back to the normal interval — measured on a real machine, that took a long CI run from 1,148 GitHub API calls/hour down to 382.
 - PR actions (approve, comment, merge, close) call `gh pr review`, `gh pr comment`, `gh pr merge`, and `gh pr close` respectively.
-- With live updates on, a workflow or pull request event refreshes only the repo it is about. A project event refreshes the matching project. The footer dot shows the relay state (green = live, grey = polling, orange = relay error). The footer also shows the REST and GraphQL quotas side by side.
+- With live updates on, a workflow or pull request event refreshes only the repo it is about. A project event refreshes the matching project. The footer dot shows the cloud state (green = live, grey = polling, orange = cloud error). The footer also shows the REST and GraphQL quotas side by side.
 - Project snapshots come from the Plane REST API (`/api/v1`, with the `X-Api-Key` header). OverSire reads comments only for items with new activity. The first snapshot of a project creates no activity, so launch stays quiet.
 - Runs as a macOS accessory app (no Dock icon, no Cmd+Tab entry).
 - Notifications use the native `UserNotifications` framework — respects Do Not Disturb and Focus modes.
@@ -367,8 +356,7 @@ A small blue dot on the icon means a tracked project has unread activity. The CI
 | "No access" or a 404 from `gh` | The token expired or lost a scope. GitHub answers 404, not 401, for a private repo it cannot see — run `gh auth login` |
 | No PRs showing | The PR tab only shows PRs where **your review is requested** — not all open PRs |
 | "Plane does not accept the token" | The token is not for that workspace, or it expired. Make a new token in that workspace |
-| A workspace stays on polling | A Plane webhook needs a workspace admin. Also check that the relay is up to date |
-| "Run: gh auth refresh -h github.com -s admin:org_hook" in the log | OverSire cannot delete the GitHub org webhooks of an old relay. Run that command. OverSire deletes them at the next launch |
+| A workspace stays on polling | A Plane webhook needs a workspace admin. Also check that the cloud is up to date |
 | Quick capture shortcut does nothing | Another app has the shortcut. Settings → Projects shows the error. Record a different shortcut |
 | AI switch is disabled | Click Test in Settings → AI. A change to the format, URL, model or key needs a new test |
 | Popover closes while typing | Expand a PR or open an item first — this switches to semitransient mode |

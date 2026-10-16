@@ -19,7 +19,7 @@ final class LegacyMigration {
     static let services = [
         "com.flarco.cat-eye.ai": "com.oversire.app.ai",
         "com.flarco.cat-eye.plane": "com.oversire.app.plane",
-        "com.flarco.cat-eye.relay": "com.oversire.app.relay",
+        "com.flarco.cat-eye.relay": "com.oversire.app.cloud",
     ]
 
     let oldDir: String

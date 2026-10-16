@@ -15,7 +15,7 @@ enum Route: Equatable {
             case .repos: return "Repos"
             case .linking: return "Linking"
             case .writeback: return "Write back to Plane"
-            case .live: return "Live updates"
+            case .live: return "Cloud (beta)"
             case .orca: return "Orca"
             case .queue: return "Sessions and queue"
             case .ai: return "AI"

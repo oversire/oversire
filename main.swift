@@ -46,7 +46,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var lastSettingsTab: SettingsTab = .general
     var lastSyncedWorkspaces: [String] = []
     var appearanceObs: NSKeyValueObservation?
-    let relayDeployer = RelayDeployer()
+    let cloudSetup = CloudSetup()
     let catalog = RepoCatalog(path: REPO_CACHE_PATH)
     let planeAccounts = PlaneAccounts()
     lazy var projectCatalog = ProjectCatalog(accounts: planeAccounts, path: PROJECT_CACHE_PATH)
@@ -91,7 +91,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let rateLimit = RateLimitMonitor()
     let updater = Updater()
     lazy var relay: RelayClient = {
-        let c = RelayClient(secrets: relayDeployer.secrets)
+        let c = RelayClient(secrets: cloudSetup.secrets)
         c.sink = self
         return c
     }()
@@ -179,17 +179,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.catalog.refreshIfStale()
             self?.projectCatalog.refreshIfStale()
         }
-        relayDeployer.planeClient = { [weak self] in self?.planeAccounts.client(for: $0) }
-        relayDeployer.trackedWorkspaces = { [weak self] in self?.trackedPlaneWorkspaces() ?? [] }
+        cloudSetup.planeClient = { [weak self] in self?.planeAccounts.client(for: $0) }
+        cloudSetup.trackedWorkspaces = { [weak self] in self?.trackedPlaneWorkspaces() ?? [] }
         projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: liveProjectKeys())
         syncPlaneWorkspaces()
         projectCatalog.refreshIfStale()
-        relayDeployer.updateIfOld { [weak self] ok in
-            guard let self else { return }
-            self.notify(title: "OverSire", subtitle: ok ? "Relay updated to v\(RELAY_BUNDLED_VERSION)" : "Relay update failed",
-                        body: ok ? "Live updates now include Plane." : "Open Settings → Live updates to see the log.", id: "relay-update")
-            self.projectStore.track(self.projectCatalog.resolve(PROJECTS_CFG), live: self.liveProjectKeys())
-        }
         applyCaptureHotKey()
         applyWindowHotKey()
         NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: agentIndex, queue: .main) { [weak self] _ in
@@ -413,7 +407,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // Repos without a webhook get no relay events. Poll them at the normal cadence.
     func scheduleFallbackTimer() {
-        let repos = relay.isHealthy ? relayDeployer.unhookedRepos(REPOS) : []
+        let repos = relay.isHealthy ? cloudSetup.unhookedRepos(REPOS) : []
         guard !repos.isEmpty else {
             fallbackTimer?.invalidate(); fallbackTimer = nil
             return
@@ -424,7 +418,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         log.info("Polling \(repos.count, privacy: .public) repos without a webhook every \(Int(interval), privacy: .public)s")
         fallbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            let repos = self.relayDeployer.unhookedRepos(REPOS)
+            let repos = self.cloudSetup.unhookedRepos(REPOS)
             guard !repos.isEmpty else { return }
             let prs = Date().timeIntervalSince(self.lastFallbackPRRefresh) >= POLL_NORMAL * 0.9
             if prs { self.lastFallbackPRRefresh = Date() }
@@ -584,16 +578,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func syncRelayRepos(previous: [String]) {
         if !RELAY.deviceID.isEmpty && !RELAY.workerURL.isEmpty {
-            relayDeployer.registerRepos()
+            cloudSetup.registerRepos()
             let added = REPOS.filter { !previous.contains($0) }
             let removed = previous.filter { !REPOS.contains($0) }
             if !added.isEmpty {
-                let d = relayDeployer
+                let d = cloudSetup
                 d.perform("Install webhooks for new repos", { d.installHooks(repos: added) }) { [weak self] _ in
                     d.refreshHookedRepos { self?.scheduleTimer() }
                 }
             }
-            relayDeployer.pruneHooks(removed: removed)
+            cloudSetup.pruneHooks(removed: removed)
             syncPlaneWorkspaces()
         }
     }
@@ -608,7 +602,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func liveProjectKeys() -> Set<String> {
         Set(projectCatalog.resolve(PROJECTS_CFG).filter { p in
-            switch relayDeployer.hooks.statuses[HookManager.planeKey(p.ref.workspace)] {
+            switch cloudSetup.hooks.statuses[HookManager.planeKey(p.ref.workspace)] {
             case .live, .waiting: return true
             default: return false
             }
@@ -633,10 +627,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let removed = lastSyncedWorkspaces.filter { !slugs.contains($0) }
         let added = slugs.filter { !lastSyncedWorkspaces.contains($0) }
         lastSyncedWorkspaces = slugs
-        relayDeployer.registerRepos()
-        relayDeployer.prunePlaneHooks(removed: removed)
+        cloudSetup.registerRepos()
+        cloudSetup.prunePlaneHooks(removed: removed)
         guard !added.isEmpty else { return }
-        let d = relayDeployer
+        let d = cloudSetup
         d.perform("Install Plane webhooks", { d.installPlaneHooks(added) }) { [weak self] _ in
             d.checkPlaneHooks(added)
             self?.projectStore.track(self?.projectCatalog.resolve(PROJECTS_CFG) ?? [], live: self?.liveProjectKeys() ?? [])
@@ -936,7 +930,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             let wasSettings = self.popover.contentViewController is GeneralSettingsVC
                 || self.popover.contentViewController is ActionsSettingsVC
                 || self.popover.contentViewController is ProjectSettingsVC
-                || self.popover.contentViewController is RelaySettingsVC
+                || self.popover.contentViewController is CloudSettingsVC
                 || self.popover.contentViewController is AISettingsVC
             let settingsTab = self.lastSettingsTab
             let wasShown = self.popover.isShown
@@ -967,7 +961,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             case .ai:
                 self.popover.contentViewController = AISettingsVC()
             case .live:
-                self.popover.contentViewController = RelaySettingsVC(deployer: self.relayDeployer, client: self.relay)
+                self.popover.contentViewController = CloudSettingsVC(setup: self.cloudSetup, client: self.relay)
             }
         }
         if !popover.isShown {
@@ -985,7 +979,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         case .repos: return ActionsSettingsVC(catalog: catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
         case .accounts: return ProjectSettingsVC(catalog: projectCatalog, store: projectStore, accounts: planeAccounts, cfg: PROJECTS_CFG)
         case .ai: return AISettingsVC()
-        case .live: return RelaySettingsVC(deployer: relayDeployer, client: relay)
+        case .live: return CloudSettingsVC(setup: cloudSetup, client: relay)
         default: return nil
         }
     }
@@ -1036,8 +1030,8 @@ extension GHActionsBar: RelaySink {
 
     func relayStateChanged() {
         scheduleTimer()
-        if relay.state == .live { relayDeployer.refreshHookedRepos { [weak self] in self?.scheduleTimer() } }
-        (popover?.contentViewController as? RelaySettingsVC)?.rebuild()
+        if relay.state == .live { cloudSetup.refreshHookedRepos { [weak self] in self?.scheduleTimer() } }
+        (popover?.contentViewController as? CloudSettingsVC)?.rebuild()
     }
 }
 

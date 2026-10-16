@@ -153,28 +153,13 @@ func runSelfTest() {
     bo.reset()
     check(bo.next(jitter: 0.2) == 1.2, "backoff jitter")
 
-    let deployOut = """
-    Total Upload: 13.02 KiB / gzip: 4.28 KiB
-    Uploaded oversire-relay (3.1 sec)
-    Deployed oversire-relay triggers (0.4 sec)
-      https://oversire-relay.fritz-1.workers.dev
-    Current Version ID: 0f1e
-    """
-    check(RelayDeployer.parseWorkerURL(deployOut) == "https://oversire-relay.fritz-1.workers.dev", "deploy URL parser")
-    check(RelayDeployer.parseWorkerURL("no url") == nil, "deploy URL parser without URL")
-    let who = RelayDeployer.parseWhoami("""
-    {"loggedIn": true, "email": "me@x.dev", "accounts": [{"id": "abc", "name": "Mine"}, {"id": "def", "name": "Work"}]}
-    """)
-    check(who?.email == "me@x.dev" && who?.accounts.map { $0.id } == ["abc", "def"], "whoami parser")
-    check(RelayDeployer.parseWhoami("{\"loggedIn\": false}") == nil, "whoami parser logged out")
-    check(RelayDeployer.parseSecretNames("""
-    [{"name": "DEVICE_AB12", "type": "secret_text"}, {"name": "WEBHOOK_SECRET", "type": "secret_text"}]
-    """) == ["DEVICE_AB12", "WEBHOOK_SECRET"], "secret list parser")
+    check(CloudSetup.normalize("cloud.example.dev/") == "https://cloud.example.dev", "cloud URL gets https")
+    check(CloudSetup.normalize("http://x.dev") == nil, "cloud URL must be https")
+    check(CloudSetup.normalize("  ") == nil, "empty cloud URL")
 
     let token = String(repeating: "ab12", count: 16)
     check(maskSecrets("put \(token) done") == "put •••• done", "secret masking")
     check(maskSecrets("deploy abc123") == "deploy abc123", "masking leaves short hex")
-    check(stripANSI("\u{1B}[32mok\u{1B}[0m") == "ok", "ANSI stripping")
 
     let noon = Date(timeIntervalSince1970: 86400 * 100 + 43200)
     let q = WriteQuota(rowsToday: 40_000, now: noon)
@@ -182,14 +167,14 @@ func runSelfTest() {
     check(!WriteQuota(rowsToday: 1_000, now: noon).warn, "quota no warning")
     let repos = ["O/Hooked", "O/Bare", "O/Denied", "O/Waiting"]
     let sts: [String: HookStatus] = ["O/Denied": .pollingOnly("x"), "O/Waiting": .waiting]
-    check(RelayDeployer.unhooked(repos, hooked: nil, statuses: sts).isEmpty, "unhooked unknown before health")
+    check(CloudSetup.unhooked(repos, hooked: nil, statuses: sts).isEmpty, "unhooked unknown before health")
     let rl = try? JSONDecoder().decode(RateLimit.self, from: Data("""
         {"resources":{"core":{"limit":5000,"used":3600,"remaining":1400,"reset":1},
         "graphql":{"limit":5000,"used":100,"reset":1},"search":{"limit":30,"used":30,"reset":1}}}
         """.utf8))
     check(rl?.percent == 72 && rl?.color == C_QUEUED, "rate limit uses the fullest of REST and GraphQL")
     check(rl?.footerLabel == "REST 72% · GQL 2%", "footer shows REST and GraphQL \(rl?.footerLabel ?? "")")
-    check(RelayDeployer.unhooked(repos, hooked: ["o/hooked", "o/denied"], statuses: sts) == ["O/Bare", "O/Denied"],
+    check(CloudSetup.unhooked(repos, hooked: ["o/hooked", "o/denied"], statuses: sts) == ["O/Bare", "O/Denied"],
           "unhooked repos")
     REPO_COLORS = ["o/a": 3, "o/b": 0]
     check(repoColor("o/a") == REPO_PALETTE[3], "repo color keeps its slot")
