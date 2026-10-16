@@ -1,7 +1,6 @@
 import Foundation
 import OverSireCore
 import OverSireAI
-import CIGitHubActions
 
 // A short cause of a failed run, from the log and the changed files.
 struct RunExplanation: Codable, Equatable {
@@ -109,7 +108,7 @@ final class CIAssist {
 
     static func explainInput(run r: Run, job: String, log: [String], files: [String]) -> AIInput {
         CIPrompts.failureInput(workflow: r.workflowName ?? r.name, number: r.number, branch: r.headBranch, sha: r.headSha,
-                               commit: r.displayTitle, job: job, files: files, errors: log.filter(ActionsCI.isError), tail: log)
+                               commit: r.displayTitle, job: job, files: files, errors: log.filter(CILog.isError), tail: log)
     }
 
     static func parseExplanation(_ text: String) -> RunExplanation? {

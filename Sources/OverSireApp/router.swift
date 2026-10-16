@@ -3,7 +3,12 @@ import OverSireCore
 
 // One place in the window. The path is the deep link: oversire://<path>.
 enum Route: Equatable {
-    enum InboxTab: String, CaseIterable { case all, mentions, runs, agents, intake }
+    enum InboxTab: String, CaseIterable {
+        case all, mentions, runs, agents, intake
+
+        /// The tabs that the accounts support. Intake needs a tracker with intake.
+        static func visible(_ has: (Capability) -> Bool) -> [InboxTab] { allCases.filter { $0 != .intake || has(.intake) } }
+    }
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {

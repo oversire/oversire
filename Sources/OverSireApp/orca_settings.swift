@@ -1,10 +1,12 @@
 import Cocoa
 import OverSireCore
-import RuntimeOrca
 
 // Settings → Projects → Orca: the agent, the prompt template, and the Orca workspace of each
 // Plane project. The Orca account (CLI and environment) is on the Providers page.
 extension ProjectSettingsVC {
+    /// A runtime that reports the version of its tool.
+    protocol VersionReporting: AgentRuntime { func version() async throws -> String }
+
     struct OrcaProbe {
         var environment: String?
         var version: String?
@@ -133,14 +135,18 @@ extension ProjectSettingsVC {
     func probeOrca() {
         guard !ProjectSettingsVC.orcaProbing else { return }
         ProjectSettingsVC.orcaProbing = true
-        let rt = cfg.orca.runtime
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var p = OrcaProbe(environment: rt.environment)
-            switch Result(blocking: { try await rt.version() }) {
+        guard let rt = ENV.runtime else { ProjectSettingsVC.orcaProbing = false; return }
+        let environment = ENV.accounts(.runtime).first?.values["environment"].flatMap { $0.isEmpty ? nil : $0 }
+        Task { [weak self] in
+            var p = OrcaProbe(environment: environment)
+            switch await Result(awaiting: {
+                guard let v = rt as? any VersionReporting else { throw ProviderError.unsupported(.sessionInput) }
+                return try await v.version()
+            }) {
             case .success(let v): p.version = v
             case .failure(let e): p.error = e.message
             }
-            p.repos = (try? Result(blocking: { try await rt.repos() }).get()) ?? []
+            p.repos = (try? await rt.repos(in: nil)) ?? []
             DispatchQueue.main.async {
                 ProjectSettingsVC.orcaProbe = p
                 ProjectSettingsVC.orcaProbing = false

@@ -1,11 +1,9 @@
 import Cocoa
 import GitHubKit
-import CodeHostGitHub
-import CIGitHubActions
 import OverSireCore
 
 
-// The gh CLI and the shared GitHub client. GitHub adapters get GITHUB.
+// The gh CLI and the GitHub client for the rate limit.
 let GH = GitHubClient.defaultPath
 let GITHUB = GitHubClient(commands: ProcessRunner(environment: GitHubClient.environment), http: URLSessionTransport.noRedirects, gh: GH)
 
@@ -34,27 +32,135 @@ func ghStr(_ args: String...) -> String? {
     return s?.isEmpty == false ? s : nil
 }
 
-/// The Actions adapter for one repo. The owner is the first part of the path.
-func actions(_ repo: String) -> ActionsCI { ActionsCI(owner: repoOwner(repo), client: GITHUB) }
+// ─── Repo calls ──────────────────────────────────────────────────────────────
 
-// nil means the fetch failed, which a targeted refresh must not treat as "no runs".
-func fetchRuns(repo: String) -> [Run]? {
-    let ci = actions(repo)
-    switch Result(blocking: { try await ci.runs(RunQuery(repo: ci.repoRef(repo), limit: RUNS_PER_REPO)) }) {
-    case .success(let runs):
-        lastFetchError = nil
-        return runs
-    case .failure(let e):
-        log.warning("Runs of \(repo, privacy: .public) failed: \(e.message, privacy: .public)")
-        lastFetchError = GitHubClient.hint(e)
+/// The code host and CI accounts of repo owners. AppEnvironment gives the real ones.
+protocol RepoAccounts: AnyObject {
+    func codeHost(owner: String) -> (any CodeHost)?
+    func ci(owner: String) -> (any CIProvider)?
+}
+
+/// Optional adapter features that RepoClient uses when an adapter has them.
+protocol RepoAddressing: Provider { func repoRef(_ path: String) -> RepoRef }
+protocol KnownJobFailures: CIProvider { func failures(_ r: RunRef, jobs: [Job]) async throws -> [Failure] }
+protocol RawLogReading: CIProvider { func rawLog(_ j: JobRef) async throws -> String }
+
+/// CI and pull request calls for repos named "owner/name". A failed list call sets lastFetchError.
+struct RepoClient {
+    let accounts: RepoAccounts
+
+    private func ci(_ repo: String) throws -> any CIProvider {
+        guard let c = accounts.ci(owner: repoOwner(repo)) else { throw ProviderError.unauthorized }
+        return c
+    }
+
+    private func host(_ repo: String) throws -> any CodeHost {
+        guard let h = accounts.codeHost(owner: repoOwner(repo)) else { throw ProviderError.unauthorized }
+        return h
+    }
+
+    static func repoRef(_ p: any Provider, _ path: String) -> RepoRef {
+        (p as? any RepoAddressing)?.repoRef(path) ?? RepoRef(account: p.account, path: path, url: URL(string: "https://github.com/\(path)")!)
+    }
+
+    static func runRef(_ p: any Provider, _ path: String, id: String) -> RunRef {
+        RunRef(account: p.account, repo: repoRef(p, path), id: id)
+    }
+
+    /// nil means the fetch failed, which a targeted refresh must not treat as "no runs".
+    func runs(_ repo: String) async -> [Run]? {
+        switch await Result(awaiting: { let c = try ci(repo); return try await c.runs(RunQuery(repo: Self.repoRef(c, repo), limit: RUNS_PER_REPO)) }) {
+        case .success(let runs):
+            lastFetchError = nil
+            return runs
+        case .failure(let e):
+            log.warning("Runs of \(repo, privacy: .public) failed: \(e.message, privacy: .public)")
+            lastFetchError = GitHubClient.hint(e)
+            return nil
+        }
+    }
+
+    func run(_ repo: String, id: String) async -> Run? {
+        try? await Result(awaiting: { let c = try ci(repo); return try await c.run(Self.runRef(c, repo, id: id)) }).get()
+    }
+
+    func commitMessage(_ repo: String, sha: String) async -> String? {
+        guard !sha.isEmpty else { return nil }
+        return try? await Result(awaiting: { let h = try host(repo); return try await h.commitMessage(Self.repoRef(h, repo), sha: sha) }).get()
+    }
+
+    func jobs(_ repo: String, runId: String) async -> [Job]? {
+        try? await Result(awaiting: { let c = try ci(repo); return try await c.jobs(Self.runRef(c, repo, id: runId)) }).get()
+    }
+
+    func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure] {
+        (try? await Result(awaiting: {
+            let c = try ci(repo)
+            let r = Self.runRef(c, repo, id: runId)
+            if let k = c as? any KnownJobFailures { return try await k.failures(r, jobs: jobs) }
+            return try await c.failures(r)
+        }).get()) ?? []
+    }
+
+    /// The end of the raw job log.
+    func rawLog(_ repo: String, jobId: String) async -> String? {
+        try? await Result(awaiting: {
+            let c = try ci(repo)
+            let j = JobRef(run: Self.runRef(c, repo, id: ""), id: jobId)
+            if let raw = c as? any RawLogReading { return try await raw.rawLog(j) }
+            guard let l = c as? any LogReading else { throw ProviderError.unsupported(.logs) }
+            return try await l.log(j, lines: 400).joined(separator: "\n")
+        }).get()
+    }
+
+    /// nil on success, else the error text.
+    func perform(_ a: RunAction, repo: String, id: String) async -> String? {
+        if case .failure(let e) = await Result(awaiting: { let c = try ci(repo); try await c.perform(a, on: Self.runRef(c, repo, id: id)) }) {
+            return GitHubClient.hint(e)
+        }
         return nil
+    }
+
+    func changes(_ repo: String) async -> [ChangeRequest] {
+        switch await Result(awaiting: { let h = try host(repo); return try await h.changes(Self.repoRef(h, repo), ChangeFilter(limit: 20)) }) {
+        case .success(let list):
+            lastFetchError = nil
+            return list
+        case .failure(let e):
+            log.warning("PRs of \(repo, privacy: .public) failed: \(e.message, privacy: .public)")
+            lastFetchError = GitHubClient.hint(e)
+            return []
+        }
+    }
+
+    /// The PR tab shows lastFetchError in its error banner.
+    func perform(_ action: ChangeAction, repo: String, number: Int) async {
+        let r = await Result(awaiting: {
+            let h = try host(repo)
+            let url = Self.repoRef(h, repo).url.appendingPathComponent("pull/\(number)")
+            try await h.perform(action, on: ChangeRef(repo: Self.repoRef(h, repo), number: number, url: url))
+        })
+        if case .failure(let e) = r {
+            lastFetchError = GitHubClient.hint(e)
+            log.warning("PR action \(action) for \(repo)#\(number) failed: \(e.message, privacy: .public)")
+        }
+    }
+
+    /// The login of the token owner.
+    func me(owner: String = "") async -> String? {
+        switch await Result(awaiting: {
+            guard let h = accounts.codeHost(owner: owner) else { throw ProviderError.unauthorized }
+            return try await h.probe()
+        }) {
+        case .success(let me): return me.person.login
+        case .failure(let e):
+            lastFetchError = GitHubClient.hint(e)
+            return nil
+        }
     }
 }
 
-func fetchRun(repo: String, id: String) -> Run? {
-    let ci = actions(repo)
-    return try? Result(blocking: { try await ci.run(ci.runRef(repo, id: id)) }).get()
-}
+let REPO_CLIENT = RepoClient(accounts: ENV)
 
 // ─── Run Detail Fetching ─────────────────────────────────────────────────────
 
@@ -63,66 +169,6 @@ var commitMsgCache: [String: String] = [:]       // head sha → full commit mes
 var failureCache: [String: [Failure]] = [:]      // run id → failure summaries (stable once completed)
 var jobsCache: [String: (updatedAt: String, jobs: [Job])] = [:]  // run id → jobs at that run update
 var detailFetchInFlight = Set<String>()
-
-func fetchCommitMessage(repo: String, sha: String) -> String? {
-    guard !sha.isEmpty else { return nil }
-    let host = GitHubCodeHost(owner: repoOwner(repo), client: GITHUB)
-    return try? Result(blocking: { try await host.commitMessage(host.repoRef(repo), sha: sha) }).get()
-}
-
-func fetchRunJobs(repo: String, runId: String) -> [Job]? {
-    let ci = actions(repo)
-    return try? Result(blocking: { try await ci.jobs(ci.runRef(repo, id: runId)) }).get()
-}
-
-func fetchRunFailures(repo: String, runId: String, jobs: [Job]) -> [Failure] {
-    let ci = actions(repo)
-    return (try? Result(blocking: { try await ci.failures(ci.runRef(repo, id: runId), jobs: jobs) }).get()) ?? []
-}
-
-/// nil on success, else the error text.
-func runAction(_ a: RunAction, repo: String, id: String) -> String? {
-    let ci = actions(repo)
-    if case .failure(let e) = Result(blocking: { try await ci.perform(a, on: ci.runRef(repo, id: id)) }) { return GitHubClient.hint(e) }
-    return nil
-}
-
-// Sets lastFetchError on a failure.
-func fetchPRs(repo: String) -> [ChangeRequest] {
-    let host = GitHubCodeHost(owner: repoOwner(repo), client: GITHUB)
-    switch Result(blocking: { try await host.changes(host.repoRef(repo), ChangeFilter(limit: 20)) }) {
-    case .success(let list):
-        lastFetchError = nil
-        return list
-    case .failure(let e):
-        log.warning("PRs of \(repo, privacy: .public) failed: \(e.message, privacy: .public)")
-        lastFetchError = GitHubClient.hint(e)
-        return []
-    }
-}
-
-func executePRAction(repo: String, number: Int, action: ChangeAction, completion: @escaping () -> Void) {
-    DispatchQueue.global(qos: .userInitiated).async {
-        let host = GitHubCodeHost(owner: repoOwner(repo), client: GITHUB)
-        let ref = ChangeRef(repo: host.repoRef(repo), number: number, url: URL(string: "https://github.com/\(repo)/pull/\(number)")!)
-        // The PR tab shows lastFetchError in its error banner.
-        if case .failure(let e) = Result(blocking: { try await host.perform(action, on: ref) }) {
-            lastFetchError = GitHubClient.hint(e)
-            log.warning("PR action \(action) for \(repo)#\(number) failed: \(e.message, privacy: .public)")
-        }
-        DispatchQueue.main.async { completion() }
-    }
-}
-
-func getGHUser() -> String? {
-    let host = GitHubCodeHost(owner: "", client: GITHUB)
-    switch Result(blocking: { try await host.probe() }) {
-    case .success(let me): return me.person.login
-    case .failure(let e):
-        lastFetchError = GitHubClient.hint(e)
-        return nil
-    }
-}
 
 // ─── GitHub rate limit ───────────────────────────────────────────────────────
 
@@ -159,8 +205,8 @@ final class RateLimitMonitor {
     }
 
     func fetch() {
-        DispatchQueue.global(qos: .utility).async {
-            guard let rl = try? Result(blocking: { try await GITHUB.rateLimit() }).get() else { return }
+        Task {
+            guard let rl = try? await GITHUB.rateLimit() else { return }
             DispatchQueue.main.async { self.latest = rl; self.onChange?() }
         }
     }

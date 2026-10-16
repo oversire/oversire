@@ -100,14 +100,13 @@ final class ProjectSettingsVC: NSViewController {
         let q = (filterField?.stringValue ?? "").lowercased()
         let workspaces = catalog.workspaces
         if workspaces.isEmpty {
-            let l = NSTextField(labelWithString: "Add a Plane workspace in Settings › Providers.")
+            let l = NSTextField(labelWithString: "Add a tracker account in Settings › Providers.")
             l.font = .systemFont(ofSize: 12); l.textColor = .secondaryLabelColor
             l.frame = NSRect(x: 16, y: y + 4, width: w - 32, height: 18)
             doc.addSubview(l)
             return y + 28
         }
-        for ws in workspaces {
-            let slug = ws.slug
+        for slug in workspaces {
             let projects = cfg.sorted(catalog.projects(of: slug)).filter { p in
                 q.isEmpty || p.title.lowercased().contains(q) || p.identifier.lowercased().contains(q) || slug.lowercased().contains(q)
             }

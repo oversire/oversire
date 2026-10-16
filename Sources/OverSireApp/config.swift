@@ -1,7 +1,6 @@
 import Foundation
 import OverSireCore
 import OverSireAI
-import RuntimeOrca
 import TrackerPlane
 import CryptoKit
 import os
@@ -280,7 +279,7 @@ struct OrcaConfig: Codable, Equatable {
     static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
 
     var enabled = true
-    var cli = OrcaRuntime.defaultPath
+    var cli = ""   // the runtime account sets it
     var environment: String?
     var agent = "claude"
     var prompt = OrcaConfig.defaultPrompt
@@ -291,7 +290,7 @@ struct OrcaConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        cli = try c.decodeIfPresent(String.self, forKey: .cli) ?? OrcaRuntime.defaultPath
+        cli = try c.decodeIfPresent(String.self, forKey: .cli) ?? ""
         environment = try c.decodeIfPresent(String.self, forKey: .environment)
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? OrcaConfig.defaultPrompt
@@ -307,7 +306,6 @@ struct OrcaConfig: Codable, Equatable {
             .replacingOccurrences(of: "{title}", with: item.title)
     }
 
-    var runtime: OrcaRuntime { OrcaRuntime(exe: cli, environment: environment, commands: ProcessRunner()) }
 
     // The Orca workspace whose name matches the project: "towertail-workspace" for TOWERTAIL.
     static func guess(_ p: ProjectSummary, _ repos: [RuntimeRepo]) -> String? {
@@ -438,9 +436,17 @@ func isValidRepo(_ s: String) -> Bool {
     repoPattern.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
 }
 
+/// saveConfig writes only after loadConfig read the file or found no file.
+/// A process that did not read the config (a test) or could not decode it must not overwrite it.
+private(set) var CONFIG_READ = false
+
 func loadConfig() {
-    guard let data = FileManager.default.contents(atPath: CONFIG_PATH),
-          let c = try? JSONDecoder().decode(AppConfig.self, from: data) else { return }
+    guard let data = FileManager.default.contents(atPath: CONFIG_PATH) else { CONFIG_READ = true; return }
+    guard let c = try? JSONDecoder().decode(AppConfig.self, from: data) else {
+        log.error("Cannot decode \(CONFIG_PATH, privacy: .public). OverSire does not save the config.")
+        return
+    }
+    CONFIG_READ = true
     PICKED_REPOS = c.repos.filter { isValidRepo($0) }
     PICKED_ORGS = c.orgs ?? []
     REPOS = PICKED_REPOS
@@ -467,6 +473,7 @@ func loadConfig() {
 }
 
 func saveConfig() {
+    guard CONFIG_READ else { return }
     try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
     ACCOUNTS = ACCOUNTS.filter { !AppEnvironment.repoProviders.contains($0.account.provider) }
         + AppEnvironment.repoAccounts(repos: PICKED_REPOS.filter(isValidRepo), orgs: PICKED_ORGS)

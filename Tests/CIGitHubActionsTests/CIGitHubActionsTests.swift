@@ -149,13 +149,13 @@ final class CIGitHubActionsTests: XCTestCase {
     func testLogHelpers() {
         let log = "2026-10-01T23:14:09.48Z FAIL\tpkg\t300s\n2026-10-01T23:14:11.29Z ##[error]Process completed with exit code 1.\n" +
             "2026-10-01T23:14:11.32Z Post job cleanup.\n"
-        XCTAssertEqual(ActionsCI.errorSnippet(log), "FAIL\tpkg\t300s\n##[error]Process completed with exit code 1.", "the snippet ends at the error")
-        XCTAssertEqual(ActionsCI.clean("2026-10-01T23:14:09.48Z \u{1B}[32mok\u{1B}[0m pkg\n##[group]Run x\n\n[90m12:00[0m INF done\n"),
+        XCTAssertEqual(CILog.errorSnippet(log), "FAIL\tpkg\t300s\n##[error]Process completed with exit code 1.", "the snippet ends at the error")
+        XCTAssertEqual(CILog.clean("2026-10-01T23:14:09.48Z \u{1B}[32mok\u{1B}[0m pkg\n##[group]Run x\n\n[90m12:00[0m INF done\n"),
                        ["ok pkg", "12:00 INF done"])
-        XCTAssertTrue(ActionsCI.isError("##[error]boom") && ActionsCI.isError("--- FAIL: TestX") && ActionsCI.isError("panic: nil map"))
-        XCTAssertFalse(ActionsCI.isError("ok  pkg 0.3s") || ActionsCI.isError("errors are fine"))
+        XCTAssertTrue(CILog.isError("##[error]boom") && CILog.isError("--- FAIL: TestX") && CILog.isError("panic: nil map"))
+        XCTAssertFalse(CILog.isError("ok  pkg 0.3s") || CILog.isError("errors are fine"))
         let long = (1...40).map { "line \($0)" }.joined(separator: "\n")
-        XCTAssertEqual(ActionsCI.errorSnippet(long).split(separator: "\n").count, ActionsCI.snippetLines, "no marker gives the last lines")
+        XCTAssertEqual(CILog.errorSnippet(long).split(separator: "\n").count, CILog.snippetLines, "no marker gives the last lines")
     }
 
     func testDescriptor() throws {

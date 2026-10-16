@@ -82,12 +82,15 @@ final class PRsPage: Page {
             self.busy.insert(id); self.errors[id] = nil
             self.reload()
             lastFetchError = nil
-            executePRAction(repo: repo, number: p.number, action: action) { [weak self] in
+            Task { [weak self] in
+                await REPO_CLIENT.perform(action, repo: repo, number: p.number)
+                await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.busy.remove(id)
                 if let e = lastFetchError { self.errors[id] = "\(verb) failed: \(e)" }
                 self.data.refresh(force: true, completion: nil)
                 self.reload()
+                }
             }
         }
         if let w = view.window { a.beginSheetModal(for: w, completionHandler: run) } else { run(a.runModal()) }

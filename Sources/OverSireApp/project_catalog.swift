@@ -1,6 +1,5 @@
 import Foundation
 import OverSireCore
-import TrackerPlane
 
 // The projects of each Plane workspace, for the picker. Cached on disk and
 // refreshed, per workspace, at most once a day unless the user asks.
@@ -23,17 +22,11 @@ final class ProjectCatalog {
     private(set) var fetchedAt: [String: Date] = [:]
     private(set) var status: [String: OwnerFetch] = [:]
     private var ticket: [String: Int] = [:]
-    private let accounts: PlaneAccounts
+    private let trackers: TrackerDirectory
     private let path: String
-    private let fetchQ: OperationQueue = {
-        let q = OperationQueue()
-        q.maxConcurrentOperationCount = 3
-        q.qualityOfService = .userInitiated
-        return q
-    }()
 
-    init(accounts: PlaneAccounts, path: String) {
-        self.accounts = accounts
+    init(trackers: TrackerDirectory, path: String) {
+        self.trackers = trackers
         self.path = path
         guard let data = FileManager.default.contents(atPath: path),
               let c = try? JSONDecoder().decode(ProjectCatalogCache.self, from: data) else { return }
@@ -43,10 +36,10 @@ final class ProjectCatalog {
         }
     }
 
-    var workspaces: [PlaneWorkspace] { accounts.workspaces }
+    var workspaces: [String] { trackers.trackerIds }
     var refreshing: Bool { status.values.contains { if case .loading = $0 { return true }; return false } }
     var isStale: Bool {
-        workspaces.contains { fetchedAt[$0.slug].map { -$0.timeIntervalSinceNow > ProjectCatalog.maxAge } ?? true }
+        workspaces.contains { fetchedAt[$0].map { -$0.timeIntervalSinceNow > ProjectCatalog.maxAge } ?? true }
     }
 
     func projects(of slug: String) -> [ProjectSummary] { bySlug[slug] ?? [] }
@@ -55,9 +48,9 @@ final class ProjectCatalog {
     // Explicit picks plus every open project of the workspaces picked as a whole.
     func resolve(_ cfg: ProjectsConfig) -> [ProjectSummary] {
         var out: [ProjectSummary] = []
-        for w in cfg.workspaces {
-            let all = cfg.allOf.contains(w.slug)
-            out += projects(of: w.slug).filter { !$0.closed && (all || cfg.picked.contains($0.ref.storeKey)) }
+        for w in workspaces {
+            let all = cfg.allOf.contains(w)
+            out += projects(of: w).filter { !$0.closed && (all || cfg.picked.contains($0.ref.storeKey)) }
         }
         return cfg.sorted(out)
     }
@@ -65,8 +58,8 @@ final class ProjectCatalog {
     func refreshIfStale() { if isStale { refreshAll() } }
 
     func refreshAll(force: Bool = false) {
-        for w in workspaces { refresh(w.slug, force: force) }
-        let known = Set(workspaces.map(\.slug))
+        for w in workspaces { refresh(w, force: force) }
+        let known = Set(workspaces)
         if bySlug.keys.contains(where: { !known.contains($0) }) {
             bySlug = bySlug.filter { known.contains($0.key) }
             save()
@@ -77,8 +70,8 @@ final class ProjectCatalog {
     // A click on Refresh starts a new request even if the last one still runs.
     func refresh(_ slug: String, force: Bool = false) {
         if !force, case .loading = fetch(slug) { return }
-        guard let client = accounts.client(for: slug) else {
-            status[slug] = .failed(PlaneAccounts.noToken)
+        guard let client = trackers.tracker(slug) else {
+            status[slug] = .failed(ProjectStore.noToken)
             notify()
             return
         }
@@ -86,8 +79,8 @@ final class ProjectCatalog {
         ticket[slug] = n
         status[slug] = .loading
         notify()
-        fetchQ.addOperation { [weak self] in
-            let result = Result(blocking: { try await client.projects() })
+        Task { [weak self] in
+            let result = await Result(awaiting: { try await client.projects() })
             DispatchQueue.main.async {
                 guard let self = self, self.ticket[slug] == n else { return }
                 switch result {

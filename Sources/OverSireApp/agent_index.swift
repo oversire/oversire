@@ -1,9 +1,11 @@
 import AppKit
 import OverSireCore
-import RuntimeOrca
 
 /// The runtime calls of the agent index.
 typealias AgentHost = AgentRuntime & SessionIO & Revealing
+
+/// A runtime that runs a local tool, which can be missing.
+protocol InstallChecking { var installed: Bool { get } }
 
 // The Orca agent of each Plane item. OverSire finds agents by the card name (the item
 // key), by the pane of an agent it started, and by the item URL in the prompt.
@@ -84,7 +86,6 @@ final class AgentIndex: NSObject {
     private var polling = false
     private var lastPoll = Date.distantPast
     private var timer: Timer?
-    private let q = DispatchQueue(label: "com.oversire.app.orca", qos: .utility)
 
     var now: () -> Date = Date.init
     var visible: () -> Bool = { false }
@@ -92,7 +93,7 @@ final class AgentIndex: NSObject {
     var onAlert: ((_ key: String, _ agent: AgentSession) -> Void)?
 
     private var cfg: OrcaConfig { PROJECTS_CFG.orca }
-    var runtime: () -> any AgentHost = { PROJECTS_CFG.orca.runtime }
+    var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
 
     static let linkAge: TimeInterval = 30 * 86400
 
@@ -107,8 +108,11 @@ final class AgentIndex: NSObject {
 
     func agent(_ key: String) -> AgentSession? { agents[key.uppercased()] }
 
-    // Self when Orca is on and installed, else nil. The UI shows no Orca controls then.
-    var ready: AgentIndex? { cfg.enabled && FileManager.default.isExecutableFile(atPath: cfg.cli) ? self : nil }
+    // Self when a runtime account exists and its tool is installed, else nil. The UI shows no agent controls then.
+    var ready: AgentIndex? {
+        guard let rt = runtime() else { return nil }
+        return (rt as? any InstallChecking)?.installed ?? true ? self : nil
+    }
 
     func startTimer() {
         timer?.invalidate()
@@ -122,12 +126,11 @@ final class AgentIndex: NSObject {
     }
 
     func poll() {
-        guard ready != nil, !polling else { return }
-        let rt = runtime()
+        guard ready != nil, !polling, let rt = runtime() else { return }
         polling = true
         lastPoll = now()
-        q.async { [weak self] in
-            let r = Result(blocking: { try await rt.workspaces() })
+        Task { [weak self] in
+            let r = await Result(awaiting: { try await rt.workspaces() })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.polling = false
@@ -146,9 +149,9 @@ final class AgentIndex: NSObject {
     func start(_ item: Item, snap: ProjectSnapshot, anchor: NSView) {
         let pk = snap.summary.ref.storeKey
         if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root) { _ in }; return }
-        let rt = runtime()
-        q.async { [weak self] in
-            let r = Result(blocking: { try await rt.repos(in: nil) })
+        guard let rt = runtime() else { return }
+        Task { [weak self] in
+            let r = await Result(awaiting: { try await rt.repos(in: nil) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch r {
@@ -254,13 +257,14 @@ final class AgentIndex: NSObject {
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
     func start(_ item: Item, root: String, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let key = item.key.uppercased()
-        let (rt, agent, prompt) = (runtime(), cfg.agent, cfg.prompt(for: item))
+        guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
+        let (agent, prompt) = (cfg.agent, cfg.prompt(for: item))
         launches[key] = PendingLaunch(at: now())
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()
-        q.async { [weak self] in
+        Task { [weak self] in
             let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: prompt)
-            let r = Result(blocking: { try await rt.launch(req) })
+            let r = await Result(awaiting: { try await rt.launch(req) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch r {
@@ -288,8 +292,7 @@ final class AgentIndex: NSObject {
 
     // Shows the item's terminal in Orca.
     func reveal(_ key: String) {
-        guard let a = agent(key), let card = a.card else { return }
-        let rt = runtime()
+        guard let a = agent(key), let card = a.card, let rt = runtime() else { return }
         Task {
             guard let ts = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)),
                   let t = AgentIndex.pick(ts, agent: a, key: key) ?? ts.first(where: { !$0.orphaned }) else { return }
@@ -299,7 +302,7 @@ final class AgentIndex: NSObject {
 
     // Shows the first live terminal of a worktree in Orca.
     func reveal(card: String) {
-        let rt = runtime()
+        guard let rt = runtime() else { return }
         Task {
             guard let t = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)).first(where: { !$0.orphaned }) else { return }
             try? await rt.reveal(t.ref)
@@ -309,27 +312,27 @@ final class AgentIndex: NSObject {
     func send(_ key: String, text: String, done: @escaping (ProviderError?) -> Void) {
         terminal(key) { rt, s in
             guard let s else { return ProviderError.vendor(code: "no_terminal", message: "The session terminal is closed") }
-            if case .failure(let e) = Result(blocking: { try await rt.send(s, text: text) }) { return e }
+            if case .failure(let e) = await Result(awaiting: { try await rt.send(s, text: text) }) { return e }
             return nil
         } done: { done($0) }
     }
 
     func tail(_ key: String, lines n: Int = 8, done: @escaping ([String]) -> Void) {
         terminal(key) { rt, s -> [String] in
-            guard let s, case .success(let lines) = Result(blocking: { try await rt.tail(s, lines: n) }) else { return [] }
+            guard let s, case .success(let lines) = await Result(awaiting: { try await rt.tail(s, lines: n) }) else { return [] }
             return lines
         } done: { done($0) }
     }
 
-    private func terminal<T>(_ key: String, _ work: @escaping (any AgentHost, SessionRef?) -> T, done: @escaping (T) -> Void) {
+    private func terminal<T>(_ key: String, _ work: @escaping (any AgentHost, SessionRef?) async -> T, done: @escaping (T) -> Void) {
         let a = agent(key)
-        let rt = runtime()
-        q.async {
+        guard let rt = runtime() else { return }
+        Task {
             var session: SessionRef?
-            if let a, let card = a.card, case .success(let ts) = Result(blocking: { try await rt.sessions(WorkspaceRef(account: rt.account, id: card)) }) {
+            if let a, let card = a.card, case .success(let ts) = await Result(awaiting: { try await rt.sessions(WorkspaceRef(account: rt.account, id: card)) }) {
                 session = AgentIndex.pick(ts, agent: a, key: key)?.ref
             }
-            let r = work(rt, session)
+            let r = await work(rt, session)
             DispatchQueue.main.async { done(r) }
         }
     }

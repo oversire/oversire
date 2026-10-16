@@ -29,6 +29,15 @@ public actor LocalStore: Store {
         try rows(R.collection).values.compactMap { try? Self.decoder.decode(R.self, from: $0) }
     }
 
+    /// The records on disk, read outside the actor. Use it only at start, before the first write.
+    public nonisolated func stored<R: StoreRecord>(_ type: R.Type) -> [R] {
+        guard let data = try? Data(contentsOf: file(R.collection)),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        return obj.values.compactMap { v in
+            (try? JSONSerialization.data(withJSONObject: v, options: [.fragmentsAllowed])).flatMap { try? Self.decoder.decode(R.self, from: $0) }
+        }
+    }
+
     public func get<R: StoreRecord>(_ type: R.Type, id: String) throws -> R? {
         try rows(R.collection)[id].flatMap { try? Self.decoder.decode(R.self, from: $0) }
     }
@@ -65,7 +74,7 @@ public actor LocalStore: Store {
 
     // MARK: Files
 
-    func file(_ collection: String) -> URL { dir.appendingPathComponent(collection + ".json") }
+    nonisolated func file(_ collection: String) -> URL { dir.appendingPathComponent(collection + ".json") }
 
     private func rows(_ collection: String) throws -> [String: Data] {
         if let c = cache[collection] { return c }

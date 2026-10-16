@@ -19,6 +19,8 @@ protocol AppData: AnyObject {
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func settingsVC(_ p: Route.SettingsPage) -> NSViewController?
     func refresh(force: Bool, completion: (() -> Void)?)
+    /// True when an account has the feature. Pages hide what no account has.
+    func has(_ c: Capability) -> Bool
 }
 
 // A hash of the data that pages show. A poll or event that changes none of it does not rebuild the page.

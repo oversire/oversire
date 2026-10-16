@@ -86,6 +86,8 @@ struct Workstream {
 final class WorkstreamIndex {
     static let changed = Notification.Name("WorkstreamIndexChanged")
     static let keyRE = try! NSRegularExpression(pattern: "(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]*)-([0-9]+)(?![0-9])")
+    /// The key formats of the tracker accounts. The app sets them when the accounts change.
+    static var formats: [KeyFormat] = [.projectDash]
 
     private(set) var streams: [String: Workstream] = [:]
     private(set) var checkouts: [Checkout] = []
@@ -161,20 +163,18 @@ final class WorkstreamIndex {
     // MARK: Linking rules (pure, for the selftest)
 
     // The first item key in a text, if its project is tracked. `whole`: the text must be only the key.
-    static func key(in text: String, known: Set<String>, whole: Bool = false) -> String? {
-        let ns = text as NSString
-        for m in keyRE.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            let prefix = ns.substring(with: m.range(at: 1)).uppercased()
-            guard known.isEmpty || known.contains(prefix) else { continue }
-            if whole && m.range.length != ns.length { return nil }
-            return prefix + "-" + ns.substring(with: m.range(at: 2))
+    static func key(in text: String, known: Set<String>, whole: Bool = false, formats: [KeyFormat] = formats) -> String? {
+        for f in formats {
+            // Underscores are word characters, so "x_FOO-1" has no word edge before the key.
+            guard let k = f.keys(in: text.replacingOccurrences(of: "_", with: " "), known: known).first else { continue }
+            return whole && k.count != text.count ? nil : k
         }
         return nil
     }
 
     // <key>/… or <key>-… at the start of a branch.
-    static func key(inBranch b: String, known: Set<String>) -> String? {
-        guard let k = key(in: b, known: known) else { return nil }
+    static func key(inBranch b: String, known: Set<String>, formats: [KeyFormat] = formats) -> String? {
+        guard let k = key(in: b, known: known, formats: formats) else { return nil }
         let lower = b.lowercased(), kl = k.lowercased()
         guard lower.hasPrefix(kl) else { return nil }
         let rest = lower.dropFirst(kl.count)

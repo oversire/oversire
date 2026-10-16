@@ -1,7 +1,6 @@
 import Cocoa
 import OverSireCore
 import OverSireSync
-import TrackerPlane
 import Network
 import Security
 
@@ -355,12 +354,12 @@ final class HookManager {
 
     // Plane shows a webhook secret only when it creates the hook. A hook that the
     // relay has no secret for is deleted and created again. Needs a workspace admin.
-    func ensurePlane(_ client: PlaneTracker, workerURL: String, relayHookId: String?, api: RelayAPI) -> HookStatus {
-        let slug = client.workspace.slug
+    func ensurePlane(_ client: any WebhookManaging, workerURL: String, relayHookId: String?, api: RelayAPI) async -> HookStatus {
+        let slug = client.account.id
         let key = HookManager.planeKey(slug)
         let url = HookManager.planeURL(slug, workerURL: workerURL)
         let existing: [WebhookRegistration]
-        switch Result(blocking: { try await client.webhooks() }) {
+        switch await Result(awaiting: { try await client.webhooks() }) {
         case .success(let list): existing = list.filter { $0.url.absoluteString == url }
         case .failure(let e):
             let s = planeDenied(e) ? HookStatus.pollingOnly("Not a workspace admin") : .error(e.message)
@@ -370,15 +369,15 @@ final class HookManager {
             setStatus(key, .waiting)
             return .waiting
         }
-        for hook in existing { _ = Result(blocking: { try await client.unregister(hook.id) }) }
+        for hook in existing { _ = await Result(awaiting: { try await client.unregister(hook.id) }) }
         guard let hookURL = URL(string: url) else { setStatus(key, .error("Bad URL")); return .error("Bad URL") }
-        switch Result(blocking: { try await client.register(url: hookURL) }) {
+        switch await Result(awaiting: { try await client.register(url: hookURL) }) {
         case .failure(let e):
             let s = planeDenied(e) ? HookStatus.pollingOnly("Not a workspace admin") : .error(e.message)
             setStatus(key, s); return s
         case .success(let made):
             guard api.putPlaneHook(workspace: slug, id: made.id, secret: made.secret ?? "") else {
-                _ = Result(blocking: { try await client.unregister(made.id) })
+                _ = await Result(awaiting: { try await client.unregister(made.id) })
                 setStatus(key, .error("The relay did not save the secret")); return .error("The relay did not save the secret")
             }
             setStatus(key, .waiting)
@@ -387,11 +386,11 @@ final class HookManager {
     }
 
     // Plane has no delivery log in its API, so the relay gives the last delivery.
-    func checkPlane(_ client: PlaneTracker, workerURL: String, relayHook: RelayPlaneHook?) -> HookStatus {
-        let key = HookManager.planeKey(client.workspace.slug)
-        let url = HookManager.planeURL(client.workspace.slug, workerURL: workerURL)
+    func checkPlane(_ client: any WebhookManaging, workerURL: String, relayHook: RelayPlaneHook?) async -> HookStatus {
+        let key = HookManager.planeKey(client.account.id)
+        let url = HookManager.planeURL(client.account.id, workerURL: workerURL)
         let s: HookStatus
-        switch Result(blocking: { try await client.webhooks() }) {
+        switch await Result(awaiting: { try await client.webhooks() }) {
         case .failure(let e):
             s = planeDenied(e) ? .pollingOnly("Not a workspace admin") : .error(e.message)
         case .success(let list):
@@ -408,9 +407,9 @@ final class HookManager {
         return s
     }
 
-    func deletePlane(_ client: PlaneTracker, hookId: String) -> Bool {
-        let ok = Result(blocking: { try await client.unregister(hookId) }).isSuccess
-        lock.lock(); _statuses[HookManager.planeKey(client.workspace.slug)] = nil; lock.unlock()
+    func deletePlane(_ client: any WebhookManaging, hookId: String) async -> Bool {
+        let ok = await Result(awaiting: { try await client.unregister(hookId) }).isSuccess
+        lock.withLock { _statuses[HookManager.planeKey(client.account.id)] = nil }
         return ok
     }
 
@@ -467,13 +466,13 @@ final class CloudSetup {
     }
 
     // Runs one task at a time in the background. `body` returns false on failure.
-    func perform(_ title: String, _ body: @escaping () -> Bool, then: ((Bool) -> Void)? = nil) {
+    func perform(_ title: String, _ body: @escaping () async -> Bool, then: ((Bool) -> Void)? = nil) {
         guard busy == nil else { return }
         busy = title
         onChange?()
         append("▸ \(title)")
-        work.async {
-            let ok = body()
+        Task {
+            let ok = await body()
             self.append(ok ? "✓ \(title)" : "✗ \(title) failed")
             DispatchQueue.main.async {
                 self.busy = nil
@@ -581,7 +580,7 @@ final class CloudSetup {
     }
 
     // Set by the app. Called on the main thread.
-    var planeClient: (String) -> PlaneTracker? = { _ in nil }
+    var planeClient: (String) -> (any WebhookManaging)? = { _ in nil }
     var trackedWorkspaces: () -> [String] = { [] }
 
     private func onMain<T>(_ f: () -> T) -> T { Thread.isMainThread ? f() : DispatchQueue.main.sync(execute: f) }
@@ -625,14 +624,14 @@ final class CloudSetup {
         }
     }
 
-    func installPlaneHooks(_ slugs: [String]) -> Bool {
+    func installPlaneHooks(_ slugs: [String]) async -> Bool {
         guard case .success(let h) = api.health() else { append("Cloud health check failed"); return false }
         let api = self.api, url = RELAY.workerURL
         var ok = true
         for slug in slugs {
-            guard let client = onMain({ planeClient(slug) }) else { append("\(slug): no token"); ok = false; continue }
+            guard let client = await MainActor.run(body: { planeClient(slug) }) else { append("\(slug): no token"); ok = false; continue }
             let known = h.planeHooks.first { $0.workspace == slug }?.hookId
-            let s = hooks.ensurePlane(client, workerURL: url, relayHookId: known, api: api)
+            let s = await hooks.ensurePlane(client, workerURL: url, relayHookId: known, api: api)
             append("\(slug) (Plane): \(describe(s))")
             if case .error = s { ok = false }
             if case .pollingOnly = s { append("A Plane webhook needs a workspace admin. \(slug) stays on polling.") }
@@ -645,10 +644,10 @@ final class CloudSetup {
         guard !url.isEmpty, !slugs.isEmpty else { return }
         let api = self.api
         let clients = slugs.compactMap { planeClient($0) }
-        work.async {
+        Task {
             let h = try? api.health().get()
             for c in clients {
-                _ = self.hooks.checkPlane(c, workerURL: url, relayHook: h?.planeHooks.first { $0.workspace == c.workspace.slug })
+                _ = await self.hooks.checkPlane(c, workerURL: url, relayHook: h?.planeHooks.first { $0.workspace == c.account.id })
             }
             DispatchQueue.main.async { self.onChange?() }
         }
@@ -659,12 +658,12 @@ final class CloudSetup {
         guard !removed.isEmpty, !RELAY.workerURL.isEmpty else { return }
         let api = self.api
         let clients = removed.compactMap { planeClient($0) }
-        work.async {
+        Task {
             guard case .success(let h) = api.health() else { return }
             let others = Set(h.devices.filter { $0.id != RELAY.deviceID }.flatMap { $0.orgs })
-            for c in clients where !others.contains(HookManager.planeKey(c.workspace.slug)) {
-                guard let id = h.planeHooks.first(where: { $0.workspace == c.workspace.slug })?.hookId else { continue }
-                if self.hooks.deletePlane(c, hookId: id) { _ = api.deletePlaneHook(workspace: c.workspace.slug) }
+            for c in clients where !others.contains(HookManager.planeKey(c.account.id)) {
+                guard let id = h.planeHooks.first(where: { $0.workspace == c.account.id })?.hookId else { continue }
+                if await self.hooks.deletePlane(c, hookId: id) { _ = api.deletePlaneHook(workspace: c.account.id) }
             }
         }
     }
@@ -673,10 +672,10 @@ final class CloudSetup {
     func removePlaneHook(_ slug: String) {
         guard !RELAY.workerURL.isEmpty, let client = planeClient(slug) else { return }
         let api = self.api
-        work.async {
+        Task {
             guard case .success(let h) = api.health(),
                   let id = h.planeHooks.first(where: { $0.workspace == slug })?.hookId else { return }
-            if self.hooks.deletePlane(client, hookId: id) { _ = api.deletePlaneHook(workspace: slug) }
+            if await self.hooks.deletePlane(client, hookId: id) { _ = api.deletePlaneHook(workspace: slug) }
         }
     }
 

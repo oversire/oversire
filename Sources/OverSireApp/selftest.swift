@@ -439,11 +439,11 @@ func runSelfTest() {
             let b = AppEnvironment.accounts(from: old)
             check(b.prefix(3).map { "\($0.account.provider.rawValue):\($0.account.id)" } == ["plane:ocral", "plane:btd", "orca:mbp"], "old accounts")
             check(b[1].values["host"] == "https://plane.example.com" && b[0].secretKeys == ["PLANE_TOKEN_ocral"], "plane account")
-            check(b[2].values["agent"] == "codex" && b[2].values["cli"] == OrcaRuntime.defaultPath, "orca account")
+            check(b[2].values["agent"] == "codex" && b[2].values["cli"] == nil, "orca account")
             var p = ProjectsConfig()
             AppEnvironment.applyLegacyFields(b, to: &p)
             check(p.workspaces.map(\.slug) == ["ocral", "btd"] && p.workspaces[1].host == "https://plane.example.com", "plane fields")
-            check(p.orca.enabled && p.orca.environment == "mbp", "orca fields")
+            check(p.orca.enabled && p.orca.environment == "mbp" && p.orca.cli == OrcaRuntime.defaultPath, "orca fields")
             AppEnvironment.applyLegacyFields(a, to: &p)
             check(p.workspaces.map(\.slug) == ["gone"] && !p.orca.enabled, "fields follow the accounts")
         } else { check(false, "accounts fixture decode") }

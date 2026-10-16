@@ -1,6 +1,5 @@
 import Cocoa
 import OverSireCore
-import TrackerPlane
 
 struct NewItem {
     var projectKey: String
@@ -8,6 +7,21 @@ struct NewItem {
     var body: String                        // Markdown
     var fieldOptions: [String: String]      // field id ("state", "priority") → option id
 }
+
+/// The tracker accounts. AppEnvironment gives the real ones. Tests give fakes.
+protocol TrackerDirectory: AnyObject {
+    /// The tracker account ids, for example the Plane workspace slugs.
+    var trackerIds: [String] { get }
+    func tracker(_ id: String) -> (any Tracker)?
+}
+
+/// Optional tracker features that the store uses when a tracker has them.
+protocol MemberListing: Tracker { func memberNames() async -> [String: String] }
+protocol SelfAssigning: Tracker { func assignMe(_ i: ItemRef) async throws }
+protocol StatusTimeline: Tracker { func timeline(_ i: ItemRef, statuses: [StatusOption], current: String?) async throws -> [ActivityEntry] }
+protocol IntakeKeying: Tracker { func intakeSequences(_ p: ProjectRef) async throws -> [String: Int] }
+/// A tracker whose Markdown names uploaded files by id.
+protocol AssetLinking: AssetResolving { func assetIds(in markdown: String) -> Set<String> }
 
 // Last snapshots, the activity feed, and unread state. Fetches run off the main
 // queue. The first snapshot of a project creates no activity, so launch is quiet.
@@ -23,11 +37,10 @@ final class ProjectStore {
     private(set) var intakeKeys: [String: Int] = [:]   // work item id → number, for keys such as TREBI-264
     private var loadingKeys: Set<String> = []
 
-    private let accounts: PlaneAccounts
+    private let trackers: TrackerDirectory
     private let notifier: ProjectNotifier
     private let statePath: String
     private let activityPath: String
-    private let q = DispatchQueue(label: "com.oversire.app.projects", qos: .utility)
     private var timer: Timer?
     private var readActivity = Set<String>()
     private var readItems = Set<String>()
@@ -40,8 +53,10 @@ final class ProjectStore {
     var relayIsLive: () -> Bool = { false }
     var onChange: (() -> Void)?
 
-    init(accounts: PlaneAccounts, notifier: ProjectNotifier, statePath: String, activityPath: String) {
-        self.accounts = accounts
+    static let noToken = "Add a token for this account in Settings › Providers."
+
+    init(trackers: TrackerDirectory, notifier: ProjectNotifier, statePath: String, activityPath: String) {
+        self.trackers = trackers
         self.notifier = notifier
         self.statePath = statePath
         self.activityPath = activityPath
@@ -81,16 +96,16 @@ final class ProjectStore {
         for k in todo { refreshing.insert(k) }
         publish()
         let jobs = tracked.filter { todo.contains($0.ref.storeKey) }.map { p in
-            (p, accounts.client(for: p.ref.workspace), snapshots[p.ref.storeKey])
+            (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey])
         }
         let limit = snapshotLimit
-        q.async { [weak self] in
+        Task { [weak self] in
             guard let self = self else { return }
             var fresh: [ProjectSnapshot] = []
             var error: String?
             for (p, client, previous) in jobs {
-                guard let client else { error = "\(p.ref.workspace): " + PlaneAccounts.noToken; continue }
-                switch Result(blocking: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
+                guard let client else { error = "\(p.ref.workspace): " + ProjectStore.noToken; continue }
+                switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
                 case .success(let s): fresh.append(s)
                 case .failure(let e): error = "\(p.ref.workspace): " + e.message
                 }
@@ -117,7 +132,7 @@ final class ProjectStore {
     }
 
     func timeline(itemId: String, done: @escaping ([ActivityEntry]) -> Void) {
-        guard let found = item(itemId), let client = accounts.client(for: found.snap.summary.ref.workspace) else { done([]); return }
+        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace) else { done([]); return }
         let stamp = isoFmt.string(from: found.item.activityAt)
         let cacheKey = itemId + "|" + stamp
         if let hit = timelineCache[cacheKey] { done(hit.entries); return }
@@ -127,8 +142,8 @@ final class ProjectStore {
         guard let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
         let states = found.snap.statusOptions
         let current = found.snap.option(found.item.statusOptionId)?.name
-        q.async { [weak self] in
-            let result = Result(blocking: { try await client.timeline(ref, statuses: states, current: current) })
+        Task { [weak self] in
+            let result = await Result(awaiting: { try await ProjectStore.timeline(client, ref, statuses: states, current: current) })
             guard let self else { return }
             DispatchQueue.main.async {
                 let waiters = self.timelineWaiters.removeValue(forKey: cacheKey) ?? []
@@ -196,11 +211,11 @@ final class ProjectStore {
     // The labels of the project and the members of the workspace, for the item window menus.
     func options(projectKey: String, done: @escaping (ItemOptions) -> Void) {
         if let hit = optionCache[projectKey], -hit.at.timeIntervalSinceNow < 600 { done(hit.options); return }
-        guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { return }
+        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { return }
         let project = snap.summary.ref
-        q.async { [weak self] in
-            let labels = (try? Result(blocking: { try await client.labels(project) }).get()) ?? []
-            let names = (try? Result(blocking: { await client.memberNames() }).get()) ?? [:]
+        Task { [weak self] in
+            let labels = (try? await (client as? any LabelManaging)?.labels(project)) ?? []
+            let names = await (client as? any MemberListing)?.memberNames() ?? [:]
             let members = names.map { StatusOption(id: $0.key, name: $0.value, color: "") }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             let options = ItemOptions(labels: labels, members: members)
@@ -243,21 +258,21 @@ final class ProjectStore {
         let current = found.item.statusOptionId
         write(itemId, failure: nil, done: done) { c, ref in
             if let progress, current != progress.id { try await c.update(ref, ItemPatch(status: progress.id)) }
-            try await c.assignMe(ref)
+            try await ProjectStore.assignMe(c, ref)
         }
     }
 
     // `done(created, message)`.
     func create(_ new: NewItem, done: @escaping (Bool, String?) -> Void) {
-        guard let snap = snapshots[new.projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
+        guard let snap = snapshots[new.projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(false, "The project is not loaded yet"); return
         }
         let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
                               priority: new.fieldOptions[ProjectSnapshot.priorityFieldId])
         let project = snap.summary.ref
-        q.async { [weak self] in
-            let added = Result(blocking: { try await client.create(draft, in: project).id })
+        Task { [weak self] in
+            let added = await Result(awaiting: { try await client.create(draft, in: project).id })
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch added {
@@ -274,12 +289,12 @@ final class ProjectStore {
 
     // Runs one change off the main queue, then reloads the project. A change made here is not news.
     private func write(_ itemId: String, failure: String?, done: @escaping (Bool) -> Void,
-                       _ op: @escaping @Sendable (PlaneTracker, ItemRef) async throws -> Void) {
-        guard let found = item(itemId), let client = accounts.client(for: found.snap.summary.ref.workspace),
+                       _ op: @escaping @Sendable (any Tracker, ItemRef) async throws -> Void) {
+        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
               let ref = found.item.ref(in: found.snap.summary.ref) else { done(false); return }
         suppressNotify.insert(itemId)
-        q.async { [weak self] in
-            let result = Result(blocking: { try await op(client, ref) })
+        Task { [weak self] in
+            let result = await Result(awaiting: { try await op(client, ref) })
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if case .failure(let e) = result {
@@ -295,23 +310,29 @@ final class ProjectStore {
     // MARK: Intake
 
     func intakeDetail(projectKey: String, item: IntakeItem, done: @escaping (Result<IntakeDetail, ProviderError>) -> Void) {
-        guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
+        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(.failure(.unauthorized)); return
         }
         let project = snap.summary.ref
-        q.async {
-            let r = Result(blocking: { try await client.intakeDetail(item, in: project) })
+        Task {
+            let r = await Result(awaiting: {
+                guard let t = client as? any IntakeTriaging else { throw ProviderError.unsupported(.intake) }
+                return try await t.intakeDetail(item, in: project)
+            })
             DispatchQueue.main.async { done(r) }
         }
     }
 
     // The refresh then moves an accepted item into the list.
     func triage(projectKey: String, item: IntakeItem, action: IntakeAction, done: @escaping (Bool) -> Void) {
-        guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { done(false); return }
+        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { done(false); return }
         suppressNotify.insert(item.workItemId)
         let project = snap.summary.ref
-        q.async { [weak self] in
-            let r = Result(blocking: { try await client.triage(item, in: project, action) })
+        Task { [weak self] in
+            let r = await Result(awaiting: {
+                guard let t = client as? any IntakeTriaging else { throw ProviderError.unsupported(.intake) }
+                try await t.triage(item, in: project, action)
+            })
             DispatchQueue.main.async {
                 guard let self else { return }
                 if case .failure(let e) = r {
@@ -327,11 +348,11 @@ final class ProjectStore {
     func loadIntakeKeys(projectKey: String, done: @escaping () -> Void) {
         guard let snap = snapshots[projectKey], let intake = snap.intake,
               intake.contains(where: { intakeKeys[$0.workItemId] == nil }), !loadingKeys.contains(projectKey),
-              let client = accounts.client(for: snap.summary.ref.workspace) else { return }
+              let client = trackers.tracker(snap.summary.ref.workspace) as? any IntakeKeying else { return }
         loadingKeys.insert(projectKey)
         let project = snap.summary.ref
-        q.async { [weak self] in
-            let r = Result(blocking: { try await client.intakeSequences(project) })
+        Task { [weak self] in
+            let r = await Result(awaiting: { try await client.intakeSequences(project) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.loadingKeys.remove(projectKey)
@@ -342,20 +363,20 @@ final class ProjectStore {
 
     // Plane images have an asset id as src. This puts signed download links in their place.
     func resolveImages(_ markdown: String, projectKey: String, done: @escaping (String) -> Void) {
-        let ns = markdown as NSString
-        let ids = Set(PlaneMarkup.assetRE.matches(in: markdown, range: NSRange(location: 0, length: ns.length))
-            .map { ns.substring(with: $0.range(at: 2)) })
+        let linker = snapshots[projectKey].flatMap { trackers.tracker($0.summary.ref.workspace) as? any AssetLinking }
+        let ids = linker?.assetIds(in: markdown) ?? []
         let todo = ids.filter { id in assetCache[id].map { -$0.at.timeIntervalSinceNow > 3000 } ?? true }
         func apply() -> String {
             var out = markdown
             for id in ids { if let u = assetCache[id]?.url { out = out.replacingOccurrences(of: "](\(id))", with: "](\(u))") } }
             return out
         }
-        guard !todo.isEmpty, let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
+        guard !todo.isEmpty, let client = linker else {
             done(apply()); return
         }
-        q.async { [weak self] in
-            let found = todo.compactMap { id in (try? Result(blocking: { try await client.assetURL(id) }).get()).map { (id, $0.absoluteString) } }
+        Task { [weak self] in
+            var found: [(String, String)] = []
+            for id in todo { if let u = try? await client.assetURL(id) { found.append((id, u.absoluteString)) } }
             DispatchQueue.main.async {
                 guard let self else { return }
                 for (id, u) in found { self.assetCache[id] = (u, Date()) }
@@ -530,11 +551,11 @@ final class ProjectStore {
 
 extension ProjectStore {
     // Items with new activity get their comments again. Other items keep the comment data of `previous`.
-    static func snapshot(_ t: PlaneTracker, _ summary: ProjectSummary, limit: Int,
+    static func snapshot(_ t: any Tracker, _ summary: ProjectSummary, limit: Int,
                          previous: ProjectSnapshot?) async throws -> ProjectSnapshot {
         var ref = summary.ref
         ref.key = summary.identifier
-        let me = try await t.me()
+        let me = try await t.probe().person
         let states = try await t.statuses(ref)
         let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var items: [Item] = []
@@ -558,11 +579,34 @@ extension ProjectStore {
                       ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority",
                                    options: StatusOption.priorities.filter { $0.id != "none" })]
         return ProjectSnapshot(summary: summary, statusOptions: states, items: items, fetchedAt: Date(),
-                               fields: fields, me: me.name, meId: me.id, index: try? await t.index(ref),
-                               intake: try? await t.intake(ref))
+                               fields: fields, me: me.name, meId: me.id, index: try? await (t as? any ItemIndexing)?.index(ref),
+                               intake: try? await (t as? any IntakeTriaging)?.intake(ref))
+    }
+}
+
+extension ProjectStore {
+    static func timeline(_ t: any Tracker, _ i: ItemRef, statuses: [StatusOption], current: String?) async throws -> [ActivityEntry] {
+        if let t = t as? any StatusTimeline { return try await t.timeline(i, statuses: statuses, current: current) }
+        return try await (t as? any TimelineReading)?.timeline(i) ?? []
+    }
+
+    /// Adds me and keeps the other assignees.
+    static func assignMe(_ t: any Tracker, _ i: ItemRef) async throws {
+        if let t = t as? any SelfAssigning { return try await t.assignMe(i) }
+        let me = try await t.probe().person.id
+        let now = try await t.detail(i).item.assignees
+        if !now.contains(me) { try await t.update(i, ItemPatch(assignees: now + [me])) }
     }
 }
 
 extension Result {
     var isOk: Bool { if case .success = self { return true }; return false }
+}
+
+extension Result where Failure == ProviderError {
+    init(awaiting op: () async throws -> Success) async {
+        do { self = .success(try await op()) }
+        catch let e as ProviderError { self = .failure(e) }
+        catch { self = .failure(.transport(error.localizedDescription)) }
+    }
 }

@@ -131,6 +131,7 @@ final class GlanceVC: NSViewController {
                 height: 40, label: "Next in \(l.identifier): \(e.key) \(e.title), \(e.condition.label)") { [weak self] in self?.open(.queue) }
         }, empty: "The queue is empty.")
 
+        guard data.has(.intake) else { return }
         let intake = data.projectStore.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }
         let row = Row([Glyph(Tone.intake), TwoLine("Intake", intake == 0 ? "No item waits for triage." : "\(intake) item\(intake == 1 ? "" : "s") wait for triage."),
                        Spacer(), Glyph("chevron.right", color: Palette.dim, size: 11)],

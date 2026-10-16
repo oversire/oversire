@@ -1,5 +1,4 @@
 import Foundation
-import CodeHostGitHub
 import GitHubKit
 import OverSireCore
 
@@ -40,12 +39,6 @@ final class RepoCatalog {
     private(set) var listingOwners = false
     private var pendingOwners = 0
     private let path: String
-    private let fetchQ: OperationQueue = {
-        let q = OperationQueue()
-        q.maxConcurrentOperationCount = 4
-        q.qualityOfService = .userInitiated
-        return q
-    }()
 
     init(path: String) {
         self.path = path
@@ -74,8 +67,8 @@ final class RepoCatalog {
     }
 
     func checkAuth() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let u = getGHUser()
+        Task { [weak self] in
+            let u = await REPO_CLIENT.me()
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.user = u; self.authChecked = true
@@ -90,8 +83,8 @@ final class RepoCatalog {
         guard !refreshing else { return }
         listingOwners = true
         notify()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let u = getGHUser()
+        Task { [weak self] in
+            let u = await REPO_CLIENT.me()
             let orgs = u == nil ? [] : (ghStr("api", "user/orgs", "--paginate", "--jq", ".[].login")?
                 .split(separator: "\n").map(String.init) ?? [])
             DispatchQueue.main.async {
@@ -114,8 +107,11 @@ final class RepoCatalog {
         status[login] = .loading
         pendingOwners += 1
         notify()
-        fetchQ.addOperation { [weak self] in
-            let result = RepoCatalog.list(login)
+        Task { [weak self] in
+            let result = await Result(awaiting: {
+                guard let host = ENV.codeHost(owner: login) else { throw ProviderError.unauthorized }
+                return try await host.repos().map(\.ref.path)
+            })
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.pendingOwners -= 1
@@ -132,11 +128,6 @@ final class RepoCatalog {
                 self.notify()
             }
         }
-    }
-
-    private static func list(_ login: String) -> Result<[String], ProviderError> {
-        let host = GitHubCodeHost(owner: login, client: GITHUB)
-        return Result(blocking: { try await host.repos().map(\.ref.path) })
     }
 
     private func save() {

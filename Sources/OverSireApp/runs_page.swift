@@ -1,6 +1,5 @@
 import Cocoa
 import OverSireCore
-import CIGitHubActions
 
 // One run in a page list: state, workflow and number, repo and branch, item link, time.
 final class RunLine: Row {
@@ -129,9 +128,9 @@ final class RunPage: Page {
 
     private func load() {
         let (repo, id) = (self.repo, self.runId)
-        q.async { [weak self] in
-            let r = fetchRun(repo: repo, id: id)
-            let j = fetchRunJobs(repo: repo, runId: id)
+        Task { [weak self] in
+            let r = await REPO_CLIENT.run(repo, id: id)
+            let j = await REPO_CLIENT.jobs(repo, runId: id)
             DispatchQueue.main.async {
                 guard let self, self.runId == id else { return }
                 if let r { self.run = r }
@@ -240,8 +239,8 @@ final class RunPage: Page {
             }
             logCard.add(TermView(lines: steps.isEmpty ? ["Waiting for the runner…"] : steps, height: 300))
         } else if let log {
-            let lines = errorsOnly ? log.filter(ActionsCI.isError) : log
-            let errs = Set(lines.indices.filter { ActionsCI.isError(lines[$0]) })
+            let lines = errorsOnly ? log.filter(CILog.isError) : log
+            let errs = Set(lines.indices.filter { CILog.isError(lines[$0]) })
             logCard.add(NSTextField.text("\(job?.name ?? "") · last \(log.count) lines", size: 11.5, color: Palette.dim, mono: true))
             logCard.add(TermView(lines: lines.isEmpty ? ["No error lines."] : lines, height: 420, errors: errs))
         } else {
@@ -314,8 +313,8 @@ final class RunPage: Page {
         let (repo, id) = (self.repo, self.runId)
         busy = "Cancelling…"
         reload()
-        q.async { [weak self] in
-            let err = runAction(.cancel, repo: repo, id: id)
+        Task { [weak self] in
+            let err = await REPO_CLIENT.perform(.cancel, repo: repo, id: id)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.busy = nil

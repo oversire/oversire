@@ -1,6 +1,5 @@
 import Cocoa
 import OverSireCore
-import TrackerPlane
 import QuartzCore
 import UserNotifications
 import os
@@ -52,15 +51,14 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var appearanceObs: NSKeyValueObservation?
     let cloudSetup = CloudSetup()
     let catalog = RepoCatalog(path: REPO_CACHE_PATH)
-    let planeAccounts = PlaneAccounts()
-    lazy var projectCatalog = ProjectCatalog(accounts: planeAccounts, path: PROJECT_CACHE_PATH)
+    lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
     lazy var projectNotifier: ProjectNotifier = {
         ProjectNotifier(post: { [weak self] title, subtitle, body, id in
             self?.notify(title: title, subtitle: subtitle, body: body, id: id)
         })
     }()
     lazy var projectStore: ProjectStore = {
-        let s = ProjectStore(accounts: planeAccounts, notifier: projectNotifier,
+        let s = ProjectStore(trackers: ENV, notifier: projectNotifier,
                              statePath: PROJECT_STATE_PATH, activityPath: PROJECT_ACTIVITY_PATH)
         s.relayIsLive = { [weak self] in self?.relay.state == .live }
         s.onChange = { [weak self] in
@@ -82,7 +80,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var aiChecks = AgentJudge(path: CHECKS_PATH, agents: agentIndex, queue: queue)
     lazy var writeBack: PlaneWriteBack = {
-        let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, accounts: planeAccounts)
+        let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, trackers: ENV)
         w.onError = { log.error("\($0)") }
         return w
     }()
@@ -106,7 +104,15 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         log.info("OverSire launching — repos: \(REPOS.count), poll: \(POLL_NORMAL)s/\(POLL_ACTIVE)s")
         if LegacyMigration().run() { log.info("migrated the Cat Eye data") }
         loadConfig()
-        StoreMigration.runForApp(STORE_WRITES)
+        // The loads of the store owners must see the moved records.
+        Task { @MainActor in
+            await StoreMigration.runForApp(STORE_WRITES)
+            self.launch()
+        }
+    }
+
+    private func launch() {
+        WorkstreamIndex.formats = ENV.keyFormats
         installMainMenu()
         applyShowIn()
         REPOS = catalog.resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
@@ -184,14 +190,15 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.catalog.refreshIfStale()
             self?.projectCatalog.refreshIfStale()
         }
-        cloudSetup.planeClient = { [weak self] in self?.planeAccounts.client(for: $0) }
+        cloudSetup.planeClient = { ENV.tracker($0) as? any WebhookManaging }
         ENV.onRemove = { [weak self] id in
-            if self?.planeAccounts.workspace(id.id) != nil { self?.cloudSetup.removePlaneHook(id.id) }
+            if id.provider == .plane { self?.cloudSetup.removePlaneHook(id.id) }
         }
         NotificationCenter.default.addObserver(forName: AppEnvironment.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
+            WorkstreamIndex.formats = ENV.keyFormats
             self.applyRepoSelection(reopen: false)
-            for w in PROJECTS_CFG.workspaces where self.projectCatalog.projects(of: w.slug).isEmpty { self.projectCatalog.refresh(w.slug, force: true) }
+            for w in ENV.trackerIds where self.projectCatalog.projects(of: w).isEmpty { self.projectCatalog.refresh(w, force: true) }
             self.applyProjectSelection()
             NotificationCenter.default.post(name: AppWindow.changed, object: self)
         }
@@ -461,27 +468,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let includePRs = force || Date().timeIntervalSince(lastPRRefresh) >= POLL_NORMAL * 0.9
         let start = Date()
         log.debug("Refresh starting for \(repos.count) repos")
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        Task { [weak self] in
             guard let self = self else { return }
-            var runRes = Array(repeating: (String, [Run])("", []), count: repos.count)
-            var prRes = Array(repeating: (String, [ChangeRequest])("", []), count: repos.count)
-            let collectQ = DispatchQueue(label: "com.oversire.app.collect")
-            var tasks: [() -> Void] = []
-            for (i, repo) in repos.enumerated() {
-                tasks.append {
-                    let runs = fetchRuns(repo: repo) ?? []
-                    collectQ.sync { runRes[i] = (repo, runs) }
-                }
-                if includePRs {
-                    tasks.append {
-                        let prs = fetchPRs(repo: repo)
-                        collectQ.sync { prRes[i] = (repo, prs) }
-                    }
-                }
-            }
-            // concurrentPerform caps parallelism at the core count, so many repos
-            // no longer launch an unbounded burst of simultaneous gh processes.
-            DispatchQueue.concurrentPerform(iterations: tasks.count) { tasks[$0]() }
+            let (found, foundPRs) = await Self.fetch(repos, prs: includePRs)
+            let runRes = found.map { ($0.0, $0.1 ?? []) }
+            let prRes = foundPRs
             let elapsed = Date().timeIntervalSince(start)
             let totalRuns = runRes.reduce(0) { $0 + $1.1.count }
             let totalPRs = prRes.reduce(0) { $0 + $1.1.count }
@@ -522,30 +513,14 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             return
         }
         refreshInFlight = true
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            var runRes = [(String, [Run])?](repeating: nil, count: repos.count)
-            var prRes = [(String, [ChangeRequest])?](repeating: nil, count: repos.count)
-            let collectQ = DispatchQueue(label: "com.oversire.app.collect-partial")
-            var tasks: [() -> Void] = []
-            for (i, repo) in repos.enumerated() {
-                tasks.append {
-                    let runs = fetchRuns(repo: repo)
-                    collectQ.sync { runRes[i] = runs.map { (repo, $0) } }
-                }
-                if includePRs {
-                    tasks.append {
-                        let prs = fetchPRs(repo: repo)
-                        collectQ.sync { prRes[i] = (repo, prs) }
-                    }
-                }
-            }
-            DispatchQueue.concurrentPerform(iterations: tasks.count) { tasks[$0]() }
-            let fresh = runRes.compactMap { $0 }
+        Task { [weak self] in
+            let (runRes, prRes) = await Self.fetch(repos, prs: includePRs)
+            let fresh = runRes.compactMap { r in r.1.map { (r.0, $0) } }
             // Insights backfill: a run that completed and already left the list.
             var backfill: [(String, [Run])] = []
             for (repo, id) in completedRuns {
                 let listed = fresh.first { $0.0 == repo }?.1.contains { $0.id == id } ?? false
-                if !listed, let run = fetchRun(repo: repo, id: id), run.status == "completed" {
+                if !listed, let run = await REPO_CLIENT.run(repo, id: id), run.status == "completed" {
                     backfill.append((repo, [run]))
                 }
             }
@@ -556,7 +531,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.ciAssist.observe(fresh)
                 DeployLog.shared.record(fresh + backfill)
                 self.grouped = mergeGrouped(self.grouped, fresh, order: REPOS)
-                if includePRs { self.prGrouped = mergeGrouped(self.prGrouped, prRes.compactMap { $0 }, order: REPOS) }
+                if includePRs { self.prGrouped = mergeGrouped(self.prGrouped, prRes, order: REPOS) }
                 self.lastUpdate = Date()
                 self.refreshInFlight = false
                 self.updateIcon()
@@ -569,6 +544,33 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.runPendingPartial()
             }
         }
+    }
+
+    /// The runs and PRs of each repo, in repo order. A nil run list means the fetch failed.
+    /// At most 8 repos load at once.
+    static func fetch(_ repos: [String], prs: Bool) async -> ([(String, [Run]?)], [(String, [ChangeRequest])]) {
+        var runs = [[Run]?](repeating: nil, count: repos.count)
+        var list = [[ChangeRequest]](repeating: [], count: repos.count)
+        await withTaskGroup(of: (Int, [Run]?, [ChangeRequest]).self) { g in
+            var next = 0
+            func add() {
+                guard next < repos.count else { return }
+                let i = next, repo = repos[i]
+                next += 1
+                g.addTask {
+                    async let r = REPO_CLIENT.runs(repo)
+                    async let p = prs ? REPO_CLIENT.changes(repo) : []
+                    return (i, await r, await p)
+                }
+            }
+            for _ in 0..<8 { add() }
+            for await (i, r, p) in g {
+                runs[i] = r
+                list[i] = p
+                add()
+            }
+        }
+        return (zip(repos, runs).map { ($0, $1) }, prs ? zip(repos, list).map { ($0, $1) } : [])
     }
 
     func runPendingPartial() {
@@ -611,7 +613,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func trackedPlaneWorkspaces() -> [String] {
         var seen = Set<String>()
         return projectCatalog.resolve(PROJECTS_CFG).map(\.ref.workspace).filter {
-            planeAccounts.hasToken($0) && seen.insert($0).inserted
+            ENV.tracker($0) != nil && seen.insert($0).inserted
         }
     }
 
@@ -646,7 +648,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         cloudSetup.prunePlaneHooks(removed: removed)
         guard !added.isEmpty else { return }
         let d = cloudSetup
-        d.perform("Install Plane webhooks", { d.installPlaneHooks(added) }) { [weak self] _ in
+        d.perform("Install Plane webhooks", { await d.installPlaneHooks(added) }) { [weak self] _ in
             d.checkPlaneHooks(added)
             self?.projectStore.track(self?.projectCatalog.resolve(PROJECTS_CFG) ?? [], live: self?.liveProjectKeys() ?? [])
         }
@@ -706,12 +708,15 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // MARK: - Run actions
 
+    func has(_ c: Capability) -> Bool { ENV.has(c) }
+
     func rerun(repo: String, runs: [Run], failedOnly: Bool) {
         guard !runs.isEmpty else { return }
         let action: RunAction = failedOnly ? .rerunFailed : .rerun
-        DispatchQueue.global(qos: .userInitiated).async {
-            let errors = runs.compactMap { r in
-                runAction(action, repo: repo, id: r.id).map { "\(r.workflowName ?? r.name): \($0)" }
+        Task {
+            var errors: [String] = []
+            for r in runs {
+                if let e = await REPO_CLIENT.perform(action, repo: repo, id: r.id) { errors.append("\(r.workflowName ?? r.name): \(e)") }
             }
             DispatchQueue.main.async {
                 if errors.isEmpty {

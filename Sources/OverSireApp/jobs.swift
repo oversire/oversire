@@ -1,6 +1,5 @@
 import Cocoa
 import OverSireCore
-import CIGitHubActions
 
 // A job in the run detail. A click opens the job on GitHub. A hover shows a summary.
 final class JobChip: NSView {
@@ -230,13 +229,12 @@ enum JobSummary {
 // The end of a job log for the UI. The adapter downloads only the last bytes.
 final class JobLogs {
     static let shared = JobLogs()
-    private let queue = DispatchQueue(label: "com.oversire.app.joblogs")
     private var cache: [String: String] = [:]  // main thread only
 
     func snippet(repo: String, jobId: String, done: @escaping (String?) -> Void) {
         if let s = cache[jobId] { done(s); return }
-        queue.async {
-            let s = self.tail(repo: repo, jobId: jobId).map(ActionsCI.errorSnippet)
+        Task {
+            let s = await REPO_CLIENT.rawLog(repo, jobId: jobId).map(CILog.errorSnippet)
             DispatchQueue.main.async {
                 if let s = s { self.cache[jobId] = s }
                 done(s)
@@ -246,14 +244,9 @@ final class JobLogs {
 
     // The cleaned end of the job log, read again on each call. GitHub gives the log only after the job ends.
     func lines(repo: String, jobId: String, done: @escaping ([String]?) -> Void) {
-        queue.async {
-            let l = self.tail(repo: repo, jobId: jobId).map(ActionsCI.clean)
+        Task {
+            let l = await REPO_CLIENT.rawLog(repo, jobId: jobId).map(CILog.clean)
             DispatchQueue.main.async { done(l) }
         }
-    }
-
-    private func tail(repo: String, jobId: String) -> String? {
-        let ci = actions(repo)
-        return try? Result(blocking: { try await ci.rawLog(JobRef(run: ci.runRef(repo, id: ""), id: jobId)) }).get()
     }
 }

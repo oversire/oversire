@@ -5,7 +5,6 @@ import OverSireCore
 /// The GitHub Actions runs of one owner. `repos` limits the poll.
 public final class ActionsCI: CIProvider, LogReading, RateReporting, @unchecked Sendable {
     public static let tailBytes = 16_000
-    public static let snippetLines = 15
 
     public let id: ProviderID = .githubActions
     public let account: AccountID
@@ -124,37 +123,12 @@ public final class ActionsCI: CIProvider, LogReading, RateReporting, @unchecked 
 
     /// GitHub gives the log only after the job ends.
     public func log(_ j: JobRef, lines: Int) async throws -> [String] {
-        Array(Self.clean(try await rawLog(j)).suffix(lines))
+        Array(CILog.clean(try await rawLog(j)).suffix(lines))
     }
 
     /// The end of the raw log, about `tailBytes` long.
     public func rawLog(_ j: JobRef) async throws -> String {
         try await client.tail("repos/\(try path(j.run))/actions/jobs/\(j.id)/logs", bytes: Self.tailBytes)
-    }
-
-    /// The lines up to the last "##[error]" marker, or the last lines when there is no marker.
-    public static func errorSnippet(_ log: String) -> String {
-        let lines = clean(log)
-        let end = lines.lastIndex { $0.hasPrefix("##[error]") }.map { $0 + 1 } ?? lines.count
-        return lines[max(0, end - snippetLines)..<end].joined(separator: "\n")
-    }
-
-    /// Log lines without time stamps, color codes, group markers and empty lines.
-    public static func clean(_ log: String) -> [String] {
-        let stamp = try! NSRegularExpression(pattern: #"^\d{4}-\d\d-\d\dT[\d:.]+Z ?|\u001B?\[[0-9;]*m"#)
-        return log.components(separatedBy: "\n").compactMap { raw in
-            let ns = raw.trimmingCharacters(in: .newlines) as NSString
-            var l = stamp.stringByReplacingMatches(in: ns as String, range: NSRange(location: 0, length: ns.length), withTemplate: "")
-            if l.hasPrefix("##[group]") || l.hasPrefix("##[endgroup]") || l.trimmingCharacters(in: .whitespaces).isEmpty { return nil }
-            if l.count > 220 { l = String(l.prefix(220)) + "\u{2026}" }
-            return l
-        }
-    }
-
-    public static func isError(_ line: String) -> Bool {
-        if line.hasPrefix("##[error]") { return true }
-        let l = line.lowercased()
-        return l.contains("error:") || l.hasPrefix("fail") || l.contains("--- fail") || l.contains("panic:") || l.contains("exit code 1")
     }
 
     // MARK: Mapping

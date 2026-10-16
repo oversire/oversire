@@ -115,9 +115,47 @@ final class AppEnvironment: @unchecked Sendable {
     }
 
     func has(_ c: Capability) -> Bool { capabilities().contains(c) }
+
+    /// The key formats of the trackers, without repeats. With no tracker, the common PROJECT-12 form.
+    var keyFormats: [KeyFormat] {
+        var out: [KeyFormat] = []
+        for f in trackers().map(\.keyFormat) where !out.contains(f) { out.append(f) }
+        return out.isEmpty ? [.projectDash] : out
+    }
 }
 
 let ENV = AppEnvironment()
+
+extension AppEnvironment: TrackerDirectory {
+    var trackerIds: [String] { accounts(.tracker).map(\.account.id) }
+}
+
+extension AppEnvironment: RepoAccounts {}
+
+// ─── Optional features of the adapters ───────────────────────────────────────
+
+extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, LabelIdReading {}
+
+extension PlaneTracker: IntakePage {
+    func intakeURL(_ p: ProjectRef) -> String { "\(workspace.webURL)/\(workspace.slug)/projects/\(p.id)/intake" }
+}
+
+extension PlaneTracker: HTMLBodies {
+    func html(fromMarkdown md: String) -> String { PlaneMarkup.html(fromMarkdown: md) }
+}
+
+extension OrcaRuntime: TerminalOpening, ProjectSettingsVC.VersionReporting {}
+
+extension GitHubCodeHost: RepoAddressing {}
+extension ActionsCI: RepoAddressing, KnownJobFailures, RawLogReading {}
+
+extension PlaneTracker: AssetLinking {
+    func assetIds(in markdown: String) -> Set<String> {
+        let ns = markdown as NSString
+        return Set(PlaneMarkup.assetRE.matches(in: markdown, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 2)) })
+    }
+}
 
 // ─── Account owners ──────────────────────────────────────────────────────────
 // The Providers page owns the tracker and runtime accounts. GitHub and GitHub Actions follow

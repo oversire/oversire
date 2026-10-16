@@ -1,6 +1,5 @@
 import Foundation
 import OverSireCore
-import TrackerPlane
 
 // The domain types live in OverSireCore. This file keeps the Plane and UI parts.
 

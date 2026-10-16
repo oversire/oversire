@@ -628,14 +628,14 @@ func ensureRunDetail(repo: String, group: [Run], key: String) {
     detailFetchInFlight.insert(key)
     let fallbackMsg = primary.displayTitle
     let cachedJobs = jobsCache.mapValues(\.jobs)
-    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-        let msg = needMsg ? fetchCommitMessage(repo: repo, sha: sha) : nil
+    Task { [weak self] in
+        let msg = needMsg ? await REPO_CLIENT.commitMessage(repo, sha: sha) : nil
         var jobs: [(Run, [Job])] = []
-        for r in needJobs { if let j = fetchRunJobs(repo: repo, runId: r.id) { jobs.append((r, j)) } }
+        for r in needJobs { if let j = await REPO_CLIENT.jobs(repo, runId: r.id) { jobs.append((r, j)) } }
         var fails: [(String, [Failure])] = []
         for r in needFails {
             guard let j = jobs.first(where: { $0.0.id == r.id })?.1 ?? cachedJobs[r.id] else { continue }
-            fails.append((r.id, fetchRunFailures(repo: repo, runId: r.id, jobs: j)))
+            fails.append((r.id, await REPO_CLIENT.failures(repo, runId: r.id, jobs: j)))
         }
         DispatchQueue.main.async {
             if commitMsgCache.count > 300 { commitMsgCache.removeAll() }

@@ -153,15 +153,17 @@ final class HomePage: Page {
         col.addFull(PageHeader("Home", caption: "\(df.string(from: Date())) · \(streams.count) workstream\(streams.count == 1 ? "" : "s") · \(running.count) run\(running.count == 1 ? "" : "s") in progress"))
 
         let linked = running.filter { data.workstreams.link(runId: $0.run.id) != nil }.count
-        let tiles: [NSView] = [
+        var tiles: [NSView] = [
             Tile("\(running.count)", "Running now · \(linked) linked", tone: .running) { [weak self] in self?.go(.runs(.running)) },
             Tile("\(failing.count)", failing.isEmpty ? "Failing runs · all green" : "Failing runs", tone: failing.isEmpty ? .ok : .bad) { [weak self] in self?.go(.runs(.failed)) },
             Tile("\(agents.count)", "Orca sessions · \(agents.filter { $0.phase == .waiting }.count) need input", tone: .working) { [weak self] in self?.go(.agents) },
             Tile("\(data.queue.count)", "Queue · \(data.aiChecks.pending.count) AI checks", tone: .queued) { [weak self] in self?.go(.queue) },
-            Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),
-                 tone: .intake) { [weak self] in self?.go(.inbox(.intake)) },
         ]
-        col.addFull(Grid(tiles, columns: 5))
+        if data.has(.intake) {
+            tiles.append(Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),
+                              tone: .intake) { [weak self] in self?.go(.inbox(.intake)) })
+        }
+        col.addFull(Grid(tiles, columns: tiles.count))
         if AI_CFG.digest, let d = data.ciAssist.digest, d.day == CIAssist.day(), !d.facts.isEmpty {
             let c = Card(title: "Morning digest", trailing: [ActionButton("Dismiss") { [weak self] in self?.data.ciAssist.dismissDigest() }])
             if let s = d.summary { c.add(NSTextField.text(s, size: 13, lines: 0)) }

@@ -1,6 +1,5 @@
 import Cocoa
 import OverSireCore
-import TrackerPlane
 
 // ─── Settings → Cloud (beta) ─────────────────────────────────────────────────
 
@@ -379,7 +378,7 @@ final class CloudSettingsVC: NSViewController {
             setup.checkPlaneHooks([slug])
         default:
             let s = setup
-            s.perform("Install Plane webhook for \(slug)", { s.installPlaneHooks([slug]) }) { [weak self] _ in
+            s.perform("Install Plane webhook for \(slug)", { await s.installPlaneHooks([slug]) }) { [weak self] _ in
                 s.checkPlaneHooks([slug])
                 self?.rebuild()
             }

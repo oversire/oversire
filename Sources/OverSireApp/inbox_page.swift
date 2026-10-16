@@ -145,14 +145,17 @@ final class InboxPage: Page {
     private var busy: Set<String> = []
     private var note: String?
 
-    private var tab: Route.InboxTab { if case .inbox(let t) = route { return t }; return .all }
+    private var tab: Route.InboxTab {
+        guard case .inbox(let t) = route, Route.InboxTab.visible(data.has).contains(t) else { return .all }
+        return t
+    }
 
     override func build(_ col: NSStackView) {
         let all = feed.entries(data)
         for (pk, snap) in data.projectStore.snapshots where !(snap.intake ?? []).isEmpty {
             data.projectStore.loadIntakeKeys(projectKey: pk) { [weak self] in self?.reload() }
         }
-        let tabs = Route.InboxTab.allCases
+        let tabs = Route.InboxTab.visible(data.has)
         let counts = tabs.map { t in all.filter { t == .all ? true : $0.source.tab == t }.count }
         col.addFull(PageHeader("Inbox", caption: "Plane, GitHub, Orca and AI checks in one list. Intake waits for triage.",
                                actions: [ActionButton("Mark all read", symbol: "checkmark") { [weak self] in

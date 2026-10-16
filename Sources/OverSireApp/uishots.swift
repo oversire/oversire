@@ -16,9 +16,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json",
-                                                                                       store: projectStore, accounts: PlaneAccounts()))
+                                                                                       store: projectStore, trackers: ENV))
     lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
-                                     writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json", store: projectStore, accounts: PlaneAccounts()))
+                                     writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json", store: projectStore, trackers: ENV))
     lazy var ciAssist = CIAssist(path: NSTemporaryDirectory() + "oversire-uishots/ci.json")
     lazy var aiChecks = AgentJudge(path: NSTemporaryDirectory() + "oversire-uishots/checks.json", agents: agentIndex, queue: queue)
     let relay = RelayClient(secrets: SecretStore(service: "com.oversire.app.cloud"))
@@ -30,8 +30,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         case .general: return GeneralSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), updater: Updater())
         case .repos: return ActionsSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
         case .projects:
-            let acc = PlaneAccounts()
-            return ProjectSettingsVC(catalog: ProjectCatalog(accounts: acc, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, cfg: PROJECTS_CFG)
+            return ProjectSettingsVC(catalog: ProjectCatalog(trackers: ENV, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, cfg: PROJECTS_CFG)
         case .ai: return AISettingsVC()
         case .live: return CloudSettingsVC(setup: CloudSetup(), client: relay)
         default: return nil
@@ -62,22 +61,20 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 try? FileManager.default.copyItem(atPath: fx + "/" + name, toPath: tmp + "/" + name)
             }
         }
-        projectStore = ProjectStore(accounts: PlaneAccounts(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        projectStore = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
                                     statePath: tmp + "/state.json", activityPath: tmp + "/activity.jsonl")
         super.init()
     }
+
+    func has(_ c: Capability) -> Bool { ENV.has(c) }
 
     func rerun(repo: String, runs: [Run], failedOnly: Bool) { log.info("uishots: re-run skipped") }
 
     func refresh(force: Bool, completion: (() -> Void)?) {
         let repos = REPOS
-        DispatchQueue.global().async {
-            var runs = [(String, [Run])](repeating: ("", []), count: repos.count)
-            var prs = [(String, [ChangeRequest])](repeating: ("", []), count: repos.count)
-            DispatchQueue.concurrentPerform(iterations: repos.count) { i in
-                runs[i] = (repos[i], fetchRuns(repo: repos[i]) ?? [])
-                prs[i] = (repos[i], fetchPRs(repo: repos[i]))
-            }
+        Task {
+            let (found, prs) = await GHActionsBar.fetch(repos, prs: true)
+            let runs = found.map { ($0.0, $0.1 ?? []) }
             DispatchQueue.main.async {
                 self.grouped = runs; self.prGrouped = prs
                 if let fx = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FIXTURES"], let d = FileManager.default.contents(atPath: fx + "/prs.json"),
@@ -94,7 +91,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     print("UISHOTS unlinked \(self.workstreams.unlinked.count) checkouts \(self.workstreams.checkouts.count)")
                     // Live write-back test for the items named in OVERSIRE_UISHOTS_WRITEBACK, for example "FRITZ-28".
                     if let keys = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_WRITEBACK"]?.split(separator: ",").map(String.init) {
-                        let wb = PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb-live.json", store: self.projectStore, accounts: PlaneAccounts())
+                        let wb = PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb-live.json", store: self.projectStore, trackers: ENV)
                         wb.onError = { print("UISHOTS writeback error \($0)") }
                         wb.sync(keys.compactMap { self.workstreams.streams[$0] })
                     }
@@ -113,7 +110,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         }
         REPOS = RepoCatalog(path: REPO_CACHE_PATH).resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
         assignRepoColors(REPOS)
-        let catalog = ProjectCatalog(accounts: PlaneAccounts(), path: PROJECT_CACHE_PATH)
+        let catalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
         projectStore.track(catalog.resolve(PROJECTS_CFG), live: [])
         agentIndex.poll()
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
