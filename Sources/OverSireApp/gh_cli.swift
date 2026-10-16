@@ -1,12 +1,13 @@
 import Cocoa
 import GitHubKit
 import CodeHostGitHub
+import CIGitHubActions
 import OverSireCore
 
 
 // The gh CLI and the shared GitHub client. GitHub adapters get GITHUB.
 let GH = GitHubClient.defaultPath
-let GITHUB = GitHubClient(commands: ProcessRunner(environment: GitHubClient.environment), http: URLSessionTransport(), gh: GH)
+let GITHUB = GitHubClient(commands: ProcessRunner(environment: GitHubClient.environment), http: URLSessionTransport.noRedirects, gh: GH)
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -22,53 +23,6 @@ func ghRun(_ args: [String], input: Data? = nil, timeout: TimeInterval? = nil) t
     try ProcessRunner(environment: GitHubClient.environment).runSync(GH, args, stdin: input, timeout: timeout)
 }
 
-func ghShell(_ args: String...) -> Data? {
-    guard FileManager.default.isExecutableFile(atPath: GH) else {
-        let msg = "GitHub CLI not found at \(GH)"
-        log.error("\(msg)")
-        lastFetchError = msg
-        return nil
-    }
-    do {
-        let res = try ghRun(args)
-        guard res.ok else {
-            let errStr = res.stderr
-            // Public on purpose: os_log redacts interpolated strings by default,
-            // which turned every one of these into "gh <private> exited 1:
-            // <private>" and made a whole night of failures undiagnosable.
-            // Only the first two args: "api repos/x/y/actions/runs" or "pr review"
-            // is all the diagnosis needs, and it keeps a `pr review -b <body>`
-            // out of a log any process on the machine can read.
-            log.warning("gh \(args.prefix(2).joined(separator: " "), privacy: .public) exited \(res.status): \(errStr, privacy: .public)")
-            let low = errStr.lowercased()
-            // Order matters: gh's unauthenticated 403 reads "API rate limit
-            // exceeded ... Authenticated requests get a higher rate limit",
-            // so the auth test would swallow it if it ran first.
-            if low.contains("rate limit") {
-                lastFetchError = "GitHub API rate limit hit — retries resume after the reset"
-            } else if low.contains("auth") || low.contains("login") || low.contains("bad credentials") {
-                lastFetchError = "Not authenticated. Run: gh auth login"
-            } else if low.contains("404") || low.contains("could not resolve to a repository") {
-                // GitHub answers 404, not 401, for a private repo when the token
-                // is expired or lost a scope — so a bare 404 is an auth problem
-                // far more often than a wrong repo name. Say both. `gh pr list`
-                // goes through GraphQL, which words the same case as
-                // "Could not resolve to a Repository".
-                lastFetchError = "No access — run: gh auth login (or check the repo name)"
-            } else if !errStr.isEmpty {
-                lastFetchError = String(errStr.prefix(120))
-            }
-            return nil
-        }
-        lastFetchError = nil
-        return res.stdout
-    } catch {
-        log.error("Failed to launch gh: \(error.localizedDescription)")
-        lastFetchError = "Failed to run gh: \(error.localizedDescription)"
-        return nil
-    }
-}
-
 func ghStr(_ args: String...) -> String? {
     guard FileManager.default.isExecutableFile(atPath: GH) else {
         let msg = "GitHub CLI not found at \(GH)"
@@ -80,18 +34,26 @@ func ghStr(_ args: String...) -> String? {
     return s?.isEmpty == false ? s : nil
 }
 
-let RUN_JQ = "{id, name, displayTitle: .display_title, status, conclusion, headBranch: .head_branch, headSha: .head_sha, event, url: .html_url, updatedAt: .updated_at, createdAt: .created_at, startedAt: .run_started_at, number: .run_number, workflowName: .name, actorLogin: .actor.login, attempt: .run_attempt}"
+/// The Actions adapter for one repo. The owner is the first part of the path.
+func actions(_ repo: String) -> ActionsCI { ActionsCI(owner: repoOwner(repo), client: GITHUB) }
 
 // nil means the fetch failed, which a targeted refresh must not treat as "no runs".
 func fetchRuns(repo: String) -> [Run]? {
-    guard let data = ghShell("api", "repos/\(repo)/actions/runs?per_page=\(RUNS_PER_REPO)", "--jq", "[.workflow_runs[] | \(RUN_JQ)]")
-    else { return nil }
-    return (try? JSONDecoder().decode([Run].self, from: data)) ?? []
+    let ci = actions(repo)
+    switch Result(blocking: { try await ci.runs(RunQuery(repo: ci.repoRef(repo), limit: RUNS_PER_REPO)) }) {
+    case .success(let runs):
+        lastFetchError = nil
+        return runs
+    case .failure(let e):
+        log.warning("Runs of \(repo, privacy: .public) failed: \(e.message, privacy: .public)")
+        lastFetchError = GitHubClient.hint(e)
+        return nil
+    }
 }
 
 func fetchRun(repo: String, id: String) -> Run? {
-    guard let data = ghShell("api", "repos/\(repo)/actions/runs/\(id)", "--jq", RUN_JQ) else { return nil }
-    return try? JSONDecoder().decode(Run.self, from: data)
+    let ci = actions(repo)
+    return try? Result(blocking: { try await ci.run(ci.runRef(repo, id: id)) }).get()
 }
 
 // ─── Run Detail Fetching ─────────────────────────────────────────────────────
@@ -109,37 +71,20 @@ func fetchCommitMessage(repo: String, sha: String) -> String? {
 }
 
 func fetchRunJobs(repo: String, runId: String) -> [Job]? {
-    let step = "{name, status, conclusion, startedAt: .started_at, completedAt: .completed_at}"
-    let jq = "[.jobs[] | {id, name, status, conclusion, url: .html_url, startedAt: .started_at, " +
-        "completedAt: .completed_at, runnerName: .runner_name, steps: [.steps[]? | \(step)]}]"
-    guard let data = ghShell("api", "repos/\(repo)/actions/runs/\(runId)/jobs?per_page=100", "--jq", jq) else { return nil }
-    return try? JSONDecoder().decode([Job].self, from: data)
+    let ci = actions(repo)
+    return try? Result(blocking: { try await ci.jobs(ci.runRef(repo, id: runId)) }).get()
 }
 
-// The failure message GitHub shows in its annotations box: for each failed job, pull its
-// check-run annotations (a job's id IS its check-run id) plus the name of the step that failed.
-func fetchRunFailures(repo: String, jobs: [Job]) -> [Failure] {
-    var out: [Failure] = []
-    for job in jobs where job.conclusion == "failure" {
-        if out.count >= 3 { break }
-        let step = job.steps?.first(where: { $0.conclusion == "failure" })?.name
-        var msgs: [String] = []
-        let ajq = "[.[] | {message, path, startLine: .start_line, annotationLevel: .annotation_level}]"
-        if let aData = ghShell("api", "repos/\(repo)/check-runs/\(job.id)/annotations", "--jq", ajq),
-           let anns = try? JSONDecoder().decode([CheckAnnotation].self, from: aData) {
-            for a in anns where a.annotationLevel == "failure" {
-                guard var m = a.message?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty else { continue }
-                if m.count > 400 { m = String(m.prefix(400)) + "\u{2026}" }
-                if let p = a.path, !p.isEmpty, p != ".github", let ln = a.startLine {
-                    m = "\(p):\(ln)\n\(m)"
-                }
-                msgs.append(m)
-                if msgs.count >= 3 { break }
-            }
-        }
-        out.append(Failure(job: job.name, step: step, messages: msgs))
-    }
-    return out
+func fetchRunFailures(repo: String, runId: String, jobs: [Job]) -> [Failure] {
+    let ci = actions(repo)
+    return (try? Result(blocking: { try await ci.failures(ci.runRef(repo, id: runId), jobs: jobs) }).get()) ?? []
+}
+
+/// nil on success, else the error text.
+func runAction(_ a: RunAction, repo: String, id: String) -> String? {
+    let ci = actions(repo)
+    if case .failure(let e) = Result(blocking: { try await ci.perform(a, on: ci.runRef(repo, id: id)) }) { return GitHubClient.hint(e) }
+    return nil
 }
 
 // Sets lastFetchError on a failure.

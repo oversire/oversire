@@ -95,13 +95,6 @@ func runSelfTest() {
                          startedAt: nil, completedAt: nil, runnerName: nil, steps: nil)
     check((JobChip(job: chipJob, notes: [], maxW: 400).subviews.first as? NSTextField)?.stringValue == "release\u{2026}x-amd64",
           "long job names keep both ends")
-    let log = "2026-10-01T23:14:09.48Z FAIL\tpkg\t300s\n2026-10-01T23:14:11.29Z ##[error]Process completed with exit code 1.\n" +
-        "2026-10-01T23:14:11.32Z Post job cleanup.\n"
-    check(JobLogs.errorSnippet(log) == "FAIL\tpkg\t300s\n##[error]Process completed with exit code 1.", "log snippet ends at the error")
-    let cleaned = JobLogs.clean("2026-10-01T23:14:09.48Z \u{1B}[32mok\u{1B}[0m pkg\n##[group]Run x\n\n[90m12:00[0m INF done\n")
-    check(cleaned == ["ok pkg", "12:00 INF done"], "log clean drops stamps, groups, blanks and ANSI \(cleaned)")
-    check(JobLogs.isError("##[error]boom") && JobLogs.isError("--- FAIL: TestX") && JobLogs.isError("panic: nil map"), "error lines")
-    check(!JobLogs.isError("ok  pkg 0.3s") && !JobLogs.isError("errors are fine"), "plain lines are not errors")
     let liveRun = run("main", "in_progress")
     check(RunsPage.matches(.running, run: liveRun, linked: false) && !RunsPage.matches(.failed, run: liveRun, linked: false), "running filter")
     check(RunsPage.matches(.linked, run: liveRun, linked: true) && !RunsPage.matches(.unlinked, run: liveRun, linked: true), "linked filter")

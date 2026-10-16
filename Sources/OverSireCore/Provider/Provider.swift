@@ -68,11 +68,17 @@ public struct EventPage: Sendable {
     public let events: [ProviderEvent]
     public let cursor: Cursor
     public let retryAfter: Duration?
+    /// The quota from the poll answers. It saves a call to RateReporting.
+    public let budget: RateBudget?
+    /// A subject is in progress (a running build). The account polls at the active interval.
+    public let busy: Bool
 
-    public init(events: [ProviderEvent], cursor: Cursor, retryAfter: Duration? = nil) {
+    public init(events: [ProviderEvent], cursor: Cursor, retryAfter: Duration? = nil, budget: RateBudget? = nil, busy: Bool = false) {
         self.events = events
         self.cursor = cursor
         self.retryAfter = retryAfter
+        self.budget = budget
+        self.busy = busy
     }
 }
 

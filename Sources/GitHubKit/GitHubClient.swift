@@ -90,6 +90,48 @@ public struct GitHubClient: Sendable {
         do { return try JSONDecoder().decode(RateLimit.self, from: a.body) } catch { throw ProviderError.decoding("rate_limit") }
     }
 
+    /// The end of a file that the API gives as a redirect, for example a job log.
+    /// Only the API call has the token. The storage host gets no token.
+    public func tail(_ path: String, bytes: Int) async throws -> String {
+        var token = self.token
+        if token == nil { token = try await cliToken() }
+        guard let token else { throw ProviderError.unauthorized }
+        guard let url = URL(string: GitHubClient.apiHost + "/" + path) else { throw ProviderError.transport("Bad GitHub path \(path)") }
+        var req = URLRequest(url: url, timeoutInterval: 15)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("oversire", forHTTPHeaderField: "User-Agent")
+        let (body, resp) = try await http.send(req)
+        switch resp.statusCode {
+        case 200: return String(decoding: body.suffix(bytes), as: UTF8.self)
+        case 301, 302, 303, 307: break
+        case 401: throw ProviderError.unauthorized
+        case 404, 410: throw ProviderError.notFound
+        default: throw ProviderError.vendor(code: String(resp.statusCode), message: "GitHub gave HTTP \(resp.statusCode)")
+        }
+        guard let blob = resp.value(forHTTPHeaderField: "Location").flatMap(URL.init(string:)) else {
+            throw ProviderError.decoding("no Location for \(path)")
+        }
+        var head = URLRequest(url: blob, timeoutInterval: 15)
+        head.httpMethod = "HEAD"
+        let size = (try? await http.send(head)).flatMap { Int($0.1.value(forHTTPHeaderField: "Content-Length") ?? "") } ?? 0
+        var get = URLRequest(url: blob, timeoutInterval: 15)
+        let partial = size > bytes
+        if partial { get.setValue("bytes=\(size - bytes)-", forHTTPHeaderField: "Range") }
+        let (data, r) = try await http.send(get)
+        guard r.statusCode < 300 else { throw ProviderError.vendor(code: String(r.statusCode), message: "The log download failed") }
+        var text = String(decoding: data, as: UTF8.self)
+        // A range starts inside a line.
+        if partial, let nl = text.firstIndex(of: "\n") { text = String(text[text.index(after: nl)...]) }
+        return text
+    }
+
+    func cliToken() async throws -> String? {
+        guard FileManager.default.isExecutableFile(atPath: gh) else { return nil }
+        let out = try await commands.run(gh, ["auth", "token"], stdin: nil, timeout: .seconds(10))
+        let t = String(decoding: out.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return out.ok && !t.isEmpty ? t : nil
+    }
+
     // MARK: Transports
 
     func viaHTTP(_ method: String, _ path: String, body: Data?, etag: String?) async throws -> GitHubAnswer {
@@ -104,7 +146,13 @@ public struct GitHubClient: Sendable {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = body
         }
-        let (data, resp) = try await http.send(req)
+        var (data, resp) = try await http.send(req)
+        // The transport does not follow redirects. A moved repo stays on the API host and keeps the token.
+        if [301, 302, 307, 308].contains(resp.statusCode), let loc = resp.value(forHTTPHeaderField: "Location"),
+           let next = URL(string: loc, relativeTo: url), next.host == url.host {
+            req.url = next
+            (data, resp) = try await http.send(req)
+        }
         return GitHubAnswer(status: resp.statusCode, body: data, etag: resp.value(forHTTPHeaderField: "ETag"),
                             budget: Self.budget { resp.value(forHTTPHeaderField: $0) })
     }

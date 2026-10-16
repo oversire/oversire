@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import CIGitHubActions
 
 // One run in a page list: state, workflow and number, repo and branch, item link, time.
 final class RunLine: Row {
@@ -239,8 +240,8 @@ final class RunPage: Page {
             }
             logCard.add(TermView(lines: steps.isEmpty ? ["Waiting for the runner…"] : steps, height: 300))
         } else if let log {
-            let lines = errorsOnly ? log.filter(JobLogs.isError) : log
-            let errs = Set(lines.indices.filter { JobLogs.isError(lines[$0]) })
+            let lines = errorsOnly ? log.filter(ActionsCI.isError) : log
+            let errs = Set(lines.indices.filter { ActionsCI.isError(lines[$0]) })
             logCard.add(NSTextField.text("\(job?.name ?? "") · last \(log.count) lines", size: 11.5, color: Palette.dim, mono: true))
             logCard.add(TermView(lines: lines.isEmpty ? ["No error lines."] : lines, height: 420, errors: errs))
         } else {
@@ -314,11 +315,11 @@ final class RunPage: Page {
         busy = "Cancelling…"
         reload()
         q.async { [weak self] in
-            let res = try? ghRun(["run", "cancel", String(id), "-R", repo])
+            let err = runAction(.cancel, repo: repo, id: id)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.busy = nil
-                self.note = res?.ok == true ? (.info, "GitHub cancels the run.") : (.bad, "Could not cancel: \(res?.stderr ?? "gh did not run")")
+                self.note = err.map { (.bad, "Could not cancel: \($0)") } ?? (.info, "GitHub cancels the run.")
                 self.load()
             }
         }

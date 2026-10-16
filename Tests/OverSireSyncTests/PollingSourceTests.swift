@@ -11,6 +11,7 @@ private final class CountingProvider: Provider, @unchecked Sendable {
     var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(5), requestsPerHour: 5000) }
     let cursorsSeen = Locked<[String?]>([])
     let fail = Locked(false)
+    let busy = Locked(false)
 
     init(account: AccountID) { self.account = account }
 
@@ -19,7 +20,8 @@ private final class CountingProvider: Provider, @unchecked Sendable {
     func poll(since: Cursor?) async throws -> EventPage {
         let n = cursorsSeen.with { s -> Int in s.append(since?.rawValue); return s.count }
         if fail.get() { throw ProviderError.transport("down") }
-        return EventPage(events: [event("\(account.id)-\(n)", account: account)], cursor: Cursor(rawValue: String(n)))
+        return EventPage(events: [event("\(account.id)-\(n)", account: account)], cursor: Cursor(rawValue: String(n)),
+                         busy: busy.get())
     }
 }
 
@@ -58,6 +60,25 @@ final class PollingSourceTests: XCTestCase {
         // The cloud drops: poll now to catch up.
         await source.setCloudLive(false)
         await eventually("catch-up poll") { p.cursorsSeen.get().count == 5 }
+        await source.stop()
+    }
+
+    func testABusyPagePollsAtTheActiveInterval() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("cursors-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let clock = ManualClock()
+        let p = CountingProvider(account: acme)
+        p.busy.with { $0 = true }
+        let source = PollingSource(providers: [p], cursors: CursorStore(url: file), clock: clock)
+        let stream = source.events()
+
+        _ = await take(1, from: stream)
+        try await clock.waitForSleepers()
+        XCTAssertEqual(clock.sleeps.last, .seconds(10), "a run in progress")
+        p.busy.with { $0 = false }
+        clock.advance(by: .seconds(10))
+        await eventually("second poll") { clock.sleeps.count == 2 }
+        XCTAssertEqual(clock.sleeps.last, .seconds(30), "all runs done")
         await source.stop()
     }
 

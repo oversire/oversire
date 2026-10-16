@@ -696,15 +696,14 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func rerun(repo: String, runs: [Run], failedOnly: Bool) {
         guard !runs.isEmpty else { return }
-        let endpoint = failedOnly ? "rerun-failed-jobs" : "rerun"
+        let action: RunAction = failedOnly ? .rerunFailed : .rerun
         DispatchQueue.global(qos: .userInitiated).async {
-            let errors = runs.compactMap { r -> String? in
-                let res = try? ghRun(["api", "-X", "POST", "repos/\(repo)/actions/runs/\(r.id)/\(endpoint)"])
-                return res?.ok == true ? nil : "\(r.workflowName ?? r.name): \(res?.stderr ?? "gh did not run")"
+            let errors = runs.compactMap { r in
+                runAction(action, repo: repo, id: r.id).map { "\(r.workflowName ?? r.name): \($0)" }
             }
             DispatchQueue.main.async {
                 if errors.isEmpty {
-                    log.info("Re-run (\(endpoint)) requested for \(runs.count) run(s) in \(repo)")
+                    log.info("Re-run (\(action.rawValue)) requested for \(runs.count) run(s) in \(repo)")
                 } else {
                     log.error("Re-run failed in \(repo): \(errors.joined(separator: "; "))")
                     self.notify(title: repo, subtitle: "Re-run failed", body: errors.joined(separator: "\n"),

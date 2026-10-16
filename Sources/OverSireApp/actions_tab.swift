@@ -635,7 +635,7 @@ func ensureRunDetail(repo: String, group: [Run], key: String) {
         var fails: [(String, [Failure])] = []
         for r in needFails {
             guard let j = jobs.first(where: { $0.0.id == r.id })?.1 ?? cachedJobs[r.id] else { continue }
-            fails.append((r.id, fetchRunFailures(repo: repo, jobs: j)))
+            fails.append((r.id, fetchRunFailures(repo: repo, runId: r.id, jobs: j)))
         }
         DispatchQueue.main.async {
             if commitMsgCache.count > 300 { commitMsgCache.removeAll() }

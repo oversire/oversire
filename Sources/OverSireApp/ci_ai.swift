@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import CIGitHubActions
 
 // A short cause of a failed run, from the log and the changed files.
 struct RunExplanation: Codable, Equatable {
@@ -106,7 +107,7 @@ final class CIAssist {
     // MARK: Explain
 
     static func explainRequest(run r: Run, job: String, log: [String], files: [String]) -> AIRequest {
-        let errs = log.filter(JobLogs.isError)
+        let errs = log.filter(ActionsCI.isError)
         let context = (Array(errs.suffix(40)) + ["--- last lines ---"] + Array(log.suffix(60))).joined(separator: "\n")
         let system = """
         You read a failed GitHub Actions job and give the likely cause in one or two short sentences.

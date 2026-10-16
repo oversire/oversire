@@ -74,6 +74,10 @@ public struct Run: Codable, Hashable, Sendable {
 
     public var isFailure: Bool { status == "completed" && conclusion == "failure" }
 
+    /// "waiting", "requested" and "pending" count as queued.
+    public var phase: RunStatus { RunStatus(rawValue: status) ?? .queued }
+    public var outcome: RunConclusion? { conclusion.flatMap(RunConclusion.init(rawValue:)) }
+
     // The mean duration of the completed runs of the same workflow in the last 3 days.
     public func estimatedTotal(history: [Run], now: Date = Date()) -> TimeInterval? {
         let wf = workflowName ?? name
@@ -210,4 +214,42 @@ public struct RunQuery: Hashable, Sendable {
 
 public enum RunAction: String, Codable, Sendable, CaseIterable {
     case rerun, rerunFailed, cancel
+}
+
+/// Run.status holds the raw value. Other vendors map their states to these values.
+public enum RunStatus: String, Codable, Sendable, CaseIterable {
+    case queued, running = "in_progress", completed
+}
+
+public enum RunConclusion: String, Codable, Sendable, CaseIterable {
+    case success, failure, cancelled, skipped, neutral, stale
+    case timedOut = "timed_out", actionRequired = "action_required", startupFailure = "startup_failure"
+}
+
+/// A workflow or a pipeline definition.
+public struct Pipeline: Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let path: String
+
+    public init(id: String, name: String, path: String) {
+        self.id = id
+        self.name = name
+        self.path = path
+    }
+}
+
+public protocol CIProvider: Provider {
+    func pipelines(_ r: RepoRef) async throws -> [Pipeline]
+    /// Newest first.
+    func runs(_ q: RunQuery) async throws -> [Run]
+    func run(_ r: RunRef) async throws -> Run
+    func jobs(_ r: RunRef) async throws -> [Job]
+    func failures(_ r: RunRef) async throws -> [Failure]
+    func perform(_ a: RunAction, on r: RunRef) async throws
+}
+
+public protocol LogReading: CIProvider {
+    /// The last lines of the job log, without time stamps and group markers.
+    func log(_ j: JobRef, lines: Int) async throws -> [String]
 }

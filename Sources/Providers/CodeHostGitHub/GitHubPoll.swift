@@ -38,10 +38,8 @@ extension GitHubCodeHost {
             marks[path] = Mark(etag: a.etag, at: max(mark.at, newest ?? mark.at))
         }
         let data = try JSONEncoder().encode(marks)
-        // Near the limit, wait for the reset.
-        let wait = budget.flatMap { $0.remaining < $0.limit / 10 ? Duration.seconds(max(0, $0.resetAt.timeIntervalSinceNow)) : nil }
         return EventPage(events: events.sorted { $0.at < $1.at }, cursor: Cursor(rawValue: String(decoding: data, as: UTF8.self)),
-                         retryAfter: wait)
+                         budget: budget)
     }
 
     static func action(_ r: [String: Any], at: Date) -> String {

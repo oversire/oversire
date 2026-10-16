@@ -9,6 +9,9 @@ struct URLSessionTransport: HTTPTransport {
 
     init(session: URLSession = .shared) { self.session = session }
 
+    /// The caller sees each redirect. A token then does not go to an other host.
+    static let noRedirects = URLSessionTransport(session: URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil))
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, resp): (Data, URLResponse)
         do { (data, resp) = try await session.data(for: request) } catch {
@@ -17,6 +20,11 @@ struct URLSessionTransport: HTTPTransport {
         guard let http = resp as? HTTPURLResponse else { throw ProviderError.transport("No HTTP answer") }
         return (data, http)
     }
+}
+
+final class NoRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? { nil }
 }
 
 struct ProcessRunner: CommandRunner {

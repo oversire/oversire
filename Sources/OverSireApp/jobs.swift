@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import CIGitHubActions
 
 // A job in the run detail. A click opens the job on GitHub. A hover shows a summary.
 final class JobChip: NSView {
@@ -226,20 +227,16 @@ enum JobSummary {
     }
 }
 
-// Gets the end of a job log. Logs can be large, so it asks for the size and downloads only the last bytes.
-final class JobLogs: NSObject, URLSessionTaskDelegate {
+// The end of a job log for the UI. The adapter downloads only the last bytes.
+final class JobLogs {
     static let shared = JobLogs()
-    static let tailBytes = 16_000
-    static let snippetLines = 15
-    private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     private let queue = DispatchQueue(label: "com.oversire.app.joblogs")
-    private var token: String?           // queue only
     private var cache: [String: String] = [:]  // main thread only
 
     func snippet(repo: String, jobId: String, done: @escaping (String?) -> Void) {
         if let s = cache[jobId] { done(s); return }
         queue.async {
-            let s = self.tail(repo: repo, jobId: jobId).map(JobLogs.errorSnippet)
+            let s = self.tail(repo: repo, jobId: jobId).map(ActionsCI.errorSnippet)
             DispatchQueue.main.async {
                 if let s = s { self.cache[jobId] = s }
                 done(s)
@@ -250,74 +247,13 @@ final class JobLogs: NSObject, URLSessionTaskDelegate {
     // The cleaned end of the job log, read again on each call. GitHub gives the log only after the job ends.
     func lines(repo: String, jobId: String, done: @escaping ([String]?) -> Void) {
         queue.async {
-            let l = self.tail(repo: repo, jobId: jobId).map(JobLogs.clean)
+            let l = self.tail(repo: repo, jobId: jobId).map(ActionsCI.clean)
             DispatchQueue.main.async { done(l) }
         }
     }
 
-    // Stops at the redirect, so the GitHub token does not go to the log storage host.
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(nil)
-    }
-
     private func tail(repo: String, jobId: String) -> String? {
-        if token == nil {
-            token = ghShell("auth", "token").flatMap { String(data: $0, encoding: .utf8) }?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard let token = token, !token.isEmpty,
-              let api = URL(string: "https://api.github.com/repos/\(repo)/actions/jobs/\(jobId)/logs") else { return nil }
-        var req = URLRequest(url: api)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let loc = load(req)?.1.value(forHTTPHeaderField: "Location"), let blob = URL(string: loc) else { return nil }
-        var head = URLRequest(url: blob)
-        head.httpMethod = "HEAD"
-        let size = load(head).flatMap { Int($0.1.value(forHTTPHeaderField: "Content-Length") ?? "") } ?? 0
-        var get = URLRequest(url: blob)
-        let partial = size > JobLogs.tailBytes
-        if partial { get.setValue("bytes=\(size - JobLogs.tailBytes)-", forHTTPHeaderField: "Range") }
-        guard let (data, resp) = load(get), resp.statusCode < 300 else { return nil }
-        var text = String(decoding: data, as: UTF8.self)
-        if partial, let nl = text.firstIndex(of: "\n") { text = String(text[text.index(after: nl)...]) }
-        return text
-    }
-
-    private func load(_ req: URLRequest) -> (Data, HTTPURLResponse)? {
-        var req = req
-        req.timeoutInterval = 15
-        let sem = DispatchSemaphore(value: 0)
-        var out: (Data, HTTPURLResponse)?
-        session.dataTask(with: req) { d, r, _ in
-            if let r = r as? HTTPURLResponse { out = (d ?? Data(), r) }
-            sem.signal()
-        }.resume()
-        sem.wait()
-        return out
-    }
-
-    // The lines up to the last "##[error]" marker, or the last lines when there is no marker.
-    static func errorSnippet(_ log: String) -> String {
-        let lines = clean(log)
-        let end = lines.lastIndex { $0.hasPrefix("##[error]") }.map { $0 + 1 } ?? lines.count
-        return lines[max(0, end - snippetLines)..<end].joined(separator: "\n")
-    }
-
-    // Log lines without time stamps, group markers and empty lines.
-    static func clean(_ log: String) -> [String] {
-        let stamp = try! NSRegularExpression(pattern: #"^\d{4}-\d\d-\d\dT[\d:.]+Z ?|\u001B?\[[0-9;]*m"#)
-        return log.components(separatedBy: "\n").compactMap { raw in
-            let ns = raw.trimmingCharacters(in: .newlines) as NSString
-            var l = stamp.stringByReplacingMatches(in: ns as String, range: NSRange(location: 0, length: ns.length), withTemplate: "")
-            if l.hasPrefix("##[group]") || l.hasPrefix("##[endgroup]") || l.trimmingCharacters(in: .whitespaces).isEmpty { return nil }
-            if l.count > 220 { l = String(l.prefix(220)) + "\u{2026}" }
-            return l
-        }
-    }
-
-    static func isError(_ line: String) -> Bool {
-        if line.hasPrefix("##[error]") { return true }
-        let l = line.lowercased()
-        return l.contains("error:") || l.hasPrefix("fail") || l.contains("--- fail") || l.contains("panic:") || l.contains("exit code 1")
+        let ci = actions(repo)
+        return try? Result(blocking: { try await ci.rawLog(JobRef(run: ci.runRef(repo, id: ""), id: jobId)) }).get()
     }
 }

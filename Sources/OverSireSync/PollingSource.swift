@@ -8,6 +8,7 @@ public actor PollingSource: EventSource {
     private let clock: any Clock<Duration>
     private var intervals: PollIntervals
     private var active: Set<AccountID> = []
+    private var busy: Set<AccountID> = []
     private var cloudLive = false
     private var errors: [AccountID: String] = [:]
     private var loops: [Task<Void, Never>] = []
@@ -69,7 +70,7 @@ public actor PollingSource: EventSource {
     }
 
     func mode(_ account: AccountID) -> PollMode {
-        cloudLive ? .safety : active.contains(account) ? .active : .normal
+        cloudLive ? .safety : active.contains(account) || busy.contains(account) ? .active : .normal
     }
 
     private func start(_ cont: AsyncStream<ProviderEvent>.Continuation) {
@@ -94,7 +95,9 @@ public actor PollingSource: EventSource {
                 guard !Task.isCancelled, gen == generation else { return }
                 page.events.forEach { continuation?.yield($0) }
                 cursors[p.account] = page.cursor
-                if let r = p as? any RateReporting { budget = try? await r.budget() }
+                budget = page.budget
+                if budget == nil, let r = p as? any RateReporting { budget = try? await r.budget() }
+                if page.busy { busy.insert(p.account) } else { busy.remove(p.account) }
                 plan.succeeded(retryAfter: page.retryAfter)
                 errors[p.account] = nil
             } catch is CancellationError {
