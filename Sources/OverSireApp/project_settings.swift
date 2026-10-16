@@ -1,19 +1,12 @@
 import Cocoa
 import OverSireCore
-import TrackerPlane
 
-// Settings → Projects: Plane workspaces, which projects to track, notifications,
-// display, and the poll interval.
+// Settings → Projects: which projects to track, notifications, display, and the poll interval.
+// The Plane workspaces are on the Providers page.
 final class ProjectSettingsVC: NSViewController {
     let catalog: ProjectCatalog
     let store: ProjectStore
-    let accounts: PlaneAccounts
     var cfg: ProjectsConfig
-    var slugField: NSTextField?
-    var tokenField: NSSecureTextField?
-    var hostField: NSTextField?
-    static var addStatus: (text: String, error: Bool)?
-    static var testing = false
     var filterField: NSTextField?
     var doc: Flipped?
     var scroll: NSScrollView?
@@ -22,10 +15,9 @@ final class ProjectSettingsVC: NSViewController {
     static var captureError: String?
     static var expanded: Set<String> = []
 
-    init(catalog: ProjectCatalog, store: ProjectStore, accounts: PlaneAccounts, cfg: ProjectsConfig) {
+    init(catalog: ProjectCatalog, store: ProjectStore, cfg: ProjectsConfig) {
         self.catalog = catalog
         self.store = store
-        self.accounts = accounts
         self.cfg = cfg
         super.init(nibName: nil, bundle: nil)
     }
@@ -61,8 +53,6 @@ final class ProjectSettingsVC: NSViewController {
             doc.subviews.forEach { $0.removeFromSuperview() }
             let w = POP_W
             var y: CGFloat = 0
-            y = header("PLANE WORKSPACES", y: y, button: nil)
-            y = workspaceSection(y: y, w: w, in: doc)
             y = header("PROJECTS TO TRACK", y: y, button: ("Refresh all", #selector(refreshAll)))
             let filter = NSTextField(frame: NSRect(x: 16, y: y + 4, width: w - 32, height: 22))
             filter.placeholderString = "Filter projects"
@@ -105,69 +95,12 @@ final class ProjectSettingsVC: NSViewController {
         return y + 28
     }
 
-    func workspaceSection(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
-        var y = y
-        for ws in accounts.workspaces {
-            let host = ws.host == PlaneWorkspace.cloudHost ? "Plane Cloud" : ws.host
-            let token = accounts.hasToken(ws.slug) ? "token in Keychain" : "no token"
-            let l = NSTextField(labelWithString: "\(ws.slug)  ·  \(host)  ·  \(token)")
-            l.font = .systemFont(ofSize: 12)
-            l.lineBreakMode = .byTruncatingTail
-            l.frame = NSRect(x: 16, y: y + 3, width: w - 170, height: 18)
-            doc.addSubview(l)
-            let open = NSButton(title: "Open", target: self, action: #selector(openWorkspace(_:)))
-            open.bezelStyle = .inline; open.font = .systemFont(ofSize: 11)
-            open.frame = NSRect(x: w - 146, y: y + 2, width: 60, height: 20)
-            open.identifier = NSUserInterfaceItemIdentifier(ws.slug)
-            doc.addSubview(open)
-            let rm = NSButton(title: "Remove", target: self, action: #selector(removeWorkspace(_:)))
-            rm.bezelStyle = .inline; rm.font = .systemFont(ofSize: 11)
-            rm.frame = NSRect(x: w - 80, y: y + 2, width: 66, height: 20)
-            rm.identifier = NSUserInterfaceItemIdentifier(ws.slug)
-            doc.addSubview(rm)
-            y += 26
-        }
-        let slug = NSTextField(frame: NSRect(x: 16, y: y + 4, width: 150, height: 22))
-        slug.placeholderString = "Workspace slug"
-        slug.toolTip = "The part after the host in the Plane URL, for example app.plane.so/<slug>/"
-        slug.stringValue = slugField?.stringValue ?? ""
-        let token = NSSecureTextField(frame: NSRect(x: 172, y: y + 4, width: 170, height: 22))
-        token.placeholderString = "API token"
-        token.toolTip = "Plane → Profile settings → Personal access tokens. A token works only in its own workspace."
-        token.stringValue = tokenField?.stringValue ?? ""
-        let host = NSTextField(frame: NSRect(x: 348, y: y + 4, width: w - 348 - 112, height: 22))
-        host.placeholderString = PlaneWorkspace.cloudHost
-        host.toolTip = "Change it only for a self-hosted Plane"
-        host.stringValue = hostField?.stringValue ?? ""
-        for f in [slug, token, host] as [NSTextField] { f.font = .systemFont(ofSize: 12); doc.addSubview(f) }
-        slugField = slug; tokenField = token; hostField = host
-        let add = NSButton(title: ProjectSettingsVC.testing ? "Testing…" : "Test & Add", target: self, action: #selector(addWorkspace))
-        add.bezelStyle = .rounded; add.font = .systemFont(ofSize: 11)
-        add.frame = NSRect(x: w - 108, y: y + 2, width: 96, height: 26)
-        add.isEnabled = !ProjectSettingsVC.testing
-        doc.addSubview(add)
-        y += 30
-        let note = ProjectSettingsVC.addStatus
-            ?? (accounts.workspaces.isEmpty ? ("Add one workspace for each token. OverSire keeps the tokens in the Keychain.", false) : nil)
-        if let note {
-            let l = NSTextField(labelWithString: note.text)
-            l.font = .systemFont(ofSize: 11)
-            l.textColor = note.error ? C_FAILURE : .secondaryLabelColor
-            l.lineBreakMode = .byTruncatingTail
-            l.toolTip = note.text
-            l.frame = NSRect(x: 16, y: y, width: w - 32, height: 16)
-            doc.addSubview(l)
-            y += 20
-        }
-        return y + 6
-    }
-
     func tree(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
         var y = y
         let q = (filterField?.stringValue ?? "").lowercased()
         let workspaces = catalog.workspaces
         if workspaces.isEmpty {
-            let l = NSTextField(labelWithString: "Add a Plane workspace above.")
+            let l = NSTextField(labelWithString: "Add a Plane workspace in Settings › Providers.")
             l.font = .systemFont(ofSize: 12); l.textColor = .secondaryLabelColor
             l.frame = NSRect(x: 16, y: y + 4, width: w - 32, height: 18)
             doc.addSubview(l)
@@ -256,72 +189,6 @@ final class ProjectSettingsVC: NSViewController {
         if case .live = st { return true }
         if case .waiting = st { return true }
         return false
-    }
-
-    @objc func addWorkspace() {
-        let slug = (slugField?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
-        let token = (tokenField?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        var host = (hostField?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        while host.hasSuffix("/") { host.removeLast() }
-        if host.isEmpty { host = PlaneWorkspace.cloudHost }
-        guard !slug.isEmpty, !slug.contains("/"), !token.isEmpty else {
-            ProjectSettingsVC.addStatus = ("Type the workspace slug and the token.", true)
-            rebuild(); return
-        }
-        guard host.hasPrefix("https://") || host.hasPrefix("http://") else {
-            ProjectSettingsVC.addStatus = ("The host must start with https://", true)
-            rebuild(); return
-        }
-        let ws = PlaneWorkspace(slug: slug, host: host)
-        ProjectSettingsVC.testing = true
-        ProjectSettingsVC.addStatus = ("Testing the token…", false)
-        rebuild()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let client = PlaneTracker(workspace: ws, token: token, http: URLSessionTransport())
-            let result = Result(blocking: { (try await client.me().name, try await client.projects().count) })
-            DispatchQueue.main.async {
-                ProjectSettingsVC.testing = false
-                guard let self = self else { return }
-                switch result {
-                case .success(let (name, count)):
-                    self.accounts.save(ws, token: token)
-                    self.cfg.workspaces = PROJECTS_CFG.workspaces
-                    ProjectSettingsVC.addStatus = ("Added \(slug) as \(name). \(count) projects. Pick them below.", false)
-                    ProjectSettingsVC.expanded.insert(slug)
-                    self.slugField?.stringValue = ""; self.tokenField?.stringValue = ""; self.hostField?.stringValue = ""
-                    self.catalog.refresh(slug, force: true)
-                    (NSApp.delegate as? GHActionsBar)?.applyProjectSelection()
-                case .failure(let e):
-                    ProjectSettingsVC.addStatus = ("\(slug): \(e.message). Nothing was saved.", true)
-                }
-                self.rebuild()
-            }
-        }
-    }
-
-    @objc func removeWorkspace(_ sender: NSButton) {
-        guard let slug = sender.identifier?.rawValue else { return }
-        let alert = NSAlert()
-        alert.messageText = "Remove the workspace \(slug)?"
-        alert.informativeText = "OverSire deletes the token from the Keychain and stops to track its projects. OverSire also deletes its Plane webhook, if it has one."
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let app = NSApp.delegate as? GHActionsBar
-        app?.cloudSetup.removePlaneHook(slug)
-        accounts.remove(slug)
-        cfg.workspaces = PROJECTS_CFG.workspaces
-        cfg.allOf.removeAll { $0 == slug }
-        cfg.picked.removeAll { $0.hasPrefix(slug + "/") }
-        ProjectSettingsVC.addStatus = nil
-        app?.applyProjectSelection()
-        rebuild()
-    }
-
-    @objc func openWorkspace(_ sender: NSButton) {
-        guard let slug = sender.identifier?.rawValue, let ws = accounts.workspace(slug), let url = URL(string: ws.url) else { return }
-        NSWorkspace.shared.open(url)
     }
 
     func matrix(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {

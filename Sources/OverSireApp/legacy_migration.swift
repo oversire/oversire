@@ -68,11 +68,8 @@ final class LegacyMigration {
     }
 }
 
-// Accounts from the settings that come before the accounts list. Until the Providers
-// settings page owns the list, these four vendors come from the old fields on each load.
+// Accounts from the settings that come before the accounts list. A config with no list gets them once.
 extension LegacyMigration {
-    static let derivedProviders: Set<ProviderID> = [.plane, .github, .githubActions, .orca]
-
     static func accounts(from c: AppConfig) -> [AccountConfig] {
         var out: [AccountConfig] = []
         for w in c.projects?.workspaces ?? [] {
@@ -102,10 +99,5 @@ extension LegacyMigration {
             out.append(AccountConfig(account: AccountID(provider: .orca, id: orca.environment ?? "local"), values: values))
         }
         return out
-    }
-
-    // Keeps the accounts of other vendors and makes the four old ones again.
-    static func syncAccounts(_ current: [AccountConfig], from c: AppConfig) -> [AccountConfig] {
-        current.filter { !derivedProviders.contains($0.account.provider) } + accounts(from: c)
     }
 }

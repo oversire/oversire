@@ -2,14 +2,13 @@ import Cocoa
 import OverSireCore
 import RuntimeOrca
 
-// Settings → Projects → Orca: the CLI, the host that runs agents, the agent, the
-// prompt template, and the Orca workspace of each Plane project.
+// Settings → Projects → Orca: the agent, the prompt template, and the Orca workspace of each
+// Plane project. The Orca account (CLI and environment) is on the Providers page.
 extension ProjectSettingsVC {
     struct OrcaProbe {
         var environment: String?
         var version: String?
         var error: String?
-        var environments: [String] = []
         var repos: [RuntimeRepo] = []
     }
     static var orcaProbe: OrcaProbe?
@@ -18,13 +17,11 @@ extension ProjectSettingsVC {
 
     func orcaSection(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
         var y = y + 4
-        let sw = NSSwitch(frame: NSRect(x: 16, y: y, width: 40, height: 22))
-        sw.state = cfg.orca.enabled ? .on : .off
-        sw.target = self; sw.action = #selector(toggleOrca(_:))
-        doc.addSubview(sw)
-        let l = NSTextField(labelWithString: "Start items in Orca terminals with ▶")
+        let l = NSTextField(labelWithString: cfg.orca.enabled
+            ? "Orca account: \(cfg.orca.environment ?? "this Mac"). Change it in Settings › Providers."
+            : "Add an Orca account in Settings › Providers to start items with ▶.")
         l.font = .systemFont(ofSize: 12)
-        l.frame = NSRect(x: 64, y: y + 2, width: 300, height: 18)
+        l.frame = NSRect(x: 16, y: y + 2, width: w - 100, height: 18)
         doc.addSubview(l)
         let test = NSButton(title: ProjectSettingsVC.orcaProbing ? "Testing…" : "Test", target: self, action: #selector(testOrca))
         test.bezelStyle = .rounded; test.font = .systemFont(ofSize: 11)
@@ -50,10 +47,6 @@ extension ProjectSettingsVC {
         doc.addSubview(st)
         y += 24
 
-        let envs = Array(Set((probe?.environments ?? []) + [cfg.orca.environment].compactMap { $0 })).sorted()
-        let hosts = ["This Mac"] + envs.map { "\($0) (paired server)" }
-        y = popupRow("Run sessions on", hosts, cfg.orca.environment.flatMap { e in envs.firstIndex(of: e).map { $0 + 1 } } ?? 0,
-                     #selector(orcaHostChanged(_:)), y: y, in: doc)
         let agents = ProjectSettingsVC.orcaAgents + (ProjectSettingsVC.orcaAgents.contains(cfg.orca.agent) ? [] : [cfg.orca.agent])
         y = popupRow("Agent", agents, agents.firstIndex(of: cfg.orca.agent) ?? 0, #selector(orcaAgentChanged(_:)), y: y, in: doc)
 
@@ -147,7 +140,6 @@ extension ProjectSettingsVC {
             case .success(let v): p.version = v
             case .failure(let e): p.error = e.message
             }
-            p.environments = ((try? Result(blocking: { try await rt.environments() }).get()) ?? []).filter { $0.kind != .local }.map(\.name)
             p.repos = (try? Result(blocking: { try await rt.repos() }).get()) ?? []
             DispatchQueue.main.async {
                 ProjectSettingsVC.orcaProbe = p
@@ -160,12 +152,6 @@ extension ProjectSettingsVC {
     @objc func testOrca() {
         ProjectSettingsVC.orcaProbe = nil
         probeOrca()
-        rebuild()
-    }
-    @objc func toggleOrca(_ sender: NSSwitch) { cfg.orca.enabled = sender.state == .on }
-    @objc func orcaHostChanged(_ sender: NSPopUpButton) {
-        let t = sender.titleOfSelectedItem ?? ""
-        cfg.orca.environment = sender.indexOfSelectedItem == 0 ? nil : t.replacingOccurrences(of: " (paired server)", with: "")
         rebuild()
     }
     @objc func orcaPromptChanged(_ sender: NSTextField) { cfg.orca.prompt = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }

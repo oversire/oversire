@@ -57,7 +57,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let body = NSStackView(v: [], spacing: 10)
         switch page {
         case .general: general(body)
-        case .accounts: embed(body, note: "Plane accounts, projects, quick capture and the Orca workspace of each project. GitHub uses the gh login of this Mac.")
+        case .providers: providers(body)
+        case .projects: embed(body, note: "Projects to track, notifications, quick capture and the Orca workspace of each project.")
         case .repos: embed(body, note: "The GitHub repos and organizations that OverSire polls.")
         case .linking: linking(body)
         case .writeback: writeBack(body)
@@ -83,7 +84,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private func symbol(_ p: Route.SettingsPage) -> String {
         switch p {
         case .general: return "gearshape"
-        case .accounts: return "person.crop.circle"
+        case .providers: return "square.stack.3d.up"
+        case .projects: return "person.crop.circle"
         case .repos: return "shippingbox"
         case .linking: return "link"
         case .writeback: return "square.and.pencil"
@@ -198,7 +200,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         b.addFull(Banner(o.enabled ? (ready ? .ok : .warning) : .idle,
                          title: o.enabled ? (ready ? "Orca is on." : "Orca is on, but OverSire could not read it.") : "Orca is off.",
                          body: "CLI \(o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac") · agent \(o.agent)",
-                         actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.accounts)) }]))
+                         actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.projects)) }]))
         var rows: [NSView] = []
         for p in data.projectStore.tracked.sorted(by: { $0.identifier < $1.identifier }) {
             let root = o.roots[p.ref.storeKey].flatMap { $0.isEmpty ? nil : $0 }
@@ -341,7 +343,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             SwitchRow("Other endings", on: NOTIFICATIONS.other) { NOTIFICATIONS.other = $0 },
         ]))
         b.addFull(Banner(.info, title: "Plane notifications are set for each project.",
-                         actions: [ActionButton("Open project settings") { [weak self] in self?.go(.settings(.accounts)) }]))
+                         actions: [ActionButton("Open project settings") { [weak self] in self?.go(.settings(.projects)) }]))
     }
 
     private func menuBar(_ b: NSStackView) {
@@ -365,7 +367,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         f.setAccessibilityLabel("Window shortcut")
         b.addFull(card("Global", [
             FieldRow("Open the window", note: "From any app.", f),
-            FieldRow("New item", note: "Set in Accounts › quick capture.", NSTextField.text(PROJECTS_CFG.capture.shortcutLabel, size: 12, color: Palette.mut, mono: true)),
+            FieldRow("New item", note: "Set in Projects › quick capture.", NSTextField.text(PROJECTS_CFG.capture.shortcutLabel, size: 12, color: Palette.mut, mono: true)),
         ]))
         let keys: [(String, String)] = [("⌘K", "Search or jump to a page"), ("⌘[  ⌘]", "Back and forward"), ("⌘R", "Refresh"),
                                          ("⌃⌘S", "Show or hide the sidebar"), ("⌘0", "Bring the window to the front"),

@@ -428,13 +428,24 @@ func runSelfTest() {
                      {"account":{"provider":"plane","id":"gone"},"values":{},"secretKeys":[]}]}
         """#
         if let c = try? JSONDecoder().decode(AppConfig.self, from: Data(fixture.utf8)) {
-            let a = LegacyMigration.syncAccounts(c.accounts ?? [], from: c)
+            let a = AppEnvironment.accounts(from: c)
             let ids = a.map { "\($0.account.provider.rawValue):\($0.account.id)" }
-            check(ids == ["linear:team", "plane:ocral", "plane:btd", "github:oversire", "github:flarco", "github:acme",
-                          "github-actions:oversire", "github-actions:flarco", "github-actions:acme", "orca:mbp"], "accounts \(ids)")
-            check(a[2].values["host"] == "https://plane.example.com" && a[1].secretKeys == ["PLANE_TOKEN_ocral"], "plane account")
-            check(a[3].values["repos"] == "oversire/oversire,oversire/cloud" && a[5].values["repos"] == "", "github repos by owner")
-            check(a[9].values["agent"] == "codex" && a[9].values["cli"] == OrcaRuntime.defaultPath, "orca account")
+            check(ids == ["linear:team", "plane:gone", "github:oversire", "github:flarco", "github:acme",
+                          "github-actions:oversire", "github-actions:flarco", "github-actions:acme"], "accounts \(ids)")
+            check(a[2].values["repos"] == "oversire/oversire,oversire/cloud" && a[4].values["repos"] == "", "github repos by owner")
+            check(a[2].secretKeys == ["GITHUB_TOKEN_oversire"], "github token key")
+            var old = c
+            old.accounts = nil
+            let b = AppEnvironment.accounts(from: old)
+            check(b.prefix(3).map { "\($0.account.provider.rawValue):\($0.account.id)" } == ["plane:ocral", "plane:btd", "orca:mbp"], "old accounts")
+            check(b[1].values["host"] == "https://plane.example.com" && b[0].secretKeys == ["PLANE_TOKEN_ocral"], "plane account")
+            check(b[2].values["agent"] == "codex" && b[2].values["cli"] == OrcaRuntime.defaultPath, "orca account")
+            var p = ProjectsConfig()
+            AppEnvironment.applyLegacyFields(b, to: &p)
+            check(p.workspaces.map(\.slug) == ["ocral", "btd"] && p.workspaces[1].host == "https://plane.example.com", "plane fields")
+            check(p.orca.enabled && p.orca.environment == "mbp", "orca fields")
+            AppEnvironment.applyLegacyFields(a, to: &p)
+            check(p.workspaces.map(\.slug) == ["gone"] && !p.orca.enabled, "fields follow the accounts")
         } else { check(false, "accounts fixture decode") }
     }
     do {

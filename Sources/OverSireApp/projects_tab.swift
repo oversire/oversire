@@ -734,7 +734,7 @@ extension TabVC {
         let tracked = (NSApp.delegate as? GHActionsBar)?.projectCatalog.resolve(PROJECTS_CFG) ?? []
         let agents = (NSApp.delegate as? GHActionsBar)?.agentIndex.ready
         if PROJECTS_CFG.workspaces.isEmpty {
-            return [EmptyRow("Add a Plane workspace in Settings → Projects.", w: w, icon: "square.grid.2x2")]
+            return [EmptyRow("Add a Plane workspace in Settings → Providers.", w: w, icon: "square.grid.2x2")]
         }
         if tracked.isEmpty {
             return [EmptyRow("No projects tracked. Pick projects in Settings → Projects.", w: w, icon: "square.grid.2x2")]

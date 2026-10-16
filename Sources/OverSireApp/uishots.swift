@@ -29,9 +29,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         switch p {
         case .general: return GeneralSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), updater: Updater())
         case .repos: return ActionsSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-        case .accounts:
+        case .projects:
             let acc = PlaneAccounts()
-            return ProjectSettingsVC(catalog: ProjectCatalog(accounts: acc, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, accounts: acc, cfg: PROJECTS_CFG)
+            return ProjectSettingsVC(catalog: ProjectCatalog(accounts: acc, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, cfg: PROJECTS_CFG)
         case .ai: return AISettingsVC()
         case .live: return CloudSettingsVC(setup: CloudSetup(), client: relay)
         default: return nil

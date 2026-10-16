@@ -7,12 +7,13 @@ enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
-        case general, accounts, repos, linking, writeback, live, orca, queue, ai, notifications, menubar, shortcuts
+        case general, providers, projects, repos, linking, writeback, live, orca, queue, ai, notifications, menubar, shortcuts
 
         var title: String {
             switch self {
             case .general: return "General"
-            case .accounts: return "Accounts"
+            case .providers: return "Providers"
+            case .projects: return "Projects"
             case .repos: return "Repos"
             case .linking: return "Linking"
             case .writeback: return "Write back to Plane"
@@ -89,7 +90,9 @@ enum Route: Equatable {
             self = .run(repo: rest[0] + "/" + rest[1], id: rest[2])
         case "prs": self = .prs
         case "insights": self = .insights
-        case "settings": self = .settings(rest.first.flatMap { SettingsPage(rawValue: $0.lowercased()) } ?? .general)
+        // "accounts" is the old name of the Projects page.
+        case "settings": self = .settings(rest.first.map { $0.lowercased() == "accounts" ? "projects" : $0.lowercased() }
+                                              .flatMap(SettingsPage.init(rawValue:)) ?? .general)
         case "project":
             guard let k = rest.first, !k.isEmpty else { return nil }
             self = .project(k.uppercased())
@@ -143,7 +146,7 @@ enum Route: Equatable {
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
         .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .runs(.all), .runs(.unlinked),
-        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general),
+        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.providers),
         .project("FRITZ"), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
     ]
 }

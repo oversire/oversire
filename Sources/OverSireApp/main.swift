@@ -185,6 +185,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.projectCatalog.refreshIfStale()
         }
         cloudSetup.planeClient = { [weak self] in self?.planeAccounts.client(for: $0) }
+        ENV.onRemove = { [weak self] id in
+            if self?.planeAccounts.workspace(id.id) != nil { self?.cloudSetup.removePlaneHook(id.id) }
+        }
+        NotificationCenter.default.addObserver(forName: AppEnvironment.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.applyRepoSelection(reopen: false)
+            for w in PROJECTS_CFG.workspaces where self.projectCatalog.projects(of: w.slug).isEmpty { self.projectCatalog.refresh(w.slug, force: true) }
+            self.applyProjectSelection()
+            NotificationCenter.default.post(name: AppWindow.changed, object: self)
+        }
         cloudSetup.trackedWorkspaces = { [weak self] in self?.trackedPlaneWorkspaces() ?? [] }
         projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: liveProjectKeys())
         syncPlaneWorkspaces()
@@ -961,7 +971,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             case .actions:
                 self.popover.contentViewController = ActionsSettingsVC(catalog: self.catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
             case .projects:
-                self.popover.contentViewController = ProjectSettingsVC(catalog: self.projectCatalog, store: self.projectStore, accounts: self.planeAccounts, cfg: PROJECTS_CFG)
+                self.popover.contentViewController = ProjectSettingsVC(catalog: self.projectCatalog, store: self.projectStore, cfg: PROJECTS_CFG)
             case .ai:
                 self.popover.contentViewController = AISettingsVC()
             case .live:
@@ -981,7 +991,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         switch p {
         case .general: return GeneralSettingsVC(catalog: catalog, updater: updater)
         case .repos: return ActionsSettingsVC(catalog: catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-        case .accounts: return ProjectSettingsVC(catalog: projectCatalog, store: projectStore, accounts: planeAccounts, cfg: PROJECTS_CFG)
+        case .projects: return ProjectSettingsVC(catalog: projectCatalog, store: projectStore, cfg: PROJECTS_CFG)
         case .ai: return AISettingsVC()
         case .live: return CloudSettingsVC(setup: cloudSetup, client: relay)
         default: return nil

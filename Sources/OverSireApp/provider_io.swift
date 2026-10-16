@@ -81,10 +81,15 @@ struct ProcessRunner: CommandRunner {
     }
 }
 
+/// Plane tokens keep their old Keychain service. The secrets of other accounts share one service.
 struct KeychainSecrets: SecretReader {
-    let service: String
+    func store(_ key: String) -> SecretStore {
+        SecretStore(service: key.hasPrefix("PLANE_TOKEN_") ? "com.oversire.app.plane" : "com.oversire.app.accounts")
+    }
 
-    func secret(_ key: String) -> String? { SecretStore(service: service).get(key) }
+    func secret(_ key: String) -> String? { store(key).get(key) }
+    func set(_ key: String, _ value: String) { store(key).set(key, value) }
+    func delete(_ key: String) { store(key).delete(key) }
 }
 
 /// The cloud socket over URLSessionWebSocketTask.
