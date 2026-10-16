@@ -1,0 +1,35 @@
+name: CI
+
+# Builds and tests each pull request and each push to a branch other than main.
+# The release workflow builds main.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      - name: Selftest
+        run: |
+          NO_RESTART=1 CODESIGN_IDENTITY=- ./build.sh
+          ./OverSire.app/Contents/MacOS/oversire --selftest
+      - name: Layer rules
+        run: |
+          # Only OverSireApp may import AppKit.
+          ! grep -rlE "^import (Cocoa|AppKit)" Sources --include=*.swift | grep -v "^Sources/OverSireApp/"

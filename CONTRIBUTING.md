@@ -21,7 +21,7 @@ CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
 
 ## Guidelines
 
-- **Keep it lean.** No external packages, no frameworks beyond AppKit, UserNotifications and Network. The app is split across Swift files: `main.swift` for the app delegate, plus one file per tab, settings page, and the project data layer. Repo picking is in `repo_catalog.swift` and `actions_settings.swift`. The cloud client is in `relay.swift` and `cloud_settings.swift`. The server is in the private `oversire/cloud` repo.
+- **Keep it lean.** No external packages, no frameworks beyond AppKit, UserNotifications and Network. The code is one Swift package (`Package.swift`). `OverSireCore` holds the domain types and the provider protocols. Each vendor adapter is a target in `Sources/Providers/`. `Sources/OverSireApp` holds the AppKit UI: `main.swift` for the app delegate, plus one file per tab, settings page, and the project data layer. Repo picking is in `repo_catalog.swift` and `actions_settings.swift`. The cloud client is in `relay.swift` and `cloud_settings.swift`. The server is in the private `oversire/cloud` repo.
 - **Security matters.** The app shells out to `gh` only via hardcoded trusted paths with an allowlisted environment, and validates all repo input. Don't weaken these.
 - **Accessibility matters.** Status is never conveyed by colour alone (we use the Okabe-Ito palette plus shape/text signals). New UI should follow the same rule and stay keyboard-navigable.
 - **No telemetry, no GitHub tokens.** GitHub auth goes through the `gh` CLI. OverSire keeps the Plane tokens, the AI key, the cloud device token and the webhook secret in the Keychain. Secrets go to `gh` on stdin, never in argv.
@@ -29,7 +29,7 @@ CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
 ## Submitting changes
 
 1. Fork the repo and create a branch.
-2. Make your change and verify it builds (`./build.sh`), passes `OverSire.app/Contents/MacOS/oversire --selftest`, and runs.
+2. Make your change and verify it builds (`./build.sh`), passes `swift test` and `OverSire.app/Contents/MacOS/oversire --selftest`, and runs.
 3. Update the README if behaviour or configuration changed.
 4. Open a pull request with a clear description of what and why.
 

@@ -20,3 +20,7 @@ OverSire.zip
 credentials.json
 secrets.json
 AppIcon.iconset/
+
+# SwiftPM
+.build/
+.swiftpm/

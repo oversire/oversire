@@ -81,6 +81,7 @@ jobs:
         run: |
           ./build.sh
           ./OverSire.app/Contents/MacOS/oversire --selftest
+          swift test
 
       - name: Notarize
         env:

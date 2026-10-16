@@ -20,12 +20,10 @@ fi
 # ARCHS="arm64 x86_64" builds a universal binary. The default is this Mac's arch.
 BINS=()
 for arch in ${ARCHS:-$(uname -m)}; do
-  swiftc -Osize -target "$arch-apple-macos13.0" -o "OverSire.app/Contents/MacOS/oversire-$arch" *.swift \
-    -framework Cocoa -framework UserNotifications -framework Network -framework Carbon -framework WebKit
-  BINS+=("OverSire.app/Contents/MacOS/oversire-$arch")
+  swift build -c release --triple "$arch-apple-macosx13.0" -Xswiftc -Osize --product oversire
+  BINS+=(".build/$arch-apple-macosx/release/oversire")
 done
 lipo -create "${BINS[@]}" -output OverSire.app/Contents/MacOS/oversire
-rm "${BINS[@]}"
 # AppIcon.icns comes from AppIcon.svg. See CONTRIBUTING.md to make it again.
 mkdir -p OverSire.app/Contents/Resources
 cp AppIcon.icns OverSire.app/Contents/Resources/AppIcon.icns
