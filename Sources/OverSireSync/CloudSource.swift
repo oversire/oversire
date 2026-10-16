@@ -164,9 +164,9 @@ public actor CloudSource: EventSource {
 
     private func catchUp() async throws {
         let start = cursors[Self.cursorKey].flatMap { Int($0.rawValue) } ?? 0
-        var after = start, truncated = false, events: [CloudEvent] = []
+        var after = start, truncated = false, events: [CloudEntry] = []
         while true {
-            let page: CloudEventsPage = try await get("/v1/events?after=\(after)&limit=500")
+            let page: CloudEventsPage = try await get("/v1/events?after=\(after)&limit=500&schema=1")
             // A new log starts again at seq 1: read it from the start.
             if page.head < after { after = 0; truncated = true; events = []; continue }
             events += page.events
@@ -201,7 +201,9 @@ public actor CloudSource: EventSource {
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
         let data = try await send("GET", path)
-        do { return try JSONDecoder().decode(T.self, from: data) }
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        do { return try dec.decode(T.self, from: data) }
         catch { throw ProviderError.decoding(String(describing: error)) }
     }
 

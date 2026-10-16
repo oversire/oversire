@@ -133,7 +133,7 @@ final class CloudSourceTests: XCTestCase {
         clock.advance(by: .seconds(2))
         let caught = await take(2, from: stream)
         XCTAssertEqual(caught.map(\.id), ["d4", "d5"])
-        XCTAssertTrue(cloud.requests.get().contains("GET /v1/events?after=3&limit=500"))
+        XCTAssertTrue(cloud.requests.get().contains("GET /v1/events?after=3&limit=500&schema=1"))
         h = await source.health()
         XCTAssertEqual(h, .live)
         XCTAssertTrue(first.closed.get())
@@ -247,5 +247,30 @@ final class CloudSourceTests: XCTestCase {
         let workspace = CloudEvent(seq: 5, deliveryId: "e", repo: "", kind: "plane", org: "plane:ocral")
         XCTAssertEqual(workspace.signal(at: at), .resync(AccountID(provider: "plane", id: "ocral")))
         XCTAssertNil(CloudEvent(seq: 6, deliveryId: "f", repo: "acme/web", kind: "push").signal(at: at))
+    }
+
+    func testSchemaOneEntriesAndOldEntriesDecode() throws {
+        let page = #"""
+            {"events":[
+             {"seq":1,"id":"d1","schema":1,"provider":"github-actions","account":{"provider":"github-actions","id":"acme"},
+              "kind":"run","action":"completed","at":"2026-10-16T12:00:00Z",
+              "subject":{"kind":"run","ref":{"account":{"provider":"github-actions","id":"acme"},
+               "repo":{"account":{"provider":"github","id":"acme"},"path":"acme/web","url":"https://github.com/acme/web"},"id":"7","attempt":1}}},
+             {"seq":2,"id":"plane:x","schema":1,"provider":"plane","account":{"provider":"plane","id":"ocral"},
+              "kind":"item","action":"updated","at":"2026-10-16T12:00:01Z",
+              "subject":{"kind":"project","ref":{"account":{"provider":"plane","id":"ocral"},"id":""}}},
+             {"seq":3,"deliveryId":"d3","repo":"acme/web","kind":"workflow_run","action":"completed","runId":8}],
+             "head":3,"next":3,"more":false,"truncated":false}
+            """#
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        let entries = try dec.decode(CloudEventsPage.self, from: Data(page.utf8)).events
+        let at = Date(timeIntervalSince1970: 0)
+        guard case .event(let run)? = entries[0].signal(at: at), case .run(let r) = run.subject else { return XCTFail("\(entries[0])") }
+        XCTAssertEqual(r.id, "7")
+        XCTAssertEqual(run.at, ISO8601DateFormatter().date(from: "2026-10-16T12:00:00Z"))
+        XCTAssertEqual(entries[1].signal(at: at), .resync(AccountID(provider: "plane", id: "ocral")))
+        guard case .event(let old)? = entries[2].signal(at: at), case .run(let o) = old.subject else { return XCTFail("\(entries[2])") }
+        XCTAssertEqual(o.id, "8")
     }
 }

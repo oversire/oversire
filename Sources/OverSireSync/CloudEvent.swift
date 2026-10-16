@@ -1,8 +1,8 @@
 import Foundation
 import OverSireCore
 
-// The event shape of the current cloud server (/v1/events).
-// Item 16 changes the server to send ProviderEvent. Then this file goes.
+// The entries of /v1/events. The app asks for schema=1 (ProviderEvent).
+// A server before cloud version 5 ignores the parameter and sends CloudEvent. Remove CloudEvent when all servers send schema 1.
 
 public struct CloudEvent: Decodable, Hashable, Sendable {
     public let seq: Int
@@ -34,11 +34,37 @@ public struct CloudEvent: Decodable, Hashable, Sendable {
 }
 
 public struct CloudEventsPage: Decodable, Sendable {
-    public let events: [CloudEvent]
+    public let events: [CloudEntry]
     public let head: Int
     public let next: Int
     public let more: Bool
     public let truncated: Bool
+}
+
+public enum CloudEntry: Decodable, Hashable, Sendable {
+    case event(ProviderEvent)
+    case legacy(CloudEvent)
+
+    private enum Keys: String, CodingKey { case schema }
+
+    public init(from decoder: Decoder) throws {
+        if try decoder.container(keyedBy: Keys.self).contains(.schema) {
+            self = .event(try ProviderEvent(from: decoder))
+        } else {
+            self = .legacy(try CloudEvent(from: decoder))
+        }
+    }
+
+    /// A project subject with no id stands for the whole account.
+    public func signal(at: Date) -> CloudSignal? {
+        switch self {
+        case .event(let e):
+            if case .project(let p) = e.subject, p.id.isEmpty { return .resync(e.account) }
+            return .event(e)
+        case .legacy(let c):
+            return c.signal(at: at)
+        }
+    }
 }
 
 public enum CloudSignal: Hashable, Sendable {
