@@ -1,8 +1,9 @@
 import Cocoa
+import OverSireCore
 
 // ─── PR Helpers ──────────────────────────────────────────────────────────────
 
-func prReviewIcon(_ pr: PR) -> String {
+func prReviewIcon(_ pr: ChangeRequest) -> String {
     if pr.isDraft { return "pencil.circle" }
     switch pr.reviewDecision ?? "" {
     case "APPROVED": return "checkmark.circle.fill"
@@ -12,7 +13,7 @@ func prReviewIcon(_ pr: PR) -> String {
     }
 }
 
-func prReviewColor(_ pr: PR) -> NSColor {
+func prReviewColor(_ pr: ChangeRequest) -> NSColor {
     if pr.isDraft { return .systemGray }
     switch pr.reviewDecision ?? "" {
     case "APPROVED": return C_SUCCESS
@@ -45,7 +46,7 @@ class PRRow: NSView {
     var onToggle: (() -> Void)?
     var trackingArea: NSTrackingArea?
 
-    init(_ pr: PR, repo: String, w: CGFloat, expanded: Bool) {
+    init(_ pr: ChangeRequest, repo: String, w: CGFloat, expanded: Bool) {
         self.urlStr = pr.url
         self.expanded = expanded
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: PR_ROW_H))
@@ -59,7 +60,7 @@ class PRRow: NSView {
         expanded ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.1).cgColor : nil
     }
 
-    func build(_ pr: PR, repo: String, w: CGFloat) {
+    func build(_ pr: ChangeRequest, repo: String, w: CGFloat) {
         let pad: CGFloat = 12, iconSz: CGFloat = 20
         let textX = pad + iconSz + 10, linkW: CGFloat = 28, copyW: CGFloat = 28
         let rightW: CGFloat = 140
@@ -203,11 +204,11 @@ class PRRow: NSView {
 // ─── PR Detail View ──────────────────────────────────────────────────────────
 
 class PRDetailView: NSView {
-    var onAction: ((PRAction) -> Void)?
+    var onAction: ((ChangeAction) -> Void)?
     var confirmingClose = false
     var commentField: NSTextField!
 
-    init(_ pr: PR, repo: String, w: CGFloat) {
+    init(_ pr: ChangeRequest, repo: String, w: CGFloat) {
         super.init(frame: .zero)
         wantsLayer = true
         // Inverse-of-background tint so the expanded panel is distinct from the doc bg in both modes.
@@ -330,7 +331,7 @@ class PRDetailView: NSView {
     }
     @objc func doMerge() {
         let popup = subviews.compactMap { $0 as? NSPopUpButton }.first(where: { $0.tag == 100 })
-        let methods = ["-m", "-r", "-s"]
+        let methods: [MergeMethod] = [.merge, .rebase, .squash]
         let method = methods[popup?.indexOfSelectedItem ?? 0]
         disableActions("Merging...")
         onAction?(.merge(method))
@@ -353,7 +354,7 @@ class PRDetailView: NSView {
 }
 
 extension TabVC {
-func filteredPRs() -> [(String, [PR])] {
+func filteredPRs() -> [(String, [ChangeRequest])] {
     guard let sel = selectedRepo else { return prGrouped }
     return prGrouped.filter { $0.0 == sel }
 }
@@ -398,7 +399,7 @@ func buildPRContent(_ w: CGFloat) -> [NSView] {
     return rows
 }
 
-func handlePRAction(repo: String, pr: PR, action: PRAction) {
+func handlePRAction(repo: String, pr: ChangeRequest, action: ChangeAction) {
     executePRAction(repo: repo, number: pr.number, action: action) {
         (NSApp.delegate as? GHActionsBar)?.doRefresh()
     }

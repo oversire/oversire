@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // A chip that opens a menu of choices, for status, priority and the like.
 final class MenuChip: Chiplet {
@@ -91,7 +92,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         side.widthAnchor.constraint(equalToConstant: 270).isActive = true
     }
 
-    private func loadData(item: ProjectItem, stream: Workstream?) {
+    private func loadData(item: Item, stream: Workstream?) {
         if timeline == nil {
             data.projectStore.timeline(itemId: item.id) { [weak self] e in
                 guard let self, self.key == item.key else { return }
@@ -111,7 +112,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Head and properties
 
-    private func head(snap: ProjectSnapshot, item: ProjectItem, stream: Workstream?) -> NSView {
+    private func head(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> NSView {
         let project = Chiplet(snap.summary.title, symbol: "folder", color: Palette.acc) { [weak self] in self?.go(.project(snap.summary.identifier)) }
         let keyLine = NSStackView(h: [NSTextField.text(item.key, size: 12, color: Palette.dim, mono: true), project, Spacer()], spacing: 8)
         var chips: [NSView] = [statusChip(snap: snap, item: item), priorityChip(item)]
@@ -131,34 +132,34 @@ final class ItemPage: Page, NSTextFieldDelegate {
                                NSStackView(h: chips + [Spacer()], spacing: 6)], spacing: 7)
     }
 
-    private func statusChip(snap: ProjectSnapshot, item: ProjectItem) -> NSView {
+    private func statusChip(snap: ProjectSnapshot, item: Item) -> NSView {
         let opt = snap.option(item.statusOptionId)
         return MenuChip(opt?.name ?? "No status", symbol: "circle.dotted") { [weak self] in
             snap.statusOptions.map { o in
-                let a = MenuAction(o.name) { self?.save("status", ["state": o.id]) }
+                let a = MenuAction(o.name) { self?.save("status", ItemPatch(status: o.id)) }
                 a.item.state = o.id == item.statusOptionId ? .on : .off
                 return a
             }
         }
     }
 
-    private func priorityChip(_ item: ProjectItem) -> NSView {
+    private func priorityChip(_ item: Item) -> NSView {
         let cur = item.fields["Priority"] ?? "None"
         return MenuChip(cur == "None" ? "No priority" : cur, symbol: "flag") { [weak self] in
             PlaneClient.priorities.map { p in
-                let a = MenuAction(p.name) { self?.save("priority", ["priority": p.id]) }
+                let a = MenuAction(p.name) { self?.save("priority", ItemPatch(priority: p.id)) }
                 a.item.state = p.name == cur ? .on : .off
                 return a
             }
         }
     }
 
-    private func save(_ what: String, _ fields: [String: Any]) {
+    private func save(_ what: String, _ patch: ItemPatch) {
         guard let (_, _, item) = data.projectStore.item(key: key) else { return }
         saving = what
         note = nil
         reload()
-        data.projectStore.update(itemId: item.id, fields: fields, failure: "Could not change the \(what)") { [weak self] ok in
+        data.projectStore.update(itemId: item.id, patch, failure: "Could not change the \(what)") { [weak self] ok in
             guard let self else { return }
             self.saving = nil
             if !ok { self.note = (.bad, self.data.projectStore.lastError ?? "Plane did not take the change.") }
@@ -166,7 +167,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
     }
 
-    private func properties(snap: ProjectSnapshot, item: ProjectItem, stream: Workstream?) -> NSView {
+    private func properties(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> NSView {
         let c = Card(padding: 14, spacing: 9)
         func line(_ name: String, _ value: NSView) {
             let n = NSTextField.text(name, size: 12, color: Palette.dim)
@@ -205,7 +206,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Overview
 
-    private func overview(_ main: NSStackView, pk: String, snap: ProjectSnapshot, item: ProjectItem, stream: Workstream?) {
+    private func overview(_ main: NSStackView, pk: String, snap: ProjectSnapshot, item: Item, stream: Workstream?) {
         if let s = stream, s.agent != nil || !s.runs.isEmpty || !s.checkouts.isEmpty {
             main.addFull(workstream(s, snap: snap, item: item))
         } else {
@@ -238,7 +239,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         main.addFull(d)
     }
 
-    private func workstream(_ s: Workstream, snap: ProjectSnapshot, item: ProjectItem) -> NSView {
+    private func workstream(_ s: Workstream, snap: ProjectSnapshot, item: Item) -> NSView {
         var trailing: [NSView] = []
         if let a = s.agent {
             trailing.append(ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") })
@@ -250,7 +251,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             chips.append(Chiplet((co.path as NSString).lastPathComponent, symbol: "folder", mono: true))
             if !co.branch.isEmpty { chips.append(Chiplet(co.branch, symbol: "arrow.triangle.branch", mono: true)) }
         }
-        if let a = s.agent { chips.append(Chiplet("\(a.type)\(a.repo.isEmpty ? "" : " · " + a.repo)", symbol: "cpu")) }
+        if let a = s.agent { chips.append(Chiplet("\(a.agent.rawValue)\(a.repo.isEmpty ? "" : " · " + a.repo)", symbol: "cpu")) }
         if !chips.isEmpty { c.add(NSStackView(h: chips + [Spacer()], spacing: 6)) }
 
         let left = NSStackView(v: [], spacing: 8)
@@ -328,7 +329,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func session(_ main: NSStackView, stream: Workstream?) {
         if let a = stream?.agent {
             let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
-            c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), Chiplet(a.type, symbol: "cpu"),
+            c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), Chiplet(a.agent.rawValue, symbol: "cpu"),
                                   NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 6))
             c.add(TermView(lines: tail.isEmpty ? ["Reading the terminal…"] : tail, height: 300))
             if a.phase != .done && a.phase != .failed { c.add(replyRow()) }
@@ -414,7 +415,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Sub-items
 
-    private func subItems(_ main: NSStackView, snap: ProjectSnapshot, item: ProjectItem, progress: (done: Int, total: Int)) {
+    private func subItems(_ main: NSStackView, snap: ProjectSnapshot, item: Item, progress: (done: Int, total: Int)) {
         let kids = snap.children(of: item.id)
         let list = ListCard()
         if progress.total > 0 {
@@ -434,7 +435,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private struct Event { let source: Source; let text: String; let at: Date; var body: String? = nil; var route: Route? = nil }
 
-    private func events(item: ProjectItem, stream: Workstream?) -> [Event] {
+    private func events(item: Item, stream: Workstream?) -> [Event] {
         var out: [Event] = []
         for e in timeline ?? [] {
             if case .comments(_, let c) = e.change {
@@ -460,7 +461,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         return out.sorted { $0.at > $1.at }
     }
 
-    private func activity(_ main: NSStackView, item: ProjectItem, stream: Workstream?) {
+    private func activity(_ main: NSStackView, item: Item, stream: Workstream?) {
         let all = events(item: item, stream: stream)
         main.addFull(NSStackView(h: Source.allCases.map { s in
             ToggleChip(s.rawValue, on: activitySource == s) { [weak self] in self?.activitySource = s; self?.reload() } as NSView

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 import QuartzCore
 import UserNotifications
 import os
@@ -27,7 +28,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var pendingCompletion: (() -> Void)?
     var lastPRRefresh = Date.distantPast
     var grouped: [(String, [Run])] = []
-    var prGrouped: [(String, [PR])] = []
+    var prGrouped: [(String, [ChangeRequest])] = []
     var lastUpdate = Date()
     var closeTime = Date.distantPast
     var firstLoad = true
@@ -96,7 +97,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return c
     }()
     // Targeted refreshes that arrive while another refresh runs.
-    var pendingPartial: (repos: Set<String>, prs: Bool, runs: [(String, Int)], dones: [(Bool) -> Void])?
+    var pendingPartial: (repos: Set<String>, prs: Bool, runs: [(String, String)], dones: [(Bool) -> Void])?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         log.info("OverSire launching — repos: \(REPOS.count), poll: \(POLL_NORMAL)s/\(POLL_ACTIVE)s")
@@ -449,7 +450,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             var runRes = Array(repeating: (String, [Run])("", []), count: repos.count)
-            var prRes = Array(repeating: (String, [PR])("", []), count: repos.count)
+            var prRes = Array(repeating: (String, [ChangeRequest])("", []), count: repos.count)
             let collectQ = DispatchQueue(label: "com.oversire.app.collect")
             var tasks: [() -> Void] = []
             for (i, repo) in repos.enumerated() {
@@ -497,7 +498,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // Refreshes only the given repos and merges them into the current data.
     // `done` gets false if a run fetch failed, so the relay does not ack those events.
-    func refreshRepos(_ repos: [String], includePRs: Bool, completedRuns: [(String, Int)],
+    func refreshRepos(_ repos: [String], includePRs: Bool, completedRuns: [(String, String)],
                       done: @escaping (Bool) -> Void) {
         guard !refreshInFlight else {
             var p = pendingPartial ?? (Set<String>(), false, [], [])
@@ -509,7 +510,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         refreshInFlight = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var runRes = [(String, [Run])?](repeating: nil, count: repos.count)
-            var prRes = [(String, [PR])?](repeating: nil, count: repos.count)
+            var prRes = [(String, [ChangeRequest])?](repeating: nil, count: repos.count)
             let collectQ = DispatchQueue(label: "com.oversire.app.collect-partial")
             var tasks: [() -> Void] = []
             for (i, repo) in repos.enumerated() {
@@ -606,7 +607,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             case .live, .waiting: return true
             default: return false
             }
-        }.map(\.ref.key))
+        }.map(\.ref.storeKey))
     }
 
     func applyProjectSelection() {
@@ -731,7 +732,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     // The popover PRs tab lists review requests only.
-    var reviewPRs: [(String, [PR])] { prGrouped.map { ($0.0, $0.1.filter { !$0.mine }) } }
+    var reviewPRs: [(String, [ChangeRequest])] { prGrouped.map { ($0.0, $0.1.filter { !$0.mine }) } }
 
     func reloadList() {
         workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
@@ -814,7 +815,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     // "Needs input" and "Agent done" for an item that OverSire tracks.
-    func agentAlert(_ key: String, _ agent: ItemAgent) {
+    func agentAlert(_ key: String, _ agent: AgentSession) {
         let n = PROJECTS_CFG.notifications
         guard agent.phase == .waiting ? n.agentWaiting : n.agentDone else { return }
         let found = projectStore.snapshots.values.lazy.compactMap { s in
@@ -1011,14 +1012,14 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 }
 
 extension GHActionsBar: RelaySink {
-    func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, Int)], done: @escaping (Bool) -> Void) {
+    func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, String)], done: @escaping (Bool) -> Void) {
         refreshRepos(repos, includePRs: includePRs, completedRuns: completedRuns, done: done)
     }
 
     // A gap in the log: refresh every repo.
     func relayFullRefresh(done: @escaping (Bool) -> Void) {
         refreshRepos(REPOS, includePRs: true, completedRuns: []) { ok in
-            self.projectStore.refresh(self.projectStore.tracked.map(\.ref.key), force: true) { projectOK in
+            self.projectStore.refresh(self.projectStore.tracked.map(\.ref.storeKey), force: true) { projectOK in
                 done(ok && projectOK)
             }
         }

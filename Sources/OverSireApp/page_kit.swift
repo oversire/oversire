@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── View types of the window pages ──────────────────────────────────────────
 // Pages use Auto Layout with stack views. Colors come from Palette and follow the appearance.

@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 import Security
 
 // Moves the data of a Cat Eye install to OverSire on the first start.

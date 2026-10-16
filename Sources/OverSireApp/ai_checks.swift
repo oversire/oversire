@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── AI checks of agents ─────────────────────────────────────────────────────
 // An agent that goes quiet gets a check: does it look done, or stuck? Heuristics decide first.
@@ -24,7 +25,7 @@ struct Judgement: Codable, Equatable {
 
 // What a check reads about one agent.
 struct AgentSignals {
-    var phase: ItemAgent.Phase
+    var phase: AgentSession.Phase
     var quietMinutes: Double
     var tail: [String]
     var ci: Tone?

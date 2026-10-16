@@ -1,27 +1,5 @@
 import Cocoa
-
-// ─── Model ───────────────────────────────────────────────────────────────────
-
-struct Run: Decodable {
-    let id: Int
-    let name: String
-    let displayTitle: String
-    let status: String
-    let conclusion: String?
-    let headBranch: String
-    let headSha: String
-    let event: String
-    let url: String
-    let updatedAt: String
-    let createdAt: String
-    let startedAt: String?
-    let number: Int
-    let workflowName: String?
-    let actorLogin: String?
-    var attempt: Int? = nil
-
-    var isFailure: Bool { status == "completed" && conclusion == "failure" }
-}
+import OverSireCore
 
 // Failed runs the user chose to ignore. They do not turn the menu bar icon red.
 // The key holds the attempt, so a re-run that fails again shows red again.
@@ -46,79 +24,9 @@ final class IgnoredFailures {
 
 let IGNORED = IgnoredFailures()
 
-// Puts the workflows of one trigger (same commit, branch, event, actor) into one row.
-// A second run of a workflow already in a row starts a new row. This keeps repeat dispatches apart.
-func groupRuns(_ runs: [Run]) -> [[Run]] {
-    var groups: [[Run]] = []
-    var indexByKey: [String: Int] = [:]
-    for run in runs {
-        let key = "\(run.displayTitle)|\(run.headSha)|\(run.headBranch)|\(run.event)|\(run.actorLogin ?? "")"
-        if let i = indexByKey[key], !groups[i].contains(where: { $0.workflowName == run.workflowName }) {
-            groups[i].append(run)
-        } else {
-            indexByKey[key] = groups.count; groups.append([run])
-        }
-    }
-    return groups
-}
-
-struct PRAuthor: Decodable { let login: String }
-struct PRLabel: Decodable { let name: String; let color: String? }
-struct PR: Decodable {
-    let number: Int
-    let title: String
-    let state: String
-    let author: PRAuthor
-    let headRefName: String
-    let baseRefName: String
-    let url: String
-    let createdAt: String
-    let updatedAt: String
-    let reviewDecision: String?
-    let additions: Int
-    let deletions: Int
-    let isDraft: Bool
-    let labels: [PRLabel]
-    let body: String?
-    var mine = false          // authored by the gh user; else a review request
-
-    enum CodingKeys: String, CodingKey {
-        case number, title, state, author, headRefName, baseRefName, url, createdAt, updatedAt
-        case reviewDecision, additions, deletions, isDraft, labels, body
-    }
-}
-
-enum PRAction: CustomStringConvertible {
-    case approve(String?)
-    case requestChanges(String)
-    case comment(String)
-    case merge(String)   // "-m", "-r", "-s"
-    case close
-
-    var description: String {
-        switch self {
-        case .approve: return "approve"
-        case .requestChanges: return "request-changes"
-        case .comment: return "comment"
-        case .merge(let m): return "merge(\(m))"
-        case .close: return "close"
-        }
-    }
-}
-
-
-
 let isoFmt: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
 }()
-let isoFmtFrac: ISO8601DateFormatter = {
-    let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
-}()
-
-func parseISO(_ s: String?) -> Date? {
-    guard let s = s, !s.isEmpty else { return nil }
-    return isoFmtFrac.date(from: s) ?? isoFmt.date(from: s)
-}
 
 let timestampFmt: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "MMM d, h:mm a"; return f
@@ -147,24 +55,6 @@ func runElapsed(_ r: Run) -> TimeInterval {
     return -s.timeIntervalSinceNow
 }
 
-func estimatedTotal(for run: Run, history: [Run]) -> TimeInterval? {
-    let wf = run.workflowName ?? run.name
-    // Rolling 3-day window of completed runs of the same workflow.
-    let cutoff = Date().addingTimeInterval(-3 * 24 * 3600)
-    let completed = history.filter { r in
-        guard (r.workflowName ?? r.name) == wf, r.status == "completed",
-              let s = parseISO(r.startedAt) ?? parseISO(r.createdAt) else { return false }
-        return s >= cutoff
-    }
-    let durs = completed.compactMap { r -> TimeInterval? in
-        guard let s = parseISO(r.startedAt) ?? parseISO(r.createdAt),
-              let e = parseISO(r.updatedAt) else { return nil }
-        let d = e.timeIntervalSince(s); return d > 0 ? d : nil
-    }
-    guard !durs.isEmpty else { return nil }
-    return durs.reduce(0, +) / Double(durs.count)
-}
-
 let startedFmt: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
 }()
@@ -186,49 +76,51 @@ let C_FAILURE = NSColor(srgbRed: 0.84, green: 0.37, blue: 0.00, alpha: 1)  // ve
 let C_RUNNING = NSColor(srgbRed: 0.34, green: 0.71, blue: 0.91, alpha: 1)  // sky blue
 let C_QUEUED  = NSColor(srgbRed: 0.90, green: 0.62, blue: 0.00, alpha: 1)  // amber
 
-func statusText(_ r: Run) -> String {
-    switch r.status {
-    case "in_progress": return "In progress"
-    case "queued", "waiting", "pending": return "Queued"
-    case "completed":
-        switch r.conclusion ?? "" {
-        case "success": return "Succeeded"
-        case "failure": return "Failed"
-        case "cancelled": return "Cancelled"
-        case "skipped": return "Skipped"
-        default: return "Completed"
+extension Run {
+    var statusText: String {
+        switch status {
+        case "in_progress": return "In progress"
+        case "queued", "waiting", "pending": return "Queued"
+        case "completed":
+            switch conclusion ?? "" {
+            case "success": return "Succeeded"
+            case "failure": return "Failed"
+            case "cancelled": return "Cancelled"
+            case "skipped": return "Skipped"
+            default: return "Completed"
+            }
+        default: return status
         }
-    default: return r.status
     }
-}
 
-func sfName(_ r: Run) -> String {
-    switch r.status {
-    case "in_progress": return "hourglass.circle.fill"
-    case "queued", "waiting", "pending": return "clock.fill"
-    case "completed":
-        switch r.conclusion ?? "" {
-        case "success": return "checkmark.circle.fill"
-        case "failure": return "xmark.circle.fill"
-        case "cancelled": return "minus.circle.fill"
-        case "skipped": return "forward.fill"
+    var symbolName: String {
+        switch status {
+        case "in_progress": return "hourglass.circle.fill"
+        case "queued", "waiting", "pending": return "clock.fill"
+        case "completed":
+            switch conclusion ?? "" {
+            case "success": return "checkmark.circle.fill"
+            case "failure": return "xmark.circle.fill"
+            case "cancelled": return "minus.circle.fill"
+            case "skipped": return "forward.fill"
+            default: return "questionmark.circle"
+            }
         default: return "questionmark.circle"
         }
-    default: return "questionmark.circle"
     }
-}
 
-func sfColor(_ r: Run) -> NSColor {
-    switch r.status {
-    case "in_progress": return C_RUNNING
-    case "queued", "waiting", "pending": return C_QUEUED
-    case "completed":
-        switch r.conclusion ?? "" {
-        case "success": return C_SUCCESS
-        case "failure": return C_FAILURE
-        default: return .systemGray
+    var symbolColor: NSColor {
+        switch status {
+        case "in_progress": return C_RUNNING
+        case "queued", "waiting", "pending": return C_QUEUED
+        case "completed":
+            switch conclusion ?? "" {
+            case "success": return C_SUCCESS
+            case "failure": return C_FAILURE
+            default: return .systemGray
+            }
+        default: return .secondaryLabelColor
         }
-    default: return .secondaryLabelColor
     }
 }
 

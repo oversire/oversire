@@ -1,8 +1,9 @@
 import Cocoa
+import OverSireCore
 
 // One item in a page list: status, key, title, sub-items, agent, CI, priority, assignee, time.
 final class ItemLine: Row {
-    init(_ item: ProjectItem, snap: ProjectSnapshot, stream: Workstream?, showProject: Bool = false, go: @escaping (Route) -> Void) {
+    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, showProject: Bool = false, go: @escaping (Route) -> Void) {
         let opt = snap.option(item.statusOptionId)
         let glyph = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16)
         let key = NSTextField.text(item.key, size: 11.5, color: Palette.dim, mono: true)
@@ -62,7 +63,7 @@ final class ToggleChip: Chiplet {
 
 // A card on the board: key, title and chips.
 final class BoardCard: Row {
-    init(_ item: ProjectItem, stream: Workstream?, go: @escaping (Route) -> Void) {
+    init(_ item: Item, stream: Workstream?, go: @escaping (Route) -> Void) {
         var chips: [NSView] = []
         if let a = stream?.agent { chips.append(Pill(Tone(a.phase), text: a.label())) }
         if let ci = stream?.ci { chips.append(Glyph(ci, size: 12)) }
@@ -140,7 +141,7 @@ final class ProjectPage: Page {
     }
 
     // Plane states in their category order. Done and cancelled show only with Show done.
-    private func statusGroups(_ snap: ProjectSnapshot, _ items: [ProjectItem]) -> [(StatusOption, [ProjectItem])] {
+    private func statusGroups(_ snap: ProjectSnapshot, _ items: [Item]) -> [(StatusOption, [Item])] {
         let opts = snap.statusOptions.enumerated().sorted { ($0.element.category.rank, $0.offset) < ($1.element.category.rank, $1.offset) }.map(\.element)
         let sorted = snap.sorted(items)
         var out = opts.filter { showDone || $0.category != .done }.map { o in (o, sorted.filter { $0.statusOptionId == o.id }) }
@@ -150,7 +151,7 @@ final class ProjectPage: Page {
         return out
     }
 
-    private func boardView(_ groups: [(StatusOption, [ProjectItem])], _ ws: WorkstreamIndex) -> NSView {
+    private func boardView(_ groups: [(StatusOption, [Item])], _ ws: WorkstreamIndex) -> NSView {
         let cols: [NSView] = groups.filter { !$0.1.isEmpty || $0.0.category != .done }.map { opt, its in
             let c = Card(padding: 10, spacing: 8)
             c.add(NSStackView(h: [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
@@ -180,7 +181,7 @@ final class ProjectPage: Page {
 
 // Open items of the user in all projects. An agent that waits or a failing run comes first.
 final class MyItemsPage: Page {
-    typealias Entry = (item: ProjectItem, snap: ProjectSnapshot, stream: Workstream?)
+    typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
 
     static func order(_ list: [Entry]) -> [Entry] {
         list.sorted { a, b in

@@ -1,4 +1,5 @@
 import AppKit
+import OverSireCore
 
 // The Orca agents and worktrees: agents that need input first, then all worktrees, then the activity.
 final class AgentsPage: Page {
@@ -56,20 +57,20 @@ final class AgentsPage: Page {
         return box
     }
 
-    private func cardKey(_ c: OrcaCard) -> String? {
+    private func cardKey(_ c: Workspace) -> String? {
         data.agentIndex.agents.first { $0.value.card == c.id }?.key
             ?? data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }?.key
             ?? WorkstreamIndex.key(in: c.name, known: Set(data.projectStore.tracked.map { $0.identifier.uppercased() }), whole: true)
     }
 
-    private func cardRow(_ c: OrcaCard) -> NSView {
+    private func cardRow(_ c: Workspace) -> NSView {
         let key = cardKey(c)
         let co = data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }
         let agent: NSView
         if let key, let a = data.agentIndex.agent(key), a.card == c.id {
             agent = Pill(Tone(a.phase), text: a.label())
-        } else if let g = c.agents.min(by: { rank($0.state) < rank($1.state) }) {
-            agent = Pill(tone(g.state))
+        } else if let g = c.agents.min(by: { $0.rank < $1.rank }) {
+            agent = Pill(tone(g.phase))
         } else {
             agent = Chiplet("Shell only", symbol: "terminal")
         }
@@ -94,14 +95,13 @@ final class AgentsPage: Page {
         }
     }
 
-    private func rank(_ s: OrcaAgent.State) -> Int { s == .waiting ? 0 : s == .working ? 1 : 2 }
-    private func tone(_ s: OrcaAgent.State) -> Tone { s == .waiting ? .waiting : s == .working ? .working : .done }
+    private func tone(_ s: AgentSession.Phase) -> Tone { s == .waiting ? .waiting : s == .working ? .working : .done }
 
-    private func waitingCard(_ key: String, _ a: ItemAgent) -> NSView {
+    private func waitingCard(_ key: String, _ a: AgentSession) -> NSView {
         let title = data.projectStore.item(key: key)?.2.title ?? ""
         let c = Card(border: Palette.warn.withAlphaComponent(0.55))
         let link = ActionButton("\(key) · \(title)", style: .link) { [weak self] in self?.go(.item(key, .session)) }
-        c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), link, Chiplet(a.repo.isEmpty ? a.type : a.repo, symbol: "folder", mono: true),
+        c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), link, Chiplet(a.repo.isEmpty ? a.agent.rawValue : a.repo, symbol: "folder", mono: true),
                               NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 8))
         loadTail(key)
         let lines = tails[key].map { Array($0.suffix(10)) } ?? [a.message ?? "Reading the terminal…"]

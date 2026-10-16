@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── Plane REST API ──────────────────────────────────────────────────────────
 // v1 for work items, v2 for webhooks. A token works only in its own workspace,
@@ -65,13 +66,7 @@ struct PlaneWebhook: Equatable {
 }
 
 final class PlaneClient {
-    static let priorities: [StatusOption] = [
-        StatusOption(id: "urgent", name: "Urgent", color: "#EF4444"),
-        StatusOption(id: "high", name: "High", color: "#F97316"),
-        StatusOption(id: "medium", name: "Medium", color: "#EAB308"),
-        StatusOption(id: "low", name: "Low", color: "#3B82F6"),
-        StatusOption(id: "none", name: "None", color: "#9CA3AF"),
-    ]
+    static let priorities = StatusOption.priorities
 
     let workspace: PlaneWorkspace
     private let token: String
@@ -119,8 +114,9 @@ final class PlaneClient {
         list("\(ws)/projects/", max: 1000).map { rows in
             rows.compactMap { r -> ProjectSummary? in
                 guard let id = jsonID(r["id"]), let name = r["name"] as? String else { return nil }
-                return ProjectSummary(ref: ProjectRef(workspace: workspace.slug, id: id),
-                                      identifier: r["identifier"] as? String ?? "",
+                let identifier = r["identifier"] as? String ?? ""
+                return ProjectSummary(ref: ProjectRef(workspace: workspace.slug, id: id, key: identifier.isEmpty ? nil : identifier),
+                                      identifier: identifier,
                                       title: name, url: workspace.projectURL(id),
                                       closed: !(r["archived_at"] is NSNull || r["archived_at"] == nil))
             }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
@@ -161,13 +157,13 @@ final class PlaneClient {
         }
         let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let index = try? self.index(project: p).get()
-        var reused: [ProjectItem] = []
+        var reused: [Item] = []
         if let index {
             let (extra, kept) = treeRows(project: p, loaded: Set(rows.compactMap { jsonID($0["id"]) }), index: index, previous: prevById)
             rows += extra
             reused = kept
         }
-        let items = reused + rows.compactMap { r -> ProjectItem? in
+        let items = reused + rows.compactMap { r -> Item? in
             guard var item = parseItem(r, summary: summary, names: names) else { return nil }
             let prev = prevById[item.id]
             if let prev, prev.activityAt == item.activityAt {
@@ -265,7 +261,7 @@ final class PlaneClient {
     // An item that did not change since `previous` is kept. A few others load one by one.
     // More load with the full list, which costs one call for each 100 items.
     private func treeRows(project: String, loaded: Set<String>, index: [ItemStub],
-                          previous: [String: ProjectItem]) -> (rows: [[String: Any]], kept: [ProjectItem]) {
+                          previous: [String: Item]) -> (rows: [[String: Any]], kept: [Item]) {
         let byId = Dictionary(index.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let kids = Dictionary(grouping: index.filter { $0.parentId != nil }, by: { $0.parentId! })
         var tree = loaded
@@ -277,7 +273,7 @@ final class PlaneClient {
         while let id = queue.popLast() {
             for c in kids[id] ?? [] where !tree.contains(c.id) { tree.insert(c.id); queue.append(c.id) }
         }
-        var kept: [ProjectItem] = [], need: Set<String> = []
+        var kept: [Item] = [], need: Set<String> = []
         for id in tree.subtracting(loaded) {
             if let prev = previous[id], prev.activityAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
         }
@@ -295,7 +291,7 @@ final class PlaneClient {
         return (rows, kept)
     }
 
-    private func parseItem(_ r: [String: Any], summary: ProjectSummary, names: [String: String]) -> ProjectItem? {
+    private func parseItem(_ r: [String: Any], summary: ProjectSummary, names: [String: String]) -> Item? {
         guard let id = jsonID(r["id"]), let title = r["name"] as? String else { return nil }
         if let a = r["archived_at"], !(a is NSNull) { return nil }
         let key = "\(summary.identifier)-\(jsonInt(r["sequence_id"]) ?? 0)"
@@ -311,7 +307,7 @@ final class PlaneClient {
         let labels = (r["labels"] as? [Any] ?? []).compactMap { ($0 as? [String: Any])?["name"] as? String }
         let html = r["description_html"] as? String ?? ""
         let updated = parseISO(r["updated_at"] as? String) ?? Date()
-        return ProjectItem(id: id, key: key, title: title, url: workspace.itemURL(key), statusOptionId: state,
+        return Item(id: id, key: key, title: title, url: workspace.itemURL(key), statusOptionId: state,
                            fields: fields, assignees: (r["assignees"] as? [Any] ?? []).compactMap(person),
                            labels: labels, author: person(r["created_by"]), updatedBy: person(r["updated_by"]),
                            updatedAt: updated, activityAt: parseISO(r["last_activity_at"] as? String) ?? updated,
@@ -321,13 +317,13 @@ final class PlaneClient {
     }
 
     // Oldest first.
-    func comments(project: String, item: String, url: String, names: [String: String]? = nil) -> Result<[CommentRef], PlaneError> {
+    func comments(project: String, item: String, url: String, names: [String: String]? = nil) -> Result<[Comment], PlaneError> {
         let names = names ?? memberNames()
         return list("\(ws)/projects/\(project)/issues/\(item)/comments/", max: 500).map { rows in
-            rows.compactMap { r -> CommentRef? in
+            rows.compactMap { r -> Comment? in
                 guard let id = jsonID(r["id"]) else { return nil }
                 let who = jsonID(r["actor"]) ?? jsonID(r["created_by"])
-                return CommentRef(id: id, author: who.map { names[$0] ?? $0 },
+                return Comment(id: id, author: who.map { names[$0] ?? $0 },
                                   createdAt: parseISO(r["created_at"] as? String) ?? Date(), url: url,
                                   body: PlaneMarkup.markdown(fromHTML: r["comment_html"] as? String ?? "") { names[$0] })
             }.sorted { $0.createdAt < $1.createdAt }
@@ -405,13 +401,22 @@ final class PlaneClient {
 
     // MARK: Writes
 
-    func update(project: String, item: String, _ fields: [String: Any]) -> Result<Void, PlaneError> {
+    func update(project: String, item: String, _ patch: ItemPatch) -> Result<Void, PlaneError> {
+        self.patch(project: project, item: item, patch.planeFields)
+    }
+
+    // The raw description HTML, for the OverSire block merge.
+    func setDescription(project: String, item: String, html: String) -> Result<Void, PlaneError> {
+        patch(project: project, item: item, ["description_html": html])
+    }
+
+    private func patch(project: String, item: String, _ fields: [String: Any]) -> Result<Void, PlaneError> {
         send("PATCH", "\(ws)/projects/\(project)/issues/\(item)/", body: fields).map { _ in () }
     }
 
     // Returns the new item id.
-    func create(project: String, _ fields: [String: Any]) -> Result<String, PlaneError> {
-        send("POST", "\(ws)/projects/\(project)/issues/", body: fields).flatMap { obj in
+    func create(project: String, _ draft: ItemDraft) -> Result<String, PlaneError> {
+        send("POST", "\(ws)/projects/\(project)/issues/", body: draft.planeFields).flatMap { obj in
             jsonID((obj as? [String: Any])?["id"]).map { .success($0) } ?? .failure(.http(200, "no id for the new item"))
         }
     }
@@ -467,7 +472,7 @@ final class PlaneClient {
                 }
                 if ids.contains(me.id) { return .success(()) }
                 ids.append(me.id)
-                return update(project: project, item: item, ["assignees": ids])
+                return update(project: project, item: item, ItemPatch(assignees: ids))
             }
         }
     }
@@ -630,5 +635,31 @@ final class PlaneAccounts {
         PROJECTS_CFG.picked.removeAll { $0.hasPrefix(slug + "/") }
         saveConfig()
         NotificationCenter.default.post(name: PlaneAccounts.changed, object: self)
+    }
+}
+
+extension ItemPatch {
+    var planeFields: [String: Any] {
+        var f: [String: Any] = [:]
+        if let title { f["name"] = title }
+        if let status { f["state"] = status }
+        if let priority { f["priority"] = priority }
+        if let assignees { f["assignees"] = assignees }
+        if let labels { f["labels"] = labels }
+        if let parent { f["parent"] = parent }
+        if let bodyMarkdown { f["description_html"] = PlaneMarkup.html(fromMarkdown: bodyMarkdown) }
+        return f
+    }
+}
+
+extension ItemDraft {
+    var planeFields: [String: Any] {
+        var f: [String: Any] = ["name": title]
+        if let bodyMarkdown, !bodyMarkdown.isEmpty { f["description_html"] = PlaneMarkup.html(fromMarkdown: bodyMarkdown) }
+        if let status { f["state"] = status }
+        if let priority { f["priority"] = priority }
+        if !labels.isEmpty { f["labels"] = labels }
+        if let parent { f["parent"] = parent }
+        return f
     }
 }

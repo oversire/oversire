@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // The intake (triage) queue of one project: a list of pending items, and one item with its description.
 // Accept or Decline, then the window shows the next item. Back or Esc goes to the list.

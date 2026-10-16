@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // The projects of each Plane workspace, for the picker. Cached on disk and
 // refreshed, per workspace, at most once a day unless the user asks.
@@ -55,7 +56,7 @@ final class ProjectCatalog {
         var out: [ProjectSummary] = []
         for w in cfg.workspaces {
             let all = cfg.allOf.contains(w.slug)
-            out += projects(of: w.slug).filter { !$0.closed && (all || cfg.picked.contains($0.ref.key)) }
+            out += projects(of: w.slug).filter { !$0.closed && (all || cfg.picked.contains($0.ref.storeKey)) }
         }
         return cfg.sorted(out)
     }

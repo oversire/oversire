@@ -1,9 +1,10 @@
 import Cocoa
+import OverSireCore
 
 // What the window pages read and do. The app delegate implements it.
 protocol AppData: AnyObject {
     var grouped: [(String, [Run])] { get }
-    var prGrouped: [(String, [PR])] { get }
+    var prGrouped: [(String, [ChangeRequest])] { get }
     var lastUpdate: Date { get }
     var firstLoad: Bool { get }
     var projectStore: ProjectStore { get }
@@ -24,7 +25,7 @@ protocol AppData: AnyObject {
 struct DataFingerprint: Equatable {
     let value: Int
 
-    init(runs: [(String, [Run])], prs: [(String, [PR])], agents: [String: ItemAgent], snapshots: [ProjectSnapshot], lanes: [QueueLane], streams: [Workstream] = []) {
+    init(runs: [(String, [Run])], prs: [(String, [ChangeRequest])], agents: [String: AgentSession], snapshots: [ProjectSnapshot], lanes: [QueueLane], streams: [Workstream] = []) {
         var h = Hasher()
         for (repo, rs) in runs {
             h.combine(repo)
@@ -37,8 +38,8 @@ struct DataFingerprint: Equatable {
         for (k, a) in agents.sorted(by: { $0.key < $1.key }) {
             h.combine(k); h.combine("\(a.phase)"); h.combine(a.since); h.combine(a.card); h.combine(a.message)
         }
-        for s in snapshots.sorted(by: { $0.summary.ref.key < $1.summary.ref.key }) {
-            h.combine(s.summary.ref.key); h.combine(s.items); h.combine(s.intake)
+        for s in snapshots.sorted(by: { $0.summary.ref.storeKey < $1.summary.ref.storeKey }) {
+            h.combine(s.summary.ref.storeKey); h.combine(s.items); h.combine(s.intake)
         }
         for l in lanes {
             h.combine(l.project); h.combine(l.error); h.combine(l.lastStarted)
@@ -362,7 +363,7 @@ struct SidebarModel {
         if !projects.isEmpty {
             out.append(.header("Projects"))
             for p in projects {
-                let open = store.snapshots[p.ref.key].map { $0.notDoneCount($0.rootItems) } ?? 0
+                let open = store.snapshots[p.ref.storeKey].map { $0.notDoneCount($0.rootItems) } ?? 0
                 let r = Route.project(p.identifier.uppercased())
                 out.append(.entry(SidebarEntry(key: r.sidebarKey, route: r, title: p.title, symbol: "folder",
                                                badge: open > 0 ? "\(open)" : nil, badgeTone: nil,

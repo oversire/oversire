@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // One run in a page list: state, workflow and number, repo and branch, item link, time.
 final class RunLine: Row {
@@ -8,7 +9,7 @@ final class RunLine: Row {
         let main = TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(name) · \(r.headBranch) · \(r.displayTitle)")
         var views: [NSView] = [Glyph(tone), main, Spacer()]
         let live = r.status != "completed"
-        if live, let total = estimatedTotal(for: r, history: data.grouped.first { $0.0 == repo }?.1 ?? []) {
+        if live, let total = r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) {
             let bar = NSProgressIndicator()
             bar.style = .bar
             bar.isIndeterminate = false
@@ -26,7 +27,7 @@ final class RunLine: Row {
             views.append(Chiplet("unlinked"))
         }
         let when: String
-        if live, let total = estimatedTotal(for: r, history: data.grouped.first { $0.0 == repo }?.1 ?? []) {
+        if live, let total = r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) {
             when = "~" + fmtDuration(max(5, total - runElapsed(r))) + " left"
         } else {
             when = relativeTime(lastActivity(r))
@@ -93,10 +94,10 @@ final class RunsPage: Page {
 // One run: jobs, the log of a job, and the actions re-run and cancel.
 final class RunPage: Page {
     private var run: Run?
-    private var jobs: [RunJob]?
-    private var jobId: Int?
+    private var jobs: [Job]?
+    private var jobId: String?
     private var log: [String]?
-    private var logFor: Int?
+    private var logFor: String?
     private var follow = true
     private var errorsOnly = false
     private var busy: String?
@@ -105,7 +106,7 @@ final class RunPage: Page {
     private let q = DispatchQueue(label: "com.oversire.app.run-page", qos: .userInitiated)
 
     private var repo: String { if case .run(let r, _) = route { return r }; return "" }
-    private var runId: Int { if case .run(_, let id) = route { return id }; return 0 }
+    private var runId: String { if case .run(_, let id) = route { return id }; return "" }
 
     override func viewDidAppear() {
         super.viewDidAppear()

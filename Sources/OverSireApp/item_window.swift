@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Draft text of an item in edit mode. The window keeps it, so a rebuild does not lose it.
 struct ItemEdit {
@@ -262,7 +263,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     }
 
     // Status, priority, labels and assignees open a menu. Dates are facts only.
-    private func chips(snap: ProjectSnapshot, item: ProjectItem, y: CGFloat, w: CGFloat, pad: CGFloat, in view: NSView) -> CGFloat {
+    private func chips(snap: ProjectSnapshot, item: Item, y: CGFloat, w: CGFloat, pad: CGFloat, in view: NSView) -> CGFloat {
         var x = pad, y = y
         func place(_ c: NSButton) {
             if x + c.frame.width > w - pad { x = pad; y += 28 }
@@ -324,7 +325,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         return y + 34
     }
 
-    private func overview(snap: ProjectSnapshot, item: ProjectItem, w: CGFloat, pad: CGFloat, in doc: NSView) -> CGFloat {
+    private func overview(snap: ProjectSnapshot, item: Item, w: CGFloat, pad: CGFloat, in doc: NSView) -> CGFloat {
         let cw = w - pad * 2
         var y: CGFloat = 14
         if let edit {
@@ -466,7 +467,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         return y + 40
     }
 
-    private func subItems(snap: ProjectSnapshot, item: ProjectItem, w: CGFloat, pad: CGFloat, in doc: NSView) -> CGFloat {
+    private func subItems(snap: ProjectSnapshot, item: Item, w: CGFloat, pad: CGFloat, in doc: NSView) -> CGFloat {
         var y: CGFloat = 10
         let kids = snap.children(of: item.id)
         let progress = snap.progress(of: item.id)
@@ -512,7 +513,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     }
 
     // Comments and changes, newest first. The comment box is on top.
-    private func activity(item: ProjectItem, w: CGFloat, pad: CGFloat, draft: String, in doc: NSView) -> CGFloat {
+    private func activity(item: Item, w: CGFloat, pad: CGFloat, draft: String, in doc: NSView) -> CGFloat {
         let cw = w - pad * 2
         var y: CGFloat = 14
         let cf = NSTextField(frame: NSRect(x: pad, y: y, width: cw - 90, height: 24))
@@ -670,7 +671,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         guard let pair = sender.representedObject as? [String], pair.count == 2, let id = itemId,
               let found = store.item(id) else { return }
         let (field, value) = (pair[0], pair[1])
-        var body: [String: Any]
+        let patch: ItemPatch
         switch field {
         case "labels", "assignees":
             // The item keeps names. The menu options map them to ids.
@@ -678,14 +679,15 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
             let names = field == "labels" ? found.item.labels : found.item.assignees
             var ids = list.filter { o in names.contains { $0.caseInsensitiveCompare(o.name) == .orderedSame } }.map(\.id)
             if let i = ids.firstIndex(of: value) { ids.remove(at: i) } else { ids.append(value) }
-            body = [field: ids]
-        default:
-            body = [field: value]
+            patch = field == "labels" ? ItemPatch(labels: ids) : ItemPatch(assignees: ids)
+        case "state": patch = ItemPatch(status: value)
+        case "priority": patch = ItemPatch(priority: value)
+        default: return
         }
         saving = field
         error = nil
         rebuild()
-        store.update(itemId: id, fields: body, failure: "Could not change the \(field == "state" ? "status" : field)") { [weak self] ok in
+        store.update(itemId: id, patch, failure: "Could not change the \(field == "state" ? "status" : field)") { [weak self] ok in
             guard let self else { return }
             self.saving = nil
             self.error = ok ? nil : self.store.lastError
@@ -706,7 +708,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     }
 
     // The live agent of the item: state, prompt, buttons and the last lines of its terminal.
-    private func agentCard(item: ProjectItem, y: CGFloat, w: CGFloat, pad: CGFloat, in doc: NSView) -> CGFloat {
+    private func agentCard(item: Item, y: CGFloat, w: CGFloat, pad: CGFloat, in doc: NSView) -> CGFloat {
         guard let agents, let a = agents.agent(item.key), a.phase != .failed else { return y }
         let cw = w - pad * 2
         let box = NSView(frame: NSRect(x: pad, y: y, width: cw, height: 52))
@@ -722,7 +724,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         send.frame.origin = NSPoint(x: open.frame.minX - send.frame.width - 6, y: y + 13)
         let words: String
         switch a.phase {
-        case .working: words = "Session working · " + ItemAgent.minutes(Date().timeIntervalSince(a.since))
+        case .working: words = "Session working · " + AgentSession.minutes(Date().timeIntervalSince(a.since))
         case .waiting: words = "Session needs input"
         case .done: words = "Session done"
         default: words = "Session starting…"
@@ -733,7 +735,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         doc.addSubview(t)
         let df = DateFormatter()
         df.dateFormat = "HH:mm"
-        var sub = [a.type, a.repo.isEmpty ? "Orca" : a.repo, PROJECTS_CFG.orca.environment ?? "this Mac"].joined(separator: " · ")
+        var sub = [a.agent.rawValue, a.repo.isEmpty ? "Orca" : a.repo, PROJECTS_CFG.orca.environment ?? "this Mac"].joined(separator: " · ")
         if let p = a.prompt, !p.isEmpty { sub += " \"\(p.count > 70 ? p.prefix(70) + "…" : Substring(p))\"" }
         sub += " · since " + df.string(from: a.since)
         let st = NSTextField(labelWithString: sub)

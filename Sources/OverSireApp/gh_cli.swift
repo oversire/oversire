@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 
 // Find gh CLI — hardcoded trusted paths only
@@ -163,48 +164,17 @@ func fetchRuns(repo: String) -> [Run]? {
     return (try? JSONDecoder().decode([Run].self, from: data)) ?? []
 }
 
-func fetchRun(repo: String, id: Int) -> Run? {
+func fetchRun(repo: String, id: String) -> Run? {
     guard let data = ghShell("api", "repos/\(repo)/actions/runs/\(id)", "--jq", RUN_JQ) else { return nil }
     return try? JSONDecoder().decode(Run.self, from: data)
 }
 
 // ─── Run Detail Fetching ─────────────────────────────────────────────────────
 
-struct RunFailure {
-    let job: String
-    let step: String?
-    let messages: [String]   // exact annotation messages from the checks API
-}
-
-struct RunJobStep: Decodable {
-    let name: String
-    let status: String?
-    let conclusion: String?
-    let startedAt: String?
-    let completedAt: String?
-}
-struct RunJob: Decodable {
-    let id: Int
-    let name: String
-    let status: String?
-    let conclusion: String?
-    let url: String?
-    let startedAt: String?
-    let completedAt: String?
-    let runnerName: String?
-    let steps: [RunJobStep]?
-}
-struct CheckAnnotation: Decodable {
-    let message: String?
-    let path: String?
-    let startLine: Int?
-    let annotationLevel: String?
-}
-
 // Lazily-fetched run detail data. Main-thread access only.
 var commitMsgCache: [String: String] = [:]       // head sha → full commit message
-var failureCache: [Int: [RunFailure]] = [:]      // run id → failure summaries (stable once completed)
-var jobsCache: [Int: (updatedAt: String, jobs: [RunJob])] = [:]  // run id → jobs at that run update
+var failureCache: [String: [Failure]] = [:]      // run id → failure summaries (stable once completed)
+var jobsCache: [String: (updatedAt: String, jobs: [Job])] = [:]  // run id → jobs at that run update
 var detailFetchInFlight = Set<String>()
 
 func fetchCommitMessage(repo: String, sha: String) -> String? {
@@ -215,18 +185,18 @@ func fetchCommitMessage(repo: String, sha: String) -> String? {
     return s
 }
 
-func fetchRunJobs(repo: String, runId: Int) -> [RunJob]? {
+func fetchRunJobs(repo: String, runId: String) -> [Job]? {
     let step = "{name, status, conclusion, startedAt: .started_at, completedAt: .completed_at}"
     let jq = "[.jobs[] | {id, name, status, conclusion, url: .html_url, startedAt: .started_at, " +
         "completedAt: .completed_at, runnerName: .runner_name, steps: [.steps[]? | \(step)]}]"
     guard let data = ghShell("api", "repos/\(repo)/actions/runs/\(runId)/jobs?per_page=100", "--jq", jq) else { return nil }
-    return try? JSONDecoder().decode([RunJob].self, from: data)
+    return try? JSONDecoder().decode([Job].self, from: data)
 }
 
 // The failure message GitHub shows in its annotations box: for each failed job, pull its
 // check-run annotations (a job's id IS its check-run id) plus the name of the step that failed.
-func fetchRunFailures(repo: String, jobs: [RunJob]) -> [RunFailure] {
-    var out: [RunFailure] = []
+func fetchRunFailures(repo: String, jobs: [Job]) -> [Failure] {
+    var out: [Failure] = []
     for job in jobs where job.conclusion == "failure" {
         if out.count >= 3 { break }
         let step = job.steps?.first(where: { $0.conclusion == "failure" })?.name
@@ -244,17 +214,17 @@ func fetchRunFailures(repo: String, jobs: [RunJob]) -> [RunFailure] {
                 if msgs.count >= 3 { break }
             }
         }
-        out.append(RunFailure(job: job.name, step: step, messages: msgs))
+        out.append(Failure(job: job.name, step: step, messages: msgs))
     }
     return out
 }
 
-func fetchPRs(repo: String) -> [PR] {
+func fetchPRs(repo: String) -> [ChangeRequest] {
     let fields = "number,title,state,author,headRefName,baseRefName,url,createdAt,updatedAt,reviewDecision,additions,deletions,isDraft,labels,body"
-    func list(_ search: String) -> [PR] {
+    func list(_ search: String) -> [ChangeRequest] {
         guard let data = ghShell("pr", "list", "--repo", repo, "--limit", "20", "--state", "open",
                                  "--search", search, "--json", fields) else { return [] }
-        return (try? JSONDecoder().decode([PR].self, from: data)) ?? []
+        return (try? JSONDecoder().decode([ChangeRequest].self, from: data)) ?? []
     }
     // Own PRs link runs to items. Review requests are the PRs tab.
     var out = list("review-requested:@me")
@@ -265,7 +235,7 @@ func fetchPRs(repo: String) -> [PR] {
     return out
 }
 
-func executePRAction(repo: String, number: Int, action: PRAction, completion: @escaping () -> Void) {
+func executePRAction(repo: String, number: Int, action: ChangeAction, completion: @escaping () -> Void) {
     DispatchQueue.global(qos: .userInitiated).async {
         let n = "\(number)", r = repo
         var ok = true
@@ -281,7 +251,7 @@ func executePRAction(repo: String, number: Int, action: PRAction, completion: @e
         case .comment(let body):
             ok = ghShell("pr", "comment", "-b", body, "-R", r, n) != nil
         case .merge(let method):
-            ok = ghShell("pr", "merge", method, "-R", r, n) != nil
+            ok = ghShell("pr", "merge", method.ghFlag, "-R", r, n) != nil
         case .close:
             ok = ghShell("pr", "close", "-R", r, n) != nil
         }
@@ -351,3 +321,13 @@ final class RateLimitMonitor {
     }
 }
 
+
+extension MergeMethod {
+    var ghFlag: String {
+        switch self {
+        case .merge: return "-m"
+        case .rebase: return "-r"
+        case .squash: return "-s"
+        }
+    }
+}

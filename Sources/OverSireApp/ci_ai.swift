@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // A short cause of a failed run, from the log and the changed files.
 struct RunExplanation: Codable, Equatable {
@@ -50,8 +51,8 @@ final class CIAssist {
     // MARK: Flaky
 
     // Runs of one workflow and commit that failed first and passed later. Pure, for the selftest.
-    static func flakyRuns(_ runs: [Run]) -> Set<Int> {
-        var out = Set<Int>()
+    static func flakyRuns(_ runs: [Run]) -> Set<String> {
+        var out = Set<String>()
         let groups = Dictionary(grouping: runs.filter { $0.status == "completed" }) { "\($0.workflowName ?? $0.name)|\($0.headSha)" }
         for g in groups.values {
             let sorted = g.sorted { $0.createdAt < $1.createdAt }
@@ -136,7 +137,7 @@ final class CIAssist {
 
     var canExplain: Bool { AI_CFG.ciExplain && AIClient.current != nil }
 
-    func explain(repo: String, run r: Run, job: RunJob, log: [String]) {
+    func explain(repo: String, run r: Run, job: Job, log: [String]) {
         let k = CIAssist.runKey(r)
         guard AI_CFG.ciExplain, let ai = AIClient.current, !busy.contains(k) else { return }
         busy.insert(k)
@@ -180,7 +181,7 @@ final class CIAssist {
     }
 
     // Facts of the last 24 hours. Pure, for the selftest.
-    static func digestFacts(runs: [(String, [Run])], agents: [ItemAgent], queued: Int, intake: Int, now: Date = Date()) -> [String] {
+    static func digestFacts(runs: [(String, [Run])], agents: [AgentSession], queued: Int, intake: Int, now: Date = Date()) -> [String] {
         let since = now.addingTimeInterval(-86_400)
         let recent = runs.flatMap { g in g.1.filter { (parseISO($0.createdAt) ?? .distantPast) >= since }.map { (g.0, $0) } }
         let failed = recent.filter { $0.1.isFailure }

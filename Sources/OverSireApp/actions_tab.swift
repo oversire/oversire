@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── Run Row View ────────────────────────────────────────────────────────────
 
@@ -48,9 +49,9 @@ class RunRow: NSView {
 
         let iv = NSImageView(frame: NSRect(x: pad, y: (ROW_H - iconSz) / 2, width: iconSz, height: iconSz))
         let ignored = IGNORED.contains(primary)
-        let statusDesc = statusText(primary) + (ignored ? " (ignored)" : "")
-        if let img = NSImage(systemSymbolName: sfName(primary), accessibilityDescription: statusDesc) {
-            iv.image = img; iv.contentTintColor = ignored ? .systemGray : sfColor(primary)
+        let statusDesc = primary.statusText + (ignored ? " (ignored)" : "")
+        if let img = NSImage(systemSymbolName: primary.symbolName, accessibilityDescription: statusDesc) {
+            iv.image = img; iv.contentTintColor = ignored ? .systemGray : primary.symbolColor
             iv.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
         }
         iv.toolTip = statusDesc
@@ -129,7 +130,7 @@ class RunRow: NSView {
             el.frame = NSRect(x: rightX, y: 22, width: rightW, height: 14)
             addSubview(el)
 
-            let est = estimatedTotal(for: primary, history: history)
+            let est = primary.estimatedTotal(history: history)
             let eta = LiveLabel.make(.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .secondaryLabelColor) {
                 guard let est = est else { return "estimating..." }
                 let rem = max(0, est - runElapsed(primary))
@@ -383,7 +384,7 @@ class RunDetailView: Flipped {
         } else {
             infoLine("Elapsed", fmtDuration(runElapsed(primary)), C_RUNNING, live: true)
         }
-        if let est = estimatedTotal(for: primary, history: history) {
+        if let est = primary.estimatedTotal(history: history) {
             infoLine("Expected", "~\(fmtDuration(est))")
         }
         y += 3
@@ -392,11 +393,11 @@ class RunDetailView: Flipped {
         // ── Workflows ──
         for run in group.prefix(8) {
             let iv = NSImageView(frame: NSRect(x: pad, y: y + 1, width: 13, height: 13))
-            if let img = NSImage(systemSymbolName: sfName(run), accessibilityDescription: statusText(run)) {
-                iv.image = img; iv.contentTintColor = sfColor(run)
+            if let img = NSImage(systemSymbolName: run.symbolName, accessibilityDescription: run.statusText) {
+                iv.image = img; iv.contentTintColor = run.symbolColor
                 iv.symbolConfiguration = .init(pointSize: 9.5, weight: .semibold)
             }
-            iv.toolTip = statusText(run)
+            iv.toolTip = run.statusText
             addSubview(iv)
             let name = NSTextField(labelWithString: "\(run.workflowName ?? run.name) #\(run.number)")
             name.font = .systemFont(ofSize: 11); name.textColor = .labelColor
@@ -406,9 +407,9 @@ class RunDetailView: Flipped {
             let st = LiveLabel.make(.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
                                     run.conclusion == "failure" ? C_FAILURE : .secondaryLabelColor) {
                 switch run.status {
-                case "completed": return "\(statusText(run)) \u{00B7} \(runDuration(run))"
+                case "completed": return "\(run.statusText) \u{00B7} \(runDuration(run))"
                 case "in_progress": return "\(fmtDuration(runElapsed(run))) elapsed"
-                default: return statusText(run)
+                default: return run.statusText
                 }
             }
             st.alignment = .right
@@ -559,7 +560,7 @@ func buildActionsContent(_ w: CGFloat) -> [NSView] {
         // Each group sorts by its most recent run.
         let items = data.flatMap { repo, runs in
             let visible = visibleRuns(runs)
-            return groupRuns(shownRuns(visible)).map {
+            return shownRuns(visible).grouped().map {
                 (repo: repo, group: $0, lead: $0.min(by: newerActivity)!, history: visible)
             }
         }.sorted { newerActivity($0.lead, $1.lead) }
@@ -586,7 +587,7 @@ func buildActionsContent(_ w: CGFloat) -> [NSView] {
                 if aActive != bActive { return aActive }
                 return false  // preserve API order otherwise
             }
-            for group in groupRuns(sorted) {
+            for group in sorted.grouped() {
                 appendRun(&rows, repo: repo, group: group, history: visible, w: w, showRepo: false)
             }
         }
@@ -629,9 +630,9 @@ func ensureRunDetail(repo: String, group: [Run], key: String) {
     let cachedJobs = jobsCache.mapValues(\.jobs)
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
         let msg = needMsg ? fetchCommitMessage(repo: repo, sha: sha) : nil
-        var jobs: [(Run, [RunJob])] = []
+        var jobs: [(Run, [Job])] = []
         for r in needJobs { if let j = fetchRunJobs(repo: repo, runId: r.id) { jobs.append((r, j)) } }
-        var fails: [(Int, [RunFailure])] = []
+        var fails: [(String, [Failure])] = []
         for r in needFails {
             guard let j = jobs.first(where: { $0.0.id == r.id })?.1 ?? cachedJobs[r.id] else { continue }
             fails.append((r.id, fetchRunFailures(repo: repo, jobs: j)))

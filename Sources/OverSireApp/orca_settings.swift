@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Settings → Projects → Orca: the CLI, the host that runs agents, the agent, the
 // prompt template, and the Orca workspace of each Plane project.
@@ -8,7 +9,7 @@ extension ProjectSettingsVC {
         var version: String?
         var error: String?
         var environments: [String] = []
-        var repos: [OrcaRepo] = []
+        var repos: [RuntimeRepo] = []
     }
     static var orcaProbe: OrcaProbe?
     static var orcaProbing = false
@@ -92,7 +93,7 @@ extension ProjectSettingsVC {
             y += 22
         }
         for p in projects {
-            let key = p.ref.key
+            let key = p.ref.storeKey
             if cfg.orca.roots[key] == nil, let g = OrcaConfig.guess(p, repos) { cfg.orca.roots[key] = g }
             let root = cfg.orca.roots[key].flatMap { $0.isEmpty ? nil : $0 }
             let name = NSTextField(labelWithString: p.identifier)

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ⌘K: type to find a page, a project, an item, a run or an action. Return opens it.
 final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate {

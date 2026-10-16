@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── Workstreams ─────────────────────────────────────────────────────────────
 // A workstream joins one Plane item with its Orca cards, git checkouts, agent, runs and PRs.
@@ -54,13 +55,13 @@ struct RunLink {
 
 struct Workstream {
     let key: String
-    var item: ProjectItem?
+    var item: Item?
     var projectKey: String?           // snapshot key slug/uuid
-    var cards: [OrcaCard] = []
+    var cards: [Workspace] = []
     var checkouts: [Checkout] = []
-    var agent: ItemAgent?
+    var agent: AgentSession?
     var runs: [RunLink] = []          // newest first
-    var prs: [(repo: String, pr: PR)] = []
+    var prs: [(repo: String, pr: ChangeRequest)] = []
 
     // The latest run of each workflow, so an old failure that passed again does not count.
     var latestRuns: [RunLink] {
@@ -89,7 +90,7 @@ final class WorkstreamIndex {
     private(set) var streams: [String: Workstream] = [:]
     private(set) var checkouts: [Checkout] = []
     private(set) var unlinked: [(repo: String, run: Run)] = []
-    private var runLinks: [Int: (key: String, reason: LinkReason)] = [:]
+    private var runLinks: [String: (key: String, reason: LinkReason)] = [:]
     private var scanning = false
     private var lastScan = Date.distantPast
     private let q = DispatchQueue(label: "com.oversire.app.workstreams", qos: .utility)
@@ -99,10 +100,10 @@ final class WorkstreamIndex {
     var rules: LinkRules { LINKING }
 
     func stream(_ key: String) -> Workstream? { streams[key.uppercased()] }
-    func link(runId: Int) -> (key: String, reason: LinkReason)? { runLinks[runId] }
+    func link(runId: String) -> (key: String, reason: LinkReason)? { runLinks[runId] }
 
     // Joins everything. Cheap: no I/O. Call it after each data change.
-    func rebuild(store: ProjectStore, agents: AgentIndex, runs: [(String, [Run])], prs: [(String, [PR])]) {
+    func rebuild(store: ProjectStore, agents: AgentIndex, runs: [(String, [Run])], prs: [(String, [ChangeRequest])]) {
         let known = Set(store.tracked.map { $0.identifier.uppercased() })
         var out: [String: Workstream] = [:]
         func touch(_ key: String) -> String {
@@ -127,7 +128,7 @@ final class WorkstreamIndex {
         for co in checkouts { if let k = co.key { out[touch(k)]?.checkouts.append(co) } }
         for (k, a) in agents.agents { out[touch(k)]?.agent = a }
 
-        var links: [Int: (String, LinkReason)] = [:]
+        var links: [String: (String, LinkReason)] = [:]
         var loose: [(String, Run)] = []
         let prList = prs.flatMap { g in g.1.map { (repo: g.0, pr: $0) } }
         for (repo, list) in runs {
@@ -180,12 +181,12 @@ final class WorkstreamIndex {
         return rest.isEmpty || rest.hasPrefix("/") || rest.hasPrefix("-") || rest.hasPrefix("_") ? k : nil
     }
 
-    static func key(forPR p: PR, known: Set<String>, checkouts: [Checkout], repo: String) -> String? {
+    static func key(forPR p: ChangeRequest, known: Set<String>, checkouts: [Checkout], repo: String) -> String? {
         if let co = checkouts.first(where: { $0.branch == p.headRefName && ($0.repo.isEmpty || $0.repo == repo) }), let k = co.key { return k }
         return key(inBranch: p.headRefName, known: known) ?? key(in: p.title, known: known) ?? key(in: p.body ?? "", known: known)
     }
 
-    static func match(repo: String, run r: Run, checkouts: [Checkout], prs: [(repo: String, pr: PR)],
+    static func match(repo: String, run r: Run, checkouts: [Checkout], prs: [(repo: String, pr: ChangeRequest)],
                       known: Set<String>, rules: LinkRules) -> (String, LinkReason)? {
         let mine = checkouts.filter { $0.key != nil && ($0.repo.isEmpty || $0.repo.caseInsensitiveCompare(repo) == .orderedSame) }
         if rules.head, let co = mine.first(where: { !$0.head.isEmpty && $0.head == r.headSha }), let k = co.key { return (k, .head) }
@@ -209,7 +210,7 @@ final class WorkstreamIndex {
     // MARK: Scan of the checkouts on disk
 
     // Reads branch and HEAD of each checkout: Orca card folders, their .wt/<key>/<repo>, and the Orca roots.
-    func scan(cards: [OrcaCard], roots: [String], known: Set<String>, done: @escaping () -> Void) {
+    func scan(cards: [Workspace], roots: [String], known: Set<String>, done: @escaping () -> Void) {
         guard !scanning else { done(); return }
         scanning = true
         let rules = self.rules

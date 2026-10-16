@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 
 // Runnable check: `oversire --selftest` exercises the report math without a UI.
@@ -39,12 +40,12 @@ func runSelfTest() {
 
     // The visibility rule the icon AND the poll cadence both depend on.
     func run(_ branch: String, _ status: String) -> Run {
-        Run(id: 1, name: "ci", displayTitle: "t", status: status, conclusion: nil,
+        Run(id: "1", name: "ci", displayTitle: "t", status: status, conclusion: nil,
             headBranch: branch, headSha: "s", event: "push", url: "u/\(branch)",
             updatedAt: "", createdAt: "", startedAt: nil, number: 1,
             workflowName: "ci", actorLogin: nil)
     }
-    let bad = Run(id: 2, name: "ci", displayTitle: "t", status: "completed",
+    let bad = Run(id: "2", name: "ci", displayTitle: "t", status: "completed",
                   conclusion: "failure", headBranch: "main", headSha: "s", event: "push", url: "u/selftest-ignore",
                   updatedAt: "", createdAt: "", startedAt: nil, number: 2, workflowName: "ci", actorLogin: nil, attempt: 1)
     check(overallStatus([("o/r", [bad])]).color == C_FAILURE, "failed run turns the icon red")
@@ -59,7 +60,7 @@ func runSelfTest() {
     check(!IGNORED.contains(again), "a new attempt is not ignored")
     IGNORED.set([bad], ignored: false)
     func passed(_ wf: String) -> Run {
-        Run(id: 5, name: wf, displayTitle: "t", status: "completed", conclusion: "success", headBranch: "main",
+        Run(id: "5", name: wf, displayTitle: "t", status: "completed", conclusion: "success", headBranch: "main",
             headSha: "s", event: "push", url: "u/selftest-\(wf)", updatedAt: "", createdAt: "", startedAt: nil,
             number: 3, workflowName: wf, actorLogin: nil)
     }
@@ -69,14 +70,12 @@ func runSelfTest() {
     check(Badge("main", maxChars: 15).subviews.compactMap { $0 as? NSTextField }.first?.stringValue == "main", "short branch is not cut")
     check(Badge("dependabot/npm/lodash-4.17", maxChars: 15).subviews.compactMap { $0 as? NSTextField }.first?.stringValue == "dependa\u{2026}sh-4.17", "long branch keeps both ends")
     func dispatch(_ wf: String, _ sha: String) -> Run {
-        Run(id: 3, name: wf, displayTitle: "t", status: "completed", conclusion: "success",
+        Run(id: "3", name: wf, displayTitle: "t", status: "completed", conclusion: "success",
             headBranch: "main", headSha: sha, event: "workflow_dispatch", url: "u/\(wf)/\(sha)",
             updatedAt: "", createdAt: "", startedAt: nil, number: 1, workflowName: wf, actorLogin: "a")
     }
-    let rows = groupRuns([dispatch("Deploy", "s2"), dispatch("Deploy", "s1"), dispatch("Deploy", "s1"), dispatch("Build", "s1")])
-    check(rows.map(\.count) == [1, 1, 2], "dispatches on other commits or of the same workflow get their own row")
     func done(_ wf: String, _ created: String, _ updated: String) -> Run {
-        Run(id: 4, name: wf, displayTitle: "t", status: "completed", conclusion: "success",
+        Run(id: "4", name: wf, displayTitle: "t", status: "completed", conclusion: "success",
             headBranch: "main", headSha: "s", event: "push", url: "u/\(wf)",
             updatedAt: updated, createdAt: created, startedAt: nil, number: 1, workflowName: wf, actorLogin: nil)
     }
@@ -89,7 +88,7 @@ func runSelfTest() {
     let branches = [run("dependabot/x", "completed"), run("main", "completed")]
     check(latestPerWorkflow(branches).count == 2, "per branch keeps one run on each branch")
     check(latestPerWorkflow(branches, acrossBranches: true).map(\.headBranch) == ["dependabot/x"], "across branches keeps only the newest run")
-    let chipJob = RunJob(id: 1, name: "release-linux-amd64", status: "completed", conclusion: "success", url: nil,
+    let chipJob = Job(id: "1", name: "release-linux-amd64", status: "completed", conclusion: "success", url: nil,
                          startedAt: nil, completedAt: nil, runnerName: nil, steps: nil)
     check((JobChip(job: chipJob, notes: [], maxW: 400).subviews.first as? NSTextField)?.stringValue == "release\u{2026}x-amd64",
           "long job names keep both ends")
@@ -112,7 +111,7 @@ func runSelfTest() {
     FILTER_DEFAULT_BRANCHES = false
 
     func runAt(_ created: String, _ status: String = "completed") -> Run {
-        Run(id: 1, name: "ci", displayTitle: "t", status: status, conclusion: nil,
+        Run(id: "1", name: "ci", displayTitle: "t", status: status, conclusion: nil,
             headBranch: "main", headSha: "s", event: "push", url: "u",
             updatedAt: created, createdAt: created, startedAt: nil, number: 1,
             workflowName: "ci", actorLogin: nil)
@@ -131,7 +130,7 @@ func runSelfTest() {
 
     // detectTransitions(partial:) keeps the statuses of repos it did not refresh.
     func runURL(_ url: String, _ status: String) -> Run {
-        Run(id: 1, name: "ci", displayTitle: "t", status: status, conclusion: "success",
+        Run(id: "1", name: "ci", displayTitle: "t", status: status, conclusion: "success",
             headBranch: "main", headSha: "s", event: "push", url: url,
             updatedAt: "", createdAt: "", startedAt: nil, number: 1, workflowName: "ci", actorLogin: nil)
     }
@@ -179,19 +178,10 @@ func runSelfTest() {
     REPO_COLORS = ["o/a": 3, "o/b": 0]
     check(repoColor("o/a") == REPO_PALETTE[3], "repo color keeps its slot")
 
-    check(StatusOption(id: "1", name: "Done", color: "GREEN").category == .done, "done category")
-    check(StatusOption(id: "1", name: "Closed", color: "GREEN").category == .done, "closed category")
-    check(StatusOption(id: "1", name: "Shipped", color: "GREEN").category == .done, "shipped category")
-    check(StatusOption(id: "1", name: "Blocked", color: "RED").category == .blocked, "blocked category")
-    check(StatusOption(id: "1", name: "In review", color: "PURPLE").category == .review, "review category")
-    check(StatusOption(id: "1", name: "In progress", color: "YELLOW").category == .progress, "progress category")
-    check(StatusOption(id: "1", name: "Doing", color: "YELLOW").category == .progress, "doing category")
-    check(StatusOption(id: "1", name: "Backlog", color: "GRAY").category == .todo, "todo category")
-
     let wsUUID = "11111111-2222-3333-4444-555555555555"
     func projectItem(_ id: String, status: String?, fields: [String: String] = [:], assignees: [String] = [],
-                     author: String? = "bea", comments: Int = 0, last: CommentRef? = nil) -> ProjectItem {
-        ProjectItem(id: id, key: "ENG-\(id)", title: "Item \(id)", url: "https://app.plane.so/acme/browse/ENG-\(id)/",
+                     author: String? = "bea", comments: Int = 0, last: Comment? = nil) -> Item {
+        Item(id: id, key: "ENG-\(id)", title: "Item \(id)", url: "https://app.plane.so/acme/browse/ENG-\(id)/",
                     statusOptionId: status, fields: fields, assignees: assignees, labels: [], author: author,
                     updatedBy: author, updatedAt: Date(timeIntervalSince1970: 1_700_000_000),
                     activityAt: Date(timeIntervalSince1970: 1_700_000_000), commentCount: comments, lastComment: last,
@@ -202,16 +192,16 @@ func runSelfTest() {
     func summary(_ ws: String, _ id: String, _ title: String) -> ProjectSummary {
         ProjectSummary(ref: ProjectRef(workspace: ws, id: id), identifier: "ENG", title: title, url: "", closed: false)
     }
-    func projectSnap(_ items: [ProjectItem], me: String? = "ada") -> ProjectSnapshot {
+    func projectSnap(_ items: [Item], me: String? = "ada") -> ProjectSnapshot {
         ProjectSnapshot(summary: summary("acme", wsUUID, "Board"), statusOptions: [todoOpt, doingOpt],
                         items: items, fetchedAt: Date(timeIntervalSince1970: 1_700_000_040), me: me)
     }
     // My items: an agent that waits, then failing CI, then working, then the status order.
     do {
         let snap = projectSnap([])
-        func stream(_ key: String, _ phase: ItemAgent.Phase?) -> Workstream {
+        func stream(_ key: String, _ phase: AgentSession.Phase?) -> Workstream {
             var s = Workstream(key: key)
-            s.agent = phase.map { ItemAgent(phase: $0, since: Date()) }
+            s.agent = phase.map { AgentSession(phase: $0, since: Date()) }
             return s
         }
         let got = MyItemsPage.order([
@@ -222,13 +212,9 @@ func runSelfTest() {
         ]).map(\.item.key)
         check(got == ["ENG-4", "ENG-3", "ENG-2", "ENG-1"], "my items order: \(got)")
     }
-    check(StatusOption(id: "1", name: "Blocked", color: "", group: "started").category == .blocked, "started group splits blocked")
-    check(StatusOption(id: "1", name: "Ready", color: "", group: "completed").category == .done, "completed group is done")
-    check(StatusOption(id: "1", name: "Won't do", color: "", group: "cancelled").category == .done, "cancelled group is done")
-    check(StatusOption(id: "1", name: "Done soon", color: "", group: "backlog").category == .todo, "group wins over name")
     check(ProjectStore.diff(nil, projectSnap([projectItem("a", status: "s1")])).isEmpty, "first snapshot is quiet")
     let before = projectSnap([projectItem("a", status: "s1", fields: ["Priority": "Low"], assignees: ["ada"])])
-    let comment = CommentRef(id: "c1", author: "grace", createdAt: Date(timeIntervalSince1970: 1_700_000_050), url: "https://example/c1")
+    let comment = Comment(id: "c1", author: "grace", createdAt: Date(timeIntervalSince1970: 1_700_000_050), url: "https://example/c1")
     let after = projectSnap([
         projectItem("a", status: "s2", fields: ["Priority": "High"], assignees: ["ada", "grace"], comments: 2, last: comment),
         projectItem("b", status: "s1"),
@@ -244,7 +230,7 @@ func runSelfTest() {
     check(changed("a") { if case .comments(_, let last) = $0 { return last.id == "c1" }; return false }, "diff comments")
     let removed = ProjectStore.diff(after, projectSnap([projectItem("b", status: "s1")]))
     check(removed.contains { $0.itemId == "a" && $0.1 == .removed }, "diff removed")
-    let oldComment = CommentRef(id: "c0", author: "grace", createdAt: Date(timeIntervalSince1970: 1_600_000_000), url: "")
+    let oldComment = Comment(id: "c0", author: "grace", createdAt: Date(timeIntervalSince1970: 1_600_000_000), url: "")
     let lateLoad = ProjectStore.diff(before, projectSnap([projectItem("a", status: "s1", fields: ["Priority": "Low"],
                                                                        assignees: ["ada"], comments: 1, last: oldComment)]))
     check(lateLoad.isEmpty, "an old comment that loads late is quiet \(lateLoad)")
@@ -278,7 +264,7 @@ func runSelfTest() {
     notifier.handle([("b", .assigned("bea"))], in: theirs, settings: settings)
     check(notes.count == 1 && notes[0].body == "Assigned Ada", "assigned notifies only me")
     notes = []
-    let own = ItemChange.comments(new: 1, last: CommentRef(id: "c", author: "Ada", createdAt: clock, url: "u"))
+    let own = ItemChange.comments(new: 1, last: Comment(id: "c", author: "Ada", createdAt: clock, url: "u"))
     notifier.handle([("a", own)], in: mine, settings: settings)
     check(notes.isEmpty, "own comments are skipped")
     notifier.handle([("a", .field(name: "Priority", from: "Low", to: "High"))], in: mine, settings: settings)
@@ -309,7 +295,7 @@ func runSelfTest() {
         relayEvent(#"{"seq":8,"deliveryId":"h","repo":"","org":"acme","kind":"plane","projectId":"P9"}"#),
     ], knownRepos: ["O/Kept"])
     check(plan.repos == ["O/Kept"] && plan.completedRuns.count == 1
-            && plan.completedRuns[0].0 == "O/Kept" && plan.completedRuns[0].1 == 9, "relay plan keeps known repos")
+            && plan.completedRuns[0].0 == "O/Kept" && plan.completedRuns[0].1 == "9", "relay plan keeps known repos")
     check(plan.includePRs, "pull request events refresh PRs")
     let planned = plan.plane.map { "\($0.workspace)/\($0.project ?? "*")" }
     check(planned == ["acme/P1", "beta/*"], "relay plan groups plane events \(planned)")
@@ -377,55 +363,12 @@ func runSelfTest() {
     var orderCfg = ProjectsConfig()
     orderCfg.order = ["zed/9", "ACME/2", "gone/7"]
     let ordered = orderCfg.sorted([summary("acme", "1", "Beta"), summary("acme", "2", "Alpha"), summary("zed", "9", "Zed"),
-                                   summary("bolt", "3", "Bolt"), summary("acme", "4", "Aardvark")]).map(\.ref.key)
+                                   summary("bolt", "3", "Bolt"), summary("acme", "4", "Aardvark")]).map(\.ref.storeKey)
     check(ordered == ["zed/9", "acme/2", "acme/4", "acme/1", "bolt/3"], "project order \(ordered)")
     orderCfg.setFolded("acme/1", true)
     check(orderCfg.isFolded("ACME/1"), "fold is case-insensitive")
     orderCfg.setFolded("acme/1", false)
     check(orderCfg.folded.isEmpty, "unfold")
-    let nextOpt = StatusOption(id: "s3", name: "Next", color: "BLUE")
-    let reviewOpt = StatusOption(id: "s4", name: "In review", color: "PURPLE")
-    let doneOpt = StatusOption(id: "s5", name: "Done", color: "GREEN")
-    let foldSnap = ProjectSnapshot(summary: summary("acme", "4", "Board"),
-                                   statusOptions: [todoOpt, nextOpt, reviewOpt, doneOpt],
-                                   items: [projectItem("1", status: "s3"), projectItem("2", status: "s4"),
-                                           projectItem("3", status: "s5"), projectItem("4", status: nil)],
-                                   fetchedAt: Date())
-    check(foldSnap.notDoneCount(foldSnap.items) == 3, "fold count is items not done")
-    check(foldSnap.sortedItems.map(\.id) == ["2", "1", "4", "3"], "status order \(foldSnap.sortedItems.map(\.id))")
-    func pri(_ id: String, _ status: String, _ p: String?) -> ProjectItem {
-        projectItem(id, status: status, fields: p.map { ["Priority": $0] } ?? [:])
-    }
-    let priSnap = ProjectSnapshot(summary: summary("acme", "5", "Board"), statusOptions: [todoOpt, doingOpt, doneOpt],
-                                  items: [pri("a", "s1", "Low"), pri("b", "s1", nil), pri("c", "s1", "Urgent"),
-                                          pri("d", "s5", "Urgent"), pri("e", "s2", "Low"), pri("f", "s2", "High")],
-                                  fetchedAt: Date())
-    check(priSnap.sortedItems.map(\.id) == ["f", "e", "c", "a", "b", "d"], "priority order \(priSnap.sortedItems.map(\.id))")
-    // Sub-items: a tree from parentId, progress from the index.
-    func child(_ id: String, _ parent: String?, _ status: String) -> ProjectItem {
-        var i = projectItem(id, status: status); i.parentId = parent; return i
-    }
-    var treeSnap = ProjectSnapshot(summary: summary("acme", "4", "Board"), statusOptions: [todoOpt, doingOpt, doneOpt],
-                                   items: [child("p", nil, "s1"), child("c1", "p", "s5"), child("c2", "p", "s1"),
-                                           child("g1", "c2", "s5"), child("o", "gone", "s1")], fetchedAt: Date())
-    check(treeSnap.rootItems.map(\.id) == ["p", "o"], "roots keep orphans \(treeSnap.rootItems.map(\.id))")
-    check(treeSnap.listed(subItems: true).count == 5, "listed with sub-items")
-    check(treeSnap.children(of: "p").map(\.id) == ["c2", "c1"], "children sort done last")
-    check(treeSnap.progress(of: "p") == (1, 2) && treeSnap.progress(of: "c1") == (0, 0), "progress from items")
-    check(treeSnap.ancestors(of: "g1") == ["c2", "p"] && treeSnap.ancestors(of: "o").isEmpty, "ancestors")
-    treeSnap.index = [ItemStub(id: "c1", parentId: "p", stateId: "s5", activityAt: nil),
-                      ItemStub(id: "c2", parentId: "p", stateId: "s1", activityAt: nil),
-                      ItemStub(id: "c3", parentId: "p", stateId: "s5", activityAt: nil)]
-    check(treeSnap.progress(of: "p") == (2, 3), "progress counts sub-items that are not loaded")
-    check(treeSnap.notDoneCount(treeSnap.rootItems) == 2, "folded count uses the listed items")
-    let oldItem = try? JSONDecoder().decode(ProjectItem.self, from: JSONEncoder().encode(projectItem("z", status: nil)))
-    check(oldItem?.parentId == nil, "item without parent decodes")
-
-    var bodyItem = projectItem("9", status: nil)
-    bodyItem.body = "The Relay drops events"
-    check(bodyItem.matches("relay") && bodyItem.matches("ITEM 9") && bodyItem.matches("eng-9") && bodyItem.matches("  ") && !bodyItem.matches("nope"),
-          "filter matches title and body")
-
     // AI dialects, without network.
     var aiCfg = AIConfig()
     aiCfg.baseURL = "https://llm.example.com/v1/"
@@ -495,47 +438,6 @@ func runSelfTest() {
     check(changed.extraContext == "" && (try? JSONDecoder().decode(AIConfig.self, from: Data("{}".utf8)))?.effort == "low",
           "ai config defaults")
 
-    // Copy for agent.
-    let agentSnap = ProjectSnapshot(summary: ProjectSummary(ref: ProjectRef(workspace: "ocral", id: wsUUID), identifier: "FRITZ",
-                                                            title: "Fritz", url: "https://app.plane.so/ocral/projects/x/issues/",
-                                                            closed: false),
-                                    statusOptions: [todoOpt, doingOpt], items: [], fetchedAt: Date())
-    let draftItem = ProjectItem(id: "u-1", key: "FRITZ-7", title: "Add quick capture", url: "https://app.plane.so/ocral/browse/FRITZ-7/",
-                                statusOptionId: "s1", fields: ["Priority": "High", "Title": "Add quick capture"], assignees: [],
-                                labels: ["ui"], author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(),
-                                commentCount: 0, lastComment: nil, mentionsMe: false, body: "Use ⌃⌥N.\n")
-    check(draftItem.agentMarkdown(snap: agentSnap, comments: []) == """
-    # Add quick capture
-
-    Project: ocral/Fritz · Work item: FRITZ-7 · Status: Todo · Priority: High · Labels: ui
-    https://app.plane.so/ocral/browse/FRITZ-7/
-
-    Use ⌃⌥N.
-
-    ## Comments
-    _None_
-
-    """, "agent markdown without comments \(draftItem.agentMarkdown(snap: agentSnap, comments: []))")
-    let issueItem = ProjectItem(id: "u-2", key: "FRITZ-5", title: "Fix login", url: "https://app.plane.so/ocral/browse/FRITZ-5/",
-                                statusOptionId: "s2", fields: [:], assignees: ["ada"], labels: [], author: "bea", updatedBy: "bea",
-                                updatedAt: Date(), activityAt: Date(), commentCount: 2, lastComment: nil, mentionsMe: false, body: nil)
-    let c1 = CommentRef(id: "c1", author: "bea", createdAt: Date(timeIntervalSince1970: 1_700_000_000), url: "", body: "First\nline two")
-    let c2 = CommentRef(id: "c2", author: "ada", createdAt: Date(timeIntervalSince1970: 1_700_100_000), url: "", body: "Done?")
-    check(issueItem.agentMarkdown(snap: agentSnap, comments: [c2, c1]) == """
-    # Fix login
-
-    Project: ocral/Fritz · Work item: FRITZ-5 · Status: In progress · Assignees: @ada
-    https://app.plane.so/ocral/browse/FRITZ-5/
-
-    _No description_
-
-    ## Comments
-    - @bea (2023-11-14): First
-      line two
-    - @ada (2023-11-16): Done?
-
-    """, "agent markdown with comments")
-
     // Quick capture shortcut label.
     check(CaptureConfig().shortcutLabel == "⌃⌥N", "default shortcut label")
     var cap = CaptureConfig()
@@ -568,40 +470,43 @@ func runSelfTest() {
         let cards = OrcaClient.cards(from: r)
         check(cards.count == 3 && cards[0].agents.count == 2 && cards[0].liveTerminals == 1, "orca cards parse")
         let t0 = Date(timeIntervalSince1970: 3100)
-        let launches = ["SLING-5": AgentIndex.Launch(at: t0, card: "r2::/c", paneKey: "t5:l5"),
-                        "SLING-6": AgentIndex.Launch(at: t0, error: "Orca is not reachable"),
-                        "SLING-7": AgentIndex.Launch(at: t0)]
+        let launches = ["SLING-5": AgentIndex.PendingLaunch(at: t0, card: "r2::/c", paneKey: "t5:l5"),
+                        "SLING-6": AgentIndex.PendingLaunch(at: t0, error: "Orca is not reachable"),
+                        "SLING-7": AgentIndex.PendingLaunch(at: t0)]
         let idx = AgentIndex.index(cards, launches: launches, now: t0)
         check(idx["TOWERTAIL-2"]?.phase == .waiting && idx["TOWERTAIL-2"]?.paneKey == "t2:l2", "card name match, waiting wins")
         check(idx["FRITZ-17"]?.phase == .working && idx["FRITZ-17"]?.repo == "oversire", "prompt URL match")
-        check(idx["SLING-5"]?.phase == .working && idx["SLING-5"]?.type == "codex", "launch pane match")
+        check(idx["SLING-5"]?.phase == .working && idx["SLING-5"]?.agent == "codex", "launch pane match")
         check(idx["SLING-6"]?.phase == .failed && idx["SLING-6"]?.label() == "Not started", "failed launch")
         check(idx["SLING-7"]?.phase == .starting, "pending launch")
         check(idx["TREBI-9"] == nil, "done agent of a closed terminal drops")
         check(idx.count == 5, "agent index size \(idx.count)")
         let late = AgentIndex.index(cards, launches: [:], now: t0.addingTimeInterval(2 * 86400))
         check(late["TOWERTAIL-2"]?.phase == .waiting && late["FRITZ-17"]?.phase == .working, "old waiting agents stay")
-        check(ItemAgent(phase: .working, since: t0).label(now: t0.addingTimeInterval(4 * 60 + 5)) == "Working 4m", "working label")
+        check(AgentSession(phase: .working, since: t0).label(now: t0.addingTimeInterval(4 * 60 + 5)) == "Working 4m", "working label")
         var feed = OrcaFeed(limit: 3)
         feed.record(before: [:], after: idx)
         check(feed.events.count == 3 && feed.events.map(\.at) == feed.events.map(\.at).sorted(by: >), "feed keeps the newest events")
         var f2 = OrcaFeed()
-        let w = ItemAgent(phase: .working, since: t0, repo: "r")
+        let w = AgentSession(phase: .working, since: t0, repo: "r")
         f2.record(before: [:], after: ["A-1": w])
         f2.record(before: ["A-1": w], after: ["A-1": w])
-        let ask = ItemAgent(phase: .waiting, since: t0.addingTimeInterval(60), repo: "r", message: "Pick one")
+        let ask = AgentSession(phase: .waiting, since: t0.addingTimeInterval(60), repo: "r", message: "Pick one")
         f2.record(before: ["A-1": w], after: ["A-1": ask])
-        let back = ItemAgent(phase: .working, since: t0.addingTimeInterval(120), repo: "r")
+        let back = AgentSession(phase: .working, since: t0.addingTimeInterval(120), repo: "r")
         f2.record(before: ["A-1": ask], after: ["A-1": back])
         check(f2.events.map(\.text) == ["Got input, works again", "Needs input: Pick one", "Session works"], "feed transitions \(f2.events.map(\.text))")
     } else { check(false, "orca ps parse") }
     let terms = [OrcaTerminal(handle: "h1", card: "c", title: "Terminal 1", paneKey: "t1:l1", orphaned: false),
                  OrcaTerminal(handle: "h2", card: "c", title: "✳ FRITZ-27", paneKey: "t2:l2", orphaned: false)]
-    check(AgentIndex.pick(terms, agent: ItemAgent(phase: .working, since: Date(), paneKey: "t1:l1"), key: "FRITZ-27")?.handle == "h1", "pick by pane")
-    check(AgentIndex.pick(terms, agent: ItemAgent(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-27")?.handle == "h2", "pick by key title")
-    check(AgentIndex.pick(terms, agent: ItemAgent(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-9") == nil, "no wrong terminal")
+    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "t1:l1"), key: "FRITZ-27")?.handle == "h1", "pick by pane")
+    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-27")?.handle == "h2", "pick by key title")
+    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-9") == nil, "no wrong terminal")
     let titled = [terms[0], OrcaTerminal(handle: "h3", card: "c", title: "◐ OverSire standalone Mac app", paneKey: "pty:x", orphaned: true)]
-    check(AgentIndex.pick(titled, agent: ItemAgent(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-28")?.handle == "h3", "pick the one agent title")
+    check(AgentIndex.pick(titled, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-28")?.handle == "h3", "pick the one agent title")
+    let draftItem = Item(id: "u-1", key: "FRITZ-7", title: "Add quick capture", url: "https://app.plane.so/ocral/browse/FRITZ-7/",
+                         statusOptionId: "s1", fields: [:], assignees: [], labels: [], author: nil, updatedBy: nil,
+                         updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
     var oc = OrcaConfig()
     check(oc.prompt(for: draftItem) == "work on https://app.plane.so/ocral/browse/FRITZ-7/ in worktree group .wt/fritz-7", "orca prompt template")
     oc.prompt = "{KEY}: {title}"
@@ -618,7 +523,7 @@ func runSelfTest() {
     }
     check(Route(url: URL(string: "oversire://item/FRITZ-17")!) == .item("FRITZ-17", .overview), "oversire://item/FRITZ-17 is the item")
     check(Route(url: URL(string: "oversire:item/fritz-17/session")!) == .item("FRITZ-17", .session), "oversire:item/… without slashes")
-    check(Route(url: URL(string: "oversire:///run/oversire/oversire/42")!) == .run(repo: "oversire/oversire", id: 42), "oversire:/// run link")
+    check(Route(url: URL(string: "oversire:///run/oversire/oversire/42")!) == .run(repo: "oversire/oversire", id: "42"), "oversire:/// run link")
     check(Route(url: URL(string: "oversire://runs/failed")!) == .runs(.failed), "runs filter link")
     check(Route(url: URL(string: "https://item/FRITZ-17")!) == nil, "other schemes are not routes")
     check(Route(url: URL(string: "oversire://item/17")!) == nil, "an item needs a key")
@@ -668,7 +573,7 @@ func runSelfTest() {
     // Workstream linking: branches and SHAs → item key, or unlinked.
     do {
         func wr(_ branch: String, sha: String = "0000", title: String = "t") -> Run {
-            Run(id: 9, name: "ci", displayTitle: title, status: "completed", conclusion: "success", headBranch: branch,
+            Run(id: "9", name: "ci", displayTitle: title, status: "completed", conclusion: "success", headBranch: branch,
                 headSha: sha, event: "push", url: "u", updatedAt: "", createdAt: "", startedAt: nil, number: 1,
                 workflowName: "ci", actorLogin: nil)
         }
@@ -678,8 +583,8 @@ func runSelfTest() {
             Checkout(path: "/w/.wt/trebi-7/trebi", repo: "o/trebi", branch: "fix-login", head: "def", key: "TREBI-7", cardId: nil),
             Checkout(path: "/w/.wt/trebi-8/trebi", repo: "o/trebi", branch: "main", head: "999", key: "TREBI-8", cardId: nil),
         ]
-        func pr(_ branch: String, _ title: String) -> PR {
-            try! JSONDecoder().decode(PR.self, from: Data("""
+        func pr(_ branch: String, _ title: String) -> ChangeRequest {
+            try! JSONDecoder().decode(ChangeRequest.self, from: Data("""
             {"number":1,"title":"\(title)","state":"OPEN","author":{"login":"a"},"headRefName":"\(branch)","baseRefName":"main",
              "url":"u","createdAt":"","updatedAt":"","reviewDecision":null,"additions":0,"deletions":0,"isDraft":false,"labels":[],"body":null}
             """.utf8))
@@ -798,13 +703,13 @@ func runSelfTest() {
     // CI assist: flaky runs, explanation parse, digest facts.
     do {
         func run(_ id: Int, _ sha: String, _ c: String, _ at: String, wf: String = "ci") -> Run {
-            Run(id: id, name: wf, displayTitle: "t", status: "completed", conclusion: c, headBranch: "main", headSha: sha, event: "push",
+            Run(id: String(id), name: wf, displayTitle: "t", status: "completed", conclusion: c, headBranch: "main", headSha: sha, event: "push",
                 url: "u/ci-\(id)", updatedAt: at, createdAt: at, startedAt: nil, number: id, workflowName: wf, actorLogin: nil)
         }
         let hist = [run(1, "a", "failure", "2026-10-01T10:00:00Z"), run(2, "a", "success", "2026-10-01T10:10:00Z"),
                     run(3, "b", "success", "2026-10-01T11:00:00Z"), run(4, "b", "failure", "2026-10-01T11:10:00Z"),
                     run(5, "c", "failure", "2026-10-01T12:00:00Z"), run(6, "c", "success", "2026-10-01T12:05:00Z", wf: "lint")]
-        check(CIAssist.flakyRuns(hist) == [2], "flaky: fail then pass on one commit and workflow \(CIAssist.flakyRuns(hist))")
+        check(CIAssist.flakyRuns(hist) == ["2"], "flaky: fail then pass on one commit and workflow \(CIAssist.flakyRuns(hist))")
         var retry = run(7, "d", "success", "2026-10-01T13:00:00Z"); retry.attempt = 2
         check(CIAssist.passedOnRetry(old: (1, true), new: retry), "flaky: attempt 2 passed after attempt 1 failed")
         check(!CIAssist.passedOnRetry(old: (2, true), new: retry), "flaky: same attempt is not a retry")
@@ -847,13 +752,13 @@ func runSelfTest() {
         check(OverSireBlock.merge(legacy, block: "<p>new</p>") == "<p>x</p>" + OverSireBlock.wrap("<p>new</p>"), "block: replaces the Cat Eye block")
         // A relay event that changes a run changes the fingerprint; the same poll result does not.
         func fr(_ status: String, _ c: String?) -> Run {
-            Run(id: 9, name: "ci", displayTitle: "t", status: status, conclusion: c, headBranch: "fritz-1/x", headSha: "s", event: "push",
+            Run(id: "9", name: "ci", displayTitle: "t", status: status, conclusion: c, headBranch: "fritz-1/x", headSha: "s", event: "push",
                 url: "u/9", updatedAt: "", createdAt: "", startedAt: nil, number: 9, workflowName: "ci", actorLogin: nil)
         }
         let fpA = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: [:], snapshots: [], lanes: [])
         let fpB = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: [:], snapshots: [], lanes: [])
         let fpC = DataFingerprint(runs: [("o/r", [fr("completed", "failure")])], prs: [], agents: [:], snapshots: [], lanes: [])
-        let fpD = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: ["FRITZ-1": ItemAgent(phase: .waiting, since: .distantPast)], snapshots: [], lanes: [])
+        let fpD = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: ["FRITZ-1": AgentSession(phase: .waiting, since: .distantPast)], snapshots: [], lanes: [])
         check(fpA == fpB && fpA != fpC && fpA != fpD, "fingerprint: same poll same value; run or agent change differs")
         var ws1 = Workstream(key: "FRITZ-1")
         ws1.checkouts = [Checkout(path: "/w", repo: "o/r", branch: "fritz-1/x", head: "s", key: "FRITZ-1", cardId: nil)]
@@ -867,7 +772,7 @@ func runSelfTest() {
         let daily = InsightsPage.daily([dr("success", ago: 60), dr("failure", ago: 120), dr("success", ago: 86_400 * 2)], days: 3, now: noon)
         check(daily.count == 3 && daily[2].rate == 0.5 && daily[1].rate == nil && daily[0].rate == 1, "insights: daily pass rate with a gap")
         var ws = Workstream(key: "FRITZ-1")
-        ws.agent = ItemAgent(phase: .working, since: Date().addingTimeInterval(-3_000))
+        ws.agent = AgentSession(phase: .working, since: Date().addingTimeInterval(-3_000))
         let md = PlaneWriteBack.blockMarkdown(ws)
         check(md.contains("Working since") && !md.contains("50m"), "block: no running time, so it does not change each minute")
     }

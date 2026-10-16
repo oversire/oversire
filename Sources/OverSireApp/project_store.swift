@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 struct NewItem {
     var projectKey: String
@@ -50,7 +51,7 @@ final class ProjectStore {
         tracked = projects
         liveKeys = live
         restartTimer()
-        let keys = projects.map { $0.ref.key }
+        let keys = projects.map { $0.ref.storeKey }
         refresh(keys, force: false) { _ in }
     }
 
@@ -66,7 +67,7 @@ final class ProjectStore {
 
     func poll() {
         let liveRelay = relayIsLive()
-        let keys = tracked.map(\.ref.key).filter { key in
+        let keys = tracked.map(\.ref.storeKey).filter { key in
             if liveKeys.contains(key) { return !liveRelay }
             return true
         }
@@ -78,8 +79,8 @@ final class ProjectStore {
         guard !todo.isEmpty else { done(true); return }
         for k in todo { refreshing.insert(k) }
         publish()
-        let jobs = tracked.filter { todo.contains($0.ref.key) }.map { p in
-            (p, accounts.client(for: p.ref.workspace), snapshots[p.ref.key])
+        let jobs = tracked.filter { todo.contains($0.ref.storeKey) }.map { p in
+            (p, accounts.client(for: p.ref.workspace), snapshots[p.ref.storeKey])
         }
         let limit = snapshotLimit
         q.async { [weak self] in
@@ -109,7 +110,7 @@ final class ProjectStore {
     func refreshForEvents(_ events: [(workspace: String, project: String?)], done: @escaping (Bool) -> Void) {
         let keys = tracked.map(\.ref).filter { ref in
             events.isEmpty || events.contains { $0.workspace == ref.workspace && ($0.project == nil || $0.project == ref.id) }
-        }.map(\.key)
+        }.map(\.storeKey)
         if keys.isEmpty { done(true); return }
         refresh(keys, force: true, done: done)
     }
@@ -180,14 +181,13 @@ final class ProjectStore {
 
     func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: "Could not change the status", done: done) { c, project in
-            c.update(project: project, item: itemId, ["state": optionId])
+            c.update(project: project, item: itemId, ItemPatch(status: optionId))
         }
     }
 
-    // Any v1 field, for example "priority", "labels" (ids) or "assignees" (ids).
-    func update(itemId: String, fields: [String: Any], failure: String, done: @escaping (Bool) -> Void) {
+    func update(itemId: String, _ patch: ItemPatch, failure: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: failure, done: done) { c, project in
-            c.update(project: project, item: itemId, fields)
+            c.update(project: project, item: itemId, patch)
         }
     }
 
@@ -212,7 +212,7 @@ final class ProjectStore {
     func copyForAgent(_ id: String) {
         timeline(itemId: id) { [weak self] entries in
             guard let found = self?.item(id) else { return }
-            let comments = entries.compactMap { e -> CommentRef? in
+            let comments = entries.compactMap { e -> Comment? in
                 if case .comments(_, let last) = e.change { return last }
                 return nil
             }
@@ -229,7 +229,7 @@ final class ProjectStore {
 
     func edit(itemId: String, title: String, body: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: nil, done: done) { c, project in
-            c.update(project: project, item: itemId, ["name": title, "description_html": PlaneMarkup.html(fromMarkdown: body)])
+            c.update(project: project, item: itemId, ItemPatch(title: title, bodyMarkdown: body))
         }
     }
 
@@ -240,7 +240,7 @@ final class ProjectStore {
         let current = found.item.statusOptionId
         write(itemId, failure: nil, done: done) { c, project in
             if let progress, current != progress.id,
-               case .failure(let e) = c.update(project: project, item: itemId, ["state": progress.id]) {
+               case .failure(let e) = c.update(project: project, item: itemId, ItemPatch(status: progress.id)) {
                 return .failure(e)
             }
             return c.assignMe(project: project, item: itemId)
@@ -252,14 +252,12 @@ final class ProjectStore {
         guard let snap = snapshots[new.projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
             done(false, "The project is not loaded yet"); return
         }
-        var fields: [String: Any] = ["name": new.title]
-        let body = new.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !body.isEmpty { fields["description_html"] = PlaneMarkup.html(fromMarkdown: body) }
-        if let s = new.fieldOptions[ProjectSnapshot.statusFieldId] { fields["state"] = s }
-        if let p = new.fieldOptions[ProjectSnapshot.priorityFieldId] { fields["priority"] = p }
+        let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
+                              status: new.fieldOptions[ProjectSnapshot.statusFieldId],
+                              priority: new.fieldOptions[ProjectSnapshot.priorityFieldId])
         let project = snap.summary.ref.id
         q.async { [weak self] in
-            let added = client.create(project: project, fields)
+            let added = client.create(project: project, draft)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch added {
@@ -387,14 +385,14 @@ final class ProjectStore {
         notifier.intake(lines, in: snap)
     }
 
-    func item(_ id: String) -> (key: String, snap: ProjectSnapshot, item: ProjectItem)? {
+    func item(_ id: String) -> (key: String, snap: ProjectSnapshot, item: Item)? {
         for (key, snap) in snapshots {
             if let item = snap.items.first(where: { $0.id == id }) { return (key, snap, item) }
         }
         return nil
     }
 
-    func item(key: String) -> (key: String, snap: ProjectSnapshot, item: ProjectItem)? {
+    func item(key: String) -> (key: String, snap: ProjectSnapshot, item: Item)? {
         let k = key.uppercased()
         for (pk, snap) in snapshots {
             if let item = snap.items.first(where: { $0.key.uppercased() == k }) { return (pk, snap, item) }
@@ -450,7 +448,7 @@ final class ProjectStore {
     // MARK: Private
 
     private func absorb(_ snap: ProjectSnapshot) {
-        let key = snap.summary.ref.key
+        let key = snap.summary.ref.storeKey
         let old = snapshots[key]
         let changes = ProjectStore.diff(old, snap)
         snapshots[key] = snap

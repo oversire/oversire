@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // What an agent session did, from its Claude transcript or its terminal.
 struct SessionSummary: Codable, Equatable {
@@ -24,7 +25,7 @@ final class SessionNotes {
     private(set) var summaries: [String: SessionSummary] = [:]
     private(set) var answers: [String: [(q: String, a: String)]] = [:]
     private(set) var busy: Set<String> = []
-    private var phases: [String: ItemAgent.Phase] = [:]
+    private var phases: [String: AgentSession.Phase] = [:]
     private let path: String
     private let agents: AgentIndex
     private let store: ProjectStore
@@ -191,7 +192,7 @@ final class SessionNotes {
         if let item = store.item(key: k)?.item { out += ": \(item.title)\n\(item.url)" }
         out += "\n"
         if let a = agents.agent(k), let card = agents.cards.first(where: { $0.id == a.card }) {
-            out += "\nWorktree: \(card.path) (Orca card \(card.name))\nAgent: \(a.type), \(a.label())\n"
+            out += "\nWorktree: \(card.path) (Orca card \(card.name))\nAgent: \(a.agent.rawValue), \(a.label())\n"
         }
         if let s = summaries[k] { out += "\n" + s.markdown }
         return out

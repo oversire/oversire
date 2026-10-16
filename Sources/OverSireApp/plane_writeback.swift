@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── Write-back to Plane ─────────────────────────────────────────────────────
 // OverSire adds facts to Plane and never changes text of other people:
@@ -63,7 +64,7 @@ final class PlaneWriteBack {
         if let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode([String: Done].self, from: d) { done = s }
     }
 
-    static func label(_ phase: ItemAgent.Phase) -> String? {
+    static func label(_ phase: AgentSession.Phase) -> String? {
         switch phase {
         case .starting, .working: return "session:working"
         case .waiting: return "session:needs-input"
@@ -124,11 +125,11 @@ final class PlaneWriteBack {
                 }
                 if needBlock, let block {
                     let r = client.descriptionHTML(project: project, item: id).flatMap { html in
-                        client.update(project: project, item: id, ["description_html": OverSireBlock.merge(html, block: block)])
+                        client.setDescription(project: project, item: id, html: OverSireBlock.merge(html, block: block))
                     }
                     if case .failure(let e) = r { errors.append(e.message) } else { state.block = block }
                 }
-                if let review, case .failure(let e) = client.update(project: project, item: id, ["state": review.id]) { errors.append(e.message) }
+                if let review, case .failure(let e) = client.update(project: project, item: id, ItemPatch(status: review.id)) { errors.append(e.message) }
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.inFlight.remove(key)
@@ -153,7 +154,7 @@ final class PlaneWriteBack {
             }
             let mine = Set(ids.values)
             return c.labelIds(project: project, item: item).flatMap { cur in
-                c.update(project: project, item: item, ["labels": cur.filter { !mine.contains($0) } + [ids[name]!]])
+                c.update(project: project, item: item, ItemPatch(labels: cur.filter { !mine.contains($0) } + [ids[name]!]))
             }
         }
     }

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // The small menu bar popover: Now, Runs and Work. A row opens the window at its page.
 final class GlanceVC: NSViewController {
@@ -150,7 +151,7 @@ final class GlanceVC: NSViewController {
         return row
     }
 
-    private func agentRow(_ key: String, _ a: ItemAgent) -> NSView {
+    private func agentRow(_ key: String, _ a: AgentSession) -> NSView {
         let title = data.workstreams.stream(key)?.item?.title ?? a.repo
         let msg = a.message?.replacingOccurrences(of: "\n", with: " ")
         let sub = [key, a.label(), a.phase == .waiting ? msg : nil].compactMap { $0 }.joined(separator: " · ")

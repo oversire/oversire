@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 import Network
 import Security
 
@@ -787,7 +788,7 @@ struct Backoff {
 
 // The consumer of relay events. GHActionsBar implements it.
 protocol RelaySink: AnyObject {
-    func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, Int)], done: @escaping (Bool) -> Void)
+    func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, String)], done: @escaping (Bool) -> Void)
     func relayProjectRefresh(_ events: [(workspace: String, project: String?)], done: @escaping (Bool) -> Void)
     func relayFullRefresh(done: @escaping (Bool) -> Void)
     func relayStateChanged()
@@ -797,7 +798,7 @@ protocol RelaySink: AnyObject {
 struct RelayApplyPlan {
     var repos: [String] = []
     var includePRs = false
-    var completedRuns: [(String, Int)] = []
+    var completedRuns: [(String, String)] = []
     var plane: [(workspace: String, project: String?)] = []   // nil project: the whole workspace
     var wantsRepoRefresh: Bool { !repos.isEmpty }
     var wantsProjectRefresh: Bool { !plane.isEmpty }
@@ -812,7 +813,7 @@ func relayApplyPlan(_ events: [RelayEvent], knownRepos: [String]) -> RelayApplyP
             if let r = byLower[e.repo], !plan.repos.contains(r) { plan.repos.append(r) }
             if e.kind.hasPrefix("pull_request") { plan.includePRs = true }
             if e.kind == "workflow_run", e.action == "completed", let id = e.runId, let r = byLower[e.repo] {
-                plan.completedRuns.append((r, id))
+                plan.completedRuns.append((r, String(id)))
             }
         case "plane":
             guard let org = e.org, org.hasPrefix("plane:") else { break }

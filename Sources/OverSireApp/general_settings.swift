@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Settings → General: account, which tabs are shown, and updates.
 final class GeneralSettingsVC: NSViewController {

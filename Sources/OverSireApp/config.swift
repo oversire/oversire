@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 import CryptoKit
 import os
 
@@ -78,7 +79,7 @@ struct AgentsConfig: Codable, Equatable {
 // What OverSire may add to Plane. It never changes text of other people.
 struct WriteBackConfig: Codable, Equatable {
     var enabled = true
-    var links = true                    // add the PR, run and worktree links once
+    var links = true                    // add the ChangeRequest, run and worktree links once
     var labels = true                   // agent:working, agent:needs-input, agent:done
     var block = true                    // the OverSire block at the end of the body, between markers
     var sessionComment = true           // one comment with the summary when the session ends
@@ -234,7 +235,7 @@ struct ProjectsConfig: Codable {
         var rank: [String: Int] = [:]
         for (i, k) in order.enumerated() where rank[k.lowercased()] == nil { rank[k.lowercased()] = i }
         return projects.sorted { a, b in
-            let ra = rank[a.ref.key.lowercased()] ?? .max, rb = rank[b.ref.key.lowercased()] ?? .max
+            let ra = rank[a.ref.storeKey.lowercased()] ?? .max, rb = rank[b.ref.storeKey.lowercased()] ?? .max
             if ra != rb { return ra < rb }
             if a.ref.workspace != b.ref.workspace { return a.ref.workspace < b.ref.workspace }
             return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
@@ -294,7 +295,7 @@ struct OrcaConfig: Codable, Equatable {
     }
 
     // {url}, {key} (lowercase), {KEY} and {title}.
-    func prompt(for item: ProjectItem) -> String {
+    func prompt(for item: Item) -> String {
         (prompt.isEmpty ? OrcaConfig.defaultPrompt : prompt)
             .replacingOccurrences(of: "{url}", with: item.url)
             .replacingOccurrences(of: "{KEY}", with: item.key)
@@ -305,7 +306,7 @@ struct OrcaConfig: Codable, Equatable {
     var client: OrcaClient { OrcaClient(exe: cli, environment: environment) }
 
     // The Orca workspace whose name matches the project: "towertail-workspace" for TOWERTAIL.
-    static func guess(_ p: ProjectSummary, _ repos: [OrcaRepo]) -> String? {
+    static func guess(_ p: ProjectSummary, _ repos: [RuntimeRepo]) -> String? {
         let names = [p.identifier, p.title].map { $0.lowercased() }.flatMap { [$0 + "-workspace", $0] }
         for n in names { if let r = repos.first(where: { $0.name.lowercased() == n }) { return r.path } }
         return nil

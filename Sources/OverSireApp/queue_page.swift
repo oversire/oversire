@@ -1,4 +1,5 @@
 import AppKit
+import OverSireCore
 
 // The queue: one lane per project, and the AI checks of quiet agents.
 final class QueuePage: Page {
@@ -204,7 +205,7 @@ final class QueuePage: Page {
         var keep: [MenuAction] = []
         let store = data.projectStore
         for s in store.tracked {
-            guard let snap = store.snapshots[s.ref.key] else { continue }
+            guard let snap = store.snapshots[s.ref.storeKey] else { continue }
             let open = snap.items.filter { i in
                 let cat = snap.option(i.statusOptionId)?.category
                 return (cat == .todo || cat == nil) && data.agentIndex.agent(i.key) == nil && !data.queue.contains(i.key)

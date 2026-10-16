@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 import Carbon
 
 // ─── Quick capture shortcut ──────────────────────────────────────────────────

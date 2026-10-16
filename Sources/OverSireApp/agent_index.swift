@@ -1,23 +1,14 @@
 import AppKit
+import OverSireCore
 
 // The Orca agent of each Plane item. OverSire finds agents by the card name (the item
 // key), by the pane of an agent it started, and by the item URL in the prompt.
 
-struct ItemAgent: Equatable {
-    enum Phase: Equatable { case starting, working, waiting, done, failed }
-    var phase: Phase
-    var since: Date
-    var card: String?
-    var paneKey: String?
-    var type = "claude"
-    var repo = ""
-    var prompt: String?
-    var message: String?     // the error of a failed start, else the last agent reply
-
+extension AgentSession {
     func label(now: Date = Date()) -> String {
         switch phase {
         case .starting: return "Starting…"
-        case .working: return "Working " + ItemAgent.minutes(now.timeIntervalSince(since))
+        case .working: return "Working " + AgentSession.minutes(now.timeIntervalSince(since))
         case .waiting: return "Needs input"
         case .done: return "Session done"
         case .failed: return "Not started"
@@ -28,23 +19,13 @@ struct ItemAgent: Equatable {
         let m = max(0, Int(t / 60))
         return m < 60 ? "\(m)m" : "\(m / 60)h \(m % 60)m"
     }
-
-    var rank: Int {
-        switch phase {
-        case .waiting: return 0
-        case .working: return 1
-        case .starting: return 2
-        case .failed: return 3
-        case .done: return 4
-        }
-    }
 }
 
 // One agent state change, for the Orca activity list.
 struct OrcaEvent: Equatable {
     let key: String
     let repo: String
-    let phase: ItemAgent.Phase
+    let phase: AgentSession.Phase
     let at: Date
     let text: String
 }
@@ -54,7 +35,7 @@ struct OrcaFeed {
     var limit = 50
     private(set) var events: [OrcaEvent] = []
 
-    mutating func record(before: [String: ItemAgent], after: [String: ItemAgent]) {
+    mutating func record(before: [String: AgentSession], after: [String: AgentSession]) {
         for (key, a) in after {
             let old = before[key]
             guard old?.phase != a.phase || (a.phase != .working && old?.since != a.since) else { continue }
@@ -64,7 +45,7 @@ struct OrcaFeed {
         if events.count > limit { events.removeLast(events.count - limit) }
     }
 
-    static func text(_ a: ItemAgent, from old: ItemAgent.Phase?) -> String {
+    static func text(_ a: AgentSession, from old: AgentSession.Phase?) -> String {
         let msg = a.message.map { ": " + $0.replacingOccurrences(of: "\n", with: " ").prefix(120) } ?? ""
         switch a.phase {
         case .starting: return "Session starts"
@@ -79,18 +60,18 @@ struct OrcaFeed {
 final class AgentIndex: NSObject {
     static let changed = Notification.Name("AgentIndexChanged")
 
-    struct Launch: Equatable {
+    struct PendingLaunch: Equatable {
         var at: Date
         var card: String?
         var paneKey: String?
         var error: String?
     }
 
-    private(set) var agents: [String: ItemAgent] = [:]   // uppercased item key
-    private(set) var cards: [OrcaCard] = []                // the last `worktree ps`
+    private(set) var agents: [String: AgentSession] = [:]   // uppercased item key
+    private(set) var cards: [Workspace] = []                // the last `worktree ps`
     private(set) var lastError: String?
     private(set) var feed = OrcaFeed()
-    private var launches: [String: Launch] = [:]
+    private var launches: [String: PendingLaunch] = [:]
     private var notified: [String: String] = [:]
     private var primed = false
     private var polling = false
@@ -101,11 +82,11 @@ final class AgentIndex: NSObject {
     var now: () -> Date = Date.init
     var visible: () -> Bool = { false }
     // Called once for each agent that holds a new waiting or done state for 10 seconds.
-    var onAlert: ((_ key: String, _ agent: ItemAgent) -> Void)?
+    var onAlert: ((_ key: String, _ agent: AgentSession) -> Void)?
 
     private var cfg: OrcaConfig { PROJECTS_CFG.orca }
 
-    func agent(_ key: String) -> ItemAgent? { agents[key.uppercased()] }
+    func agent(_ key: String) -> AgentSession? { agents[key.uppercased()] }
 
     // Self when Orca is on and installed, else nil. The UI shows no Orca controls then.
     var ready: AgentIndex? { cfg.enabled && FileManager.default.isExecutableFile(atPath: cfg.cli) ? self : nil }
@@ -144,8 +125,8 @@ final class AgentIndex: NSObject {
 
     // Starts the item in the project's Orca workspace. Without a saved workspace, a menu
     // at `anchor` asks for one and saves the choice.
-    func start(_ item: ProjectItem, snap: ProjectSnapshot, anchor: NSView) {
-        let pk = snap.summary.ref.key
+    func start(_ item: Item, snap: ProjectSnapshot, anchor: NSView) {
+        let pk = snap.summary.ref.storeKey
         if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root) { _ in }; return }
         let client = cfg.client
         q.async { [weak self] in
@@ -184,7 +165,7 @@ final class AgentIndex: NSObject {
     }
 
     // A failed start offers a retry. Other states open the terminal.
-    func pillClicked(_ item: ProjectItem, snap: ProjectSnapshot, anchor: NSView) {
+    func pillClicked(_ item: Item, snap: ProjectSnapshot, anchor: NSView) {
         guard let a = agent(item.key), a.phase == .failed else { reveal(item.key); return }
         let menu = NSMenu()
         let head = NSMenuItem(title: a.message ?? "The session did not start", action: nil, keyEquivalent: "")
@@ -195,7 +176,7 @@ final class AgentIndex: NSObject {
         retry.target = self
         retry.representedObject = RechooseContext(item: item, snap: snap, anchor: anchor)
         menu.addItem(retry)
-        if cfg.roots[snap.summary.ref.key]?.isEmpty == false {
+        if cfg.roots[snap.summary.ref.storeKey]?.isEmpty == false {
             let other = NSMenuItem(title: "Choose another workspace…", action: #selector(rechoose(_:)), keyEquivalent: "")
             other.target = self
             other.representedObject = RechooseContext(item: item, snap: snap, anchor: anchor)
@@ -209,8 +190,8 @@ final class AgentIndex: NSObject {
     }
 
     private final class RechooseContext: NSObject {
-        let item: ProjectItem, snap: ProjectSnapshot, anchor: NSView
-        init(item: ProjectItem, snap: ProjectSnapshot, anchor: NSView) { (self.item, self.snap, self.anchor) = (item, snap, anchor) }
+        let item: Item, snap: ProjectSnapshot, anchor: NSView
+        init(item: Item, snap: ProjectSnapshot, anchor: NSView) { (self.item, self.snap, self.anchor) = (item, snap, anchor) }
     }
 
     @objc private func retry(_ sender: NSMenuItem) {
@@ -222,7 +203,7 @@ final class AgentIndex: NSObject {
     @objc private func rechoose(_ sender: NSMenuItem) {
         guard let c = sender.representedObject as? RechooseContext else { return }
         clearFailure(c.item.key)
-        PROJECTS_CFG.orca.roots[c.snap.summary.ref.key] = nil
+        PROJECTS_CFG.orca.roots[c.snap.summary.ref.storeKey] = nil
         saveConfig()
         start(c.item, snap: c.snap, anchor: c.anchor)
     }
@@ -232,8 +213,8 @@ final class AgentIndex: NSObject {
     }
 
     private final class PickContext: NSObject {
-        let item: ProjectItem, projectKey: String, root: String
-        init(item: ProjectItem, projectKey: String, root: String) { (self.item, self.projectKey, self.root) = (item, projectKey, root) }
+        let item: Item, projectKey: String, root: String
+        init(item: Item, projectKey: String, root: String) { (self.item, self.projectKey, self.root) = (item, projectKey, root) }
     }
 
     @objc private func pick(_ sender: NSMenuItem) {
@@ -245,26 +226,26 @@ final class AgentIndex: NSObject {
 
     private func fail(_ key: String, _ message: String) {
         let k = key.uppercased()
-        launches[k] = Launch(at: now(), error: message)
+        launches[k] = PendingLaunch(at: now(), error: message)
         let before = agents
-        agents[k] = ItemAgent(phase: .failed, since: now(), message: message)
+        agents[k] = AgentSession(phase: .failed, since: now(), message: message)
         feed.record(before: before, after: agents)
         publish()
     }
 
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
-    func start(_ item: ProjectItem, root: String, done: @escaping (Result<OrcaLaunch, OrcaError>) -> Void) {
+    func start(_ item: Item, root: String, done: @escaping (Result<Launch, OrcaError>) -> Void) {
         let key = item.key.uppercased()
         let (client, agent, prompt) = (cfg.client, cfg.agent, cfg.prompt(for: item))
-        launches[key] = Launch(at: now())
-        agents[key] = ItemAgent(phase: .starting, since: now(), type: agent, repo: (root as NSString).lastPathComponent, prompt: prompt)
+        launches[key] = PendingLaunch(at: now())
+        agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()
         q.async { [weak self] in
             let r = client.start(root: root, key: item.key, url: item.url, agent: agent, prompt: prompt)
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch r {
-                case .success(let l): self.launches[key] = Launch(at: self.now(), card: l.card, paneKey: l.paneKey)
+                case .success(let l): self.launches[key] = PendingLaunch(at: self.now(), card: l.card, paneKey: l.paneKey)
                 case .failure(let e): self.fail(key, e.message)
                 }
                 self.publish()
@@ -330,7 +311,7 @@ final class AgentIndex: NSObject {
     }
 
     // The agent's own terminal: its pane, else a live tab titled with the item key.
-    static func pick(_ ts: [OrcaTerminal], agent: ItemAgent, key: String) -> OrcaTerminal? {
+    static func pick(_ ts: [OrcaTerminal], agent: AgentSession, key: String) -> OrcaTerminal? {
         if let p = agent.paneKey, let t = ts.first(where: { $0.paneKey == p }) { return t }
         if let t = ts.first(where: { !$0.orphaned && $0.title.range(of: key, options: .caseInsensitive) != nil }) { return t }
         // The only terminal with an agent title (not "Terminal N") that names no other item.
@@ -341,7 +322,7 @@ final class AgentIndex: NSObject {
         return titled.count == 1 ? titled[0] : nil
     }
 
-    func absorb(_ cards: [OrcaCard]) {
+    func absorb(_ cards: [Workspace]) {
         let at = now()
         launches = launches.filter { at.timeIntervalSince($0.value.at) < ($0.value.error == nil ? 90 : 600) }
         let before = agents
@@ -367,11 +348,11 @@ final class AgentIndex: NSObject {
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 
     // Item key → the most urgent agent. Old done agents and agents of closed terminals drop out.
-    static func index(_ cards: [OrcaCard], launches: [String: Launch], now: Date) -> [String: ItemAgent] {
-        var out: [String: ItemAgent] = [:]
+    static func index(_ cards: [Workspace], launches: [String: PendingLaunch], now: Date) -> [String: AgentSession] {
+        var out: [String: AgentSession] = [:]
         var byPane: [String: String] = [:]
         for (k, l) in launches { if let p = l.paneKey { byPane[p] = k } }
-        func put(_ key: String, _ a: ItemAgent) {
+        func put(_ key: String, _ a: AgentSession) {
             if let cur = out[key], cur.rank <= a.rank { return }
             out[key] = a
         }
@@ -386,21 +367,19 @@ final class AgentIndex: NSObject {
             for g in c.agents {
                 let key: String
                 if named { key = name }
-                else if let k = byPane[g.paneKey] { key = k }
+                else if let k = g.paneKey.flatMap({ byPane[$0] }) { key = k }
                 else if let p = g.prompt, let m = browseRE.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)),
                         let r = Range(m.range(at: 1), in: p) { key = String(p[r]).uppercased() }
                 else { continue }
-                if g.state == .done && (c.liveTerminals == 0 || now.timeIntervalSince(g.since) > 86400) { continue }
-                let phase: ItemAgent.Phase = g.state == .working ? .working : g.state == .waiting ? .waiting : .done
-                put(key, ItemAgent(phase: phase, since: g.since, card: c.id, paneKey: g.paneKey, type: g.type,
-                                   repo: c.repo, prompt: g.prompt, message: g.lastMessage))
+                if g.phase == .done && (c.liveTerminals == 0 || now.timeIntervalSince(g.since) > 86400) { continue }
+                put(key, g)
             }
         }
         for (key, l) in launches where out[key] == nil || (out[key]?.phase == .done && l.error == nil && l.card != nil && out[key]?.paneKey != l.paneKey) {
             if let e = l.error {
-                out[key] = ItemAgent(phase: .failed, since: l.at, message: e)
+                out[key] = AgentSession(phase: .failed, since: l.at, message: e)
             } else {
-                out[key] = ItemAgent(phase: .starting, since: l.at, card: l.card, paneKey: l.paneKey,
+                out[key] = AgentSession(phase: .starting, since: l.at, card: l.card, paneKey: l.paneKey,
                                      repo: cards.first { $0.id == l.card }?.repo ?? "")
             }
         }

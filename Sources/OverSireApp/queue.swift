@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── Work queue ──────────────────────────────────────────────────────────────
 // Items wait in one lane per project. The first item of a lane starts in Orca when a slot is free
@@ -68,10 +69,10 @@ final class WorkQueue {
 
     // MARK: Edits
 
-    func add(_ item: ProjectItem, snap: ProjectSnapshot, source: QueueEntry.Source = .you) {
+    func add(_ item: Item, snap: ProjectSnapshot, source: QueueEntry.Source = .you) {
         let key = item.key.uppercased()
         guard !contains(key) else { return }
-        let pk = snap.summary.ref.key
+        let pk = snap.summary.ref.storeKey
         if !lanes.contains(where: { $0.project == pk }) {
             lanes.append(QueueLane(project: pk, identifier: snap.summary.identifier))
         }

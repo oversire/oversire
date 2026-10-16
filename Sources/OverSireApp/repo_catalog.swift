@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // One GitHub account or organization and the repos it owns.
 struct RepoOwner: Codable {

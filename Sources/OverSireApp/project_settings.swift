@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Settings → Projects: Plane workspaces, which projects to track, notifications,
 // display, and the poll interval.
@@ -209,8 +210,8 @@ final class ProjectSettingsVC: NSViewController {
             for p in projects {
                 let row = NSButton(checkboxWithTitle: " \(p.title)  \(p.identifier)", target: self, action: #selector(toggleProject(_:)))
                 row.font = .systemFont(ofSize: 12)
-                row.identifier = NSUserInterfaceItemIdentifier(p.ref.key)
-                let on = cfg.allOf.contains(slug) || cfg.picked.contains(p.ref.key)
+                row.identifier = NSUserInterfaceItemIdentifier(p.ref.storeKey)
+                let on = cfg.allOf.contains(slug) || cfg.picked.contains(p.ref.storeKey)
                 row.state = on && !p.closed ? .on : .off
                 row.isEnabled = !p.closed
                 row.frame = NSRect(x: 52, y: y, width: w - 180, height: 22)
@@ -513,7 +514,7 @@ final class ProjectSettingsVC: NSViewController {
         let owner = key.split(separator: "/").first.map(String.init) ?? key
         if cfg.allOf.contains(owner) {
             cfg.allOf.removeAll { $0 == owner }
-            cfg.picked = catalog.projects(of: owner).filter { !$0.closed && $0.ref.key != key }.map(\.ref.key)
+            cfg.picked = catalog.projects(of: owner).filter { !$0.closed && $0.ref.storeKey != key }.map(\.ref.storeKey)
         } else if sender.state == .on {
             if !cfg.picked.contains(key) { cfg.picked.append(key) }
         } else {

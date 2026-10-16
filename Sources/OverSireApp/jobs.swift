@@ -1,14 +1,15 @@
 import Cocoa
+import OverSireCore
 
 // A job in the run detail. A click opens the job on GitHub. A hover shows a summary.
 final class JobChip: NSView {
     static let height: CGFloat = 18
     static let hoverDelay: TimeInterval = 1.5
-    let job: RunJob
+    let job: Job
     let notes: [String]
     private var hoverTimer: Timer?
 
-    init(job: RunJob, notes: [String], maxW: CGFloat) {
+    init(job: Job, notes: [String], maxW: CGFloat) {
         self.job = job
         self.notes = notes
         let color = JobChip.color(job)
@@ -32,9 +33,9 @@ final class JobChip: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    static func failed(_ j: RunJob) -> Bool { ["failure", "timed_out", "startup_failure"].contains(j.conclusion ?? "") }
+    static func failed(_ j: Job) -> Bool { ["failure", "timed_out", "startup_failure"].contains(j.conclusion ?? "") }
 
-    static func color(_ j: RunJob) -> NSColor {
+    static func color(_ j: Job) -> NSColor {
         if failed(j) { return C_FAILURE }
         switch j.conclusion ?? "" {
         case "success": return C_SUCCESS
@@ -43,7 +44,7 @@ final class JobChip: NSView {
         }
     }
 
-    static func statusText(_ j: RunJob) -> String {
+    static func statusText(_ j: Job) -> String {
         switch j.conclusion ?? "" {
         case "": return j.status == "in_progress" ? "Running" : "Queued"
         case "timed_out": return "Timed out"
@@ -127,12 +128,12 @@ enum JobSummary {
     static func cancelClose() { closeTimer?.invalidate(); closeTimer = nil }
 
     // Only a failed, finished job has a log worth a look.
-    static func canLoadLog(_ j: RunJob) -> Bool {
+    static func canLoadLog(_ j: Job) -> Bool {
         j.status == "completed" && JobChip.failed(j)
     }
 
     // The job URL is github.com/{owner}/{repo}/actions/runs/{run}/job/{id}.
-    static func repoOf(_ j: RunJob) -> String? {
+    static func repoOf(_ j: Job) -> String? {
         guard let parts = j.url.flatMap(URL.init(string:))?.pathComponents, parts.count > 2 else { return nil }
         return "\(parts[1])/\(parts[2])"
     }
@@ -143,7 +144,7 @@ enum JobSummary {
     }
 
     private final class SummaryView: Flipped {
-        init(job: RunJob, notes: [String], log: String?, loading: Bool) {
+        init(job: Job, notes: [String], log: String?, loading: Bool) {
             super.init(frame: .zero)
             let pad: CGFloat = 12, w = JobSummary.width - pad * 2
             var y: CGFloat = 10
@@ -233,9 +234,9 @@ final class JobLogs: NSObject, URLSessionTaskDelegate {
     private lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
     private let queue = DispatchQueue(label: "com.oversire.app.joblogs")
     private var token: String?           // queue only
-    private var cache: [Int: String] = [:]  // main thread only
+    private var cache: [String: String] = [:]  // main thread only
 
-    func snippet(repo: String, jobId: Int, done: @escaping (String?) -> Void) {
+    func snippet(repo: String, jobId: String, done: @escaping (String?) -> Void) {
         if let s = cache[jobId] { done(s); return }
         queue.async {
             let s = self.tail(repo: repo, jobId: jobId).map(JobLogs.errorSnippet)
@@ -247,7 +248,7 @@ final class JobLogs: NSObject, URLSessionTaskDelegate {
     }
 
     // The cleaned end of the job log, read again on each call. GitHub gives the log only after the job ends.
-    func lines(repo: String, jobId: Int, done: @escaping ([String]?) -> Void) {
+    func lines(repo: String, jobId: String, done: @escaping ([String]?) -> Void) {
         queue.async {
             let l = self.tail(repo: repo, jobId: jobId).map(JobLogs.clean)
             DispatchQueue.main.async { done(l) }
@@ -260,7 +261,7 @@ final class JobLogs: NSObject, URLSessionTaskDelegate {
         completionHandler(nil)
     }
 
-    private func tail(repo: String, jobId: Int) -> String? {
+    private func tail(repo: String, jobId: String) -> String? {
         if token == nil {
             token = ghShell("auth", "token").flatMap { String(data: $0, encoding: .utf8) }?
                 .trimmingCharacters(in: .whitespacesAndNewlines)

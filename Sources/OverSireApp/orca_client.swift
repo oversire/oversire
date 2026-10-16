@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── Orca CLI ────────────────────────────────────────────────────────────────
 // OverSire starts Plane items in Orca terminals. It calls the Orca CLI by its full
@@ -10,49 +11,12 @@ struct OrcaError: Error, Equatable {
     let message: String
 }
 
-struct OrcaAgent: Equatable {
-    enum State: String { case working, waiting, done }
-    let paneKey: String
-    let state: State
-    let type: String
-    let prompt: String?
-    let lastMessage: String?
-    let since: Date
-}
-
-// One Orca card (worktree) with its agents, from `worktree ps`.
-struct OrcaCard: Equatable {
-    let id: String
-    let repo: String
-    let path: String
-    let name: String
-    let comment: String?
-    let liveTerminals: Int
-    let lastActivity: Date
-    let agents: [OrcaAgent]
-}
-
 struct OrcaTerminal: Equatable {
     let handle: String
     let card: String
     let title: String
     let paneKey: String
     let orphaned: Bool
-}
-
-struct OrcaRepo: Equatable {
-    let id: String
-    let name: String
-    let path: String
-    let folder: Bool
-}
-
-// What a start made: the card, the terminal and how far the prompt got.
-struct OrcaLaunch: Equatable {
-    let card: String
-    let handle: String
-    let paneKey: String
-    let turnStarted: Bool
 }
 
 final class OrcaClient {
@@ -87,31 +51,39 @@ final class OrcaClient {
         }
     }
 
-    func repos() -> Result<[OrcaRepo], OrcaError> {
+    func repos() -> Result<[RuntimeRepo], OrcaError> {
         run(["repo", "list"]).map { r in
             (r["repos"] as? [[String: Any]] ?? []).compactMap { d in
                 guard let id = d["id"] as? String, let path = d["path"] as? String else { return nil }
-                return OrcaRepo(id: id, name: d["displayName"] as? String ?? (path as NSString).lastPathComponent,
+                return RuntimeRepo(id: id, name: d["displayName"] as? String ?? (path as NSString).lastPathComponent,
                                 path: path, folder: d["kind"] as? String == "folder")
             }
         }
     }
 
-    func cards() -> Result<[OrcaCard], OrcaError> {
+    func cards() -> Result<[Workspace], OrcaError> {
         run(["worktree", "ps", "--limit", "500"]).map { OrcaClient.cards(from: $0) }
     }
 
-    static func cards(from r: [String: Any]) -> [OrcaCard] {
+    static func cards(from r: [String: Any]) -> [Workspace] {
         func date(_ v: Any?) -> Date { Date(timeIntervalSince1970: ((v as? Double) ?? 0) / 1000) }
         return (r["worktrees"] as? [[String: Any]] ?? []).compactMap { w in
             guard let id = w["worktreeId"] as? String, w["isArchived"] as? Bool != true else { return nil }
-            let agents = (w["agents"] as? [[String: Any]] ?? []).compactMap { a -> OrcaAgent? in
-                guard let pane = a["paneKey"] as? String, let s = (a["state"] as? String).flatMap(OrcaAgent.State.init) else { return nil }
-                return OrcaAgent(paneKey: pane, state: s, type: a["agentType"] as? String ?? "agent",
-                                 prompt: a["prompt"] as? String, lastMessage: a["lastAssistantMessage"] as? String,
-                                 since: date(a["stateStartedAt"]))
+            let repo = w["repo"] as? String ?? ""
+            let agents = (w["agents"] as? [[String: Any]] ?? []).compactMap { a -> AgentSession? in
+                guard let pane = a["paneKey"] as? String else { return nil }
+                let phase: AgentSession.Phase
+                switch a["state"] as? String {
+                case "working": phase = .working
+                case "waiting": phase = .waiting
+                case "done": phase = .done
+                default: return nil
+                }
+                return AgentSession(phase: phase, since: date(a["stateStartedAt"]), card: id, paneKey: pane,
+                                    agent: AgentName(rawValue: a["agentType"] as? String ?? "agent"), repo: repo,
+                                    prompt: a["prompt"] as? String, message: a["lastAssistantMessage"] as? String)
             }
-            return OrcaCard(id: id, repo: w["repo"] as? String ?? "", path: w["path"] as? String ?? "",
+            return Workspace(id: id, repo: repo, path: w["path"] as? String ?? "",
                             name: w["displayName"] as? String ?? "", comment: w["comment"] as? String,
                             liveTerminals: w["liveTerminalCount"] as? Int ?? 0, lastActivity: date(w["lastActivityAt"]),
                             agents: agents)
@@ -160,7 +132,7 @@ final class OrcaClient {
     // Opens a Claude session named `key` in the card for the item, then sends the prompt.
     // An existing card with that name in the root is used again. A new card gets a
     // fallback shell; OverSire types the agent command into it. It never sends the prompt twice.
-    func start(root: String, key: String, url: String, agent: String, prompt: String) -> Result<OrcaLaunch, OrcaError> {
+    func start(root: String, key: String, url: String, agent: String, prompt: String) -> Result<Launch, OrcaError> {
         let command = OrcaClient.agentCommand(agent, key: key)
         var cardId: String
         var shell: OrcaTerminal?
@@ -210,7 +182,7 @@ final class OrcaClient {
         }
         guard idle else { return .failure(OrcaError(code: "not_started", message: "The agent did not start in \(key)")) }
         return send(handle: term.handle, text: prompt).map {
-            OrcaLaunch(card: cardId, handle: term.handle, paneKey: term.paneKey, turnStarted: $0)
+            Launch(card: cardId, handle: term.handle, paneKey: term.paneKey, turnStarted: $0)
         }
     }
 

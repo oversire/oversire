@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Repositories tab: a tree of owners (the user and their orgs) and their repos.
 // The tree shows the cached catalog at once and updates while it refreshes.

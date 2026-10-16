@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 import Security
 
 // Installs signed, notarized releases from GitHub and restarts the app.

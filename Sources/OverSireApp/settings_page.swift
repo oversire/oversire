@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // A switch with a title and a note. It saves the config when it flips.
 final class SwitchRow: Row {
@@ -183,7 +184,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
                          body: "It adds links and labels, and keeps its own block between markers at the end of the body."))
         b.addFull(card("Write back to Plane", [
             SwitchRow("Write back", note: "Turn off to keep Plane read only.", on: on) { AGENTS.writeBack.enabled = $0 },
-            SwitchRow("Links", note: "Add the PR, run and worktree links once.", on: AGENTS.writeBack.links, enabled: on) { AGENTS.writeBack.links = $0 },
+            SwitchRow("Links", note: "Add the ChangeRequest, run and worktree links once.", on: AGENTS.writeBack.links, enabled: on) { AGENTS.writeBack.links = $0 },
             SwitchRow("Session labels", note: "session:working, session:needs-input, session:done.", on: AGENTS.writeBack.labels, enabled: on) { AGENTS.writeBack.labels = $0 },
             SwitchRow("OverSire block", note: "Status, worktree, CI and PR at the end of the body.", on: AGENTS.writeBack.block, enabled: on) { AGENTS.writeBack.block = $0 },
             SwitchRow("Session comment", note: "One comment with the session summary when the session ends. Needs AI.", on: AGENTS.writeBack.sessionComment, enabled: on) { AGENTS.writeBack.sessionComment = $0 },
@@ -200,7 +201,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
                          actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.accounts)) }]))
         var rows: [NSView] = []
         for p in data.projectStore.tracked.sorted(by: { $0.identifier < $1.identifier }) {
-            let root = o.roots[p.ref.key].flatMap { $0.isEmpty ? nil : $0 }
+            let root = o.roots[p.ref.storeKey].flatMap { $0.isEmpty ? nil : $0 }
             rows.append(FieldRow(p.identifier, note: p.title, NSTextField.text(root.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "No workspace", size: 12,
                                                                               color: root == nil ? Palette.dim : Palette.mut, mono: true)))
         }

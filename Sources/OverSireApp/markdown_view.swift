@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 import WebKit
 
 // Markdown with markdown-it and highlight.js from the app bundle. No network.

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // One thing that waits for the user. Home and the menu bar list them, most urgent first.
 struct NeedsYou: Equatable {

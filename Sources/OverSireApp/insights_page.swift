@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // CI over the last 7 days against the 7 days before, from the deploy log.
 final class InsightsPage: Page {

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // One line of the inbox, from Plane, GitHub, Orca, the AI checks or the intake.
 struct InboxEntry {

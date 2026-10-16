@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Review requests and my open PRs, with the linked item and the CI of the branch.
 final class PRsPage: Page {
@@ -20,12 +21,12 @@ final class PRsPage: Page {
         }
     }
 
-    private func linkedKey(_ repo: String, _ p: PR) -> String? {
+    private func linkedKey(_ repo: String, _ p: ChangeRequest) -> String? {
         data.workstreams.streams.values.first { s in s.prs.contains { $0.repo == repo && $0.pr.number == p.number } }?.key
     }
 
     // The latest run of each workflow on the PR branch. The worst one gives the tone.
-    private func checks(_ repo: String, _ p: PR) -> Tone? {
+    private func checks(_ repo: String, _ p: ChangeRequest) -> Tone? {
         let runs = latestPerWorkflow((data.grouped.first { $0.0 == repo }?.1 ?? []).filter { $0.headBranch == p.headRefName })
         guard !runs.isEmpty else { return nil }
         if let r = runs.first(where: { $0.status != "completed" }) { return Tone(r) }
@@ -33,7 +34,7 @@ final class PRsPage: Page {
         return Tone(runs[0])
     }
 
-    private func row(_ repo: String, _ p: PR) -> NSView {
+    private func row(_ repo: String, _ p: ChangeRequest) -> NSView {
         let id = "\(repo)#\(p.number)"
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
         let kind = Chiplet(p.mine ? "Mine" : "Review", color: p.mine ? Palette.mut : Palette.acc)
@@ -56,7 +57,7 @@ final class PRsPage: Page {
         } else {
             if !p.mine { views.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }) }
             views.append(MenuChip("Merge", symbol: "arrow.triangle.merge") { [weak self] in
-                [("Squash and merge", "-s"), ("Rebase and merge", "-r"), ("Merge commit", "-m")].map { t, m in
+                [("Squash and merge", MergeMethod.squash), ("Rebase and merge", .rebase), ("Merge commit", .merge)].map { t, m in
                     MenuAction(t) { self?.act(repo, p, .merge(m), verb: t) }
                 }
             })
@@ -69,7 +70,7 @@ final class PRsPage: Page {
     }
 
     // Asks first. A merge or an approval is seen by other people.
-    private func act(_ repo: String, _ p: PR, _ action: PRAction, verb: String) {
+    private func act(_ repo: String, _ p: ChangeRequest, _ action: ChangeAction, verb: String) {
         let a = NSAlert()
         a.messageText = "\(verb): \(repo.split(separator: "/").last ?? "") #\(p.number)?"
         a.informativeText = p.title

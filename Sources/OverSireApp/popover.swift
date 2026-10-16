@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── Tab View ────────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ let SUB_H: CGFloat = 32
 
 class TabVC: NSViewController {
     var grouped: [(String, [Run])]
-    var prGrouped: [(String, [PR])]
+    var prGrouped: [(String, [ChangeRequest])]
     var updated: Date
     var loading: Bool
     var selectedTab: Tab
@@ -62,7 +63,7 @@ class TabVC: NSViewController {
     var showsSubBar: Bool { selectedTab == .actions || selectedTab == .projects }
     var chrome: CGFloat { TAB_H + (showsSubBar ? SUB_H : 0) }
 
-    init(grouped: [(String, [Run])], prGrouped: [(String, [PR])], updated: Date, loading: Bool,
+    init(grouped: [(String, [Run])], prGrouped: [(String, [ChangeRequest])], updated: Date, loading: Bool,
          tab: Tab, repo: String?, expandedPR: String? = nil) {
         self.grouped = grouped; self.prGrouped = prGrouped
         self.updated = updated; self.loading = loading
@@ -119,7 +120,7 @@ class TabVC: NSViewController {
     }
 
     // Shows fresh data in the open panel. Keeps the expanded row and the scroll position.
-    func update(grouped: [(String, [Run])], prGrouped: [(String, [PR])], updated: Date, loading: Bool) {
+    func update(grouped: [(String, [Run])], prGrouped: [(String, [ChangeRequest])], updated: Date, loading: Bool) {
         self.grouped = grouped; self.prGrouped = prGrouped
         self.updated = updated; self.loading = loading
         guard isViewLoaded else { return }
@@ -219,7 +220,7 @@ class TabVC: NSViewController {
     // ⌘N or "+": the sheet sits over the list. `target` nil lets AI pick the project.
     func presentNewItem(target: String?, prefill: String?, suggest: Bool = false) {
         guard let app = NSApp.delegate as? GHActionsBar else { return }
-        let projects = app.projectCatalog.resolve(PROJECTS_CFG).filter { app.projectStore.snapshots[$0.ref.key] != nil }
+        let projects = app.projectCatalog.resolve(PROJECTS_CFG).filter { app.projectStore.snapshots[$0.ref.storeKey] != nil }
         guard !projects.isEmpty else { return }
         sheet?.removeFromSuperview()
         let s = NewItemSheet(store: app.projectStore, projects: projects, target: target, prefill: prefill, w: POP_W)
@@ -269,9 +270,9 @@ class TabVC: NSViewController {
                     lastWorkspace = p.ref.workspace
                 }
                 let item = NSMenuItem(title: "  " + p.title, action: nil, keyEquivalent: "")
-                item.representedObject = p.ref.key
+                item.representedObject = p.ref.storeKey
                 popup.menu?.addItem(item)
-                if selectedProject == p.ref.key { popup.select(item) }
+                if selectedProject == p.ref.storeKey { popup.select(item) }
             }
             if selectedProject == nil { popup.selectItem(at: 0) }
             popup.action = #selector(projectChanged(_:))

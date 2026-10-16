@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // One line in the sidebar: a page, a project or a saved view.
 struct SidebarEntry: Equatable {

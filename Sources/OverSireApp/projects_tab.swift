@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── Projects tab ────────────────────────────────────────────────────────────
 
@@ -248,7 +249,7 @@ final class ProjectHeader: NSView {
 
     init(snap: ProjectSnapshot, live: Bool, refreshing: Bool, filter: String?, updated: String, w: CGFloat,
          folded: Bool, canReorder: Bool) {
-        self.key = snap.summary.ref.key
+        self.key = snap.summary.ref.storeKey
         self.folded = folded
         let chips = snap.statusOptions
         let listed = snap.listed(subItems: PROJECTS_CFG.showSubItems)
@@ -401,7 +402,7 @@ final class AgentPill: NSView {
     private let color: NSColor
     private let dashed: Bool
 
-    init(_ agent: ItemAgent) {
+    init(_ agent: AgentSession) {
         switch agent.phase {
         case .working: color = AgentPill.orca
         case .waiting: color = .systemOrange
@@ -427,7 +428,7 @@ final class AgentPill: NSView {
             dot.layer?.add(pulse, forKey: "pulse")
         }
         addSubview(dot)
-        var tip = "\(agent.type) · \(agent.repo.isEmpty ? "Orca" : agent.repo)"
+        var tip = "\(agent.agent.rawValue) · \(agent.repo.isEmpty ? "Orca" : agent.repo)"
         if let m = agent.message, !m.isEmpty { tip += "\n" + String(m.prefix(300)) }
         toolTip = tip + (agent.phase == .failed ? "" : "\nClick to open the terminal in Orca")
         setAccessibilityRole(.button)
@@ -460,8 +461,8 @@ final class ProjectItemRow: NSView {
     private var hasAgent = false
 
     // `agent` shows a pill. `canStart` shows ▶ on hover when no agent works on the item.
-    init(item: ProjectItem, snap: ProjectSnapshot, unread: Bool, last: String?, w: CGFloat, expanded: Bool,
-         progress: (done: Int, total: Int)? = nil, agent: ItemAgent? = nil, canStart: Bool = false) {
+    init(item: Item, snap: ProjectSnapshot, unread: Bool, last: String?, w: CGFloat, expanded: Bool,
+         progress: (done: Int, total: Int)? = nil, agent: AgentSession? = nil, canStart: Bool = false) {
         self.urlStr = item.url
         self.expanded = expanded
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: ROW_H))
@@ -744,11 +745,11 @@ extension TabVC {
         if projectView == .activity { return buildActivityFeed(w, store: store) }
         var rows: [NSView] = []
         if let notice = projectNotice { rows.append(EmptyRow(notice, w: w, icon: "checkmark.circle")) }
-        let shown = selectedProject.map { key in tracked.filter { $0.ref.key == key } } ?? tracked
+        let shown = selectedProject.map { key in tracked.filter { $0.ref.storeKey == key } } ?? tracked
         let query = projectQuery.trimmingCharacters(in: .whitespaces)
         let canReorder = selectedProject == nil && shown.count > 1
         for summary in shown {
-            let key = summary.ref.key
+            let key = summary.ref.storeKey
             guard let snap = store.snapshots[key] else {
                 rows.append(LoadingRow(w: w))
                 continue
@@ -890,7 +891,7 @@ extension TabVC {
         }
     }
 
-    func isHiddenDone(_ item: ProjectItem, snap: ProjectSnapshot) -> Bool {
+    func isHiddenDone(_ item: Item, snap: ProjectSnapshot) -> Bool {
         let days = PROJECTS_CFG.hideDoneAfterDays
         guard days != 0 else { return false }
         let done = snap.option(item.statusOptionId)?.category == .done

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── New item sheet ──────────────────────────────────────────────────────────
 // An overlay on the Projects tab. AI controls (✦) show only when AI is on.
@@ -51,7 +52,7 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         self.ai = AIClient.current
         self.cardW = w - 40
         let auto = ai != nil && AI_CFG.pickProject && projects.count > 1
-        self.target = target ?? (auto ? nil : projects.first?.ref.key)
+        self.target = target ?? (auto ? nil : projects.first?.ref.storeKey)
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: 400))
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.withAlphaComponent(0.25).cgColor
@@ -97,8 +98,8 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         }
         for p in projects {
             projectPop.addItem(withTitle: "\(p.ref.workspace) › \(p.title)")
-            projectPop.lastItem?.representedObject = p.ref.key
-            if p.ref.key == target { projectPop.select(projectPop.lastItem) }
+            projectPop.lastItem?.representedObject = p.ref.storeKey
+            if p.ref.storeKey == target { projectPop.select(projectPop.lastItem) }
         }
         projectPop.target = self; projectPop.action = #selector(projectChanged)
         card.addSubview(projectPop)
@@ -330,7 +331,7 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         createBtn.title = creating ? "Creating…" : "Create  ⌘↩"
         createBtn.isEnabled = !creating && !suggesting
         if let key = picked, target == nil {
-            let title = projects.first { $0.ref.key == key }?.title ?? key
+            let title = projects.first { $0.ref.storeKey == key }?.title ?? key
             why.stringValue = "✦ " + title + (pickReason.map { " · " + $0 } ?? "")
             why.toolTip = why.stringValue
         } else {
@@ -416,7 +417,7 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
     private func context() -> DraftContext {
         var ctx = DraftContext()
         if target == nil && AI_CFG.pickProject {
-            ctx.projects = projects.map { ($0.ref.key, "\($0.ref.workspace) › \($0.title)") }
+            ctx.projects = projects.map { ($0.ref.storeKey, "\($0.ref.workspace) › \($0.title)") }
         }
         if let key = effectiveKey {
             let snap = store.snapshots[key]
@@ -523,7 +524,7 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         }
         creating = true
         show(nil)
-        let name = projects.first { $0.ref.key == key }?.title ?? key
+        let name = projects.first { $0.ref.storeKey == key }?.title ?? key
         store.create(NewItem(projectKey: key, title: title, body: body, fieldOptions: options)) { [weak self] ok, msg in
             guard let self else { return }
             self.creating = false

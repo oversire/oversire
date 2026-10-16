@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── Plane rich text ─────────────────────────────────────────────────────────
 // Plane keeps descriptions and comments as editor HTML. OverSire shows and edits

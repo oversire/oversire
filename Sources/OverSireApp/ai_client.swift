@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── AI client ───────────────────────────────────────────────────────────────
 // Calls the user's own endpoint. Two API formats: OpenAI compatible and Anthropic.

@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // ─── Deploy Log & Weekly Report ──────────────────────────────────────────────
 // Append-only history of every completed workflow run we witness while polling.

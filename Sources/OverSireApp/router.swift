@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // One place in the window. The path is the deep link: oversire://<path>.
 enum Route: Equatable {
@@ -32,7 +33,7 @@ enum Route: Equatable {
     case agents
     case queue
     case runs(RunFilter)
-    case run(repo: String, id: Int)
+    case run(repo: String, id: String)
     case prs
     case insights
     case settings(SettingsPage)
@@ -84,8 +85,8 @@ enum Route: Equatable {
         case "queue": self = .queue
         case "runs": self = .runs(rest.first.flatMap { RunFilter(rawValue: $0.lowercased()) } ?? .all)
         case "run":
-            guard rest.count == 3, let id = Int(rest[2]) else { return nil }
-            self = .run(repo: rest[0] + "/" + rest[1], id: id)
+            guard rest.count == 3, Int(rest[2]) != nil else { return nil }
+            self = .run(repo: rest[0] + "/" + rest[1], id: rest[2])
         case "prs": self = .prs
         case "insights": self = .insights
         case "settings": self = .settings(rest.first.flatMap { SettingsPage(rawValue: $0.lowercased()) } ?? .general)
@@ -142,7 +143,7 @@ enum Route: Equatable {
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
         .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .runs(.all), .runs(.unlinked),
-        .run(repo: "oversire/oversire", id: 123), .prs, .insights, .settings(.ai), .settings(.general),
+        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general),
         .project("FRITZ"), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
     ]
 }

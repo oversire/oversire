@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireCore
 
 // Colors of the window pages. Each color has a dark and a light value, the same as the preview.
 // Status colors follow Okabe-Ito. A status also always has a symbol or text.
@@ -70,7 +71,7 @@ struct Tone {
     }
 
     init(_ run: Run) { self.init(status: run.status, conclusion: run.conclusion) }
-    init(_ job: RunJob) { self.init(status: job.status ?? "queued", conclusion: job.conclusion) }
+    init(_ job: Job) { self.init(status: job.status ?? "queued", conclusion: job.conclusion) }
 
     init(status: String, conclusion: String?) {
         switch status {
@@ -87,7 +88,7 @@ struct Tone {
         }
     }
 
-    init(_ phase: ItemAgent.Phase) {
+    init(_ phase: AgentSession.Phase) {
         switch phase {
         case .starting: self = Tone(symbol: "hourglass", color: Palette.run, word: "Starting")
         case .working: self = .working

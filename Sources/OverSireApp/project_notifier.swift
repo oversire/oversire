@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // macOS notifications for project changes. "My items" means the token owner is an
 // assignee or the author. The user's own comments are skipped. Changes to one
@@ -43,11 +44,11 @@ final class ProjectNotifier {
     func intake(_ lines: [(IntakeItem, String)], in snapshot: ProjectSnapshot) {
         let title = snapshot.summary.ref.workspace + " › " + snapshot.summary.title
         for (item, text) in lines {
-            post(title, item.name, text, "intake:\(snapshot.summary.ref.key)|\(item.workItemId)")
+            post(title, item.name, text, "intake:\(snapshot.summary.ref.storeKey)|\(item.workItemId)")
         }
     }
 
-    func allows(_ change: ItemChange, item: ProjectItem?, me login: String?, settings: ProjectNotificationSettings) -> Bool {
+    func allows(_ change: ItemChange, item: Item?, me login: String?, settings: ProjectNotificationSettings) -> Bool {
         let mine = item?.isMine(login) ?? false
         switch change {
         case .mention:

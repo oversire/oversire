@@ -1,11 +1,12 @@
 import Cocoa
+import OverSireCore
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
 // one PNG per route and theme. It sends no global input, so it is safe while someone uses the Mac.
 // Plane state is a copy; re-run, write-back and agent starts do nothing here.
 final class UIShots: NSObject, AppData, NSApplicationDelegate {
     var grouped: [(String, [Run])] = []
-    var prGrouped: [(String, [PR])] = []
+    var prGrouped: [(String, [ChangeRequest])] = []
     var lastUpdate = Date()
     var firstLoad = true
     let projectStore: ProjectStore
@@ -20,7 +21,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var aiChecks = AgentJudge(path: NSTemporaryDirectory() + "oversire-uishots/checks.json", agents: agentIndex, queue: queue)
     let relay = RelayClient(secrets: SecretStore(service: "com.oversire.app.cloud"))
     private let dir: String
-    struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: PR }
+    struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: ChangeRequest }
 
     func settingsVC(_ p: Route.SettingsPage) -> NSViewController? {
         switch p {
@@ -70,7 +71,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let repos = REPOS
         DispatchQueue.global().async {
             var runs = [(String, [Run])](repeating: ("", []), count: repos.count)
-            var prs = [(String, [PR])](repeating: ("", []), count: repos.count)
+            var prs = [(String, [ChangeRequest])](repeating: ("", []), count: repos.count)
             DispatchQueue.concurrentPerform(iterations: repos.count) { i in
                 runs[i] = (repos[i], fetchRuns(repo: repos[i]) ?? [])
                 prs[i] = (repos[i], fetchPRs(repo: repos[i]))
