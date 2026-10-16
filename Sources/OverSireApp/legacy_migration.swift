@@ -1,6 +1,10 @@
 import Foundation
+import CIGitHubActions
+import CodeHostGitHub
 import OverSireCore
+import RuntimeOrca
 import Security
+import TrackerPlane
 
 // Moves the data of a Cat Eye install to OverSire on the first start.
 // It copies and never deletes, so the old app still works.
@@ -61,5 +65,47 @@ final class LegacyMigration {
         try? fm.createDirectory(atPath: newDir, withIntermediateDirectories: true)
         fm.createFile(atPath: markerPath, contents: Data(ISO8601DateFormatter().string(from: Date()).utf8))
         return true
+    }
+}
+
+// Accounts from the settings that come before the accounts list. Until the Providers
+// settings page owns the list, these four vendors come from the old fields on each load.
+extension LegacyMigration {
+    static let derivedProviders: Set<ProviderID> = [.plane, .github, .githubActions, .orca]
+
+    static func accounts(from c: AppConfig) -> [AccountConfig] {
+        var out: [AccountConfig] = []
+        for w in c.projects?.workspaces ?? [] {
+            out.append(AccountConfig(account: AccountID(provider: .plane, id: w.slug), values: ["host": w.host],
+                                     secretKeys: ["PLANE_TOKEN_\(w.slug)"]))
+        }
+        var owners: [String] = []
+        var repos: [String: [String]] = [:]
+        for r in c.repos where isValidRepo(r) {
+            let owner = String(r.split(separator: "/")[0])
+            if repos[owner] == nil { owners.append(owner) }
+            repos[owner, default: []].append(r)
+        }
+        for o in c.orgs ?? [] where repos[o] == nil {
+            owners.append(o)
+            repos[o] = []
+        }
+        for p in [ProviderID.github, .githubActions] {
+            for o in owners {
+                out.append(AccountConfig(account: AccountID(provider: p, id: o), values: ["repos": repos[o]!.joined(separator: ",")]))
+            }
+        }
+        let orca = c.projects?.orca ?? OrcaConfig()
+        if orca.enabled {
+            var values = ["cli": orca.cli, "agent": orca.agent]
+            if let e = orca.environment { values["environment"] = e }
+            out.append(AccountConfig(account: AccountID(provider: .orca, id: orca.environment ?? "local"), values: values))
+        }
+        return out
+    }
+
+    // Keeps the accounts of other vendors and makes the four old ones again.
+    static func syncAccounts(_ current: [AccountConfig], from c: AppConfig) -> [AccountConfig] {
+        current.filter { !derivedProviders.contains($0.account.provider) } + accounts(from: c)
     }
 }

@@ -698,7 +698,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         DispatchQueue.global(qos: .userInitiated).async {
             let errors = runs.compactMap { r -> String? in
                 let res = try? ghRun(["api", "-X", "POST", "repos/\(repo)/actions/runs/\(r.id)/\(endpoint)"])
-                return res?.ok == true ? nil : "\(r.workflowName ?? r.name): \(res?.err ?? "gh did not run")"
+                return res?.ok == true ? nil : "\(r.workflowName ?? r.name): \(res?.stderr ?? "gh did not run")"
             }
             DispatchQueue.main.async {
                 if errors.isEmpty {

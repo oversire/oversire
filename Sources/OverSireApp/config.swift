@@ -25,6 +25,7 @@ struct AppConfig: Codable {
     var general: GeneralConfig?
     var linking: LinkRules?
     var agents: AgentsConfig?
+    var accounts: [AccountConfig]?   // one entry for each connected vendor account
 }
 
 // How much the AI checks may do. Auto acts only on "looks done". "Looks stuck" always asks.
@@ -423,6 +424,7 @@ var AI_CFG = AIConfig()
 var GENERAL = GeneralConfig()
 var LINKING = LinkRules()
 var AGENTS = AgentsConfig()
+var ACCOUNTS: [AccountConfig] = []
 let DEFAULT_BRANCHES: Set<String> = ["main", "develop"]
 
 let repoPattern = try! NSRegularExpression(pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
@@ -456,17 +458,20 @@ func loadConfig() {
     if let g = c.general { GENERAL = g }
     if let l = c.linking { LINKING = l }
     if let a = c.agents { AGENTS = a }
+    ACCOUNTS = LegacyMigration.syncAccounts(c.accounts ?? [], from: c)
 }
 
 func saveConfig() {
     try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
-    let c = AppConfig(repos: PICKED_REPOS.filter { isValidRepo($0) },
+    var c = AppConfig(repos: PICKED_REPOS.filter { isValidRepo($0) },
                       orgs: PICKED_ORGS.isEmpty ? nil : PICKED_ORGS, pollInterval: POLL_NORMAL,
                       pollActiveInterval: POLL_ACTIVE, runsPerRepo: RUNS_PER_REPO,
                       filterDefaultBranches: FILTER_DEFAULT_BRANCHES, sortByRecent: SORT_BY_RECENT,
                       oneRowPerWorkflow: ONE_ROW_PER_WORKFLOW, latestAcrossBranches: LATEST_ACROSS_BRANCHES,
                       repoColors: REPO_COLORS.isEmpty ? nil : REPO_COLORS, autoUpdate: AUTO_UPDATE,
                       relay: RELAY, notifications: NOTIFICATIONS, tabs: TABS, projects: PROJECTS_CFG, ai: AI_CFG, general: GENERAL, linking: LINKING, agents: AGENTS)
+    ACCOUNTS = LegacyMigration.syncAccounts(ACCOUNTS, from: c)
+    c.accounts = ACCOUNTS
     if let data = try? JSONEncoder().encode(c) {
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         if let pretty = try? JSONSerialization.data(withJSONObject: json as Any, options: .prettyPrinted) {

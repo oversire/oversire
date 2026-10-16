@@ -311,13 +311,13 @@ final class HookManager {
     struct GHHook: Decodable { let id: Int; let url: String? }
     struct Delivery: Decodable { let status_code: Int; let delivered_at: String }
 
-    private func gh(_ args: [String], body: [String: Any]? = nil) -> GHResult? {
+    private func gh(_ args: [String], body: [String: Any]? = nil) -> CommandOutput? {
         let input = body.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
         return try? ghRun(args + (input != nil ? ["--input", "-"] : []), input: input)
     }
 
-    private func denied(_ r: GHResult) -> Bool {
-        let e = r.err.lowercased()
+    private func denied(_ r: CommandOutput) -> Bool {
+        let e = r.stderr.lowercased()
         return e.contains("http 404") || e.contains("http 403") || e.contains("not found") || e.contains("must have admin")
     }
 
@@ -327,8 +327,8 @@ final class HookManager {
         guard let r = gh(["api", "repos/\(repo)/hooks?per_page=100", "--jq", "[.[] | {id, url: .config.url}]"]) else {
             return .failed(.error("gh failed to start"))
         }
-        if !r.ok { return .failed(denied(r) ? .pollingOnly("No admin access") : .error(String(r.err.prefix(80)))) }
-        let hooks = (try? JSONDecoder().decode([GHHook].self, from: r.out)) ?? []
+        if !r.ok { return .failed(denied(r) ? .pollingOnly("No admin access") : .error(String(r.stderr.prefix(80)))) }
+        let hooks = (try? JSONDecoder().decode([GHHook].self, from: r.stdout)) ?? []
         return hooks.first { $0.url == url }.map { .found($0.id) } ?? .missing
     }
 
@@ -348,8 +348,8 @@ final class HookManager {
         let res = existing.map { gh(["api", "-X", "PATCH", "repos/\(repo)/hooks/\($0)", "--jq", ".id"], body: body) }
             ?? gh(["api", "-X", "POST", "repos/\(repo)/hooks", "--jq", ".id"], body: body)
         guard let r = res else { return .error("gh failed to start") }
-        guard r.ok, let id = Int(String(decoding: r.out, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            let s: HookStatus = denied(r) ? .pollingOnly("No admin access") : .error(String(r.err.prefix(80)))
+        guard r.ok, let id = Int(String(decoding: r.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            let s: HookStatus = denied(r) ? .pollingOnly("No admin access") : .error(String(r.stderr.prefix(80)))
             setStatus(repo, s); return s
         }
         _ = api.putHook(repo: repo, id: id)
@@ -368,7 +368,7 @@ final class HookManager {
         }
         guard let r = gh(["api", "repos/\(repo)/hooks/\(id)/deliveries?per_page=5",
                           "--jq", "[.[] | {status_code, delivered_at}]"]), r.ok,
-              let list = try? JSONDecoder().decode([Delivery].self, from: r.out) else {
+              let list = try? JSONDecoder().decode([Delivery].self, from: r.stdout) else {
             setStatus(repo, .waiting); return .waiting
         }
         guard let last = list.first else { setStatus(repo, .waiting); return .waiting }

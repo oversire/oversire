@@ -34,53 +34,9 @@ var lastFetchError: String? {
     set { _fetchErrQ.sync { _lastFetchError = newValue } }
 }
 
-struct GHResult {
-    let status: Int32
-    let out: Data
-    let err: String
-    var ok: Bool { status == 0 }
-}
-
 // Runs gh with optional stdin, so request bodies with secrets never appear in argv.
-func ghRun(_ args: [String], input: Data? = nil, timeout: TimeInterval? = nil) throws -> GHResult {
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: GH)
-    proc.arguments = args
-    proc.environment = ghEnv
-    let outPipe = Pipe()
-    let errPipe = Pipe()
-    proc.standardOutput = outPipe
-    proc.standardError = errPipe
-    let inPipe = input.map { _ in Pipe() }
-    if let p = inPipe { proc.standardInput = p } else { proc.standardInput = FileHandle.nullDevice }
-    try proc.run()
-    if let inPipe = inPipe, let input = input {
-        inPipe.fileHandleForWriting.write(input)
-        try? inPipe.fileHandleForWriting.close()
-    }
-    if let timeout = timeout {
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
-            guard proc.isRunning else { return }
-            proc.terminate()
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
-                if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
-            }
-        }
-    }
-    // Drain both pipes BEFORE waiting: a child that fills a 64KB pipe buffer
-    // would otherwise block forever inside waitUntilExit, stranding a worker
-    // thread per poll while new refreshes keep stacking up.
-    var errData = Data()
-    let errDone = DispatchSemaphore(value: 0)
-    DispatchQueue.global(qos: .utility).async {
-        errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        errDone.signal()
-    }
-    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-    errDone.wait()
-    proc.waitUntilExit()
-    let errStr = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return GHResult(status: proc.terminationStatus, out: outData, err: errStr)
+func ghRun(_ args: [String], input: Data? = nil, timeout: TimeInterval? = nil) throws -> CommandOutput {
+    try ProcessRunner(environment: ghEnv).runSync(GH, args, stdin: input, timeout: timeout)
 }
 
 func ghShell(_ args: String...) -> Data? {
@@ -93,7 +49,7 @@ func ghShell(_ args: String...) -> Data? {
     do {
         let res = try ghRun(args)
         guard res.ok else {
-            let errStr = res.err
+            let errStr = res.stderr
             // Public on purpose: os_log redacts interpolated strings by default,
             // which turned every one of these into "gh <private> exited 1:
             // <private>" and made a whole night of failures undiagnosable.
@@ -122,7 +78,7 @@ func ghShell(_ args: String...) -> Data? {
             return nil
         }
         lastFetchError = nil
-        return res.out
+        return res.stdout
     } catch {
         log.error("Failed to launch gh: \(error.localizedDescription)")
         lastFetchError = "Failed to run gh: \(error.localizedDescription)"
@@ -136,23 +92,9 @@ func ghStr(_ args: String...) -> String? {
         log.error("\(msg)"); lastFetchError = msg
         return nil
     }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: GH)
-    proc.arguments = Array(args)
-    proc.environment = ghEnv
-    let pipe = Pipe()
-    proc.standardOutput = pipe
-    proc.standardError = FileHandle.nullDevice
-    do {
-        try proc.run()
-        // Read to EOF before waiting so large outputs can't deadlock the pipe.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        proc.waitUntilExit()
-        guard proc.terminationStatus == 0 else { return nil }
-        let s = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return s?.isEmpty == false ? s : nil
-    } catch { return nil }
+    guard let res = try? ghRun(Array(args)), res.ok else { return nil }
+    let s = String(data: res.stdout, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return s?.isEmpty == false ? s : nil
 }
 
 let RUN_JQ = "{id, name, displayTitle: .display_title, status, conclusion, headBranch: .head_branch, headSha: .head_sha, event, url: .html_url, updatedAt: .updated_at, createdAt: .created_at, startedAt: .run_started_at, number: .run_number, workflowName: .name, actorLogin: .actor.login, attempt: .run_attempt}"
@@ -315,7 +257,7 @@ final class RateLimitMonitor {
     func fetch() {
         DispatchQueue.global(qos: .utility).async {
             guard let r = try? ghRun(["api", "rate_limit"]), r.status == 0,
-                  let rl = try? JSONDecoder().decode(RateLimit.self, from: r.out) else { return }
+                  let rl = try? JSONDecoder().decode(RateLimit.self, from: r.stdout) else { return }
             DispatchQueue.main.async { self.latest = rl; self.onChange?() }
         }
     }

@@ -141,8 +141,8 @@ final class RepoCatalog {
         do {
             let res = try ghRun(["repo", "list", login, "--limit", "1000", "--no-archived",
                                  "--json", "nameWithOwner", "--jq", ".[].nameWithOwner"])
-            guard res.ok else { return .failure(ListError(message: String(res.err.prefix(120)))) }
-            let out = String(data: res.out, encoding: .utf8) ?? ""
+            guard res.ok else { return .failure(ListError(message: String(res.stderr.prefix(120)))) }
+            let out = String(data: res.stdout, encoding: .utf8) ?? ""
             let repos = out.split(separator: "\n").map(String.init)
                 .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
             return .success(repos)

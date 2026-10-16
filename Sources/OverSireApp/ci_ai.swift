@@ -145,7 +145,7 @@ final class CIAssist {
         publish()
         q.async { [weak self] in
             let res = try? ghRun(["api", "repos/\(repo)/commits/\(r.headSha)", "--jq", ".files[].filename"], timeout: 20)
-            let files = res?.ok == true ? String(decoding: res!.out, as: UTF8.self).split(separator: "\n").map(String.init) : []
+            let files = res?.ok == true ? String(decoding: res!.stdout, as: UTF8.self).split(separator: "\n").map(String.init) : []
             ai.send(CIAssist.explainRequest(run: r, job: job.name, log: log, files: files)) { result in
                 DispatchQueue.main.async {
                     guard let self else { return }

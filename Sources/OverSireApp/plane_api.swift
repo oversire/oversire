@@ -57,6 +57,17 @@ enum PlaneError: Error, Equatable {
         case .network(let s): return s
         }
     }
+
+    var providerError: ProviderError {
+        switch self {
+        case .noToken, .unauthorized: return .unauthorized
+        case .forbidden: return .forbidden
+        case .notFound: return .notFound
+        case .http(429, _): return .rateLimited(retryAfter: nil)
+        case .http(let code, let text): return .vendor(code: String(code), message: message.isEmpty ? text : message)
+        case .network(let s): return .transport(s)
+        }
+    }
 }
 
 struct PlaneWebhook: Equatable {

@@ -530,6 +530,36 @@ func runSelfTest() {
     check(Route(url: URL(string: "oversire://settings/nope")!) == .settings(.general), "unknown settings page opens General")
     check(Route(url: URL(string: "cateye://item/FRITZ-17")!) == .item("FRITZ-17", .overview), "old cateye links still open")
 
+    // Accounts from the old settings. Only Keychain key names, never tokens.
+    do {
+        let fixture = #"""
+        {"repos":["oversire/oversire","oversire/cloud","flarco/dotfiles","bad repo"],"orgs":["oversire","acme"],
+         "projects":{"workspaces":[{"slug":"ocral"},{"slug":"btd","host":"https://plane.example.com"}],
+                     "orca":{"environment":"mbp","agent":"codex"}},
+         "accounts":[{"account":{"provider":"linear","id":"team"},"values":{},"secretKeys":["LINEAR_TOKEN"]},
+                     {"account":{"provider":"plane","id":"gone"},"values":{},"secretKeys":[]}]}
+        """#
+        if let c = try? JSONDecoder().decode(AppConfig.self, from: Data(fixture.utf8)) {
+            let a = LegacyMigration.syncAccounts(c.accounts ?? [], from: c)
+            let ids = a.map { "\($0.account.provider.rawValue):\($0.account.id)" }
+            check(ids == ["linear:team", "plane:ocral", "plane:btd", "github:oversire", "github:flarco", "github:acme",
+                          "github-actions:oversire", "github-actions:flarco", "github-actions:acme", "orca:mbp"], "accounts \(ids)")
+            check(a[2].values["host"] == "https://plane.example.com" && a[1].secretKeys == ["PLANE_TOKEN_ocral"], "plane account")
+            check(a[3].values["repos"] == "oversire/oversire,oversire/cloud" && a[5].values["repos"] == "", "github repos by owner")
+            check(a[9].values["agent"] == "codex" && a[9].values["cli"] == OrcaClient.defaultPath, "orca account")
+        } else { check(false, "accounts fixture decode") }
+    }
+    check(PlaneError.http(429, "").providerError == .rateLimited(retryAfter: nil) && PlaneError.noToken.providerError == .unauthorized,
+          "plane errors map to provider errors")
+    check(OrcaError(code: "bad_reply", message: "x").providerError == .decoding("x"), "orca errors map to provider errors")
+    do {
+        let r = ProcessRunner()
+        check((try? r.runSync("/bin/echo", ["hi"]))?.stdout == Data("hi\n".utf8), "process runner output")
+        check((try? r.runSync("/bin/cat", [], stdin: Data("in".utf8)))?.stdout == Data("in".utf8), "process runner stdin")
+        let t0 = Date()
+        check((try? r.runSync("/bin/sleep", ["5"], timeout: 0.3))?.ok == false && Date().timeIntervalSince(t0) < 3, "process runner timeout")
+    }
+
     // LegacyMigration: copy the config folder, Keychain entries and defaults one time.
     do {
         final class MemVault: SecretVault {

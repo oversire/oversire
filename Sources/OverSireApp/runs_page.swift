@@ -318,7 +318,7 @@ final class RunPage: Page {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.busy = nil
-                self.note = res?.ok == true ? (.info, "GitHub cancels the run.") : (.bad, "Could not cancel: \(res?.err ?? "gh did not run")")
+                self.note = res?.ok == true ? (.info, "GitHub cancels the run.") : (.bad, "Could not cancel: \(res?.stderr ?? "gh did not run")")
                 self.load()
             }
         }

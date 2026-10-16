@@ -9,6 +9,14 @@ import OverSireCore
 struct OrcaError: Error, Equatable {
     let code: String
     let message: String
+
+    var providerError: ProviderError {
+        switch code {
+        case "launch", "unreachable", "not_installed": return .transport(message)
+        case "bad_reply": return .decoding(message)
+        default: return .vendor(code: code, message: message)
+        }
+    }
 }
 
 struct OrcaTerminal: Equatable {
@@ -224,27 +232,11 @@ final class OrcaClient {
         guard installed else { return .failure(OrcaError(code: "not_installed", message: "Orca CLI not found at \(exe)")) }
         var full = args + ["--json"]
         if routed, let environment { full += ["--environment", environment] }
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: exe)
-        proc.arguments = full
-        proc.standardInput = FileHandle.nullDevice
-        let out = Pipe(), err = Pipe()
-        proc.standardOutput = out
-        proc.standardError = err
-        do { try proc.run() } catch { return .failure(OrcaError(code: "launch", message: error.localizedDescription)) }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
-            if proc.isRunning { proc.terminate() }
+        let res: CommandOutput
+        do { res = try ProcessRunner().runSync(exe, full, timeout: timeout) } catch {
+            return .failure(OrcaError(code: "launch", message: error.localizedDescription))
         }
-        var errData = Data()
-        let errDone = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            errData = err.fileHandleForReading.readDataToEndOfFile()
-            errDone.signal()
-        }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        errDone.wait()
-        proc.waitUntilExit()
-        return OrcaClient.parse(data, stderr: String(data: errData, encoding: .utf8) ?? "", command: args.prefix(2).joined(separator: " "))
+        return OrcaClient.parse(res.stdout, stderr: res.stderr, command: args.prefix(2).joined(separator: " "))
     }
 
     static func parse(_ data: Data, stderr: String, command: String) -> Result<[String: Any], OrcaError> {
