@@ -283,7 +283,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         chip("state", opt?.name ?? "No status", dot: projectColor(opt?.color ?? "GRAY"), tip: "Change the status")
         let pri = item.fields["Priority"]
         chip("priority", pri ?? "No priority",
-             dot: pri.flatMap { p in PlaneClient.priorities.first { $0.name == p } }.map { projectColor($0.color) },
+             dot: pri.flatMap { p in StatusOption.priorities.first { $0.name == p } }.map { projectColor($0.color) },
              tip: "Change the priority")
         chip("labels", item.labels.isEmpty ? "No labels" : item.labels.joined(separator: ", "), tip: "Add or remove labels")
         chip("assignees", item.assignees.isEmpty ? "No assignee" : item.assignees.joined(separator: ", "),
@@ -637,7 +637,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         case "state":
             for o in snap.statusOptions { add(o.name, value: o.id, on: o.id == item.statusOptionId, color: o.color) }
         case "priority":
-            for p in PlaneClient.priorities {
+            for p in StatusOption.priorities {
                 add(p.name, value: p.id, on: (item.fields["Priority"] ?? "None") == p.name, color: p.color)
             }
         default:

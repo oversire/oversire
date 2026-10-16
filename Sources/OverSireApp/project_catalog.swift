@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import TrackerPlane
 
 // The projects of each Plane workspace, for the picker. Cached on disk and
 // refreshed, per workspace, at most once a day unless the user asks.
@@ -77,7 +78,7 @@ final class ProjectCatalog {
     func refresh(_ slug: String, force: Bool = false) {
         if !force, case .loading = fetch(slug) { return }
         guard let client = accounts.client(for: slug) else {
-            status[slug] = .failed(PlaneError.noToken.message)
+            status[slug] = .failed(PlaneAccounts.noToken)
             notify()
             return
         }
@@ -86,7 +87,7 @@ final class ProjectCatalog {
         status[slug] = .loading
         notify()
         fetchQ.addOperation { [weak self] in
-            let result = client.projects()
+            let result = Result(blocking: { try await client.projects() })
             DispatchQueue.main.async {
                 guard let self = self, self.ticket[slug] == n else { return }
                 switch result {

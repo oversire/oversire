@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import TrackerPlane
 
 // ─── Write-back to Plane ─────────────────────────────────────────────────────
 // OverSire adds facts to Plane and never changes text of other people:
@@ -111,25 +112,32 @@ final class PlaneWriteBack {
             guard needLabel || needBlock || !links.isEmpty || review != nil else { continue }
             inFlight.insert(s.key)
             lastWrite[s.key] = Date()
-            let project = snap.summary.ref.id, id = item.id, key = s.key
+            guard let ref = item.ref(in: snap.summary.ref) else { continue }
+            let key = s.key
             q.async { [weak self] in
                 var errors: [String] = []
                 for (url, title) in links {
-                    if case .failure(let e) = client.addLink(project: project, item: id, url: url, title: title) { errors.append(e.message) } else { state.links.append(url) }
+                    guard let u = URL(string: url) else { continue }
+                    if case .failure(let e) = Result(blocking: { try await client.addLink(ref, url: u, title: title) }) {
+                        errors.append(e.message)
+                    } else { state.links.append(url) }
                 }
                 if needLabel, let want = wantLabel {
-                    switch PlaneWriteBack.setLabel(client, project: project, item: id, want) {
+                    switch Result(blocking: { try await PlaneWriteBack.setLabel(client, ref, want) }) {
                     case .success: state.label = want
                     case .failure(let e): errors.append(e.message)
                     }
                 }
                 if needBlock, let block {
-                    let r = client.descriptionHTML(project: project, item: id).flatMap { html in
-                        client.setDescription(project: project, item: id, html: OverSireBlock.merge(html, block: block))
-                    }
+                    let r = Result(blocking: {
+                        let html = try await client.descriptionHTML(ref)
+                        try await client.setDescription(ref, html: OverSireBlock.merge(html, block: block))
+                    })
                     if case .failure(let e) = r { errors.append(e.message) } else { state.block = block }
                 }
-                if let review, case .failure(let e) = client.update(project: project, item: id, ItemPatch(status: review.id)) { errors.append(e.message) }
+                if let review, case .failure(let e) = Result(blocking: { try await client.update(ref, ItemPatch(status: review.id)) }) {
+                    errors.append(e.message)
+                }
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.inFlight.remove(key)
@@ -142,21 +150,15 @@ final class PlaneWriteBack {
     }
 
     // Keeps the labels of other people. Removes only the other session:* labels, and the old agent:* ones.
-    private static func setLabel(_ c: PlaneClient, project: String, item: String, _ name: String) -> Result<Void, PlaneError> {
-        c.labels(project: project).flatMap { all in
-            var ids: [String: String] = [:]
-            for l in all where l.name.hasPrefix("session:") || l.name.hasPrefix("agent:") { ids[l.name] = l.id }
-            if ids[name] == nil {
-                switch c.createLabel(project: project, name: name, color: labelColors[name] ?? "#9CA3AF") {
-                case .success(let id): ids[name] = id
-                case .failure(let e): return .failure(e)
-                }
-            }
-            let mine = Set(ids.values)
-            return c.labelIds(project: project, item: item).flatMap { cur in
-                c.update(project: project, item: item, ItemPatch(labels: cur.filter { !mine.contains($0) } + [ids[name]!]))
-            }
+    private static func setLabel(_ c: PlaneTracker, _ item: ItemRef, _ name: String) async throws {
+        var ids: [String: String] = [:]
+        for l in try await c.labels(item.project) where l.name.hasPrefix("session:") || l.name.hasPrefix("agent:") { ids[l.name] = l.id }
+        if ids[name] == nil {
+            ids[name] = try await c.createLabel(name, color: labelColors[name] ?? "#9CA3AF", in: item.project)
         }
+        let mine = Set(ids.values)
+        let cur = try await c.labelIds(item)
+        try await c.update(item, ItemPatch(labels: cur.filter { !mine.contains($0) } + [ids[name]!]))
     }
 
     // One comment for the item, when the session ends. It never posts two.
@@ -172,12 +174,13 @@ final class PlaneWriteBack {
     // Adds the block to a pending intake item. Accept is a second step.
     func addBlock(projectKey: String, intake: IntakeItem, markdown: String, done: @escaping (Bool) -> Void) {
         guard let snap = store.snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { done(false); return }
-        let project = snap.summary.ref.id
+        let project = snap.summary.ref
         let block = PlaneMarkup.html(fromMarkdown: markdown)
         q.async {
-            let r = client.intakeHTML(project: project, workItem: intake.workItemId).flatMap { html in
-                client.updateIntake(project: project, workItem: intake.workItemId, ["description_html": OverSireBlock.merge(html, block: block)])
-            }
+            let r = Result(blocking: {
+                let html = try await client.intakeHTML(project, workItem: intake.workItemId)
+                try await client.setIntakeDescription(project, workItem: intake.workItemId, html: OverSireBlock.merge(html, block: block))
+            })
             DispatchQueue.main.async { done(r.isOk) }
         }
     }

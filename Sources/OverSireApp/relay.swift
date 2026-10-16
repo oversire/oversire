@@ -1,6 +1,7 @@
 import Cocoa
 import OverSireCore
 import OverSireSync
+import TrackerPlane
 import Network
 import Security
 
@@ -354,29 +355,30 @@ final class HookManager {
 
     // Plane shows a webhook secret only when it creates the hook. A hook that the
     // relay has no secret for is deleted and created again. Needs a workspace admin.
-    func ensurePlane(_ client: PlaneClient, workerURL: String, relayHookId: String?, api: RelayAPI) -> HookStatus {
+    func ensurePlane(_ client: PlaneTracker, workerURL: String, relayHookId: String?, api: RelayAPI) -> HookStatus {
         let slug = client.workspace.slug
         let key = HookManager.planeKey(slug)
         let url = HookManager.planeURL(slug, workerURL: workerURL)
-        let existing: [PlaneWebhook]
-        switch client.webhooks() {
-        case .success(let list): existing = list.filter { $0.url == url }
+        let existing: [WebhookRegistration]
+        switch Result(blocking: { try await client.webhooks() }) {
+        case .success(let list): existing = list.filter { $0.url.absoluteString == url }
         case .failure(let e):
             let s = planeDenied(e) ? HookStatus.pollingOnly("Not a workspace admin") : .error(e.message)
             setStatus(key, s); return s
         }
-        if let hook = existing.first(where: { $0.id == relayHookId }), hook.isActive, existing.count == 1 {
+        if let hook = existing.first(where: { $0.id == relayHookId }), hook.active, existing.count == 1 {
             setStatus(key, .waiting)
             return .waiting
         }
-        for hook in existing { _ = client.deleteWebhook(id: hook.id) }
-        switch client.createWebhook(url: url) {
+        for hook in existing { _ = Result(blocking: { try await client.unregister(hook.id) }) }
+        guard let hookURL = URL(string: url) else { setStatus(key, .error("Bad URL")); return .error("Bad URL") }
+        switch Result(blocking: { try await client.register(url: hookURL) }) {
         case .failure(let e):
             let s = planeDenied(e) ? HookStatus.pollingOnly("Not a workspace admin") : .error(e.message)
             setStatus(key, s); return s
         case .success(let made):
-            guard api.putPlaneHook(workspace: slug, id: made.id, secret: made.secret) else {
-                _ = client.deleteWebhook(id: made.id)
+            guard api.putPlaneHook(workspace: slug, id: made.id, secret: made.secret ?? "") else {
+                _ = Result(blocking: { try await client.unregister(made.id) })
                 setStatus(key, .error("The relay did not save the secret")); return .error("The relay did not save the secret")
             }
             setStatus(key, .waiting)
@@ -385,16 +387,16 @@ final class HookManager {
     }
 
     // Plane has no delivery log in its API, so the relay gives the last delivery.
-    func checkPlane(_ client: PlaneClient, workerURL: String, relayHook: RelayPlaneHook?) -> HookStatus {
+    func checkPlane(_ client: PlaneTracker, workerURL: String, relayHook: RelayPlaneHook?) -> HookStatus {
         let key = HookManager.planeKey(client.workspace.slug)
         let url = HookManager.planeURL(client.workspace.slug, workerURL: workerURL)
         let s: HookStatus
-        switch client.webhooks() {
+        switch Result(blocking: { try await client.webhooks() }) {
         case .failure(let e):
             s = planeDenied(e) ? .pollingOnly("Not a workspace admin") : .error(e.message)
         case .success(let list):
-            if let hook = list.first(where: { $0.url == url }) {
-                if !hook.isActive { s = .error("Off in Plane. Click Add to turn it on.") }
+            if let hook = list.first(where: { $0.url.absoluteString == url }) {
+                if !hook.active { s = .error("Off in Plane. Click Add to turn it on.") }
                 else if relayHook?.hookId != hook.id { s = .error("The relay has no secret. Click Add.") }
                 else if let at = relayHook?.lastDelivery { s = .live(relativeAgo(Date(timeIntervalSince1970: at / 1000))) }
                 else { s = .waiting }
@@ -406,13 +408,13 @@ final class HookManager {
         return s
     }
 
-    func deletePlane(_ client: PlaneClient, hookId: String) -> Bool {
-        let ok = client.deleteWebhook(id: hookId).isSuccess
+    func deletePlane(_ client: PlaneTracker, hookId: String) -> Bool {
+        let ok = Result(blocking: { try await client.unregister(hookId) }).isSuccess
         lock.lock(); _statuses[HookManager.planeKey(client.workspace.slug)] = nil; lock.unlock()
         return ok
     }
 
-    private func planeDenied(_ e: PlaneError) -> Bool { e == .forbidden || e == .unauthorized }
+    private func planeDenied(_ e: ProviderError) -> Bool { e == .forbidden || e == .unauthorized }
 }
 
 extension Result {
@@ -579,7 +581,7 @@ final class CloudSetup {
     }
 
     // Set by the app. Called on the main thread.
-    var planeClient: (String) -> PlaneClient? = { _ in nil }
+    var planeClient: (String) -> PlaneTracker? = { _ in nil }
     var trackedWorkspaces: () -> [String] = { [] }
 
     private func onMain<T>(_ f: () -> T) -> T { Thread.isMainThread ? f() : DispatchQueue.main.sync(execute: f) }

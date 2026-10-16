@@ -297,7 +297,7 @@ final class IntakeWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDel
         if let k = key(of: item) { chip(Chip(k, menu: false)) }
         chip(Chip("Pending", dot: .systemOrange, menu: false, tint: .systemOrange))
         if let p = item.priority {
-            let color = PlaneClient.priorities.first { $0.name == p }.map { projectColor($0.color) }
+            let color = StatusOption.priorities.first { $0.name == p }.map { projectColor($0.color) }
             chip(Chip(p, dot: color, menu: false, tint: color ?? .secondaryLabelColor))
         }
         for l in d?.labels ?? [] { chip(Chip(l, menu: false)) }
@@ -535,7 +535,7 @@ private final class IntakeRow: Flipped {
             x += b.frame.width + 6
         }
         if let p = item.priority {
-            let color = PlaneClient.priorities.first { $0.name == p }.map { projectColor($0.color) }
+            let color = StatusOption.priorities.first { $0.name == p }.map { projectColor($0.color) }
             let b = Badge(p, tint: color)
             b.frame.origin = NSPoint(x: x, y: 31)
             addSubview(b)

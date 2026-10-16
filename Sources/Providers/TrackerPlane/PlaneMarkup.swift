@@ -6,9 +6,9 @@ import OverSireCore
 // Markdown, so it converts both ways. It covers what the Plane editor writes:
 // paragraphs, headings, lists, task lists, quotes, code, tables, links and mentions.
 
-enum PlaneMarkup {
+public enum PlaneMarkup {
     // `mention` gives the name for a user id of a <mention-component>.
-    static func markdown(fromHTML html: String, mention: (String) -> String? = { _ in nil }) -> String {
+    public static func markdown(fromHTML html: String, mention: (String) -> String? = { _ in nil }) -> String {
         var w = MarkdownWriter()
         var i = html.startIndex
         while i < html.endIndex {
@@ -34,7 +34,7 @@ enum PlaneMarkup {
         return w.finish()
     }
 
-    static func html(fromMarkdown md: String) -> String {
+    public static func html(fromMarkdown md: String) -> String {
         let lines = md.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         return blocks(lines[...])
     }
@@ -191,14 +191,14 @@ enum PlaneMarkup {
         return out + (tasks ? "</ul>" : "</\(tag)>")
     }
 
-    static let assetRE = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([0-9a-fA-F]{8}-[0-9a-fA-F-]{27})\)"#)
+    public static let assetRE = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([0-9a-fA-F]{8}-[0-9a-fA-F-]{27})\)"#)
     private static let imageRE = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(([^)\s]+)\)"#)
     private static let linkRE = try! NSRegularExpression(pattern: #"\[([^\]]+)\]\(([^)\s]+)\)"#)
     private static let boldRE = try! NSRegularExpression(pattern: #"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"#)
     private static let strikeRE = try! NSRegularExpression(pattern: #"~~(?=\S)(.+?)(?<=\S)~~"#)
     private static let italicRE = try! NSRegularExpression(pattern: #"(?<![\w*])([*_])(?=\S)(.+?)(?<=\S)\1(?![\w*])"#)
 
-    static func inline(_ text: String) -> String {
+    public static func inline(_ text: String) -> String {
         // Code spans first, so their text keeps its * and _.
         var codes: [String] = []
         var s = ""
@@ -226,12 +226,12 @@ enum PlaneMarkup {
         re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: template)
     }
 
-    static func escape(_ s: String) -> String {
+    public static func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
-    static func decodeEntities(_ s: String) -> String {
+    public static func decodeEntities(_ s: String) -> String {
         guard s.contains("&") else { return s }
         var out = s
         for (k, v) in [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&#x27;", "'"), ("&nbsp;", " "), ("&#160;", " ")] {

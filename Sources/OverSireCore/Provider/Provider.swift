@@ -91,11 +91,13 @@ public struct WebhookRegistration: Hashable, Sendable, Codable {
     public let id: String
     public let url: URL
     public let secret: String?   // only in the answer to register
+    public let active: Bool
 
-    public init(id: String, url: URL, secret: String? = nil) {
+    public init(id: String, url: URL, secret: String? = nil, active: Bool = true) {
         self.id = id
         self.url = url
         self.secret = secret
+        self.active = active
     }
 }
 

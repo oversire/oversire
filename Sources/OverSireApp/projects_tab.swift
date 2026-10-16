@@ -500,7 +500,7 @@ final class ProjectItemRow: NSView {
             x += sb.frame.width + 6
         }
         if let pri = item.fields["Priority"] {
-            let color = PlaneClient.priorities.first { $0.name == pri }?.color ?? "ORANGE"
+            let color = StatusOption.priorities.first { $0.name == pri }?.color ?? "ORANGE"
             let pb = Badge(pri, tint: projectColor(color))
             pb.frame.origin = NSPoint(x: x, y: 6)
             addSubview(pb)

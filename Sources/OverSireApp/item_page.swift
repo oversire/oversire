@@ -146,7 +146,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func priorityChip(_ item: Item) -> NSView {
         let cur = item.fields["Priority"] ?? "None"
         return MenuChip(cur == "None" ? "No priority" : cur, symbol: "flag") { [weak self] in
-            PlaneClient.priorities.map { p in
+            StatusOption.priorities.map { p in
                 let a = MenuAction(p.name) { self?.save("priority", ItemPatch(priority: p.id)) }
                 a.item.state = p.name == cur ? .on : .off
                 return a

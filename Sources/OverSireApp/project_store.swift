@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import TrackerPlane
 
 struct NewItem {
     var projectKey: String
@@ -88,8 +89,8 @@ final class ProjectStore {
             var fresh: [ProjectSnapshot] = []
             var error: String?
             for (p, client, previous) in jobs {
-                guard let client else { error = "\(p.ref.workspace): " + PlaneError.noToken.message; continue }
-                switch client.snapshot(p, limit: limit, previous: previous) {
+                guard let client else { error = "\(p.ref.workspace): " + PlaneAccounts.noToken; continue }
+                switch Result(blocking: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
                 case .success(let s): fresh.append(s)
                 case .failure(let e): error = "\(p.ref.workspace): " + e.message
                 }
@@ -123,10 +124,11 @@ final class ProjectStore {
         if timelineWaiters[cacheKey] != nil { timelineWaiters[cacheKey]?.append(done); return }
         timelineWaiters[cacheKey] = [done]
         let projectKey = found.key
-        let (project, url, states) = (found.snap.summary.ref.id, found.item.url, found.snap.statusOptions)
+        guard let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
+        let states = found.snap.statusOptions
         let current = found.snap.option(found.item.statusOptionId)?.name
         q.async { [weak self] in
-            let result = client.timeline(project: project, item: itemId, url: url, states: states, current: current)
+            let result = Result(blocking: { try await client.timeline(ref, statuses: states, current: current) })
             guard let self else { return }
             DispatchQueue.main.async {
                 let waiters = self.timelineWaiters.removeValue(forKey: cacheKey) ?? []
@@ -180,14 +182,14 @@ final class ProjectStore {
     }
 
     func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: "Could not change the status", done: done) { c, project in
-            c.update(project: project, item: itemId, ItemPatch(status: optionId))
+        write(itemId, failure: "Could not change the status", done: done) { c, ref in
+            try await c.update(ref, ItemPatch(status: optionId))
         }
     }
 
     func update(itemId: String, _ patch: ItemPatch, failure: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: failure, done: done) { c, project in
-            c.update(project: project, item: itemId, patch)
+        write(itemId, failure: failure, done: done) { c, ref in
+            try await c.update(ref, patch)
         }
     }
 
@@ -195,10 +197,11 @@ final class ProjectStore {
     func options(projectKey: String, done: @escaping (ItemOptions) -> Void) {
         if let hit = optionCache[projectKey], -hit.at.timeIntervalSinceNow < 600 { done(hit.options); return }
         guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { return }
-        let project = snap.summary.ref.id
+        let project = snap.summary.ref
         q.async { [weak self] in
-            let labels = (try? client.labels(project: project).get()) ?? []
-            let members = client.memberNames().map { StatusOption(id: $0.key, name: $0.value, color: "") }
+            let labels = (try? Result(blocking: { try await client.labels(project) }).get()) ?? []
+            let names = (try? Result(blocking: { await client.memberNames() }).get()) ?? [:]
+            let members = names.map { StatusOption(id: $0.key, name: $0.value, color: "") }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             let options = ItemOptions(labels: labels, members: members)
             DispatchQueue.main.async {
@@ -222,14 +225,14 @@ final class ProjectStore {
     }
 
     func comment(itemId: String, body: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: "Could not post the comment", done: done) { c, project in
-            c.comment(project: project, item: itemId, markdown: body)
+        write(itemId, failure: "Could not post the comment", done: done) { c, ref in
+            try await c.comment(ref, markdown: body)
         }
     }
 
     func edit(itemId: String, title: String, body: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: nil, done: done) { c, project in
-            c.update(project: project, item: itemId, ItemPatch(title: title, bodyMarkdown: body))
+        write(itemId, failure: nil, done: done) { c, ref in
+            try await c.update(ref, ItemPatch(title: title, bodyMarkdown: body))
         }
     }
 
@@ -238,12 +241,9 @@ final class ProjectStore {
         guard let found = item(itemId) else { done(false); return }
         let progress = found.snap.statusOptions.first { $0.category == .progress }
         let current = found.item.statusOptionId
-        write(itemId, failure: nil, done: done) { c, project in
-            if let progress, current != progress.id,
-               case .failure(let e) = c.update(project: project, item: itemId, ItemPatch(status: progress.id)) {
-                return .failure(e)
-            }
-            return c.assignMe(project: project, item: itemId)
+        write(itemId, failure: nil, done: done) { c, ref in
+            if let progress, current != progress.id { try await c.update(ref, ItemPatch(status: progress.id)) }
+            try await c.assignMe(ref)
         }
     }
 
@@ -255,9 +255,9 @@ final class ProjectStore {
         let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
                               priority: new.fieldOptions[ProjectSnapshot.priorityFieldId])
-        let project = snap.summary.ref.id
+        let project = snap.summary.ref
         q.async { [weak self] in
-            let added = client.create(project: project, draft)
+            let added = Result(blocking: { try await client.create(draft, in: project).id })
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch added {
@@ -274,12 +274,12 @@ final class ProjectStore {
 
     // Runs one change off the main queue, then reloads the project. A change made here is not news.
     private func write(_ itemId: String, failure: String?, done: @escaping (Bool) -> Void,
-                       _ op: @escaping (PlaneClient, String) -> Result<Void, PlaneError>) {
-        guard let found = item(itemId), let client = accounts.client(for: found.snap.summary.ref.workspace) else { done(false); return }
+                       _ op: @escaping @Sendable (PlaneTracker, ItemRef) async throws -> Void) {
+        guard let found = item(itemId), let client = accounts.client(for: found.snap.summary.ref.workspace),
+              let ref = found.item.ref(in: found.snap.summary.ref) else { done(false); return }
         suppressNotify.insert(itemId)
-        let project = found.snap.summary.ref.id
         q.async { [weak self] in
-            let result = op(client, project)
+            let result = Result(blocking: { try await op(client, ref) })
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if case .failure(let e) = result {
@@ -294,13 +294,13 @@ final class ProjectStore {
 
     // MARK: Intake
 
-    func intakeDetail(projectKey: String, item: IntakeItem, done: @escaping (Result<IntakeDetail, PlaneError>) -> Void) {
+    func intakeDetail(projectKey: String, item: IntakeItem, done: @escaping (Result<IntakeDetail, ProviderError>) -> Void) {
         guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
-            done(.failure(.noToken)); return
+            done(.failure(.unauthorized)); return
         }
-        let project = snap.summary.ref.id
+        let project = snap.summary.ref
         q.async {
-            let r = client.intakeDetail(project: project, workItem: item.workItemId)
+            let r = Result(blocking: { try await client.intakeDetail(item, in: project) })
             DispatchQueue.main.async { done(r) }
         }
     }
@@ -309,9 +309,9 @@ final class ProjectStore {
     func triage(projectKey: String, item: IntakeItem, action: IntakeAction, done: @escaping (Bool) -> Void) {
         guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { done(false); return }
         suppressNotify.insert(item.workItemId)
-        let project = snap.summary.ref.id
+        let project = snap.summary.ref
         q.async { [weak self] in
-            let r = client.triage(project: project, workItem: item.workItemId, action: action)
+            let r = Result(blocking: { try await client.triage(item, in: project, action) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 if case .failure(let e) = r {
@@ -329,9 +329,9 @@ final class ProjectStore {
               intake.contains(where: { intakeKeys[$0.workItemId] == nil }), !loadingKeys.contains(projectKey),
               let client = accounts.client(for: snap.summary.ref.workspace) else { return }
         loadingKeys.insert(projectKey)
-        let project = snap.summary.ref.id
+        let project = snap.summary.ref
         q.async { [weak self] in
-            let r = client.intakeSequences(project: project)
+            let r = Result(blocking: { try await client.intakeSequences(project) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.loadingKeys.remove(projectKey)
@@ -355,7 +355,7 @@ final class ProjectStore {
             done(apply()); return
         }
         q.async { [weak self] in
-            let found = todo.compactMap { id in (try? client.assetURL(id).get()).map { (id, $0) } }
+            let found = todo.compactMap { id in (try? Result(blocking: { try await client.assetURL(id) }).get()).map { (id, $0.absoluteString) } }
             DispatchQueue.main.async {
                 guard let self else { return }
                 for (id, u) in found { self.assetCache[id] = (u, Date()) }
@@ -525,6 +525,41 @@ final class ProjectStore {
     private func publish() {
         onChange?()
         NotificationCenter.default.post(name: ProjectStore.changed, object: self)
+    }
+}
+
+extension ProjectStore {
+    // Items with new activity get their comments again. Other items keep the comment data of `previous`.
+    static func snapshot(_ t: PlaneTracker, _ summary: ProjectSummary, limit: Int,
+                         previous: ProjectSnapshot?) async throws -> ProjectSnapshot {
+        var ref = summary.ref
+        ref.key = summary.identifier
+        let me = try await t.me()
+        let states = try await t.statuses(ref)
+        let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var items: [Item] = []
+        for var item in try await t.items(ref, since: nil, limit: limit) {
+            let prev = prevById[item.id]
+            if let prev, prev.activityAt == item.activityAt {
+                item.commentCount = prev.commentCount
+                item.lastComment = prev.lastComment
+                item.mentionsMe = prev.mentionsMe
+            } else if previous != nil, let iref = item.ref(in: ref), let list = try? await t.comments(iref) {
+                item.commentCount = list.count
+                item.lastComment = list.last
+                let since = previous?.fetchedAt ?? .distantPast
+                let fresh = list.filter { $0.createdAt > since }.compactMap(\.body)
+                let text = prev == nil ? fresh + [item.body ?? ""] : fresh
+                item.mentionsMe = text.contains { $0.localizedCaseInsensitiveContains("@" + me.name) }
+            }
+            items.append(item)
+        }
+        let fields = [ProjectField(id: ProjectSnapshot.statusFieldId, name: "Status", options: states),
+                      ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority",
+                                   options: StatusOption.priorities.filter { $0.id != "none" })]
+        return ProjectSnapshot(summary: summary, statusOptions: states, items: items, fetchedAt: Date(),
+                               fields: fields, me: me.name, meId: me.id, index: try? await t.index(ref),
+                               intake: try? await t.intake(ref))
     }
 }
 

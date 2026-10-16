@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import TrackerPlane
 
 // ─── Settings → Cloud (beta) ─────────────────────────────────────────────────
 

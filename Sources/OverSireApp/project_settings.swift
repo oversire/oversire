@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import TrackerPlane
 
 // Settings → Projects: Plane workspaces, which projects to track, notifications,
 // display, and the poll interval.
@@ -277,8 +278,8 @@ final class ProjectSettingsVC: NSViewController {
         ProjectSettingsVC.addStatus = ("Testing the token…", false)
         rebuild()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let client = PlaneClient(workspace: ws, token: token)
-            let result = client.me().flatMap { me in client.projects().map { (me.name, $0.count) } }
+            let client = PlaneTracker(workspace: ws, token: token, http: URLSessionTransport())
+            let result = Result(blocking: { (try await client.me().name, try await client.projects().count) })
             DispatchQueue.main.async {
                 ProjectSettingsVC.testing = false
                 guard let self = self else { return }
@@ -292,7 +293,7 @@ final class ProjectSettingsVC: NSViewController {
                     self.catalog.refresh(slug, force: true)
                     (NSApp.delegate as? GHActionsBar)?.applyProjectSelection()
                 case .failure(let e):
-                    ProjectSettingsVC.addStatus = ("\(slug): \(e.message) Nothing was saved.", true)
+                    ProjectSettingsVC.addStatus = ("\(slug): \(e.message). Nothing was saved.", true)
                 }
                 self.rebuild()
             }

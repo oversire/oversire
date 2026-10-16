@@ -457,3 +457,99 @@ public struct ItemDraft: Hashable, Sendable {
         self.parent = parent
     }
 }
+
+// ─── Tracker protocols ───────────────────────────────────────────────────────
+
+/// One item with the data that the list does not carry.
+public struct ItemDetail: Hashable, Sendable {
+    public var item: Item
+    public var comments: [Comment]   // oldest first
+    public var links: [URL]
+
+    public init(item: Item, comments: [Comment], links: [URL] = []) {
+        self.item = item
+        self.comments = comments
+        self.links = links
+    }
+}
+
+/// Finds item keys such as OVERSIRE-12 in text and branch names.
+public struct KeyFormat: Hashable, Sendable {
+    public static let projectDash = KeyFormat(pattern: "\\b([A-Za-z][A-Za-z0-9]*-[0-9]+)\\b")
+
+    public let pattern: String   // capture group 1 is the key
+
+    public init(pattern: String) { self.pattern = pattern }
+
+    /// Keys in text order, uppercased, without repeats. A non-empty known set keeps only keys of those project keys.
+    public func keys(in text: String, known: Set<String> = []) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+        var out: [String] = []
+        for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let r = Range(m.range(at: m.numberOfRanges > 1 ? 1 : 0), in: text) else { continue }
+            let key = text[r].uppercased()
+            guard !out.contains(key), known.isEmpty || known.contains(Self.project(of: key)) else { continue }
+            out.append(key)
+        }
+        return out
+    }
+
+    /// The first key in a branch name: "FRITZ-28/desktop-app", "feature/oversire-12-fix".
+    public func key(inBranch b: String, known: Set<String> = []) -> String? {
+        keys(in: b.replacingOccurrences(of: "_", with: "/"), known: known).first
+    }
+
+    static func project(of key: String) -> String {
+        String(key[..<(key.lastIndex(of: "-") ?? key.endIndex)])
+    }
+}
+
+public protocol Tracker: Provider {
+    var keyFormat: KeyFormat { get }
+    func projects() async throws -> [ProjectSummary]
+    func statuses(_ p: ProjectRef) async throws -> [StatusOption]
+    /// The items with the newest activity first, up to limit. A since date stops at older activity.
+    func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item]
+    func detail(_ i: ItemRef) async throws -> ItemDetail
+    func comments(_ i: ItemRef) async throws -> [Comment]
+    func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef
+    func update(_ i: ItemRef, _ patch: ItemPatch) async throws
+    func comment(_ i: ItemRef, markdown: String) async throws
+}
+
+public protocol IntakeTriaging: Tracker {
+    func intake(_ p: ProjectRef) async throws -> [IntakeItem]
+    func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail
+    func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws
+}
+
+public protocol TimelineReading: Tracker {
+    func timeline(_ i: ItemRef) async throws -> [ActivityEntry]
+}
+
+public protocol LabelManaging: Tracker {
+    func labels(_ p: ProjectRef) async throws -> [StatusOption]
+    /// Returns the id of the new label.
+    func createLabel(_ name: String, color: String, in p: ProjectRef) async throws -> String
+}
+
+public protocol LinkManaging: Tracker {
+    func links(_ i: ItemRef) async throws -> [URL]
+    func addLink(_ i: ItemRef, url: URL, title: String) async throws
+}
+
+/// A fast list of all items for trees and key links.
+public protocol ItemIndexing: Tracker {
+    func index(_ p: ProjectRef) async throws -> [ItemStub]
+}
+
+public protocol AssetResolving: Tracker {
+    /// A signed download link for an uploaded file.
+    func assetURL(_ id: String) async throws -> URL
+}
+
+extension Item {
+    public func ref(in project: ProjectRef) -> ItemRef? {
+        URL(string: url).map { ItemRef(project: project, id: id, key: key, url: $0) }
+    }
+}

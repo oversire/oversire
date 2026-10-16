@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import TrackerPlane
 import OverSireSync
 
 
@@ -291,54 +292,6 @@ func runSelfTest() {
     let planned = plan.plane.map { "\($0.workspace)/\($0.project ?? "*")" }
     check(planned == ["acme/P1", "beta/*"], "relay plan groups plane events \(planned)")
 
-    let ws = PlaneWorkspace(slug: "acme")
-    check(ws.itemURL("ENG-4") == "https://app.plane.so/acme/browse/ENG-4/" && ws.url == "https://app.plane.so/acme/",
-          "cloud item url")
-    check(PlaneWorkspace(slug: "acme", host: "https://plane.example.com").itemURL("ENG-4")
-            == "https://plane.example.com/acme/browse/ENG-4/", "self-hosted item url")
-    let oldWs = try? JSONDecoder().decode(PlaneWorkspace.self, from: Data(#"{"slug":"acme"}"#.utf8))
-    check(oldWs?.host == PlaneWorkspace.cloudHost, "workspace host default")
-
-    // Plane activity rows.
-    let names = ["u1": "Ada"]
-    let states = [todoOpt, doingOpt]
-    check(PlaneClient.change(["verb": "created"], names: names, states: states) == .added, "activity created")
-    check(PlaneClient.change(["verb": "updated", "field": "state", "old_value": "Todo", "new_value": NSNull(),
-                              "new_identifier": "s2"], names: names, states: states)
-            == .status(from: "Todo", to: "In progress"), "activity state from id")
-    check(PlaneClient.change(["verb": "updated", "field": "assignees", "new_value": "", "new_identifier": "u1"],
-                             names: names, states: states) == .assigned("Ada"), "activity assigned")
-    check(PlaneClient.change(["verb": "updated", "field": "priority", "old_value": "low", "new_value": "urgent"],
-                             names: names, states: states) == .field(name: "Priority", from: "Low", to: "Urgent"), "activity priority")
-    check(PlaneClient.change(["verb": "updated", "field": "description"], names: names, states: states) == nil,
-          "unknown activity is skipped")
-
-    // Plane rich text.
-    let html = #"<h2>Context</h2><p>Hi <mention-component entity_identifier="u1" entity_name="user_mention"></mention-component>, see <a href="https://x.dev">this</a> &amp; <strong>that</strong>.</p><ul data-type="taskList"><li data-type="taskItem" data-checked="true"><p>one</p></li><li data-type="taskItem" data-checked="false"><p>two</p></li></ul><pre><code>let a = 1 &lt; 2</code></pre>"#
-    let pmd = PlaneMarkup.markdown(fromHTML: html, mention: { names[$0] })
-    check(pmd.contains("## Context") && pmd.contains("Hi @Ada, see [this](https://x.dev) & **that**."), "html to markdown \(pmd)")
-    check(pmd.contains("- [x] one") && pmd.contains("- [ ] two") && pmd.contains("```\nlet a = 1 < 2\n```"), "tasks and code \(pmd)")
-    let back = PlaneMarkup.html(fromMarkdown: pmd)
-    check(back.contains(#"data-type="taskList""#) && back.contains("<h2>Context</h2>") && back.contains("&lt; 2"),
-          "markdown to html \(back)")
-    check(PlaneMarkup.markdown(fromHTML: PlaneMarkup.html(fromMarkdown: pmd)) == PlaneMarkup.markdown(fromHTML: back), "round trip")
-    check(PlaneMarkup.html(fromMarkdown: "a <b> & c") == "<p>a &lt;b&gt; &amp; c</p>", "plain text is escaped")
-    let planeTable = "<p>Work items</p><table><tbody><tr><th colspan=\"1\" rowspan=\"1\"><p>Plane</p></th><th><p>Repo</p></th></tr>"
-        + "<tr><td><p>TREBI-286</p></td><td><p>Connector <code>internal/host</code></p><p>a|b</p></td></tr></tbody></table><p>After</p>"
-    let tableMD = PlaneMarkup.markdown(fromHTML: planeTable)
-    check(tableMD == "Work items\n\n| Plane | Repo |\n| --- | --- |\n| TREBI-286 | Connector `internal/host` a\\|b |\n\nAfter",
-          "table to Markdown: \(tableMD)")
-    let tableHTML = PlaneMarkup.html(fromMarkdown: tableMD)
-    check(tableHTML.contains("<table><tbody><tr><th><p>Plane</p></th>") && tableHTML.contains("<td><p>Connector <code>internal/host</code> a|b</p></td>"),
-          "table to HTML: \(tableHTML)")
-    check(PlaneMarkup.markdown(fromHTML: tableHTML) == tableMD, "table round trip")
-    let asset = "a246509a-505b-46c2-80a1-7e0dd05b475d"
-    let imgMD = PlaneMarkup.markdown(fromHTML: "<p>See</p><image-component src=\"\(asset)\" width=\"200\"></image-component>")
-    check(imgMD == "See\n\n![](\(asset))", "image to Markdown: \(imgMD)")
-    let imgHTML = PlaneMarkup.html(fromMarkdown: imgMD)
-    check(imgHTML.contains("<image-component src=\"\(asset)\"></image-component>"), "image to HTML: \(imgHTML)")
-    check(PlaneMarkup.html(fromMarkdown: "![x](https://e.com/a.png)").contains("<img src=\"https://e.com/a.png\" alt=\"x\">"), "web image")
-
     let oldConfig = #"{"repos":["o/r"],"pollInterval":30}"#.data(using: .utf8)!
     let decoded = try? JSONDecoder().decode(AppConfig.self, from: oldConfig)
     check(decoded?.projects == nil && decoded?.repos == ["o/r"], "old config without projects decodes")
@@ -540,8 +493,6 @@ func runSelfTest() {
             check(a[9].values["agent"] == "codex" && a[9].values["cli"] == OrcaClient.defaultPath, "orca account")
         } else { check(false, "accounts fixture decode") }
     }
-    check(PlaneError.http(429, "").providerError == .rateLimited(retryAfter: nil) && PlaneError.noToken.providerError == .unauthorized,
-          "plane errors map to provider errors")
     check(OrcaError(code: "bad_reply", message: "x").providerError == .decoding("x"), "orca errors map to provider errors")
     do {
         let r = ProcessRunner()

@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import TrackerPlane
 
 // ─── Intake agent ────────────────────────────────────────────────────────────
 // A read-only Claude session in the main checkout of the project checks a new intake ticket:
