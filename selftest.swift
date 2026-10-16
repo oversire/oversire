@@ -638,6 +638,38 @@ func runSelfTest() {
     check(Route(url: URL(string: "https://item/FRITZ-17")!) == nil, "other schemes are not routes")
     check(Route(url: URL(string: "oversire://item/17")!) == nil, "an item needs a key")
     check(Route(url: URL(string: "oversire://settings/nope")!) == .settings(.general), "unknown settings page opens General")
+    check(Route(url: URL(string: "cateye://item/FRITZ-17")!) == .item("FRITZ-17", .overview), "old cateye links still open")
+
+    // LegacyMigration: copy the config folder, Keychain entries and defaults one time.
+    do {
+        final class MemVault: SecretVault {
+            var d: [String: String] = [:]
+            func get(_ key: String) -> String? { d[key] }
+            func set(_ key: String, _ value: String) { d[key] = value }
+            func keys() -> [String] { Array(d.keys) }
+        }
+        let fm = FileManager.default
+        let home = NSTemporaryDirectory() + "oversire-migration-\(UUID().uuidString)"
+        try? fm.createDirectory(atPath: home + "/.config/cat-eye", withIntermediateDirectories: true)
+        fm.createFile(atPath: home + "/.config/cat-eye/config.json", contents: Data("{\"repos\":[\"o/r\"]}".utf8))
+        var vaults: [String: MemVault] = [:]
+        func vault(_ s: String) -> SecretVault { if let v = vaults[s] { return v }; let v = MemVault(); vaults[s] = v; return v }
+        vault("com.flarco.cat-eye.plane").set("ocral", "tok")
+        vault("com.flarco.cat-eye.ai").set("KEY", "old")
+        vault("com.oversire.app.ai").set("KEY", "new")
+        let suite = "oversire-selftest-\(UUID().uuidString)"
+        let defs = UserDefaults(suiteName: suite)!
+        let m = LegacyMigration(home: home, vault: vault, oldDefaults: { ["ignoredFailures": ["a"]] }, newDefaults: defs)
+        check(m.run(), "migration: first run migrates")
+        check(fm.contents(atPath: home + "/.config/oversire/config.json") != nil, "migration: config folder copied")
+        check(fm.fileExists(atPath: home + "/.config/cat-eye/config.json"), "migration: old folder stays")
+        check(vault("com.oversire.app.plane").get("ocral") == "tok", "migration: Keychain entry copied")
+        check(vault("com.oversire.app.ai").get("KEY") == "new", "migration: a new Keychain value wins")
+        check(defs.stringArray(forKey: "ignoredFailures") == ["a"], "migration: defaults copied")
+        check(!m.run(), "migration: the marker stops a second run")
+        defs.removePersistentDomain(forName: suite)
+        try? fm.removeItem(atPath: home)
+    }
     let router = Router()
     router.go(.inbox(.all)); router.go(.inbox(.intake)); router.go(.runs(.all))
     check(router.backStack == [.home, .inbox(.intake)], "a tab change replaces the history entry")
@@ -825,6 +857,9 @@ func runSelfTest() {
         check(OverSireBlock.current(twice) == "</p><p>v2</p><p>", "block: read back")
         let plane = "<p>x</p><p class=\"editor-paragraph-block\">\(OverSireBlock.start)</p><p>old</p><p class=\"editor-paragraph-block\">\(OverSireBlock.end)</p>"
         check(OverSireBlock.merge(plane, block: "<p>new</p>") == "<p>x</p>" + OverSireBlock.wrap("<p>new</p>"), "block: Plane classes on the marker lines")
+        let legacy = "<p>x</p><p>Cat Eye block ▾ (Cat Eye updates this part)</p><p>old</p><p>Cat Eye block ▴</p>"
+        check(OverSireBlock.current(legacy) == "</p><p>old</p><p>", "block: reads the Cat Eye markers")
+        check(OverSireBlock.merge(legacy, block: "<p>new</p>") == "<p>x</p>" + OverSireBlock.wrap("<p>new</p>"), "block: replaces the Cat Eye block")
         // A relay event that changes a run changes the fingerprint; the same poll result does not.
         func fr(_ status: String, _ c: String?) -> Run {
             Run(id: 9, name: "ci", displayTitle: "t", status: status, conclusion: c, headBranch: "fritz-1/x", headSha: "s", event: "push",

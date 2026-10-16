@@ -240,6 +240,16 @@ final class SecretStore {
     func delete(_ key: String) {
         SecItemDelete(query(key) as CFDictionary)
     }
+
+    func keys() -> [String] {
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                kSecAttrService as String: service,
+                                kSecReturnAttributes as String: true,
+                                kSecMatchLimit as String: kSecMatchLimitAll]
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let items = out as? [[String: Any]] else { return [] }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
 }
 
 // ─── Relay HTTP API ──────────────────────────────────────────────────────────

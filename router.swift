@@ -60,7 +60,8 @@ enum Route: Equatable {
 
     // Accepts oversire://item/FRITZ-17, oversire:item/FRITZ-17 and oversire:///item/FRITZ-17.
     init?(url: URL) {
-        guard url.scheme?.lowercased() == "oversire" else { return nil }
+        // cateye is the scheme of the old app. Links to it stay in Plane.
+        guard ["oversire", "cateye"].contains(url.scheme?.lowercased()) else { return nil }
         var parts: [String] = []
         if let host = url.host, !host.isEmpty { parts.append(host) }
         parts += url.path.split(separator: "/").map(String.init)

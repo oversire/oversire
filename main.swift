@@ -100,6 +100,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func applicationDidFinishLaunching(_ note: Notification) {
         log.info("OverSire launching — repos: \(REPOS.count), poll: \(POLL_NORMAL)s/\(POLL_ACTIVE)s")
+        if LegacyMigration().run() { log.info("migrated the Cat Eye data") }
         loadConfig()
         installMainMenu()
         applyShowIn()

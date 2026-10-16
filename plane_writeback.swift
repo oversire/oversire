@@ -8,24 +8,32 @@ import Foundation
 enum OverSireBlock {
     static let start = "OverSire block ▾ (OverSire updates this part)"
     static let end = "OverSire block ▴"
+    // Items that Cat Eye wrote keep its markers. The next write replaces them.
+    static let markers = [(start, end), ("Cat Eye block ▾ (Cat Eye updates this part)", "Cat Eye block ▴")]
 
     static func wrap(_ innerHTML: String) -> String { "<p>\(start)</p>" + innerHTML + "<p>\(end)</p>" }
 
     // Replaces the block, or adds it at the end. The text before and after the block stays the same.
     static func merge(_ html: String, block innerHTML: String) -> String {
         let new = wrap(innerHTML)
-        if let s = html.range(of: start, options: .backwards),
-           let open = html.range(of: "<p", options: .backwards, range: html.startIndex..<s.lowerBound),
-           let e = html.range(of: end, range: s.upperBound..<html.endIndex),
-           let close = html.range(of: "</p>", range: e.upperBound..<html.endIndex) {
-            return html.replacingCharacters(in: open.lowerBound..<close.upperBound, with: new)
+        for (start, end) in markers {
+            if let s = html.range(of: start, options: .backwards),
+               let open = html.range(of: "<p", options: .backwards, range: html.startIndex..<s.lowerBound),
+               let e = html.range(of: end, range: s.upperBound..<html.endIndex),
+               let close = html.range(of: "</p>", range: e.upperBound..<html.endIndex) {
+                return html.replacingCharacters(in: open.lowerBound..<close.upperBound, with: new)
+            }
         }
         return html + new
     }
 
     static func current(_ html: String) -> String? {
-        guard let s = html.range(of: start, options: .backwards), let e = html.range(of: end, range: s.upperBound..<html.endIndex) else { return nil }
-        return String(html[s.upperBound..<e.lowerBound])
+        for (start, end) in markers {
+            if let s = html.range(of: start, options: .backwards), let e = html.range(of: end, range: s.upperBound..<html.endIndex) {
+                return String(html[s.upperBound..<e.lowerBound])
+            }
+        }
+        return nil
     }
 }
 
