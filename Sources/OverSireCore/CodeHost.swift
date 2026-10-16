@@ -135,3 +135,22 @@ public struct ChangeFilter: Hashable, Sendable {
         self.limit = limit
     }
 }
+
+public struct Repo: Codable, Hashable, Sendable {
+    public let ref: RepoRef
+    public let isPrivate: Bool
+
+    public init(ref: RepoRef, isPrivate: Bool) {
+        self.ref = ref
+        self.isPrivate = isPrivate
+    }
+}
+
+/// A code host account: one GitHub owner, one GitLab group.
+public protocol CodeHost: Provider {
+    /// The repos that the account owns, without archived repos.
+    func repos() async throws -> [Repo]
+    func changes(_ r: RepoRef, _ f: ChangeFilter) async throws -> [ChangeRequest]
+    func perform(_ a: ChangeAction, on c: ChangeRef) async throws
+    func commitMessage(_ r: RepoRef, sha: String) async throws -> String
+}

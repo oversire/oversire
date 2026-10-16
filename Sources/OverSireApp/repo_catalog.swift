@@ -1,4 +1,6 @@
 import Foundation
+import CodeHostGitHub
+import GitHubKit
 import OverSireCore
 
 // One GitHub account or organization and the repos it owns.
@@ -124,7 +126,7 @@ final class RepoCatalog {
                     if let i = self.owners.firstIndex(where: { $0.login == login }) { self.owners[i] = o }
                     else { self.owners.append(o) }
                 case .failure(let e):
-                    self.status[login] = .failed(e.message)
+                    self.status[login] = .failed(GitHubClient.hint(e))
                 }
                 self.save()
                 self.notify()
@@ -132,23 +134,9 @@ final class RepoCatalog {
         }
     }
 
-    struct ListError: Error { let message: String }
-
-    private static func list(_ login: String) -> Result<[String], ListError> {
-        guard FileManager.default.isExecutableFile(atPath: GH) else {
-            return .failure(ListError(message: "GitHub CLI not found at \(GH)"))
-        }
-        do {
-            let res = try ghRun(["repo", "list", login, "--limit", "1000", "--no-archived",
-                                 "--json", "nameWithOwner", "--jq", ".[].nameWithOwner"])
-            guard res.ok else { return .failure(ListError(message: String(res.stderr.prefix(120)))) }
-            let out = String(data: res.stdout, encoding: .utf8) ?? ""
-            let repos = out.split(separator: "\n").map(String.init)
-                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-            return .success(repos)
-        } catch {
-            return .failure(ListError(message: error.localizedDescription))
-        }
+    private static func list(_ login: String) -> Result<[String], ProviderError> {
+        let host = GitHubCodeHost(owner: login, client: GITHUB)
+        return Result(blocking: { try await host.repos().map(\.ref.path) })
     }
 
     private func save() {

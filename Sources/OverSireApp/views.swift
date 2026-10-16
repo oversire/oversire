@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import GitHubKit
 
 // ─── Shared Views ────────────────────────────────────────────────────────────
 

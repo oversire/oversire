@@ -4,6 +4,7 @@ import TrackerPlane
 import QuartzCore
 import UserNotifications
 import os
+import GitHubKit
 
 let POP_W: CGFloat = 660
 // macOS cuts off the top of a popover that is taller than the space below the menu bar.

@@ -1,29 +1,12 @@
 import Cocoa
+import GitHubKit
+import CodeHostGitHub
 import OverSireCore
 
 
-// Find gh CLI — hardcoded trusted paths only
-let GH: String = {
-    let trusted = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
-    for p in trusted {
-        if FileManager.default.isExecutableFile(atPath: p) { return p }
-    }
-    return trusted[0] // Will show "gh not found" error on first fetch
-}()
-
-// Minimal env for gh CLI — PATH, HOME, LANG + gh auth/config vars
-let ghEnv: [String: String] = {
-    let env = ProcessInfo.processInfo.environment
-    let allow = ["PATH", "HOME", "LANG", "SHELL",
-                 "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR",
-                 "XDG_CONFIG_HOME", "XDG_DATA_HOME",
-                 "GNUPGHOME", "SSH_AUTH_SOCK"]
-    var result: [String: String] = [:]
-    for key in allow { if let v = env[key] { result[key] = v } }
-    if result["PATH"] == nil { result["PATH"] = "/usr/bin:/bin:/opt/homebrew/bin" }
-    if result["HOME"] == nil { result["HOME"] = NSHomeDirectory() }
-    return result
-}()
+// The gh CLI and the shared GitHub client. GitHub adapters get GITHUB.
+let GH = GitHubClient.defaultPath
+let GITHUB = GitHubClient(commands: ProcessRunner(environment: GitHubClient.environment), http: URLSessionTransport(), gh: GH)
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +19,7 @@ var lastFetchError: String? {
 
 // Runs gh with optional stdin, so request bodies with secrets never appear in argv.
 func ghRun(_ args: [String], input: Data? = nil, timeout: TimeInterval? = nil) throws -> CommandOutput {
-    try ProcessRunner(environment: ghEnv).runSync(GH, args, stdin: input, timeout: timeout)
+    try ProcessRunner(environment: GitHubClient.environment).runSync(GH, args, stdin: input, timeout: timeout)
 }
 
 func ghShell(_ args: String...) -> Data? {
@@ -120,11 +103,9 @@ var jobsCache: [String: (updatedAt: String, jobs: [Job])] = [:]  // run id → j
 var detailFetchInFlight = Set<String>()
 
 func fetchCommitMessage(repo: String, sha: String) -> String? {
-    guard !sha.isEmpty,
-          let data = ghShell("api", "repos/\(repo)/commits/\(sha)", "--jq", ".commit.message"),
-          let s = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-          !s.isEmpty else { return nil }
-    return s
+    guard !sha.isEmpty else { return nil }
+    let host = GitHubCodeHost(owner: repoOwner(repo), client: GITHUB)
+    return try? Result(blocking: { try await host.commitMessage(host.repoRef(repo), sha: sha) }).get()
 }
 
 func fetchRunJobs(repo: String, runId: String) -> [Job]? {
@@ -161,68 +142,46 @@ func fetchRunFailures(repo: String, jobs: [Job]) -> [Failure] {
     return out
 }
 
+// Sets lastFetchError on a failure.
 func fetchPRs(repo: String) -> [ChangeRequest] {
-    let fields = "number,title,state,author,headRefName,baseRefName,url,createdAt,updatedAt,reviewDecision,additions,deletions,isDraft,labels,body"
-    func list(_ search: String) -> [ChangeRequest] {
-        guard let data = ghShell("pr", "list", "--repo", repo, "--limit", "20", "--state", "open",
-                                 "--search", search, "--json", fields) else { return [] }
-        return (try? JSONDecoder().decode([ChangeRequest].self, from: data)) ?? []
+    let host = GitHubCodeHost(owner: repoOwner(repo), client: GITHUB)
+    switch Result(blocking: { try await host.changes(host.repoRef(repo), ChangeFilter(limit: 20)) }) {
+    case .success(let list):
+        lastFetchError = nil
+        return list
+    case .failure(let e):
+        log.warning("PRs of \(repo, privacy: .public) failed: \(e.message, privacy: .public)")
+        lastFetchError = GitHubClient.hint(e)
+        return []
     }
-    // Own PRs link runs to items. Review requests are the PRs tab.
-    var out = list("review-requested:@me")
-    for var p in list("author:@me") where !out.contains(where: { $0.number == p.number }) {
-        p.mine = true
-        out.append(p)
-    }
-    return out
 }
 
 func executePRAction(repo: String, number: Int, action: ChangeAction, completion: @escaping () -> Void) {
     DispatchQueue.global(qos: .userInitiated).async {
-        let n = "\(number)", r = repo
-        var ok = true
-        switch action {
-        case .approve(let body):
-            if let b = body, !b.isEmpty {
-                ok = ghShell("pr", "review", "--approve", "-b", b, "-R", r, n) != nil
-            } else {
-                ok = ghShell("pr", "review", "--approve", "-R", r, n) != nil
-            }
-        case .requestChanges(let body):
-            ok = ghShell("pr", "review", "--request-changes", "-b", body, "-R", r, n) != nil
-        case .comment(let body):
-            ok = ghShell("pr", "comment", "-b", body, "-R", r, n) != nil
-        case .merge(let method):
-            ok = ghShell("pr", "merge", method.ghFlag, "-R", r, n) != nil
-        case .close:
-            ok = ghShell("pr", "close", "-R", r, n) != nil
-        }
-        // ghShell sets lastFetchError on failure; surface it via the PR tab's error banner.
-        if !ok {
-            log.warning("PR action \(action) for \(r)#\(number) failed: \(lastFetchError ?? "unknown")")
+        let host = GitHubCodeHost(owner: repoOwner(repo), client: GITHUB)
+        let ref = ChangeRef(repo: host.repoRef(repo), number: number, url: URL(string: "https://github.com/\(repo)/pull/\(number)")!)
+        // The PR tab shows lastFetchError in its error banner.
+        if case .failure(let e) = Result(blocking: { try await host.perform(action, on: ref) }) {
+            lastFetchError = GitHubClient.hint(e)
+            log.warning("PR action \(action) for \(repo)#\(number) failed: \(e.message, privacy: .public)")
         }
         DispatchQueue.main.async { completion() }
     }
 }
 
-
-func getGHUser() -> String? { ghStr("api", "user", "--jq", ".login") }
+func getGHUser() -> String? {
+    let host = GitHubCodeHost(owner: "", client: GITHUB)
+    switch Result(blocking: { try await host.probe() }) {
+    case .success(let me): return me.person.login
+    case .failure(let e):
+        lastFetchError = GitHubClient.hint(e)
+        return nil
+    }
+}
 
 // ─── GitHub rate limit ───────────────────────────────────────────────────────
 
-struct RateLimit: Decodable {
-    struct Bucket: Decodable {
-        let limit: Int, used: Int, reset: TimeInterval
-        var fraction: Double { limit > 0 ? Double(used) / Double(limit) : 0 }
-    }
-    let resources: [String: Bucket]
-
-    // Runs use REST and PRs use GraphQL. Show the bucket nearest its limit.
-    var buckets: [(name: String, bucket: Bucket)] {
-        [("REST", resources["core"]), ("GraphQL", resources["graphql"])].compactMap { n, b in b.map { (n, $0) } }
-    }
-    var fraction: Double { buckets.map { $0.bucket.fraction }.max() ?? 0 }
-    var percent: Int { Int((fraction * 100).rounded()) }
+extension RateLimit {
     var color: NSColor { fraction >= 0.9 ? C_FAILURE : fraction >= 0.7 ? C_QUEUED : .secondaryLabelColor }
 
     // REST and GraphQL sit side by side. The colour still follows the fuller bucket.
@@ -256,20 +215,8 @@ final class RateLimitMonitor {
 
     func fetch() {
         DispatchQueue.global(qos: .utility).async {
-            guard let r = try? ghRun(["api", "rate_limit"]), r.status == 0,
-                  let rl = try? JSONDecoder().decode(RateLimit.self, from: r.stdout) else { return }
+            guard let rl = try? Result(blocking: { try await GITHUB.rateLimit() }).get() else { return }
             DispatchQueue.main.async { self.latest = rl; self.onChange?() }
-        }
-    }
-}
-
-
-extension MergeMethod {
-    var ghFlag: String {
-        switch self {
-        case .merge: return "-m"
-        case .rebase: return "-r"
-        case .squash: return "-s"
         }
     }
 }

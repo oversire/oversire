@@ -2,6 +2,7 @@ import Cocoa
 import OverSireCore
 import TrackerPlane
 import OverSireSync
+import GitHubKit
 
 
 // Runnable check: `oversire --selftest` exercises the report math without a UI.

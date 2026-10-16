@@ -46,7 +46,7 @@ public actor EventMerger: EventSource {
         cont.onTermination = { _ in Task { await self.stop(generation: gen) } }
         tasks = sources.map { s in
             // A cancel ends the stream, and the source stops.
-            Task { for await e in s.events() { await self.forward(e) } }
+            Task { for await e in s.events() { self.forward(e) } }
         }
         if let cloud, let polling {
             let health = await cloud.healthUpdates()
