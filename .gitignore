@@ -1,0 +1,22 @@
+# Build artifacts
+OverSire.app/
+oversire
+*.o
+*.dSYM/
+OverSire.zip
+
+# macOS
+.DS_Store
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+credentials.json
+secrets.json
+AppIcon.iconset/

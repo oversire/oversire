@@ -1,0 +1,228 @@
+import Cocoa
+
+// One item in a page list: status, key, title, sub-items, agent, CI, priority, assignee, time.
+final class ItemLine: Row {
+    init(_ item: ProjectItem, snap: ProjectSnapshot, stream: Workstream?, showProject: Bool = false, go: @escaping (Route) -> Void) {
+        let opt = snap.option(item.statusOptionId)
+        let glyph = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16)
+        let key = NSTextField.text(item.key, size: 11.5, color: Palette.dim, mono: true)
+        key.widthAnchor.constraint(equalToConstant: showProject ? 96 : 78).isActive = true
+        let title = NSTextField.text(item.title, size: 13)
+        title.setContentHuggingPriority(.init(1), for: .horizontal)
+        var views: [NSView] = [glyph, key, title]
+        let prog = snap.progress(of: item.id)
+        if prog.total > 0 {
+            views += [ProgressRing(done: prog.done, total: prog.total).sized(14), NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)]
+        }
+        if let a = stream?.agent { views.append(Pill(Tone(a.phase), text: a.label())) }
+        if let ci = stream?.ci { views.append(Chiplet("CI", symbol: ci.symbol, color: ci.color)) }
+        if let p = item.fields["Priority"], p != "None" { views.append(Chiplet(p)) }
+        if let who = item.assignees.first { views.append(Avatar(who)) }
+        let when = NSTextField.text(relativeTime(item.activityAt), size: 11.5, color: Palette.dim)
+        when.alignment = .right
+        when.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        views.append(when)
+        let parts = [opt?.name, stream?.agent?.label(), stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
+        super.init(views, height: 38, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// Initials in a round badge. The name is the tooltip.
+final class Avatar: Box {
+    init(_ name: String, size: CGFloat = 20) {
+        super.init(fill: projectColor(name).withAlphaComponent(0.75), border: nil, radius: size / 2)
+        let words = name.split(whereSeparator: { $0 == " " || $0 == "." || $0 == "_" })
+        let initials = (words.count > 1 ? words.prefix(2).compactMap(\.first).map(String.init).joined() : String(name.prefix(2))).uppercased()
+        let l = NSTextField.text(initials, size: size * 0.45, weight: .semibold, color: .white)
+        addSubview(l)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: size), heightAnchor.constraint(equalToConstant: size),
+            l.centerXAnchor.constraint(equalTo: centerXAnchor), l.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        toolTip = name
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel("Assignee \(name)")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// A filter chip that stays on or off.
+final class ToggleChip: Chiplet {
+    init(_ text: String, on: Bool, _ flip: @escaping () -> Void) {
+        super.init(text, symbol: on ? "checkmark" : nil, color: on ? Palette.fg : Palette.mut,
+                   fill: on ? Palette.acc.withAlphaComponent(0.18) : Palette.raise, onClick: flip)
+        if on { border = Palette.acc }
+        setAccessibilityRole(.checkBox)
+        setAccessibilityValue(on ? 1 : 0)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// A card on the board: key, title and chips.
+final class BoardCard: Row {
+    init(_ item: ProjectItem, stream: Workstream?, go: @escaping (Route) -> Void) {
+        var chips: [NSView] = []
+        if let a = stream?.agent { chips.append(Pill(Tone(a.phase), text: a.label())) }
+        if let ci = stream?.ci { chips.append(Glyph(ci, size: 12)) }
+        if let p = item.fields["Priority"], p != "None" { chips.append(Chiplet(p)) }
+        let col = NSStackView(v: [NSTextField.text(item.key, size: 11, color: Palette.dim, mono: true),
+                                  NSTextField.text(item.title, size: 12.5, weight: .medium, lines: 3)], spacing: 4)
+        if !chips.isEmpty { col.addArrangedSubview(NSStackView(h: chips, spacing: 5)) }
+        super.init([col], height: 54, inset: 10, label: "\(item.key) \(item.title)") { go(.item(item.key, .overview)) }
+        fill = Palette.raise; border = Palette.line; radius = 8
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// Items of one project: a list grouped by status, or a board.
+final class ProjectPage: Page {
+    private static let layoutKey = "projectLayout"
+    private var board = UserDefaults.standard.string(forKey: ProjectPage.layoutKey) == "board"
+    private var onlyAgent = false
+    private var onlyFailing = false
+    private var onlyMine = false
+    private var showDone = false
+    private var showSubItems = false
+
+    private var projectKey: String { if case .project(let k) = route { return k }; return "" }
+
+    override func build(_ col: NSStackView) {
+        let store = data.projectStore
+        guard let snap = store.snapshots.values.first(where: { $0.summary.identifier.uppercased() == projectKey }) else {
+            col.addFull(PageHeader(projectKey, caption: "Project"))
+            col.addFull(EmptyNote(store.snapshots.isEmpty ? "Loading projects…" : "OverSire does not track a project with the key \(projectKey).", symbol: "questionmark.folder"))
+            return
+        }
+        let ws = data.workstreams
+        var items = snap.listed(subItems: showSubItems)
+        if onlyAgent { items = items.filter { ws.stream($0.key)?.agent != nil } }
+        if onlyFailing { items = items.filter { ws.stream($0.key)?.ci?.word == Tone.bad.word } }
+        if onlyMine { items = items.filter { $0.isMine(snap.me) } }
+        let open = snap.notDoneCount(snap.rootItems)
+
+        var actions: [NSView] = []
+        if let n = snap.intake?.count, n > 0 {
+            actions.append(ActionButton("\(n) intake", symbol: "tray.and.arrow.down") { [weak self] in self?.go(.inbox(.intake)) })
+        }
+        let seg = NSSegmentedControl(labels: ["List", "Board"], trackingMode: .selectOne, target: self, action: #selector(layoutChanged(_:)))
+        seg.selectedSegment = board ? 1 : 0
+        seg.setAccessibilityLabel("Layout")
+        actions.append(seg)
+        actions.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: snap.summary.url)!) })
+        col.addFull(PageHeader(snap.summary.title, caption: "\(snap.summary.identifier) · \(open) open · updated \(relativeTime(snap.fetchedAt))", actions: actions))
+
+        let filters = NSStackView(h: [
+            ToggleChip("Mine", on: onlyMine) { [weak self] in self?.flip(\.onlyMine) },
+            ToggleChip("Has session", on: onlyAgent) { [weak self] in self?.flip(\.onlyAgent) },
+            ToggleChip("CI failing", on: onlyFailing) { [weak self] in self?.flip(\.onlyFailing) },
+            ToggleChip("Sub-items", on: showSubItems) { [weak self] in self?.flip(\.showSubItems) },
+            ToggleChip("Show done", on: showDone) { [weak self] in self?.flip(\.showDone) },
+            Spacer(),
+            NSTextField.text("Grouped by status · sorted by priority", size: 12, color: Palette.dim),
+        ], spacing: 6)
+        col.addFull(filters)
+
+        let groups = statusGroups(snap, items)
+        if board { col.addFull(boardView(groups, ws)); return }
+        let list = ListCard()
+        for (opt, its) in groups where !its.isEmpty {
+            let head = Row([StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
+                            NSTextField.text(opt.name, size: 12.5, weight: .semibold),
+                            NSTextField.text("\(its.count)", size: 12, color: Palette.dim), Spacer()], height: 32)
+            head.fill = Palette.raise
+            list.add(head)
+            for i in its.prefix(200) { list.add(ItemLine(i, snap: snap, stream: ws.stream(i.key)) { [weak self] in self?.go($0) }) }
+        }
+        if list.isEmpty { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
+        col.addFull(list)
+    }
+
+    // Plane states in their category order. Done and cancelled show only with Show done.
+    private func statusGroups(_ snap: ProjectSnapshot, _ items: [ProjectItem]) -> [(StatusOption, [ProjectItem])] {
+        let opts = snap.statusOptions.enumerated().sorted { ($0.element.category.rank, $0.offset) < ($1.element.category.rank, $1.offset) }.map(\.element)
+        let sorted = snap.sorted(items)
+        var out = opts.filter { showDone || $0.category != .done }.map { o in (o, sorted.filter { $0.statusOptionId == o.id }) }
+        let known = Set(opts.map(\.id))
+        let rest = sorted.filter { !known.contains($0.statusOptionId ?? "") }
+        if !rest.isEmpty { out.append((StatusOption(id: "", name: "No status", color: "GRAY"), rest)) }
+        return out
+    }
+
+    private func boardView(_ groups: [(StatusOption, [ProjectItem])], _ ws: WorkstreamIndex) -> NSView {
+        let cols: [NSView] = groups.filter { !$0.1.isEmpty || $0.0.category != .done }.map { opt, its in
+            let c = Card(padding: 10, spacing: 8)
+            c.add(NSStackView(h: [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
+                                  NSTextField.text(opt.name, size: 12.5, weight: .semibold),
+                                  NSTextField.text("\(its.count)", size: 12, color: Palette.dim)], spacing: 6))
+            for i in its.prefix(25) { c.add(BoardCard(i, stream: ws.stream(i.key)) { [weak self] in self?.go($0) }) }
+            if its.count > 25 { c.add(NSTextField.text("\(its.count - 25) more", size: 12, color: Palette.dim)) }
+            if its.isEmpty { c.add(NSTextField.text("No items", size: 12, color: Palette.dim)) }
+            return c
+        }
+        let row = NSStackView(h: cols, spacing: 10, align: .top)
+        row.distribution = .fillEqually
+        return row
+    }
+
+    private func flip(_ k: ReferenceWritableKeyPath<ProjectPage, Bool>) {
+        self[keyPath: k].toggle()
+        reload()
+    }
+
+    @objc private func layoutChanged(_ s: NSSegmentedControl) {
+        board = s.selectedSegment == 1
+        UserDefaults.standard.set(board ? "board" : "list", forKey: ProjectPage.layoutKey)
+        reload()
+    }
+}
+
+// Open items of the user in all projects. An agent that waits or a failing run comes first.
+final class MyItemsPage: Page {
+    typealias Entry = (item: ProjectItem, snap: ProjectSnapshot, stream: Workstream?)
+
+    static func order(_ list: [Entry]) -> [Entry] {
+        list.sorted { a, b in
+            let ra = a.stream.map(WorkstreamCard.rank) ?? 5, rb = b.stream.map(WorkstreamCard.rank) ?? 5
+            if ra != rb { return ra < rb }
+            let ca = (a.snap.option(a.item.statusOptionId)?.category ?? .todo).rank
+            let cb = (b.snap.option(b.item.statusOptionId)?.category ?? .todo).rank
+            if ca != cb { return ca < cb }
+            return a.item.activityAt > b.item.activityAt
+        }
+    }
+
+    override func build(_ col: NSStackView) {
+        var list: [Entry] = []
+        for snap in data.projectStore.snapshots.values {
+            for i in snap.rootItems where i.isMine(snap.me) && snap.option(i.statusOptionId)?.category != .done {
+                list.append((i, snap, data.workstreams.stream(i.key)))
+            }
+        }
+        let ordered = MyItemsPage.order(list)
+        col.addFull(PageHeader("My items", caption: "\(ordered.count) open items of yours in all projects. A session that needs input or failing CI comes first."))
+        let card = ListCard()
+        for e in ordered.prefix(300) {
+            card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, showProject: true) { [weak self] in self?.go($0) })
+        }
+        if card.isEmpty { card.add(EmptyNote(data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")) }
+        col.addFull(card)
+    }
+}
+
+extension NSView {
+    // Fixed size for a view that draws itself in its frame.
+    func fixedWidth(_ w: CGFloat) -> Self {
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: w).isActive = true
+        return self
+    }
+
+    func sized(_ s: CGFloat) -> Self {
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: s).isActive = true
+        heightAnchor.constraint(equalToConstant: s).isActive = true
+        return self
+    }
+}

@@ -1,0 +1,535 @@
+import Cocoa
+
+struct NewItem {
+    var projectKey: String
+    var title: String
+    var body: String                        // Markdown
+    var fieldOptions: [String: String]      // field id ("state", "priority") → option id
+}
+
+// Last snapshots, the activity feed, and unread state. Fetches run off the main
+// queue. The first snapshot of a project creates no activity, so launch is quiet.
+
+final class ProjectStore {
+    static let changed = Notification.Name("ProjectStoreChanged")
+
+    private(set) var snapshots: [String: ProjectSnapshot] = [:]
+    private(set) var refreshing: Set<String> = []
+    private(set) var lastError: String?
+    private(set) var tracked: [ProjectSummary] = []
+    private(set) var liveKeys: Set<String> = []
+    private(set) var intakeKeys: [String: Int] = [:]   // work item id → number, for keys such as TREBI-264
+    private var loadingKeys: Set<String> = []
+
+    private let accounts: PlaneAccounts
+    private let notifier: ProjectNotifier
+    private let statePath: String
+    private let activityPath: String
+    private let q = DispatchQueue(label: "com.oversire.app.projects", qos: .utility)
+    private var timer: Timer?
+    private var readActivity = Set<String>()
+    private var readItems = Set<String>()
+    private var activityCache: [ActivityEntry] = []
+    private var timelineCache: [String: (stamp: String, entries: [ActivityEntry])] = [:]
+    private var optionCache: [String: (options: ItemOptions, at: Date)] = [:]
+    private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
+    private var suppressNotify = Set<String>()
+    private var assetCache: [String: (url: String, at: Date)] = [:]
+    var relayIsLive: () -> Bool = { false }
+    var onChange: (() -> Void)?
+
+    init(accounts: PlaneAccounts, notifier: ProjectNotifier, statePath: String, activityPath: String) {
+        self.accounts = accounts
+        self.notifier = notifier
+        self.statePath = statePath
+        self.activityPath = activityPath
+        load()
+    }
+
+    func track(_ projects: [ProjectSummary], live: Set<String>) {
+        tracked = projects
+        liveKeys = live
+        restartTimer()
+        let keys = projects.map { $0.ref.key }
+        refresh(keys, force: false) { _ in }
+    }
+
+    func restartTimer() {
+        timer?.invalidate()
+        let minutes = min(30, max(2, PROJECTS_CFG.pollMinutes))
+        let interval = TimeInterval(minutes * 60)
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.poll() }
+        t.tolerance = interval * 0.1
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    func poll() {
+        let liveRelay = relayIsLive()
+        let keys = tracked.map(\.ref.key).filter { key in
+            if liveKeys.contains(key) { return !liveRelay }
+            return true
+        }
+        refresh(keys, force: false) { _ in }
+    }
+
+    func refresh(_ keys: [String], force: Bool, done: @escaping (Bool) -> Void) {
+        let todo = keys.filter { force || !refreshing.contains($0) }
+        guard !todo.isEmpty else { done(true); return }
+        for k in todo { refreshing.insert(k) }
+        publish()
+        let jobs = tracked.filter { todo.contains($0.ref.key) }.map { p in
+            (p, accounts.client(for: p.ref.workspace), snapshots[p.ref.key])
+        }
+        let limit = snapshotLimit
+        q.async { [weak self] in
+            guard let self = self else { return }
+            var fresh: [ProjectSnapshot] = []
+            var error: String?
+            for (p, client, previous) in jobs {
+                guard let client else { error = "\(p.ref.workspace): " + PlaneError.noToken.message; continue }
+                switch client.snapshot(p, limit: limit, previous: previous) {
+                case .success(let s): fresh.append(s)
+                case .failure(let e): error = "\(p.ref.workspace): " + e.message
+                }
+            }
+            let failed = error != nil
+            DispatchQueue.main.async {
+                for k in todo { self.refreshing.remove(k) }
+                self.lastError = error
+                for snap in fresh { self.absorb(snap) }
+                self.save()
+                self.publish()
+                done(!failed)
+            }
+        }
+    }
+
+    // A nil project means all tracked projects of the workspace. No events means all.
+    func refreshForEvents(_ events: [(workspace: String, project: String?)], done: @escaping (Bool) -> Void) {
+        let keys = tracked.map(\.ref).filter { ref in
+            events.isEmpty || events.contains { $0.workspace == ref.workspace && ($0.project == nil || $0.project == ref.id) }
+        }.map(\.key)
+        if keys.isEmpty { done(true); return }
+        refresh(keys, force: true, done: done)
+    }
+
+    func timeline(itemId: String, done: @escaping ([ActivityEntry]) -> Void) {
+        guard let found = item(itemId), let client = accounts.client(for: found.snap.summary.ref.workspace) else { done([]); return }
+        let stamp = isoFmt.string(from: found.item.activityAt)
+        let cacheKey = itemId + "|" + stamp
+        if let hit = timelineCache[cacheKey] { done(hit.entries); return }
+        if timelineWaiters[cacheKey] != nil { timelineWaiters[cacheKey]?.append(done); return }
+        timelineWaiters[cacheKey] = [done]
+        let projectKey = found.key
+        let (project, url, states) = (found.snap.summary.ref.id, found.item.url, found.snap.statusOptions)
+        let current = found.snap.option(found.item.statusOptionId)?.name
+        q.async { [weak self] in
+            let result = client.timeline(project: project, item: itemId, url: url, states: states, current: current)
+            guard let self else { return }
+            DispatchQueue.main.async {
+                let waiters = self.timelineWaiters.removeValue(forKey: cacheKey) ?? []
+                let entries: [ActivityEntry]
+                if case .success(let list) = result {
+                    entries = list.suffix(200).map { e in
+                        var c = e
+                        c.projectKey = projectKey
+                        c.itemId = itemId
+                        c.unread = !self.readActivity.contains(c.id) && !self.readItems.contains(itemId)
+                        return c
+                    }
+                    self.timelineCache[cacheKey] = (stamp, entries)
+                } else {
+                    entries = []
+                }
+                waiters.forEach { $0(entries) }
+                self.publish()
+            }
+        }
+    }
+
+    func activity(limit: Int, project: String?) -> [ActivityEntry] {
+        let rows = activityCache.filter { project == nil || $0.projectKey == project }
+            .sorted { $0.at > $1.at }
+        return Array(rows.prefix(limit)).map { e in
+            var c = e
+            c.unread = !readActivity.contains(e.id) && !readItems.contains(e.itemId)
+            return c
+        }
+    }
+
+    func unreadCount() -> Int {
+        activity(limit: 500, project: nil).filter(\.unread).count
+    }
+
+    func isUnread(itemId: String) -> Bool {
+        activity(limit: 500, project: nil).contains { $0.itemId == itemId && $0.unread }
+    }
+
+    func markRead(itemId: String) {
+        readItems.insert(itemId)
+        save()
+        publish()
+    }
+
+    func markActivityRead(_ id: String) {
+        readActivity.insert(id)
+        save()
+        publish()
+    }
+
+    func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
+        write(itemId, failure: "Could not change the status", done: done) { c, project in
+            c.update(project: project, item: itemId, ["state": optionId])
+        }
+    }
+
+    // Any v1 field, for example "priority", "labels" (ids) or "assignees" (ids).
+    func update(itemId: String, fields: [String: Any], failure: String, done: @escaping (Bool) -> Void) {
+        write(itemId, failure: failure, done: done) { c, project in
+            c.update(project: project, item: itemId, fields)
+        }
+    }
+
+    // The labels of the project and the members of the workspace, for the item window menus.
+    func options(projectKey: String, done: @escaping (ItemOptions) -> Void) {
+        if let hit = optionCache[projectKey], -hit.at.timeIntervalSinceNow < 600 { done(hit.options); return }
+        guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { return }
+        let project = snap.summary.ref.id
+        q.async { [weak self] in
+            let labels = (try? client.labels(project: project).get()) ?? []
+            let members = client.memberNames().map { StatusOption(id: $0.key, name: $0.value, color: "") }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            let options = ItemOptions(labels: labels, members: members)
+            DispatchQueue.main.async {
+                self?.optionCache[projectKey] = (options, Date())
+                done(options)
+            }
+        }
+    }
+
+    // Title, facts, link, description and all comments as Markdown, on the pasteboard.
+    func copyForAgent(_ id: String) {
+        timeline(itemId: id) { [weak self] entries in
+            guard let found = self?.item(id) else { return }
+            let comments = entries.compactMap { e -> CommentRef? in
+                if case .comments(_, let last) = e.change { return last }
+                return nil
+            }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(found.item.agentMarkdown(snap: found.snap, comments: comments), forType: .string)
+        }
+    }
+
+    func comment(itemId: String, body: String, done: @escaping (Bool) -> Void) {
+        write(itemId, failure: "Could not post the comment", done: done) { c, project in
+            c.comment(project: project, item: itemId, markdown: body)
+        }
+    }
+
+    func edit(itemId: String, title: String, body: String, done: @escaping (Bool) -> Void) {
+        write(itemId, failure: nil, done: done) { c, project in
+            c.update(project: project, item: itemId, ["name": title, "description_html": PlaneMarkup.html(fromMarkdown: body)])
+        }
+    }
+
+    // The first "in progress" state, plus assign me. A project without such a state only assigns.
+    func start(itemId: String, done: @escaping (Bool) -> Void) {
+        guard let found = item(itemId) else { done(false); return }
+        let progress = found.snap.statusOptions.first { $0.category == .progress }
+        let current = found.item.statusOptionId
+        write(itemId, failure: nil, done: done) { c, project in
+            if let progress, current != progress.id,
+               case .failure(let e) = c.update(project: project, item: itemId, ["state": progress.id]) {
+                return .failure(e)
+            }
+            return c.assignMe(project: project, item: itemId)
+        }
+    }
+
+    // `done(created, message)`.
+    func create(_ new: NewItem, done: @escaping (Bool, String?) -> Void) {
+        guard let snap = snapshots[new.projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
+            done(false, "The project is not loaded yet"); return
+        }
+        var fields: [String: Any] = ["name": new.title]
+        let body = new.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty { fields["description_html"] = PlaneMarkup.html(fromMarkdown: body) }
+        if let s = new.fieldOptions[ProjectSnapshot.statusFieldId] { fields["state"] = s }
+        if let p = new.fieldOptions[ProjectSnapshot.priorityFieldId] { fields["priority"] = p }
+        let project = snap.summary.ref.id
+        q.async { [weak self] in
+            let added = client.create(project: project, fields)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch added {
+                case .failure(let e):
+                    self.lastError = e.message
+                    done(false, e.message)
+                case .success(let itemId):
+                    self.suppressNotify.insert(itemId)
+                    self.refresh([new.projectKey], force: true) { _ in done(true, nil) }
+                }
+            }
+        }
+    }
+
+    // Runs one change off the main queue, then reloads the project. A change made here is not news.
+    private func write(_ itemId: String, failure: String?, done: @escaping (Bool) -> Void,
+                       _ op: @escaping (PlaneClient, String) -> Result<Void, PlaneError>) {
+        guard let found = item(itemId), let client = accounts.client(for: found.snap.summary.ref.workspace) else { done(false); return }
+        suppressNotify.insert(itemId)
+        let project = found.snap.summary.ref.id
+        q.async { [weak self] in
+            let result = op(client, project)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if case .failure(let e) = result {
+                    self.suppressNotify.remove(itemId)
+                    self.lastError = failure ?? e.message
+                }
+                self.timelineCache = self.timelineCache.filter { !$0.key.hasPrefix(itemId) }
+                self.refresh([found.key], force: true) { done($0 && result.isOk) }
+            }
+        }
+    }
+
+    // MARK: Intake
+
+    func intakeDetail(projectKey: String, item: IntakeItem, done: @escaping (Result<IntakeDetail, PlaneError>) -> Void) {
+        guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
+            done(.failure(.noToken)); return
+        }
+        let project = snap.summary.ref.id
+        q.async {
+            let r = client.intakeDetail(project: project, workItem: item.workItemId)
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    // The refresh then moves an accepted item into the list.
+    func triage(projectKey: String, item: IntakeItem, action: IntakeAction, done: @escaping (Bool) -> Void) {
+        guard let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else { done(false); return }
+        suppressNotify.insert(item.workItemId)
+        let project = snap.summary.ref.id
+        q.async { [weak self] in
+            let r = client.triage(project: project, workItem: item.workItemId, action: action)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case .failure(let e) = r {
+                    self.suppressNotify.remove(item.workItemId)
+                    self.lastError = action.failure + e.message
+                }
+                self.refresh([projectKey], force: true) { done($0 && r.isOk) }
+            }
+        }
+    }
+
+    // The numbers do not change, so one load per new item is enough.
+    func loadIntakeKeys(projectKey: String, done: @escaping () -> Void) {
+        guard let snap = snapshots[projectKey], let intake = snap.intake,
+              intake.contains(where: { intakeKeys[$0.workItemId] == nil }), !loadingKeys.contains(projectKey),
+              let client = accounts.client(for: snap.summary.ref.workspace) else { return }
+        loadingKeys.insert(projectKey)
+        let project = snap.summary.ref.id
+        q.async { [weak self] in
+            let r = client.intakeSequences(project: project)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.loadingKeys.remove(projectKey)
+                if case .success(let found) = r { self.intakeKeys.merge(found) { $1 }; done() }
+            }
+        }
+    }
+
+    // Plane images have an asset id as src. This puts signed download links in their place.
+    func resolveImages(_ markdown: String, projectKey: String, done: @escaping (String) -> Void) {
+        let ns = markdown as NSString
+        let ids = Set(PlaneMarkup.assetRE.matches(in: markdown, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 2)) })
+        let todo = ids.filter { id in assetCache[id].map { -$0.at.timeIntervalSinceNow > 3000 } ?? true }
+        func apply() -> String {
+            var out = markdown
+            for id in ids { if let u = assetCache[id]?.url { out = out.replacingOccurrences(of: "](\(id))", with: "](\(u))") } }
+            return out
+        }
+        guard !todo.isEmpty, let snap = snapshots[projectKey], let client = accounts.client(for: snap.summary.ref.workspace) else {
+            done(apply()); return
+        }
+        q.async { [weak self] in
+            let found = todo.compactMap { id in (try? client.assetURL(id).get()).map { (id, $0) } }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                for (id, u) in found { self.assetCache[id] = (u, Date()) }
+                done(apply())
+            }
+        }
+    }
+
+    // New, changed and closed intake items. A closed item is accepted when it is now in the list.
+    private func notifyIntake(old: ProjectSnapshot?, new snap: ProjectSnapshot) {
+        guard PROJECTS_CFG.notifications.intake, let before = old?.intake, let after = snap.intake else { return }
+        let was = Dictionary(before.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let now = Dictionary(after.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var lines: [(IntakeItem, String)] = []
+        for i in after where !suppressNotify.contains(i.workItemId) {
+            if let prev = was[i.id] {
+                if prev.name != i.name || prev.priority != i.priority { lines.append((i, "Intake item changed")) }
+            } else {
+                lines.append((i, "New intake item" + (i.author.map { " from \($0)" } ?? "")))
+            }
+        }
+        for i in before where now[i.id] == nil {
+            if suppressNotify.remove(i.workItemId) != nil { continue }
+            let accepted = snap.items.contains { $0.id == i.workItemId }
+            lines.append((i, accepted ? "Intake item accepted" : "Intake item declined or removed"))
+        }
+        notifier.intake(lines, in: snap)
+    }
+
+    func item(_ id: String) -> (key: String, snap: ProjectSnapshot, item: ProjectItem)? {
+        for (key, snap) in snapshots {
+            if let item = snap.items.first(where: { $0.id == id }) { return (key, snap, item) }
+        }
+        return nil
+    }
+
+    func item(key: String) -> (key: String, snap: ProjectSnapshot, item: ProjectItem)? {
+        let k = key.uppercased()
+        for (pk, snap) in snapshots {
+            if let item = snap.items.first(where: { $0.key.uppercased() == k }) { return (pk, snap, item) }
+        }
+        return nil
+    }
+
+    var snapshotLimit: Int {
+        let n = PROJECTS_CFG.itemsPerProject
+        return min(300, max(100, n == 0 ? 200 : n))
+    }
+
+    // MARK: Diff
+
+    static func diff(_ old: ProjectSnapshot?, _ new: ProjectSnapshot) -> [(itemId: String, ItemChange)] {
+        guard let old = old else { return [] }
+        var out: [(String, ItemChange)] = []
+        let oldById = Dictionary(old.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let newIds = Set(new.items.map(\.id))
+        for item in new.items {
+            guard let prev = oldById[item.id] else {
+                out.append((item.id, .added))
+                if item.mentionsMe { out.append((item.id, .mention)) }
+                continue
+            }
+            if prev.statusOptionId != item.statusOptionId {
+                out.append((item.id, .status(from: old.statusName(prev.statusOptionId), to: new.statusName(item.statusOptionId))))
+            }
+            let wasDone = old.option(prev.statusOptionId)?.category == .done
+            let isDone = new.option(item.statusOptionId)?.category == .done
+            if isDone && !wasDone { out.append((item.id, .closed)) }
+            if wasDone && !isDone { out.append((item.id, .reopened)) }
+            let names = Set(prev.fields.keys).union(item.fields.keys).subtracting(["Status"])
+            for name in names.sorted() where prev.fields[name] != item.fields[name] {
+                out.append((item.id, .field(name: name, from: prev.fields[name], to: item.fields[name])))
+            }
+            let oldA = Set(prev.assignees), newA = Set(item.assignees)
+            for a in newA.subtracting(oldA).sorted() { out.append((item.id, .assigned(a))) }
+            for a in oldA.subtracting(newA).sorted() { out.append((item.id, .unassigned(a))) }
+            // Comments load only on new activity, so an old comment can appear here first. Skip it.
+            if let last = item.lastComment, last.id != prev.lastComment?.id, last.createdAt > old.fetchedAt {
+                let n = prev.lastComment == nil ? 1 : max(1, item.commentCount - prev.commentCount)
+                out.append((item.id, .comments(new: n, last: last)))
+                if item.mentionsMe { out.append((item.id, .mention)) }
+            }
+        }
+        for item in old.items where !newIds.contains(item.id) {
+            out.append((item.id, .removed))
+        }
+        return out
+    }
+
+    // MARK: Private
+
+    private func absorb(_ snap: ProjectSnapshot) {
+        let key = snap.summary.ref.key
+        let old = snapshots[key]
+        let changes = ProjectStore.diff(old, snap)
+        snapshots[key] = snap
+        notifyIntake(old: old, new: snap)
+        guard old != nil, !changes.isEmpty else { return }
+        let at = snap.fetchedAt
+        let me = snap.me?.lowercased()
+        var own = Set<String>()
+        let entries = changes.map { pair -> ActivityEntry in
+            let item = snap.items.first { $0.id == pair.itemId } ?? old?.items.first { $0.id == pair.itemId }
+            let actor: String?
+            switch pair.1 {
+            case .added: actor = item?.author
+            case .comments(_, let last): actor = last.author
+            case .mention: actor = item?.lastComment?.author ?? item?.author
+            default: actor = item?.updatedBy
+            }
+            let e = ActivityEntry.make(projectKey: key, itemId: pair.itemId, change: pair.1, actor: actor,
+                                       url: item?.url ?? snap.summary.url, at: at)
+            // Changes made in OverSire or by me are not news.
+            if suppressNotify.contains(pair.itemId) || (me != nil && actor?.lowercased() == me) { own.insert(e.id) }
+            return e
+        }
+        append(entries)
+        readActivity.formUnion(own)
+        let filtered = zip(changes, entries).filter { !own.contains($1.id) }.map(\.0)
+        suppressNotify.subtract(changes.map(\.itemId))
+        notifier.handle(filtered, in: snap, settings: PROJECTS_CFG.notifications)
+    }
+
+    private func append(_ entries: [ActivityEntry]) {
+        let known = Set(activityCache.map(\.id))
+        let fresh = entries.filter { !known.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        activityCache.append(contentsOf: fresh)
+        let cutoff = Date().addingTimeInterval(-14 * 86400)
+        activityCache.removeAll { $0.at < cutoff }
+        let text = activityCache.compactMap { e -> String? in
+            guard let d = try? JSONEncoder().encode(e) else { return nil }
+            return String(data: d, encoding: .utf8)
+        }.joined(separator: "\n") + "\n"
+        try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
+        try? text.write(toFile: activityPath, atomically: true, encoding: .utf8)
+    }
+
+    private struct Disk: Codable {
+        var snapshots: [String: ProjectSnapshot]
+        var readActivity: [String]
+        var readItems: [String]
+    }
+
+    private func load() {
+        if let data = FileManager.default.contents(atPath: statePath),
+           let disk = try? JSONDecoder().decode(Disk.self, from: data) {
+            snapshots = disk.snapshots
+            readActivity = Set(disk.readActivity)
+            readItems = Set(disk.readItems)
+        }
+        let raw = (try? String(contentsOfFile: activityPath, encoding: .utf8)) ?? ""
+        let dec = JSONDecoder()
+        activityCache = raw.split(separator: "\n").compactMap {
+            guard let d = $0.data(using: .utf8) else { return nil }
+            return try? dec.decode(ActivityEntry.self, from: d)
+        }
+    }
+
+    private func save() {
+        let disk = Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems))
+        guard let data = try? JSONEncoder().encode(disk) else { return }
+        try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
+        try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)
+    }
+
+    private func publish() {
+        onChange?()
+        NotificationCenter.default.post(name: ProjectStore.changed, object: self)
+    }
+}
+
+extension Result {
+    var isOk: Bool { if case .success = self { return true }; return false }
+}

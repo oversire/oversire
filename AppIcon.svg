@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#21262D"/><stop offset="1" stop-color="#0D1117"/></linearGradient>
+    <radialGradient id="iris" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#D8FFB0"/><stop offset="0.55" stop-color="#3CC48A"/><stop offset="1" stop-color="#00694C"/></radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#3CC48A" stop-opacity="0.55"/><stop offset="1" stop-color="#3CC48A" stop-opacity="0"/></radialGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-opacity="0.35"/></filter>
+    <clipPath id="almond"><path d="M-48 0 Q0 -50 48 0 Q0 50 -48 0 Z"/></clipPath>
+    <g id="eye">
+      <ellipse cx="0" cy="0" rx="78" ry="60" fill="url(#glow)"/>
+      <path d="M-48 0 Q0 -50 48 0 Q0 50 -48 0 Z" fill="url(#iris)"/>
+      <ellipse cx="0" cy="0" rx="8" ry="30" fill="#06120D" clip-path="url(#almond)"/>
+      <circle cx="13" cy="-9" r="6.5" fill="#fff" opacity="0.95"/>
+      <path d="M-48 0 Q0 -50 48 0 Q0 50 -48 0 Z" fill="none" stroke="#0A2A1F" stroke-width="3"/>
+    </g>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#sh)"/>
+  <g transform="translate(512 512) scale(29.5) translate(-12 -12.27)">
+    <path d="M10.226 17.284c-2.965-.36-5.054-2.493-5.054-5.256 0-1.123.404-2.336 1.078-3.144-.292-.741-.247-2.314.09-2.965.898-.112 2.111.36 2.83 1.01.853-.269 1.752-.404 2.853-.404 1.1 0 1.999.135 2.807.382.696-.629 1.932-1.1 2.83-.988.315.606.36 2.179.067 2.942.72.854 1.101 2 1.101 3.167 0 2.763-2.089 4.852-5.098 5.234.763.494 1.28 1.572 1.28 2.807v2.336c0 .674.561 1.056 1.235.786 4.066-1.55 7.255-5.615 7.255-10.646C23.5 6.188 18.334 1 11.978 1 5.62 1 .5 6.188.5 12.545c0 4.986 3.167 9.12 7.435 10.669.606.225 1.19-.18 1.19-.786V20.63a2.9 2.9 0 0 1-1.078.224c-1.483 0-2.359-.808-2.987-2.313-.247-.607-.517-.966-1.034-1.033-.27-.023-.359-.135-.359-.27 0-.27.45-.471.898-.471.652 0 1.213.404 1.797 1.235.45.651.921.943 1.483.943.561 0 .92-.202 1.437-.719.382-.381.674-.718.944-.943" fill="#F0F6FC"/>
+  </g>
+  <!-- Cat eyes and nose on the face. Face center is mark (12, 12.1). -->
+  <use href="#eye" x="430" y="510"/>
+  <use href="#eye" x="594" y="510"/>
+  <path d="M497 566 L527 566 L512 584 Z" fill="#FF8FA3" stroke="#B4475C" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

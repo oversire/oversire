@@ -1,0 +1,416 @@
+import AppKit
+
+// The Orca agent of each Plane item. OverSire finds agents by the card name (the item
+// key), by the pane of an agent it started, and by the item URL in the prompt.
+
+struct ItemAgent: Equatable {
+    enum Phase: Equatable { case starting, working, waiting, done, failed }
+    var phase: Phase
+    var since: Date
+    var card: String?
+    var paneKey: String?
+    var type = "claude"
+    var repo = ""
+    var prompt: String?
+    var message: String?     // the error of a failed start, else the last agent reply
+
+    func label(now: Date = Date()) -> String {
+        switch phase {
+        case .starting: return "Starting…"
+        case .working: return "Working " + ItemAgent.minutes(now.timeIntervalSince(since))
+        case .waiting: return "Needs input"
+        case .done: return "Session done"
+        case .failed: return "Not started"
+        }
+    }
+
+    static func minutes(_ t: TimeInterval) -> String {
+        let m = max(0, Int(t / 60))
+        return m < 60 ? "\(m)m" : "\(m / 60)h \(m % 60)m"
+    }
+
+    var rank: Int {
+        switch phase {
+        case .waiting: return 0
+        case .working: return 1
+        case .starting: return 2
+        case .failed: return 3
+        case .done: return 4
+        }
+    }
+}
+
+// One agent state change, for the Orca activity list.
+struct OrcaEvent: Equatable {
+    let key: String
+    let repo: String
+    let phase: ItemAgent.Phase
+    let at: Date
+    let text: String
+}
+
+// The last agent state changes, newest first.
+struct OrcaFeed {
+    var limit = 50
+    private(set) var events: [OrcaEvent] = []
+
+    mutating func record(before: [String: ItemAgent], after: [String: ItemAgent]) {
+        for (key, a) in after {
+            let old = before[key]
+            guard old?.phase != a.phase || (a.phase != .working && old?.since != a.since) else { continue }
+            events.append(OrcaEvent(key: key, repo: a.repo, phase: a.phase, at: a.since, text: OrcaFeed.text(a, from: old?.phase)))
+        }
+        events.sort { $0.at > $1.at }
+        if events.count > limit { events.removeLast(events.count - limit) }
+    }
+
+    static func text(_ a: ItemAgent, from old: ItemAgent.Phase?) -> String {
+        let msg = a.message.map { ": " + $0.replacingOccurrences(of: "\n", with: " ").prefix(120) } ?? ""
+        switch a.phase {
+        case .starting: return "Session starts"
+        case .working: return old == .waiting ? "Got input, works again" : "Session works"
+        case .waiting: return "Needs input" + msg
+        case .done: return "Session done" + msg
+        case .failed: return "Did not start" + msg
+        }
+    }
+}
+
+final class AgentIndex: NSObject {
+    static let changed = Notification.Name("AgentIndexChanged")
+
+    struct Launch: Equatable {
+        var at: Date
+        var card: String?
+        var paneKey: String?
+        var error: String?
+    }
+
+    private(set) var agents: [String: ItemAgent] = [:]   // uppercased item key
+    private(set) var cards: [OrcaCard] = []                // the last `worktree ps`
+    private(set) var lastError: String?
+    private(set) var feed = OrcaFeed()
+    private var launches: [String: Launch] = [:]
+    private var notified: [String: String] = [:]
+    private var primed = false
+    private var polling = false
+    private var lastPoll = Date.distantPast
+    private var timer: Timer?
+    private let q = DispatchQueue(label: "com.oversire.app.orca", qos: .utility)
+
+    var now: () -> Date = Date.init
+    var visible: () -> Bool = { false }
+    // Called once for each agent that holds a new waiting or done state for 10 seconds.
+    var onAlert: ((_ key: String, _ agent: ItemAgent) -> Void)?
+
+    private var cfg: OrcaConfig { PROJECTS_CFG.orca }
+
+    func agent(_ key: String) -> ItemAgent? { agents[key.uppercased()] }
+
+    // Self when Orca is on and installed, else nil. The UI shows no Orca controls then.
+    var ready: AgentIndex? { cfg.enabled && FileManager.default.isExecutableFile(atPath: cfg.cli) ? self : nil }
+
+    func startTimer() {
+        timer?.invalidate()
+        let t = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if self.visible() || -self.lastPoll.timeIntervalSinceNow >= 60 { self.poll() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+        poll()
+    }
+
+    func poll() {
+        guard cfg.enabled, !polling else { return }
+        let client = cfg.client
+        guard client.installed else { return }
+        polling = true
+        lastPoll = now()
+        q.async { [weak self] in
+            let r = client.cards()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.polling = false
+                switch r {
+                case .failure(let e): self.lastError = e.message
+                case .success(let cards):
+                    self.lastError = nil
+                    self.absorb(cards)
+                }
+            }
+        }
+    }
+
+    // Starts the item in the project's Orca workspace. Without a saved workspace, a menu
+    // at `anchor` asks for one and saves the choice.
+    func start(_ item: ProjectItem, snap: ProjectSnapshot, anchor: NSView) {
+        let pk = snap.summary.ref.key
+        if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root) { _ in }; return }
+        let client = cfg.client
+        q.async { [weak self] in
+            let r = client.repos()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch r {
+                case .failure(let e): self.fail(item.key, e.message)
+                case .success(let repos):
+                    let menu = NSMenu()
+                    menu.addItem(withTitle: "Run \(snap.summary.identifier) items in…", action: nil, keyEquivalent: "").isEnabled = false
+                    let guess = OrcaConfig.guess(snap.summary, repos)
+                    let sorted = repos.sorted { a, b in
+                        if (a.path == guess) != (b.path == guess) { return a.path == guess }
+                        if a.folder != b.folder { return a.folder }
+                        return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                    }
+                    for repo in sorted {
+                        let mi = NSMenuItem(title: repo.name, action: #selector(self.pick(_:)), keyEquivalent: "")
+                        mi.target = self
+                        mi.toolTip = repo.path
+                        mi.image = NSImage(systemSymbolName: repo.folder ? "folder" : "arrow.triangle.branch", accessibilityDescription: nil)
+                        mi.representedObject = PickContext(item: item, projectKey: pk, root: repo.path)
+                        menu.addItem(mi)
+                    }
+                    if repos.isEmpty { menu.addItem(withTitle: "Orca has no workspaces", action: nil, keyEquivalent: "").isEnabled = false }
+                    // A rebuild can remove the anchor while Orca replies.
+                    if anchor.window != nil {
+                        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 2), in: anchor)
+                    } else {
+                        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+                    }
+                }
+            }
+        }
+    }
+
+    // A failed start offers a retry. Other states open the terminal.
+    func pillClicked(_ item: ProjectItem, snap: ProjectSnapshot, anchor: NSView) {
+        guard let a = agent(item.key), a.phase == .failed else { reveal(item.key); return }
+        let menu = NSMenu()
+        let head = NSMenuItem(title: a.message ?? "The session did not start", action: nil, keyEquivalent: "")
+        head.isEnabled = false
+        menu.addItem(head)
+        menu.addItem(.separator())
+        let retry = NSMenuItem(title: "Try again", action: #selector(retry(_:)), keyEquivalent: "")
+        retry.target = self
+        retry.representedObject = RechooseContext(item: item, snap: snap, anchor: anchor)
+        menu.addItem(retry)
+        if cfg.roots[snap.summary.ref.key]?.isEmpty == false {
+            let other = NSMenuItem(title: "Choose another workspace…", action: #selector(rechoose(_:)), keyEquivalent: "")
+            other.target = self
+            other.representedObject = RechooseContext(item: item, snap: snap, anchor: anchor)
+            menu.addItem(other)
+        }
+        let dismiss = NSMenuItem(title: "Dismiss", action: #selector(dismiss(_:)), keyEquivalent: "")
+        dismiss.target = self
+        dismiss.representedObject = item.key
+        menu.addItem(dismiss)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 2), in: anchor)
+    }
+
+    private final class RechooseContext: NSObject {
+        let item: ProjectItem, snap: ProjectSnapshot, anchor: NSView
+        init(item: ProjectItem, snap: ProjectSnapshot, anchor: NSView) { (self.item, self.snap, self.anchor) = (item, snap, anchor) }
+    }
+
+    @objc private func retry(_ sender: NSMenuItem) {
+        guard let c = sender.representedObject as? RechooseContext else { return }
+        clearFailure(c.item.key)
+        start(c.item, snap: c.snap, anchor: c.anchor)
+    }
+
+    @objc private func rechoose(_ sender: NSMenuItem) {
+        guard let c = sender.representedObject as? RechooseContext else { return }
+        clearFailure(c.item.key)
+        PROJECTS_CFG.orca.roots[c.snap.summary.ref.key] = nil
+        saveConfig()
+        start(c.item, snap: c.snap, anchor: c.anchor)
+    }
+
+    @objc private func dismiss(_ sender: NSMenuItem) {
+        if let key = sender.representedObject as? String { clearFailure(key) }
+    }
+
+    private final class PickContext: NSObject {
+        let item: ProjectItem, projectKey: String, root: String
+        init(item: ProjectItem, projectKey: String, root: String) { (self.item, self.projectKey, self.root) = (item, projectKey, root) }
+    }
+
+    @objc private func pick(_ sender: NSMenuItem) {
+        guard let c = sender.representedObject as? PickContext else { return }
+        PROJECTS_CFG.orca.roots[c.projectKey] = c.root
+        saveConfig()
+        start(c.item, root: c.root) { _ in }
+    }
+
+    private func fail(_ key: String, _ message: String) {
+        let k = key.uppercased()
+        launches[k] = Launch(at: now(), error: message)
+        let before = agents
+        agents[k] = ItemAgent(phase: .failed, since: now(), message: message)
+        feed.record(before: before, after: agents)
+        publish()
+    }
+
+    // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
+    func start(_ item: ProjectItem, root: String, done: @escaping (Result<OrcaLaunch, OrcaError>) -> Void) {
+        let key = item.key.uppercased()
+        let (client, agent, prompt) = (cfg.client, cfg.agent, cfg.prompt(for: item))
+        launches[key] = Launch(at: now())
+        agents[key] = ItemAgent(phase: .starting, since: now(), type: agent, repo: (root as NSString).lastPathComponent, prompt: prompt)
+        publish()
+        q.async { [weak self] in
+            let r = client.start(root: root, key: item.key, url: item.url, agent: agent, prompt: prompt)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch r {
+                case .success(let l): self.launches[key] = Launch(at: self.now(), card: l.card, paneKey: l.paneKey)
+                case .failure(let e): self.fail(key, e.message)
+                }
+                self.publish()
+                self.poll()
+                done(r)
+            }
+        }
+    }
+
+    func clearFailure(_ key: String) {
+        let k = key.uppercased()
+        guard launches[k]?.error != nil else { return }
+        launches[k] = nil
+        agents[k] = nil
+        publish()
+    }
+
+    // Shows the item's terminal in Orca.
+    func reveal(_ key: String) {
+        guard let a = agent(key), let card = a.card else { return }
+        let client = cfg.client
+        q.async {
+            guard case .success(let ts) = client.terminals(card: card) else { return }
+            if let t = AgentIndex.pick(ts, agent: a, key: key) ?? ts.first(where: { !$0.orphaned }) { client.reveal(handle: t.handle) }
+        }
+    }
+
+    // Shows the first live terminal of a worktree in Orca.
+    func reveal(card: String) {
+        let client = cfg.client
+        q.async {
+            guard case .success(let ts) = client.terminals(card: card), let t = ts.first(where: { !$0.orphaned }) else { return }
+            client.reveal(handle: t.handle)
+        }
+    }
+
+    func send(_ key: String, text: String, done: @escaping (OrcaError?) -> Void) {
+        terminal(key) { client, handle in
+            guard let handle else { return OrcaError(code: "no_terminal", message: "The session terminal is closed") }
+            if case .failure(let e) = client.send(handle: handle, text: text) { return e }
+            return nil
+        } done: { done($0) }
+    }
+
+    func tail(_ key: String, lines n: Int = 8, done: @escaping ([String]) -> Void) {
+        terminal(key) { client, handle -> [String] in
+            guard let handle, case .success(let lines) = client.tail(handle: handle, lines: n) else { return [] }
+            return lines
+        } done: { done($0) }
+    }
+
+    private func terminal<T>(_ key: String, _ work: @escaping (OrcaClient, String?) -> T, done: @escaping (T) -> Void) {
+        let a = agent(key)
+        let client = cfg.client
+        q.async {
+            var handle: String?
+            if let a, let card = a.card, case .success(let ts) = client.terminals(card: card) {
+                handle = AgentIndex.pick(ts, agent: a, key: key)?.handle
+            }
+            let r = work(client, handle)
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    // The agent's own terminal: its pane, else a live tab titled with the item key.
+    static func pick(_ ts: [OrcaTerminal], agent: ItemAgent, key: String) -> OrcaTerminal? {
+        if let p = agent.paneKey, let t = ts.first(where: { $0.paneKey == p }) { return t }
+        if let t = ts.first(where: { !$0.orphaned && $0.title.range(of: key, options: .caseInsensitive) != nil }) { return t }
+        // The only terminal with an agent title (not "Terminal N") that names no other item.
+        let titled = ts.filter { t in
+            !t.title.isEmpty && t.title.range(of: #"^Terminal \d+$"#, options: .regularExpression) == nil
+                && WorkstreamIndex.keyRE.firstMatch(in: t.title, range: NSRange(t.title.startIndex..., in: t.title)) == nil
+        }
+        return titled.count == 1 ? titled[0] : nil
+    }
+
+    func absorb(_ cards: [OrcaCard]) {
+        let at = now()
+        launches = launches.filter { at.timeIntervalSince($0.value.at) < ($0.value.error == nil ? 90 : 600) }
+        let before = agents
+        let cardsChanged = self.cards != cards
+        self.cards = cards
+        agents = AgentIndex.index(cards, launches: launches, now: at)
+        feed.record(before: before, after: agents)
+        for (key, a) in agents where a.phase == .waiting || a.phase == .done {
+            let tag = "\(a.phase)|\(a.paneKey ?? "")|\(Int(a.since.timeIntervalSince1970))"
+            guard notified[key] != tag else { continue }
+            if !primed { notified[key] = tag; continue }
+            guard at.timeIntervalSince(a.since) >= 10 else { continue }
+            notified[key] = tag
+            onAlert?(key, a)
+        }
+        primed = true
+        // Working minutes change without a state change. A publish each minute keeps them current.
+        if agents != before || cardsChanged || (agents.values.contains { $0.phase == .working } && at.timeIntervalSince(lastPublish) >= 60) { publish() }
+    }
+
+    static let browseRE = try! NSRegularExpression(pattern: "/browse/([A-Za-z][A-Za-z0-9]*-[0-9]+)\\b")
+    static let keyRE = try! NSRegularExpression(pattern: "^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
+    static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
+
+    // Item key → the most urgent agent. Old done agents and agents of closed terminals drop out.
+    static func index(_ cards: [OrcaCard], launches: [String: Launch], now: Date) -> [String: ItemAgent] {
+        var out: [String: ItemAgent] = [:]
+        var byPane: [String: String] = [:]
+        for (k, l) in launches { if let p = l.paneKey { byPane[p] = k } }
+        func put(_ key: String, _ a: ItemAgent) {
+            if let cur = out[key], cur.rank <= a.rank { return }
+            out[key] = a
+        }
+        for c in cards {
+            var name = c.name.uppercased()
+            var named = keyRE.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
+            // A branch name as card name: FRITZ-28/desktop-app.
+            if !named, let m = keyPrefixRE.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let r = Range(m.range(at: 1), in: name) {
+                name = String(name[r])
+                named = true
+            }
+            for g in c.agents {
+                let key: String
+                if named { key = name }
+                else if let k = byPane[g.paneKey] { key = k }
+                else if let p = g.prompt, let m = browseRE.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)),
+                        let r = Range(m.range(at: 1), in: p) { key = String(p[r]).uppercased() }
+                else { continue }
+                if g.state == .done && (c.liveTerminals == 0 || now.timeIntervalSince(g.since) > 86400) { continue }
+                let phase: ItemAgent.Phase = g.state == .working ? .working : g.state == .waiting ? .waiting : .done
+                put(key, ItemAgent(phase: phase, since: g.since, card: c.id, paneKey: g.paneKey, type: g.type,
+                                   repo: c.repo, prompt: g.prompt, message: g.lastMessage))
+            }
+        }
+        for (key, l) in launches where out[key] == nil || (out[key]?.phase == .done && l.error == nil && l.card != nil && out[key]?.paneKey != l.paneKey) {
+            if let e = l.error {
+                out[key] = ItemAgent(phase: .failed, since: l.at, message: e)
+            } else {
+                out[key] = ItemAgent(phase: .starting, since: l.at, card: l.card, paneKey: l.paneKey,
+                                     repo: cards.first { $0.id == l.card }?.repo ?? "")
+            }
+        }
+        return out
+    }
+
+    private var lastPublish = Date.distantPast
+
+    private func publish() {
+        lastPublish = now()
+        NotificationCenter.default.post(name: AgentIndex.changed, object: self)
+    }
+}

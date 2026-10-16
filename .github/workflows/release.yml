@@ -1,0 +1,118 @@
+name: Release
+
+# Each push to main that changes the app makes a signed, notarized release. Installed apps
+# update to it automatically. The tag is the last tag with the patch number plus one.
+# A higher version in Info.plist wins, for minor or major bumps.
+on:
+  push:
+    branches: [main]
+    # These files are not in the app. A change to them only must not restart every install.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'screenshots/**'
+      - 'assets/**'
+      - 'LICENSE'
+      - 'worker/test/**'
+      - 'update.sh'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Only the owner can release. Runs for other actors and in forks skip this job.
+    if: github.repository == 'oversire/oversire' && github.actor == 'flarco'
+    runs-on: macos-15
+    # The signing secrets live in this environment. It accepts the main branch only.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compute version
+        id: version
+        run: |
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          latest=${latest#v}
+          base=$(plutil -extract CFBundleShortVersionString raw Info.plist)
+          if [ -z "$latest" ]; then
+            next=$base
+          else
+            IFS=. read -r major minor patch <<<"$latest"
+            next="$major.$minor.$((patch + 1))"
+            [ "$(printf '%s\n%s\n' "$next" "$base" | sort -V | tail -1)" = "$base" ] && next=$base
+          fi
+          echo "Version: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Import certificate
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kc_pass=$(openssl rand -hex 24)
+          printf '%s' "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          curl -fsSL -o "$RUNNER_TEMP/g2.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security create-keychain -p "$kc_pass" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$kc_pass" "$kc"
+          security import "$RUNNER_TEMP/g2.cer" -k "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kc_pass" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$kc"
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCHS: arm64 x86_64
+          RELEASE: "1"
+          CODESIGN_IDENTITY: "Developer ID Application: Fritz Larco (Q56WK6TB88)"
+        run: |
+          ./build.sh
+          ./OverSire.app/Contents/MacOS/oversire --selftest
+
+      - name: Notarize
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$key"
+          ditto -c -k --keepParent OverSire.app "$RUNNER_TEMP/submit.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/submit.zip" --key "$key" --key-id "$ASC_KEY_ID" \
+            --issuer "$ASC_ISSUER_ID" --wait --timeout 30m --output-format json | tee "$RUNNER_TEMP/notary.json"
+          id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json")
+          status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json")
+          if [ "$status" != "Accepted" ]; then
+            xcrun notarytool log "$id" --key "$key" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID"
+            exit 1
+          fi
+          rm "$key"
+          xcrun stapler staple OverSire.app
+          spctl --assess --type execute -vv OverSire.app
+          ditto -c -k --keepParent OverSire.app OverSire.zip
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" OverSire.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "v$VERSION" --generate-notes
+
+      - name: Remove keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
