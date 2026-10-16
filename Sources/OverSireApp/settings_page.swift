@@ -227,7 +227,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     private func pollChanged() {
         saveConfig()
-        app?.scheduleTimer()
+        app?.relay.update()
+        app?.updatePolling()
         NotificationCenter.default.post(name: AppWindow.changed, object: nil)
     }
 

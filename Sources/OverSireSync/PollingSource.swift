@@ -16,10 +16,13 @@ public actor PollingSource: EventSource {
     private var pokes: Set<AccountID> = []
     private var continuation: AsyncStream<ProviderEvent>.Continuation?
     private var generation = 0
+    private let onPolled: @Sendable (AccountID) -> Void
 
+    /// onPolled runs after each poll that succeeds.
     public init(providers: [any Provider], cursors: CursorStore, clock: any Clock<Duration> = ContinuousClock(),
-                intervals: PollIntervals = PollIntervals()) {
+                intervals: PollIntervals = PollIntervals(), onPolled: @escaping @Sendable (AccountID) -> Void = { _ in }) {
         self.providers = providers
+        self.onPolled = onPolled
         self.cursors = cursors
         self.clock = clock
         self.intervals = intervals
@@ -100,6 +103,7 @@ public actor PollingSource: EventSource {
                 if page.busy { busy.insert(p.account) } else { busy.remove(p.account) }
                 plan.succeeded(retryAfter: page.retryAfter)
                 errors[p.account] = nil
+                onPolled(p.account)
             } catch is CancellationError {
                 return
             } catch {

@@ -31,11 +31,14 @@ final class PollingSourceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         let clock = ManualClock()
         let p = CountingProvider(account: acme)
-        let source = PollingSource(providers: [p], cursors: CursorStore(url: file), clock: clock)
+        let polled = Locked<[AccountID]>([])
+        let source = PollingSource(providers: [p], cursors: CursorStore(url: file), clock: clock,
+                                   onPolled: { a in polled.with { $0.append(a) } })
         let stream = source.events()
 
         let first = await take(1, from: stream)
         XCTAssertEqual(first.map(\.id), ["acme-1"])
+        await eventually("onPolled") { polled.get() == [acme] }
         try await clock.waitForSleepers()
         XCTAssertEqual(clock.sleeps.last, .seconds(30))
         clock.advance(by: .seconds(30))

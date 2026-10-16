@@ -5,7 +5,7 @@ import OverSireCore
 
 final class CloudSettingsVC: NSViewController {
     let setup: CloudSetup
-    let client: RelayClient
+    let client: LiveSync
     var body: Flipped!
     var scroll: NSScrollView!
     var logView: NSTextView?
@@ -21,7 +21,7 @@ final class CloudSettingsVC: NSViewController {
     var checked = false
     var lastHealthCheck = Date.distantPast
 
-    init(setup: CloudSetup, client: RelayClient) {
+    init(setup: CloudSetup, client: LiveSync) {
         self.setup = setup
         self.client = client
         super.init(nibName: nil, bundle: nil)
@@ -321,8 +321,7 @@ final class CloudSettingsVC: NSViewController {
     @objc func toggleEnabled(_ sender: NSButton) {
         RELAY.enabled = sender.state == .on
         saveConfig()
-        RELAY.enabled ? client.start() : client.stop()
-        (NSApp.delegate as? GHActionsBar)?.scheduleTimer()
+        client.start()
         rebuild()
     }
 
@@ -344,7 +343,6 @@ final class CloudSettingsVC: NSViewController {
             if ok {
                 self.urlDraft = nil
                 self.client.start()
-                (NSApp.delegate as? GHActionsBar)?.scheduleTimer()
             }
             self.checkAgain()
         }
@@ -354,10 +352,10 @@ final class CloudSettingsVC: NSViewController {
         guard confirm("Disconnect this Mac?",
                       "OverSire deletes the device token from the Keychain and goes back to polling. The webhooks and the other Macs stay.",
                       ok: "Disconnect") else { return }
-        client.stop()
         setup.disconnect()
+        client.forgetCloudCursor()
+        client.start()
         urlDraft = nil
-        (NSApp.delegate as? GHActionsBar)?.scheduleTimer()
         rebuild()
     }
 
@@ -396,7 +394,7 @@ final class CloudSettingsVC: NSViewController {
         guard (1...720).contains(hours) else { setup.append("Retention must be from 1 hour to 30 days."); return }
         RELAY.reconcileInterval = TimeInterval(min(max(minutes, 1), 120) * 60)
         saveConfig()
-        (NSApp.delegate as? GHActionsBar)?.scheduleTimer()
+        client.update()
         retentionField = nil; reconcileField = nil; retentionUnit = nil
         let s = setup
         s.perform("Set retention to \(hours) h", { s.setRetention(hours: hours) }) { [weak self] _ in self?.checkAgain() }

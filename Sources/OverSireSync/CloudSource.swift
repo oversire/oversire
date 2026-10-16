@@ -15,7 +15,7 @@ public protocol WebSocketConnection: Sendable {
 
 /// The paid push path: a WebSocket to oversire/cloud that pokes, and a REST read of the event log.
 public actor CloudSource: EventSource {
-    static let cursorKey = "cloud"
+    public static let cursorKey = "cloud"
 
     private let base: URL
     private let token: String

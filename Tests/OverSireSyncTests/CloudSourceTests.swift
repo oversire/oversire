@@ -176,6 +176,18 @@ final class CloudSourceTests: XCTestCase {
         _ = stream
     }
 
+    func testTheMergerReportsTheCloudHealth() async throws {
+        let socket = FakeSocket([.failure(.unauthorized)])
+        let cloud = CloudSource(base: base, token: "t-1", http: FakeCloud(), socket: socket,
+                                cursors: CursorStore(url: nil), clock: ManualClock())
+        let seen = Locked<[SourceHealth]>([])
+        let merger = EventMerger(polling: nil, cloud: cloud, onCloudHealth: { h in seen.with { $0.append(h) } })
+        let stream = merger.events()
+        await eventually("failed") { seen.get().last == .failed("The cloud rejected this Mac's token") }
+        await merger.stop()
+        _ = stream
+    }
+
     func testANewLogStartsOverAndAsksForAResync() async throws {
         let clock = ManualClock()
         let cloud = FakeCloud()

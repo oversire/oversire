@@ -21,9 +21,6 @@ let TEXT_X: CGFloat = 42     // PAD + ICON_SZ + 10
 class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate, AppData {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
-    var timer: Timer?
-    var fallbackTimer: Timer?
-    var lastFallbackPRRefresh = Date.distantPast
     var isPulsing = false
     var iconKey: MenuIconState?
     var refreshInFlight = false
@@ -31,7 +28,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var lastPRRefresh = Date.distantPast
     var grouped: [(String, [Run])] = []
     var prGrouped: [(String, [ChangeRequest])] = []
-    var lastUpdate = Date()
+    var lastFetch = Date()
+    /// A poll with no change also means the data is current.
+    var lastUpdate: Date { max(lastFetch, relay.lastPoll ?? .distantPast) }
     var closeTime = Date.distantPast
     var firstLoad = true
     var ghIcon: NSImage?
@@ -92,9 +91,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }()
     let rateLimit = RateLimitMonitor()
     let updater = Updater()
-    lazy var relay: RelayClient = {
-        let c = RelayClient(secrets: cloudSetup.secrets)
+    lazy var relay: LiveSync = {
+        let c = LiveSync(secrets: cloudSetup.secrets)
+        LiveSync.migrateCursor(into: c.cursors)
         c.sink = self
+        c.unhooked = { [weak self] in self?.cloudSetup.unhookedRepos(REPOS) ?? [] }
         return c
     }()
     // Targeted refreshes that arrive while another refresh runs.
@@ -166,10 +167,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.showSettings()   // opens + shows the popover itself
             }
         } else {
-            refresh()
+            // Polling gives events for changes only, so the first load reads the PRs too.
+            refresh(force: true)
         }
-        scheduleTimer()
-        if relay.canRun { relay.start() }
+        relay.start()
+        updatePolling()
         rateLimit.onChange = { [weak self] in
             ((self?.popover.contentViewController as? TabVC)?.footerView as? Footer)?.showQuota(self?.rateLimit.latest)
         }
@@ -198,6 +200,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             guard let self else { return }
             WorkstreamIndex.formats = ENV.keyFormats
             self.applyRepoSelection(reopen: false)
+            self.relay.update()
             for w in ENV.trackerIds where self.projectCatalog.projects(of: w).isEmpty { self.projectCatalog.refresh(w, force: true) }
             self.applyProjectSelection()
             NotificationCenter.default.post(name: AppWindow.changed, object: self)
@@ -392,61 +395,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // MARK: - Polling
 
-    func scheduleTimer() {
-        guard !REPOS.isEmpty else {
-            timer?.invalidate(); fallbackTimer?.invalidate()
-            return
-        }
-        // The fast cadence exists for the person reading the popover. With it shut,
-        // the menu bar icon only has to be roughly right, and 10s polling through a
-        // long CI run cost a measured 1,148 REST calls/hour — 23% of the GitHub
-        // budget — that nobody was looking at.
-        // A healthy relay pushes changes, so polling only reconciles.
-        let interval: TimeInterval
-        if relay.isHealthy {
-            interval = RELAY.reconcileInterval ?? 600
-        } else {
-            interval = pollInterval(grouped)
-        }
-        // Each refresh calls this. Keep a timer with the same interval, or frequent
-        // refreshes push the reconcile out forever.
-        if timer?.isValid != true || timer?.timeInterval != interval {
-            timer?.invalidate()
-            timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                self?.refresh()
-                if self?.relay.isHealthy == true { self?.relay.sync() }
-            }
-            // Generous tolerance lets the system coalesce wakeups (and App Nap us)
-            // instead of firing on an exact-deadline timer.
-            timer?.tolerance = interval * 0.2
-        }
-        scheduleFallbackTimer()
-    }
-
-    func pollInterval(_ g: [(String, [Run])]) -> TimeInterval {
-        (popover.isShown && hasActive(visibleGrouped(g))) ? POLL_ACTIVE : POLL_NORMAL
-    }
-
-    // Repos without a webhook get no relay events. Poll them at the normal cadence.
-    func scheduleFallbackTimer() {
-        let repos = relay.isHealthy ? cloudSetup.unhookedRepos(REPOS) : []
-        guard !repos.isEmpty else {
-            fallbackTimer?.invalidate(); fallbackTimer = nil
-            return
-        }
-        let interval = pollInterval(grouped.filter { repos.contains($0.0) })
-        guard fallbackTimer?.isValid != true || fallbackTimer?.timeInterval != interval else { return }
-        fallbackTimer?.invalidate()
-        log.info("Polling \(repos.count, privacy: .public) repos without a webhook every \(Int(interval), privacy: .public)s")
-        fallbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            let repos = self.cloudSetup.unhookedRepos(REPOS)
-            guard !repos.isEmpty else { return }
-            let prs = Date().timeIntervalSince(self.lastFallbackPRRefresh) >= POLL_NORMAL * 0.9
-            if prs { self.lastFallbackPRRefresh = Date() }
-            self.refreshRepos(repos, includePRs: prs, completedRuns: []) { _ in }
-        }
-        fallbackTimer?.tolerance = interval * 0.2
+    // The fast cadence exists for the person reading the popover. With it shut,
+    // the menu bar icon only has to be roughly right, and 10s polling through a
+    // long CI run cost a measured 1,148 REST calls/hour that nobody was looking at.
+    func updatePolling() {
+        relay.setWatching(popover.isShown && hasActive(visibleGrouped(grouped)))
     }
 
     func refresh(force: Bool = false, completion: (() -> Void)? = nil) {
@@ -486,12 +439,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     self.prGrouped = prRes
                     self.lastPRRefresh = Date()
                 }
-                self.lastUpdate = Date()
+                self.lastFetch = Date()
                 self.firstLoad = false
                 self.refreshInFlight = false
                 self.updateIcon()
                 self.reloadList()
-                self.scheduleTimer()
+                self.updatePolling()
                 completion?()
                 let pending = self.pendingCompletion
                 self.pendingCompletion = nil
@@ -532,11 +485,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 DeployLog.shared.record(fresh + backfill)
                 self.grouped = mergeGrouped(self.grouped, fresh, order: REPOS)
                 if includePRs { self.prGrouped = mergeGrouped(self.prGrouped, prRes, order: REPOS) }
-                self.lastUpdate = Date()
+                self.lastFetch = Date()
                 self.refreshInFlight = false
                 self.updateIcon()
                 self.reloadList()
-                self.scheduleTimer()
+                self.updatePolling()
                 done(ok)
                 let pending = self.pendingCompletion
                 self.pendingCompletion = nil
@@ -590,7 +543,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         log.info("Repo catalog changed the tracked repos: \(previous.count) -> \(REPOS.count)")
         syncRelayRepos(previous: previous)
         refresh(force: true)
-        scheduleTimer()
+        relay.update()
+        updatePolling()
     }
 
     func syncRelayRepos(previous: [String]) {
@@ -601,7 +555,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             if !added.isEmpty {
                 let d = cloudSetup
                 d.perform("Install webhooks for new repos", { d.installHooks(repos: added) }) { [weak self] _ in
-                    d.refreshHookedRepos { self?.scheduleTimer() }
+                    d.refreshHookedRepos { self?.relay.update() }
                 }
             }
             cloudSetup.pruneHooks(removed: removed)
@@ -656,6 +610,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func onConfigSaved(previous: [String]) {
         syncRelayRepos(previous: previous)
+        relay.update()
         prevStatuses = [:]
         firstLoad = true
         grouped = []
@@ -906,7 +861,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             // never re-reads it, so a fetch started now lands in a view nobody is
             // looking at — and doRefresh()/onConfigSaved() already refresh before
             // they call toggle(), so it would double their cost.
-            scheduleTimer()
+            updatePolling()
         }
     }
 
@@ -1024,7 +979,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         closeTime = Date()
         popover.behavior = .transient
         popover.contentViewController = nil  // Release settings view if open
-        scheduleTimer()                      // nobody is watching: back to the slow cadence
+        updatePolling()                      // nobody is watching: back to the slow cadence
         updater.installIfIdle()
     }
 }
@@ -1048,8 +1003,8 @@ extension GHActionsBar: RelaySink {
     }
 
     func relayStateChanged() {
-        scheduleTimer()
-        if relay.state == .live { cloudSetup.refreshHookedRepos { [weak self] in self?.scheduleTimer() } }
+        updatePolling()
+        if relay.state == .live { cloudSetup.refreshHookedRepos { [weak self] in self?.relay.update() } }
         (popover?.contentViewController as? CloudSettingsVC)?.rebuild()
     }
 }

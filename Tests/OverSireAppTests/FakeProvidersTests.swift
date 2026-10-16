@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 import OverSireCore
 import OverSireTestKit
+import OverSireSync
 @testable import OverSireApp
 
 final class FakeProvidersTests: XCTestCase {
@@ -61,5 +62,43 @@ final class ConfigSafetyTests: XCTestCase {
         saveConfig()
         XCTAssertFalse(CONFIG_READ)
         XCTAssertEqual(FileManager.default.contents(atPath: CONFIG_PATH), before, "a test process must not write the user config")
+    }
+}
+
+final class LiveSyncTests: XCTestCase {
+    private func ev(_ id: String, _ kind: EventKind, _ action: String, _ subject: SubjectRef) -> ProviderEvent {
+        ProviderEvent(id: id, provider: "fake", account: AccountID(provider: "fake", id: "o"), kind: kind,
+                      action: action, subject: subject, at: Date())
+    }
+
+    func testPlanFromEventsOfAnyProvider() {
+        let host = AccountID(provider: "fake-host", id: "o")
+        let repo = RepoRef(account: host, path: "o/kept", url: URL(string: "https://host.fake/o/kept")!)
+        let other = RepoRef(account: host, path: "o/other", url: URL(string: "https://host.fake/o/other")!)
+        let tracker = FakeTracker(account: "ws")
+        let item = ItemRef(project: tracker.project, id: "i1", key: "FAKE-1", url: URL(string: "https://tracker.fake/FAKE-1")!)
+        let plan = RefreshPlan([
+            ev("1", .run, "completed", .run(RunRef(account: host, repo: repo, id: "9"))),
+            ev("2", .run, "in_progress", .run(RunRef(account: host, repo: repo, id: "10"))),
+            ev("3", .change, "updated", .change(ChangeRef(repo: other, number: 3, url: other.url))),
+            ev("4", .item, "updated", .item(item)),
+        ], resyncs: [AccountID(provider: "fake-tracker", id: "ws2")], knownRepos: ["O/Kept"])
+        XCTAssertEqual(plan.repos, ["O/Kept"], "unknown repos drop")
+        XCTAssertEqual(plan.completedRuns.map(\.1), ["9"])
+        XCTAssertTrue(plan.includePRs)
+        XCTAssertEqual(plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }, ["ws2/*", "ws/p1"])
+    }
+
+    func testTheOldCloudCursorMoves() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "oversire-tests-\(UUID())"))
+        defaults.set(42, forKey: "relayCursor")
+        let cursors = CursorStore(url: nil)
+        LiveSync.migrateCursor(into: cursors, defaults: defaults)
+        XCTAssertEqual(cursors[CloudSource.cursorKey]?.rawValue, "42")
+        XCTAssertNil(defaults.object(forKey: "relayCursor"))
+
+        defaults.set(7, forKey: "relayCursor")
+        LiveSync.migrateCursor(into: cursors, defaults: defaults)
+        XCTAssertEqual(cursors[CloudSource.cursorKey]?.rawValue, "42", "a newer cursor stays")
     }
 }

@@ -11,10 +11,14 @@ public actor EventMerger: EventSource {
     private var tasks: [Task<Void, Never>] = []
     private var continuation: AsyncStream<ProviderEvent>.Continuation?
     private var generation = 0
+    private let onCloudHealth: @Sendable (SourceHealth) -> Void
 
-    public init(polling: PollingSource?, cloud: CloudSource? = nil, others: [any EventSource] = [], capacity: Int = 2000) {
+    /// onCloudHealth gets each health change of the cloud source.
+    public init(polling: PollingSource?, cloud: CloudSource? = nil, others: [any EventSource] = [], capacity: Int = 2000,
+                onCloudHealth: @escaping @Sendable (SourceHealth) -> Void = { _ in }) {
         self.polling = polling
         self.cloud = cloud
+        self.onCloudHealth = onCloudHealth
         sources = [polling as (any EventSource)?, cloud].compactMap { $0 } + others
         seen = RecentIDs(capacity: capacity)
     }
@@ -48,10 +52,13 @@ public actor EventMerger: EventSource {
             // A cancel ends the stream, and the source stops.
             Task { for await e in s.events() { self.forward(e) } }
         }
-        if let cloud, let polling {
+        if let cloud {
             let health = await cloud.healthUpdates()
-            tasks.append(Task {
-                for await h in health { await polling.setCloudLive(h == .live) }
+            tasks.append(Task { [polling, onCloudHealth] in
+                for await h in health {
+                    onCloudHealth(h)
+                    await polling?.setCloudLive(h == .live)
+                }
             })
         }
     }

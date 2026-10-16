@@ -9,7 +9,7 @@ protocol AppData: AnyObject {
     var firstLoad: Bool { get }
     var projectStore: ProjectStore { get }
     var agentIndex: AgentIndex { get }
-    var relay: RelayClient { get }
+    var relay: LiveSync { get }
     var workstreams: WorkstreamIndex { get }
     var queue: WorkQueue { get }
     var aiChecks: AgentJudge { get }

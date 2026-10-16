@@ -408,7 +408,7 @@ class TabVC: NSViewController {
         let appDel = NSApp.delegate as? GHActionsBar
         appDel?.updateIcon()
         // Cadence follows visibility too, so filtering a branch out stops the fast poll.
-        appDel?.scheduleTimer()
+        appDel?.updatePolling()
     }
 
     @objc func scrolled(_ note: Notification) {

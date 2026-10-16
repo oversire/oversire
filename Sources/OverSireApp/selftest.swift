@@ -272,7 +272,7 @@ func runSelfTest() {
     func relayEvent(_ json: String) -> CloudSignal? {
         try! JSONDecoder().decode(CloudEvent.self, from: Data(json.utf8)).signal(at: Date())
     }
-    let plan = relayApplyPlan([
+    let signals = [
         relayEvent(#"{"seq":1,"deliveryId":"a","repo":"o/kept","kind":"workflow_run","action":"completed","runId":9}"#),
         relayEvent(#"{"seq":2,"deliveryId":"b","repo":"","org":"plane:acme","kind":"plane","action":"workitem.updated","projectId":"P1","itemId":"I1"}"#),
         relayEvent(#"{"seq":3,"deliveryId":"c","repo":"","org":"plane:acme","kind":"plane","action":"workitem.comment.created","projectId":"P1"}"#),
@@ -281,12 +281,14 @@ func runSelfTest() {
         relayEvent(#"{"seq":6,"deliveryId":"f","repo":"","org":"plane:beta","kind":"plane","action":"project.updated"}"#),
         relayEvent(#"{"seq":7,"deliveryId":"g","repo":"","org":"plane:beta","kind":"plane","action":"workitem.created","projectId":"P3"}"#),
         relayEvent(#"{"seq":8,"deliveryId":"h","repo":"","org":"acme","kind":"plane","projectId":"P9"}"#),
-    ].compactMap { $0 }, knownRepos: ["O/Kept"])
+    ].compactMap { $0 }
+    let plan = RefreshPlan(signals.compactMap { if case .event(let e) = $0 { return e }; return nil },
+                           resyncs: signals.compactMap { if case .resync(let a) = $0 { return a }; return nil }, knownRepos: ["O/Kept"])
     check(plan.repos == ["O/Kept"] && plan.completedRuns.count == 1
             && plan.completedRuns[0].0 == "O/Kept" && plan.completedRuns[0].1 == "9", "relay plan keeps known repos")
     check(plan.includePRs, "pull request events refresh PRs")
-    let planned = plan.plane.map { "\($0.workspace)/\($0.project ?? "*")" }
-    check(planned == ["acme/P1", "beta/*"], "relay plan groups plane events \(planned)")
+    let planned = plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }
+    check(Set(planned) == ["acme/P1", "beta/*"] && planned.count == 2, "relay plan groups plane events \(planned)")
 
     let oldConfig = #"{"repos":["o/r"],"pollInterval":30}"#.data(using: .utf8)!
     let decoded = try? JSONDecoder().decode(AppConfig.self, from: oldConfig)

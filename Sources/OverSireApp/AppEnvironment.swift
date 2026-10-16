@@ -116,6 +116,22 @@ final class AppEnvironment: @unchecked Sendable {
 
     func has(_ c: Capability) -> Bool { capabilities().contains(c) }
 
+    /// New code host and CI adapters that poll these repos, one for each owner and layer.
+    /// The repo list is the resolved one, so the repos of an org pick poll too.
+    func pollers(repos: [String]) -> [any Provider] {
+        let owners = repos.reduce(into: [String: [String]]()) { $0[repoOwner($1), default: []].append($1) }
+        return [Layer.codeHost, .ci].flatMap { layer in
+            owners.sorted { $0.key < $1.key }.compactMap { owner, list -> (any Provider)? in
+                let known = accounts(layer).first { $0.account.id.caseInsensitiveCompare(owner) == .orderedSame }
+                guard var c = known ?? registry.descriptors(layer).first.map({
+                    AccountConfig(account: AccountID(provider: $0.id, id: owner), values: ["owner": owner])
+                }) else { return nil }
+                c.values["repos"] = list.joined(separator: ",")
+                return try? registry.make(c, environment: io(c.account.provider))
+            }
+        }
+    }
+
     /// The key formats of the trackers, without repeats. With no tracker, the common PROJECT-12 form.
     var keyFormats: [KeyFormat] {
         var out: [KeyFormat] = []
