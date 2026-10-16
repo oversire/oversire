@@ -21,10 +21,18 @@ CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
 
 ## Guidelines
 
-- **Keep it lean.** No external packages, no frameworks beyond AppKit, UserNotifications and Network. The code is one Swift package (`Package.swift`). `OverSireCore` holds the domain types and the provider protocols. Each vendor adapter is a target in `Sources/Providers/`. `Sources/OverSireApp` holds the AppKit UI: `main.swift` for the app delegate, plus one file per tab, settings page, and the project data layer. Repo picking is in `repo_catalog.swift` and `actions_settings.swift`. The cloud client is in `relay.swift` and `cloud_settings.swift`. The server is in the private `oversire/cloud` repo.
+- **Keep it lean.** No external packages, no frameworks beyond AppKit, UserNotifications and Network. The code is one Swift package (`Package.swift`). `OverSireCore` holds the domain types and the provider protocols. Each vendor adapter is a target in `Sources/Providers/`. `Sources/OverSireApp` holds the AppKit UI: `main.swift` for the app delegate, plus one file per tab, settings page, and the project data layer. Repo picking is in `repo_catalog.swift` and `actions_settings.swift`. The live sync is in `live_sync.swift`, and the cloud settings are in `cloud_settings.swift`.
 - **Security matters.** The app shells out to `gh` only via hardcoded trusted paths with an allowlisted environment, and validates all repo input. Don't weaken these.
 - **Accessibility matters.** Status is never conveyed by colour alone (we use the Okabe-Ito palette plus shape/text signals). New UI should follow the same rule and stay keyboard-navigable.
 - **No telemetry, no GitHub tokens.** GitHub auth goes through the `gh` CLI. OverSire keeps the Plane tokens, the AI key, the cloud device token and the webhook secret in the Keychain. Secrets go to `gh` on stdin, never in argv.
+
+## Adding a provider
+
+OverSire talks to each vendor through an adapter: a tracker, a code host, a CI provider or an agent runtime. To add a vendor, follow [docs/adding-a-provider.md](docs/adding-a-provider.md). Each layer has a template in `Sources/Providers/` that builds as it is.
+
+## Open core
+
+This repo is the full app under the MIT license. The paid cloud (the webhook relay, the hosted sync and the billing) is in the private `oversire/cloud` repo. That repo has its own guide for webhook adapters. A provider in this repo must work without the cloud: it polls.
 
 ## Submitting changes
 
