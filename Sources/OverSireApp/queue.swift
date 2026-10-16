@@ -5,33 +5,15 @@ import OverSireCore
 // Items wait in one lane per project. The first item of a lane starts in Orca when a slot is free
 // and its start condition holds.
 
-struct QueueEntry: Codable, Equatable {
-    enum Condition: String, Codable, CaseIterable {
-        case slot, ciPassed, done, tonight
-        var label: String {
-            switch self {
-            case .slot: return "When a slot frees"
-            case .ciPassed: return "After the one above passes CI"
-            case .done: return "After the one above is done"
-            case .tonight: return "Tonight from 22:00"
-            }
+extension QueueEntry.Condition {
+    var label: String {
+        switch self {
+        case .slot: return "When a slot frees"
+        case .ciPassed: return "After the one above passes CI"
+        case .done: return "After the one above is done"
+        case .tonight: return "Tonight from 22:00"
         }
     }
-    enum Source: String, Codable { case you, label, assignee }
-
-    let key: String
-    var title: String
-    var condition = Condition.slot
-    var added: Date
-    var source = Source.you
-}
-
-struct QueueLane: Codable, Equatable {
-    let project: String               // project ref key
-    var identifier: String
-    var entries: [QueueEntry] = []
-    var lastStarted: String?          // "the one above" of the first entry
-    var error: String?                // why the lane cannot start
 }
 
 // What the queue needs to know about the world. A struct of closures, so the selftest can fake it.
@@ -49,12 +31,14 @@ final class WorkQueue {
     private(set) var lanes: [QueueLane] = []
     private var seen: Set<String> = []       // keys added by a Plane trigger once; a removal stays removed
     private var released: Set<String> = []   // agents that hold no slot, for example after an approved "looks done"
-    private let path: String
+    private let writes: StoreWrites
+    private var saved: [String: QueueLane] = [:]
+    private var savedSeen: Set<String> = []
     private let store: ProjectStore
     private let agents: AgentIndex
 
-    init(path: String, store: ProjectStore, agents: AgentIndex) {
-        self.path = path
+    init(writes: StoreWrites, store: ProjectStore, agents: AgentIndex) {
+        self.writes = writes
         self.store = store
         self.agents = agents
         load()
@@ -202,19 +186,22 @@ final class WorkQueue {
 
     // MARK: Store
 
-    private struct Saved: Codable { var lanes: [QueueLane]; var seen: [String] }
-
     private func load() {
-        guard let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode(Saved.self, from: d) else { return }
-        lanes = s.lanes
-        seen = Set(s.seen)
+        lanes = writes.load(QueueLane.self).sorted { $0.identifier < $1.identifier }
+        saved = Dictionary(lanes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        seen = Set(writes.load(QueueTrigger.self).map(\.key))
+        savedSeen = seen
     }
 
+    // Writes only the lanes and trigger keys that changed.
     private func save() {
         lanes.removeAll { $0.entries.isEmpty && $0.lastStarted == nil && $0.error == nil }
-        if let d = try? JSONEncoder().encode(Saved(lanes: lanes, seen: Array(seen.suffix(2000)))) {
-            try? d.write(to: URL(fileURLWithPath: path), options: .atomic)
-        }
+        let now = Dictionary(lanes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for (id, lane) in now where saved[id] != lane { writes.put(lane) }
+        for id in saved.keys where now[id] == nil { writes.delete(QueueLane.self, id: id) }
+        for key in seen.subtracting(savedSeen) { writes.put(QueueTrigger(key: key, at: Date())) }
+        saved = now
+        savedSeen = seen
         publish()
     }
 

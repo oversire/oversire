@@ -4,25 +4,37 @@ import OverSireCore
 // Failed runs the user chose to ignore. They do not turn the menu bar icon red.
 // The key holds the attempt, so a re-run that fails again shows red again.
 final class IgnoredFailures {
-    private let defaultsKey = "ignoredFailures"
-    private var keys: [String]
+    static let limit = 500
+    private let writes: StoreWrites
+    private var keys: [String: Date]
 
-    init() { keys = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? [] }
+    init(writes: StoreWrites) {
+        self.writes = writes
+        keys = Dictionary(writes.load(IgnoredFailure.self).map { ($0.id, $0.at) }, uniquingKeysWith: max)
+    }
 
     static func key(_ r: Run) -> String { "\(r.url)#\(r.attempt ?? 1)" }
 
-    func contains(_ r: Run) -> Bool { keys.contains(IgnoredFailures.key(r)) }
+    func contains(_ r: Run) -> Bool { keys[IgnoredFailures.key(r)] != nil }
 
     func set(_ runs: [Run], ignored: Bool) {
-        let ks = runs.map(IgnoredFailures.key)
-        keys.removeAll { ks.contains($0) }
-        if ignored { keys += ks }
-        keys = Array(keys.suffix(500))
-        UserDefaults.standard.set(keys, forKey: defaultsKey)
+        let now = Date()
+        for k in runs.map(IgnoredFailures.key) {
+            if ignored {
+                keys[k] = now
+                writes.put(IgnoredFailure(id: k, at: now))
+            } else if keys.removeValue(forKey: k) != nil {
+                writes.delete(IgnoredFailure.self, id: k)
+            }
+        }
+        for (k, _) in keys.sorted(by: { $0.value < $1.value }).dropLast(IgnoredFailures.limit) {
+            keys[k] = nil
+            writes.delete(IgnoredFailure.self, id: k)
+        }
     }
 }
 
-let IGNORED = IgnoredFailures()
+let IGNORED = IgnoredFailures(writes: STORE_WRITES)
 
 let isoFmt: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f

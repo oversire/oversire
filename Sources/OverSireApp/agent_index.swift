@@ -76,6 +76,9 @@ final class AgentIndex: NSObject {
     private(set) var lastError: String?
     private(set) var feed = OrcaFeed()
     private var launches: [String: PendingLaunch] = [:]
+    // The panes that OverSire started. They keep the item key when the card name has none.
+    private var links: [String: AgentLink] = [:]
+    private let writes: StoreWrites?
     private var notified: [String: String] = [:]
     private var primed = false
     private var polling = false
@@ -90,6 +93,17 @@ final class AgentIndex: NSObject {
 
     private var cfg: OrcaConfig { PROJECTS_CFG.orca }
     var runtime: () -> any AgentHost = { PROJECTS_CFG.orca.runtime }
+
+    static let linkAge: TimeInterval = 30 * 86400
+
+    init(writes: StoreWrites? = nil) {
+        self.writes = writes
+        super.init()
+        let old = Date().addingTimeInterval(-AgentIndex.linkAge)
+        for l in writes?.load(AgentLink.self) ?? [] {
+            if l.at < old { writes?.delete(AgentLink.self, id: l.id) } else { links[l.key] = l }
+        }
+    }
 
     func agent(_ key: String) -> AgentSession? { agents[key.uppercased()] }
 
@@ -250,7 +264,11 @@ final class AgentIndex: NSObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch r {
-                case .success(let l): self.launches[key] = PendingLaunch(at: self.now(), card: l.card, paneKey: l.paneKey)
+                case .success(let l):
+                    self.launches[key] = PendingLaunch(at: self.now(), card: l.card, paneKey: l.paneKey)
+                    let link = AgentLink(key: key, workspace: WorkspaceRef(account: rt.account, id: l.card), pane: l.paneKey, at: self.now())
+                    self.links[key] = link
+                    self.writes?.put(link)
                 case .failure(let e): self.fail(key, e.message)
                 }
                 self.publish()
@@ -334,7 +352,7 @@ final class AgentIndex: NSObject {
         let before = agents
         let cardsChanged = self.cards != cards
         self.cards = cards
-        agents = AgentIndex.index(cards, launches: launches, now: at)
+        agents = AgentIndex.index(cards, launches: launches, links: links, now: at)
         feed.record(before: before, after: agents)
         for (key, a) in agents where a.phase == .waiting || a.phase == .done {
             let tag = "\(a.phase)|\(a.paneKey ?? "")|\(Int(a.since.timeIntervalSince1970))"
@@ -354,9 +372,11 @@ final class AgentIndex: NSObject {
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 
     // Item key → the most urgent agent. Old done agents and agents of closed terminals drop out.
-    static func index(_ cards: [Workspace], launches: [String: PendingLaunch], now: Date) -> [String: AgentSession] {
+    static func index(_ cards: [Workspace], launches: [String: PendingLaunch], links: [String: AgentLink] = [:],
+                      now: Date) -> [String: AgentSession] {
         var out: [String: AgentSession] = [:]
         var byPane: [String: String] = [:]
+        for (k, l) in links { if let p = l.pane { byPane[p] = k } }
         for (k, l) in launches { if let p = l.paneKey { byPane[p] = k } }
         func put(_ key: String, _ a: AgentSession) {
             if let cur = out[key], cur.rank <= a.rank { return }

@@ -15,6 +15,13 @@ final class ContractTests: XCTestCase {
         "run-action": roundTrip(RunAction.self),
         "launch-request": roundTrip(LaunchRequest.self),
         "account": roundTrip(AccountConfig.self),
+        "queue-lane": roundTrip(QueueLane.self),
+        "queue-trigger": roundTrip(QueueTrigger.self),
+        "ignored-failure": roundTrip(IgnoredFailure.self),
+        "pin": roundTrip(Pin.self),
+        "snooze": roundTrip(Snooze.self),
+        "note": roundTrip(Note.self),
+        "agent-link": roundTrip(AgentLink.self),
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
@@ -55,7 +62,7 @@ final class ContractTests: XCTestCase {
     func testSchemaFilesCarryTheVersion() throws {
         let dir = Self.root.appendingPathComponent("schema")
         let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }
-        XCTAssertEqual(Set(names), ["refs.json", "provider-event.json", "actions.json", "ai-task.json", "account.json"])
+        XCTAssertEqual(Set(names), ["refs.json", "provider-event.json", "actions.json", "ai-task.json", "account.json", "store.json"])
         for name in names {
             let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent(name))) as? [String: Any])
             XCTAssertEqual(obj["$schema"] as? String, "https://json-schema.org/draft/2020-12/schema", name)

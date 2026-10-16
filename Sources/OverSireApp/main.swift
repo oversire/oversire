@@ -5,6 +5,7 @@ import QuartzCore
 import UserNotifications
 import os
 import GitHubKit
+import OverSireSync
 
 let POP_W: CGFloat = 660
 // macOS cuts off the top of a popover that is taller than the space below the menu bar.
@@ -69,7 +70,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return s
     }()
     lazy var agentIndex: AgentIndex = {
-        let a = AgentIndex()
+        let a = AgentIndex(writes: STORE_WRITES)
         a.visible = { [weak self] in (self?.popover.isShown ?? false) || ItemWindow.isOpen }
         a.onAlert = { [weak self] key, agent in self?.agentAlert(key, agent) }
         return a
@@ -78,7 +79,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var captureHotKey: GlobalHotKey?
     var windowHotKey: GlobalHotKey?
     let workstreams = WorkstreamIndex()
-    lazy var queue = WorkQueue(path: QUEUE_PATH, store: projectStore, agents: agentIndex)
+    lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var aiChecks = AgentJudge(path: CHECKS_PATH, agents: agentIndex, queue: queue)
     lazy var writeBack: PlaneWriteBack = {
         let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, accounts: planeAccounts)
@@ -105,6 +106,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         log.info("OverSire launching — repos: \(REPOS.count), poll: \(POLL_NORMAL)s/\(POLL_ACTIVE)s")
         if LegacyMigration().run() { log.info("migrated the Cat Eye data") }
         loadConfig()
+        StoreMigration.runForApp(STORE_WRITES)
         installMainMenu()
         applyShowIn()
         REPOS = catalog.resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)

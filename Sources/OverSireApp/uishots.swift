@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
 // one PNG per route and theme. It sends no global input, so it is safe while someone uses the Mac.
@@ -10,9 +11,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     var lastUpdate = Date()
     var firstLoad = true
     let projectStore: ProjectStore
-    let agentIndex = AgentIndex()
+    let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: NSTemporaryDirectory() + "oversire-uishots/store")))
+    lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()
-    lazy var queue = WorkQueue(path: NSTemporaryDirectory() + "oversire-uishots/queue.json", store: projectStore, agents: agentIndex)
+    lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json",
                                                                                        store: projectStore, accounts: PlaneAccounts()))
     lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
