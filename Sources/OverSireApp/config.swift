@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import RuntimeOrca
 import TrackerPlane
 import CryptoKit
 import os
@@ -278,7 +279,7 @@ struct OrcaConfig: Codable, Equatable {
     static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
 
     var enabled = true
-    var cli = OrcaClient.defaultPath
+    var cli = OrcaRuntime.defaultPath
     var environment: String?
     var agent = "claude"
     var prompt = OrcaConfig.defaultPrompt
@@ -289,7 +290,7 @@ struct OrcaConfig: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        cli = try c.decodeIfPresent(String.self, forKey: .cli) ?? OrcaClient.defaultPath
+        cli = try c.decodeIfPresent(String.self, forKey: .cli) ?? OrcaRuntime.defaultPath
         environment = try c.decodeIfPresent(String.self, forKey: .environment)
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? OrcaConfig.defaultPrompt
@@ -305,7 +306,7 @@ struct OrcaConfig: Codable, Equatable {
             .replacingOccurrences(of: "{title}", with: item.title)
     }
 
-    var client: OrcaClient { OrcaClient(exe: cli, environment: environment) }
+    var runtime: OrcaRuntime { OrcaRuntime(exe: cli, environment: environment, commands: ProcessRunner()) }
 
     // The Orca workspace whose name matches the project: "towertail-workspace" for TOWERTAIL.
     static func guess(_ p: ProjectSummary, _ repos: [RuntimeRepo]) -> String? {

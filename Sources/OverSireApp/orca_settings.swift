@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import RuntimeOrca
 
 // Settings → Projects → Orca: the CLI, the host that runs agents, the agent, the
 // prompt template, and the Orca workspace of each Plane project.
@@ -139,15 +140,15 @@ extension ProjectSettingsVC {
     func probeOrca() {
         guard !ProjectSettingsVC.orcaProbing else { return }
         ProjectSettingsVC.orcaProbing = true
-        let client = cfg.orca.client
+        let rt = cfg.orca.runtime
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var p = OrcaProbe(environment: client.environment)
-            switch client.version() {
+            var p = OrcaProbe(environment: rt.environment)
+            switch Result(blocking: { try await rt.version() }) {
             case .success(let v): p.version = v
             case .failure(let e): p.error = e.message
             }
-            p.environments = (try? client.environments().get()) ?? []
-            p.repos = (try? client.repos().get()) ?? []
+            p.environments = ((try? Result(blocking: { try await rt.environments() }).get()) ?? []).filter { $0.kind != .local }.map(\.name)
+            p.repos = (try? Result(blocking: { try await rt.repos() }).get()) ?? []
             DispatchQueue.main.async {
                 ProjectSettingsVC.orcaProbe = p
                 ProjectSettingsVC.orcaProbing = false

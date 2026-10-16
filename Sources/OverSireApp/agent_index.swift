@@ -1,5 +1,9 @@
 import AppKit
 import OverSireCore
+import RuntimeOrca
+
+/// The runtime calls of the agent index.
+typealias AgentHost = AgentRuntime & SessionIO & Revealing
 
 // The Orca agent of each Plane item. OverSire finds agents by the card name (the item
 // key), by the pane of an agent it started, and by the item URL in the prompt.
@@ -85,6 +89,7 @@ final class AgentIndex: NSObject {
     var onAlert: ((_ key: String, _ agent: AgentSession) -> Void)?
 
     private var cfg: OrcaConfig { PROJECTS_CFG.orca }
+    var runtime: () -> any AgentHost = { PROJECTS_CFG.orca.runtime }
 
     func agent(_ key: String) -> AgentSession? { agents[key.uppercased()] }
 
@@ -103,13 +108,12 @@ final class AgentIndex: NSObject {
     }
 
     func poll() {
-        guard cfg.enabled, !polling else { return }
-        let client = cfg.client
-        guard client.installed else { return }
+        guard ready != nil, !polling else { return }
+        let rt = runtime()
         polling = true
         lastPoll = now()
         q.async { [weak self] in
-            let r = client.cards()
+            let r = Result(blocking: { try await rt.workspaces() })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.polling = false
@@ -128,9 +132,9 @@ final class AgentIndex: NSObject {
     func start(_ item: Item, snap: ProjectSnapshot, anchor: NSView) {
         let pk = snap.summary.ref.storeKey
         if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root) { _ in }; return }
-        let client = cfg.client
+        let rt = runtime()
         q.async { [weak self] in
-            let r = client.repos()
+            let r = Result(blocking: { try await rt.repos(in: nil) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch r {
@@ -234,14 +238,15 @@ final class AgentIndex: NSObject {
     }
 
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
-    func start(_ item: Item, root: String, done: @escaping (Result<Launch, OrcaError>) -> Void) {
+    func start(_ item: Item, root: String, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let key = item.key.uppercased()
-        let (client, agent, prompt) = (cfg.client, cfg.agent, cfg.prompt(for: item))
+        let (rt, agent, prompt) = (runtime(), cfg.agent, cfg.prompt(for: item))
         launches[key] = PendingLaunch(at: now())
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()
         q.async { [weak self] in
-            let r = client.start(root: root, key: item.key, url: item.url, agent: agent, prompt: prompt)
+            let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: prompt)
+            let r = Result(blocking: { try await rt.launch(req) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch r {
@@ -266,52 +271,53 @@ final class AgentIndex: NSObject {
     // Shows the item's terminal in Orca.
     func reveal(_ key: String) {
         guard let a = agent(key), let card = a.card else { return }
-        let client = cfg.client
-        q.async {
-            guard case .success(let ts) = client.terminals(card: card) else { return }
-            if let t = AgentIndex.pick(ts, agent: a, key: key) ?? ts.first(where: { !$0.orphaned }) { client.reveal(handle: t.handle) }
+        let rt = runtime()
+        Task {
+            guard let ts = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)),
+                  let t = AgentIndex.pick(ts, agent: a, key: key) ?? ts.first(where: { !$0.orphaned }) else { return }
+            try? await rt.reveal(t.ref)
         }
     }
 
     // Shows the first live terminal of a worktree in Orca.
     func reveal(card: String) {
-        let client = cfg.client
-        q.async {
-            guard case .success(let ts) = client.terminals(card: card), let t = ts.first(where: { !$0.orphaned }) else { return }
-            client.reveal(handle: t.handle)
+        let rt = runtime()
+        Task {
+            guard let t = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)).first(where: { !$0.orphaned }) else { return }
+            try? await rt.reveal(t.ref)
         }
     }
 
-    func send(_ key: String, text: String, done: @escaping (OrcaError?) -> Void) {
-        terminal(key) { client, handle in
-            guard let handle else { return OrcaError(code: "no_terminal", message: "The session terminal is closed") }
-            if case .failure(let e) = client.send(handle: handle, text: text) { return e }
+    func send(_ key: String, text: String, done: @escaping (ProviderError?) -> Void) {
+        terminal(key) { rt, s in
+            guard let s else { return ProviderError.vendor(code: "no_terminal", message: "The session terminal is closed") }
+            if case .failure(let e) = Result(blocking: { try await rt.send(s, text: text) }) { return e }
             return nil
         } done: { done($0) }
     }
 
     func tail(_ key: String, lines n: Int = 8, done: @escaping ([String]) -> Void) {
-        terminal(key) { client, handle -> [String] in
-            guard let handle, case .success(let lines) = client.tail(handle: handle, lines: n) else { return [] }
+        terminal(key) { rt, s -> [String] in
+            guard let s, case .success(let lines) = Result(blocking: { try await rt.tail(s, lines: n) }) else { return [] }
             return lines
         } done: { done($0) }
     }
 
-    private func terminal<T>(_ key: String, _ work: @escaping (OrcaClient, String?) -> T, done: @escaping (T) -> Void) {
+    private func terminal<T>(_ key: String, _ work: @escaping (any AgentHost, SessionRef?) -> T, done: @escaping (T) -> Void) {
         let a = agent(key)
-        let client = cfg.client
+        let rt = runtime()
         q.async {
-            var handle: String?
-            if let a, let card = a.card, case .success(let ts) = client.terminals(card: card) {
-                handle = AgentIndex.pick(ts, agent: a, key: key)?.handle
+            var session: SessionRef?
+            if let a, let card = a.card, case .success(let ts) = Result(blocking: { try await rt.sessions(WorkspaceRef(account: rt.account, id: card)) }) {
+                session = AgentIndex.pick(ts, agent: a, key: key)?.ref
             }
-            let r = work(client, handle)
+            let r = work(rt, session)
             DispatchQueue.main.async { done(r) }
         }
     }
 
     // The agent's own terminal: its pane, else a live tab titled with the item key.
-    static func pick(_ ts: [OrcaTerminal], agent: AgentSession, key: String) -> OrcaTerminal? {
+    static func pick(_ ts: [RuntimeSession], agent: AgentSession, key: String) -> RuntimeSession? {
         if let p = agent.paneKey, let t = ts.first(where: { $0.paneKey == p }) { return t }
         if let t = ts.first(where: { !$0.orphaned && $0.title.range(of: key, options: .caseInsensitive) != nil }) { return t }
         // The only terminal with an agent title (not "Terminal N") that names no other item.

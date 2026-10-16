@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import RuntimeOrca
 import TrackerPlane
 
 // ─── Intake agent ────────────────────────────────────────────────────────────
@@ -49,8 +50,8 @@ final class IntakeAgent {
 
     enum State: Equatable {
         case starting
-        case running(handle: String, since: Date, tail: [String])
-        case report(IntakeReport, handle: String)
+        case running(handle: SessionRef, since: Date, tail: [String])
+        case report(IntakeReport, handle: SessionRef)
         case applied(accepted: Bool)
         case failed(String)
     }
@@ -66,7 +67,7 @@ final class IntakeAgent {
         self.writeBack = writeBack
     }
 
-    var available: Bool { AI_CFG.intakeAgent && PROJECTS_CFG.orca.enabled && PROJECTS_CFG.orca.client.installed }
+    var available: Bool { AI_CFG.intakeAgent && PROJECTS_CFG.orca.enabled && PROJECTS_CFG.orca.runtime.installed }
 
     func state(_ item: IntakeItem) -> State? { states[item.id] }
 
@@ -93,12 +94,13 @@ final class IntakeAgent {
             let prompt = IntakeAgent.prompt(AGENTS.intakePrompt, key: key, title: item.name, url: url, body: body)
                 .replacingOccurrences(of: "\n", with: " ")
             let path = AGENTS.intakeScratch ? root + "/.wt/intake-" + key.lowercased() : root
-            let client = PROJECTS_CFG.orca.client
+            let rt = PROJECTS_CFG.orca.runtime
             let title = "intake-" + key
             self.q.async {
                 if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
-                let r = client.openTerminal(path: path, title: title,
-                                            command: "claude -n '\(title)' --permission-mode plan", prompt: prompt)
+                let r = Result(blocking: {
+                    try await rt.openTerminal(path: path, title: title, command: "claude -n '\(title)' --permission-mode plan", prompt: prompt)
+                })
                 DispatchQueue.main.async {
                     switch r {
                     case .success(let h): self.set(item.id, .running(handle: h, since: Date(), tail: []))
@@ -118,15 +120,15 @@ final class IntakeAgent {
     }
 
     private func poll() {
-        let running = states.compactMap { id, s -> (String, String)? in
+        let running = states.compactMap { id, s -> (String, SessionRef)? in
             if case .running(let h, _, _) = s { return (id, h) }
             return nil
         }
         if running.isEmpty { timer?.invalidate(); timer = nil; return }
-        let client = PROJECTS_CFG.orca.client
+        let rt = PROJECTS_CFG.orca.runtime
         for (id, h) in running {
             q.async { [weak self] in
-                let r = client.output(handle: h)
+                let r = Result(blocking: { try await rt.output(h, lines: 400) })
                 DispatchQueue.main.async {
                     guard let self, case .running(_, let since, _) = self.states[id] else { return }
                     switch r {
@@ -149,7 +151,8 @@ final class IntakeAgent {
         writeBack.addBlock(projectKey: projectKey, intake: item, markdown: md) { [weak self] ok in
             guard let self else { return }
             guard ok else { done(false); return }
-            PROJECTS_CFG.orca.client.close(handle: h)
+            let rt = PROJECTS_CFG.orca.runtime
+            Task { try? await rt.close(h) }
             if !accept { self.set(item.id, .applied(accepted: false)); done(true); return }
             self.store.triage(projectKey: projectKey, item: item, action: .accept) { ok in
                 self.set(item.id, .applied(accepted: ok))
@@ -160,14 +163,14 @@ final class IntakeAgent {
 
     func reveal(_ item: IntakeItem) {
         switch states[item.id] {
-        case .running(let h, _, _), .report(_, let h): let c = PROJECTS_CFG.orca.client; q.async { c.reveal(handle: h) }
+        case .running(let h, _, _), .report(_, let h): let rt = PROJECTS_CFG.orca.runtime; Task { try? await rt.reveal(h) }
         default: break
         }
     }
 
     func discard(_ item: IntakeItem) {
-        if case .report(_, let h) = states[item.id] { let c = PROJECTS_CFG.orca.client; q.async { c.close(handle: h) } }
-        if case .running(let h, _, _) = states[item.id] { let c = PROJECTS_CFG.orca.client; q.async { c.close(handle: h) } }
+        if case .report(_, let h) = states[item.id] { let rt = PROJECTS_CFG.orca.runtime; Task { try? await rt.close(h) } }
+        if case .running(let h, _, _) = states[item.id] { let rt = PROJECTS_CFG.orca.runtime; Task { try? await rt.close(h) } }
         states[item.id] = nil
         NotificationCenter.default.post(name: IntakeAgent.changed, object: self)
     }

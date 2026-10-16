@@ -36,6 +36,8 @@
       "properties": {
         "repo": { "description": "Repo path or remote URL in the runtime.", "type": "string" },
         "item": { "$ref": "refs.json#/$defs/ItemRef" },
+        "name": { "description": "The workspace name. Default: the item key.", "type": "string" },
+        "note": { "description": "The workspace note. Default: the item URL.", "type": "string" },
         "branch": { "type": "string" },
         "agent": { "description": "Same raw values as the AgentBinder Harness: claude, codex, opencode, cursor.", "type": "string" },
         "prompt": { "type": "string" },

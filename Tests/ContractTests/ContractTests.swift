@@ -13,6 +13,7 @@ final class ContractTests: XCTestCase {
         "item-patch": roundTrip(ItemPatch.self),
         "change-action": roundTrip(ChangeAction.self),
         "run-action": roundTrip(RunAction.self),
+        "launch-request": roundTrip(LaunchRequest.self),
         "account": roundTrip(AccountConfig.self),
     ]
 

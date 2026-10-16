@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import RuntimeOrca
 import TrackerPlane
 import OverSireSync
 import GitHubKit
@@ -384,13 +385,7 @@ func runSelfTest() {
     cap.modifiers = 0
     check(cap.shortcutLabel == "None" && !cap.hasShortcut, "cleared shortcut")
 
-    // Orca: reply parse, agent index, prompt template.
-    if case .failure(let e) = OrcaClient.parse(Data(#"{"ok":false,"error":{"code":"runtime_unavailable","message":"no server"}}"#.utf8), stderr: "", command: "worktree ps") {
-        check(e.code == "runtime_unavailable" && e.message == "no server", "orca error reply")
-    } else { check(false, "orca error reply") }
-    if case .failure(let e) = OrcaClient.parse(Data("boom".utf8), stderr: "connect failed", command: "status") {
-        check(e.message == "orca status: connect failed", "orca non-JSON reply")
-    } else { check(false, "orca non-JSON reply") }
+    // Orca: agent index, prompt template.
     let psJSON = #"""
     {"ok":true,"result":{"worktrees":[
      {"worktreeId":"r1::/w::workspace:a","repo":"towertail-workspace","path":"/w","displayName":"TOWERTAIL-2","liveTerminalCount":1,"lastActivityAt":1000,
@@ -404,8 +399,8 @@ func runSelfTest() {
       "agents":[{"paneKey":"t6:l6","state":"done","agentType":"claude","stateStartedAt":3000000}]},
      {"worktreeId":"r4::/y","repo":"y","path":"/y","displayName":"OLD","isArchived":true,"agents":[]}]}}
     """#
-    if case .success(let r) = OrcaClient.parse(Data(psJSON.utf8), stderr: "", command: "worktree ps") {
-        let cards = OrcaClient.cards(from: r)
+    if let r = (try? JSONSerialization.jsonObject(with: Data(psJSON.utf8)) as? [String: Any])?["result"] as? [String: Any] {
+        let cards = OrcaRuntime.cards(from: r)
         check(cards.count == 3 && cards[0].agents.count == 2 && cards[0].liveTerminals == 1, "orca cards parse")
         let t0 = Date(timeIntervalSince1970: 3100)
         let launches = ["SLING-5": AgentIndex.PendingLaunch(at: t0, card: "r2::/c", paneKey: "t5:l5"),
@@ -435,13 +430,16 @@ func runSelfTest() {
         f2.record(before: ["A-1": ask], after: ["A-1": back])
         check(f2.events.map(\.text) == ["Got input, works again", "Needs input: Pick one", "Session works"], "feed transitions \(f2.events.map(\.text))")
     } else { check(false, "orca ps parse") }
-    let terms = [OrcaTerminal(handle: "h1", card: "c", title: "Terminal 1", paneKey: "t1:l1", orphaned: false),
-                 OrcaTerminal(handle: "h2", card: "c", title: "✳ FRITZ-27", paneKey: "t2:l2", orphaned: false)]
-    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "t1:l1"), key: "FRITZ-27")?.handle == "h1", "pick by pane")
-    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-27")?.handle == "h2", "pick by key title")
+    func term(_ h: String, _ title: String, _ pane: String, orphaned: Bool = false) -> RuntimeSession {
+        RuntimeSession(ref: SessionRef(workspace: WorkspaceRef(account: AccountID(provider: .orca, id: "local"), id: "c"), id: h),
+                       title: title, paneKey: pane, orphaned: orphaned)
+    }
+    let terms = [term("h1", "Terminal 1", "t1:l1"), term("h2", "✳ FRITZ-27", "t2:l2")]
+    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "t1:l1"), key: "FRITZ-27")?.ref.id == "h1", "pick by pane")
+    check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-27")?.ref.id == "h2", "pick by key title")
     check(AgentIndex.pick(terms, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-9") == nil, "no wrong terminal")
-    let titled = [terms[0], OrcaTerminal(handle: "h3", card: "c", title: "◐ OverSire standalone Mac app", paneKey: "pty:x", orphaned: true)]
-    check(AgentIndex.pick(titled, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-28")?.handle == "h3", "pick the one agent title")
+    let titled = [terms[0], term("h3", "◐ OverSire standalone Mac app", "pty:x", orphaned: true)]
+    check(AgentIndex.pick(titled, agent: AgentSession(phase: .working, since: Date(), paneKey: "gone"), key: "FRITZ-28")?.ref.id == "h3", "pick the one agent title")
     let draftItem = Item(id: "u-1", key: "FRITZ-7", title: "Add quick capture", url: "https://app.plane.so/ocral/browse/FRITZ-7/",
                          statusOptionId: "s1", fields: [:], assignees: [], labels: [], author: nil, updatedBy: nil,
                          updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
@@ -449,7 +447,6 @@ func runSelfTest() {
     check(oc.prompt(for: draftItem) == "work on https://app.plane.so/ocral/browse/FRITZ-7/ in worktree group .wt/fritz-7", "orca prompt template")
     oc.prompt = "{KEY}: {title}"
     check(oc.prompt(for: draftItem) == "FRITZ-7: Add quick capture", "orca prompt fields")
-    check(OrcaClient.agentCommand("claude", key: "FRITZ-7") == "claude -n 'FRITZ-7'" && OrcaClient.agentCommand("codex", key: "X-1") == "codex", "agent command")
     if let d = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"orca":{"environment":"mbp","roots":{"a/b":"/w"}}}"#.utf8)) {
         check(d.orca.environment == "mbp" && d.orca.agent == "claude" && d.orca.roots["a/b"] == "/w" && d.notifications.agentDone, "orca config decode")
     } else { check(false, "orca config decode") }
@@ -484,10 +481,9 @@ func runSelfTest() {
                           "github-actions:oversire", "github-actions:flarco", "github-actions:acme", "orca:mbp"], "accounts \(ids)")
             check(a[2].values["host"] == "https://plane.example.com" && a[1].secretKeys == ["PLANE_TOKEN_ocral"], "plane account")
             check(a[3].values["repos"] == "oversire/oversire,oversire/cloud" && a[5].values["repos"] == "", "github repos by owner")
-            check(a[9].values["agent"] == "codex" && a[9].values["cli"] == OrcaClient.defaultPath, "orca account")
+            check(a[9].values["agent"] == "codex" && a[9].values["cli"] == OrcaRuntime.defaultPath, "orca account")
         } else { check(false, "accounts fixture decode") }
     }
-    check(OrcaError(code: "bad_reply", message: "x").providerError == .decoding("x"), "orca errors map to provider errors")
     do {
         let r = ProcessRunner()
         check((try? r.runSync("/bin/echo", ["hi"]))?.stdout == Data("hi\n".utf8), "process runner output")

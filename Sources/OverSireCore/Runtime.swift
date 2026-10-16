@@ -91,3 +91,85 @@ public struct Launch: Hashable, Sendable {
         self.turnStarted = turnStarted
     }
 }
+
+/// A place where a runtime runs sessions: this Mac, a paired server or a cloud.
+public struct RuntimeEnvironment: Hashable, Sendable, Codable {
+    public enum Kind: String, Hashable, Sendable, Codable { case local, ssh, cloud }
+
+    public let id: String
+    public let name: String
+    public let kind: Kind
+
+    public init(id: String, name: String, kind: Kind) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+    }
+
+    public static let local = RuntimeEnvironment(id: "local", name: "This Mac", kind: .local)
+}
+
+/// One terminal of a workspace. A terminal can hold an agent session.
+public struct RuntimeSession: Hashable, Sendable {
+    public let ref: SessionRef
+    public let title: String
+    public let paneKey: String
+    public let orphaned: Bool
+
+    public init(ref: SessionRef, title: String, paneKey: String, orphaned: Bool) {
+        self.ref = ref
+        self.title = title
+        self.paneKey = paneKey
+        self.orphaned = orphaned
+    }
+}
+
+/// Start an agent in a workspace of the runtime. The JSON form is in Contract/schema/actions.json.
+public struct LaunchRequest: Hashable, Sendable, Codable {
+    public var repo: String              // the repo path or remote URL in the runtime
+    public var item: ItemRef?
+    public var name: String?             // the workspace name; default: the item key
+    public var note: String?             // the workspace note; default: the item URL
+    public var branch: String?
+    public var agent: AgentName
+    public var prompt: String
+    public var environment: String?
+
+    public init(repo: String, item: ItemRef? = nil, name: String? = nil, note: String? = nil, branch: String? = nil,
+                agent: AgentName, prompt: String, environment: String? = nil) {
+        self.repo = repo
+        self.item = item
+        self.name = name
+        self.note = note
+        self.branch = branch
+        self.agent = agent
+        self.prompt = prompt
+        self.environment = environment
+    }
+
+    public var workspaceName: String? { name ?? item?.key }
+}
+
+public protocol AgentRuntime: Provider {
+    func environments() async throws -> [RuntimeEnvironment]
+    /// nil: the environment of the account.
+    func repos(in env: RuntimeEnvironment?) async throws -> [RuntimeRepo]
+    func workspaces() async throws -> [Workspace]
+    func sessions(_ w: WorkspaceRef) async throws -> [RuntimeSession]
+    func launch(_ r: LaunchRequest) async throws -> Launch
+}
+
+public protocol SessionIO: AgentRuntime {
+    /// True when the agent started a turn.
+    @discardableResult func send(_ s: SessionRef, text: String) async throws -> Bool
+    /// The last lines that the screen shows, without empty lines.
+    func tail(_ s: SessionRef, lines: Int) async throws -> [String]
+    /// The scroll back as text.
+    func output(_ s: SessionRef, lines: Int) async throws -> [String]
+    func close(_ s: SessionRef) async throws
+}
+
+/// Shows a session in the runtime UI on this Mac.
+public protocol Revealing: AgentRuntime {
+    func reveal(_ s: SessionRef) async throws
+}
