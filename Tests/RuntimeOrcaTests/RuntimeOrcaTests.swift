@@ -44,6 +44,11 @@ final class RuntimeOrcaTests: XCTestCase {
         rt.shellWait = .zero
     }
 
+    func testCapabilitiesAgreeWithProtocols() {
+        let r = ProviderConformance.capabilities(rt!)
+        XCTAssertTrue(r.passed, r.description)
+    }
+
     func testParse() throws {
         XCTAssertThrowsError(try OrcaRuntime.parse(Data(#"{"ok":false,"error":{"code":"runtime_unavailable","message":"no server"}}"#.utf8),
                                                    stderr: "", command: "worktree ps")) {

@@ -15,6 +15,11 @@ final class CodeHostGitHubTests: XCTestCase {
                               client: GitHubClient(commands: gh, http: NoHTTP(), gh: "/bin/sh"))
     }
 
+    func testCapabilitiesAgreeWithProtocols() {
+        let r = ProviderConformance.capabilities(host!)
+        XCTAssertTrue(r.passed, r.description)
+    }
+
     func testParseCLIOutput() throws {
         let a = try XCTUnwrap(GitHubClient.parse(Data(answer("304 Not Modified", "", etag: "\"e1\"").utf8)))
         XCTAssertEqual(a.status, 304)

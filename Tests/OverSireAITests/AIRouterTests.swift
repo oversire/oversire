@@ -50,7 +50,7 @@ final class AIRouterTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-ai-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = LocalStore(dir: dir)
-        let clock = Clock()
+        let clock = TickClock()
         let router = AIRouter(engines: [FakeAIEngine()], store: store, now: { clock.tick() })
         for i in 0..<(AIRouter.keep + 2) {
             _ = try await router.run(AITask(id: "t\(i)", kind: .tidy, input: AIInput(text: "x")))
@@ -75,7 +75,7 @@ final class AIRouterTests: XCTestCase {
 }
 
 /// One second more on each call.
-final class Clock: @unchecked Sendable {
+final class TickClock: @unchecked Sendable {
     private let lock = NSLock()
     private var t = Date(timeIntervalSince1970: 1_800_000_000)
     func tick() -> Date { lock.withLock { t.addTimeInterval(1); return t } }

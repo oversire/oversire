@@ -7,7 +7,7 @@ public final class GitHubCodeHost: CodeHost, RateReporting, @unchecked Sendable 
     public let id: ProviderID = .github
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.changeActions, .webhooks] }
+    public var capabilities: Set<Capability> { [.changeActions] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 5000) }
 
     let client: GitHubClient

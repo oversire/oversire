@@ -20,6 +20,11 @@ final class CIGitHubActionsTests: XCTestCase {
         ci = ActionsCI(owner: "acme", repos: ["acme/app"], client: GitHubClient(commands: gh, http: NoHTTP(), gh: "/bin/sh"))
     }
 
+    func testCapabilitiesAgreeWithProtocols() {
+        let r = ProviderConformance.capabilities(ci!)
+        XCTAssertTrue(r.passed, r.description)
+    }
+
     func testRunMapping() async throws {
         gh.on("GET", "repos/acme/app/actions/runs?per_page=5&branch=feat%2Fx", answer("200 OK", #"{"workflow_runs":["# + Self.runJSON + "]}"))
         let runs = try await ci.runs(RunQuery(repo: ci.repoRef("acme/app"), branch: "feat/x", limit: 5))

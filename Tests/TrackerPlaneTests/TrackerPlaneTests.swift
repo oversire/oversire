@@ -1,5 +1,6 @@
 import XCTest
 import OverSireCore
+import OverSireTestKit
 @testable import TrackerPlane
 
 /// Recorded Plane answers, keyed by "METHOD path". Each request is kept.
@@ -40,6 +41,11 @@ final class TrackerPlaneTests: XCTestCase {
         http.on("GET", "\(ws)/members/", #"[{"member":{"id":"u1","display_name":"Ada"}},{"member":{"id":"u2","display_name":"Bo"}}]"#)
         http.on("GET", "\(ws)/projects/", #"{"results":[{"id":"P1","name":"Engine","identifier":"ENG","archived_at":null},{"id":"P2","name":"Attic","identifier":"OLD","archived_at":"2026-01-01T00:00:00Z"}],"next_page_results":false}"#)
         http.on("GET", "\(ws)/projects/P1/states/", ##"{"results":[{"id":"s2","name":"Doing","color":"#F59E0B","group":"started","sequence":2},{"id":"s1","name":"Todo","color":"#888888","group":"unstarted","sequence":1}]}"##)
+    }
+
+    func testCapabilitiesAgreeWithProtocols() {
+        let r = ProviderConformance.capabilities(plane!)
+        XCTAssertTrue(r.passed, r.description)
     }
 
     func testWorkspaceURLs() throws {

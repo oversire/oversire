@@ -10,7 +10,7 @@ public final class ActionsCI: CIProvider, LogReading, RateReporting, @unchecked 
     public let id: ProviderID = .githubActions
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.rerun, .cancel, .logs, .annotations, .webhooks] }
+    public var capabilities: Set<Capability> { [.rerun, .cancel, .logs, .annotations] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(10), requestsPerHour: 5000) }
 
     let client: GitHubClient
