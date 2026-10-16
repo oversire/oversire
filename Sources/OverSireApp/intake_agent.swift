@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 import RuntimeOrca
 import TrackerPlane
 
@@ -72,9 +73,8 @@ final class IntakeAgent {
     func state(_ item: IntakeItem) -> State? { states[item.id] }
 
     static func prompt(_ template: String, key: String, title: String, url: String, body: String) -> String {
-        template.replacingOccurrences(of: "{KEY}", with: key).replacingOccurrences(of: "{key}", with: key.lowercased())
-            .replacingOccurrences(of: "{title}", with: title).replacingOccurrences(of: "{url}", with: url)
-            .replacingOccurrences(of: "{body}", with: body.isEmpty ? "(no description)" : String(body.prefix(6000)))
+        let input = AgentPrompts.triageInput(template: template, key: key, title: title, url: url, body: body)
+        return (try? AITaskKind.triage.prompt(input).user) ?? ""
     }
 
     // Opens the session in Orca. The project needs a saved Orca workspace.

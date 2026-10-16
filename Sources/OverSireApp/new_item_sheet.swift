@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 
 // ─── New item sheet ──────────────────────────────────────────────────────────
 // An overlay on the Projects tab. AI controls (✦) show only when AI is on.

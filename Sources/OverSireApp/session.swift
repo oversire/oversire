@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireAI
 
 // What an agent session did, from its Claude transcript or its terminal.
 struct SessionSummary: Codable, Equatable {
@@ -129,20 +130,8 @@ final class SessionNotes {
 
     // MARK: AI
 
-    static func summaryRequest(key: String, title: String, transcript: String) -> AIRequest {
-        let system = """
-        You summarize a coding agent session for the team that tracks the work item.
-        Use short sentences in plain technical English. Do not guess. Use only facts from the transcript.
-        Reply with one JSON object only:
-        {"done":["what the agent did"],"files":["changed file paths"],"decisions":["choices and why"],"questions":["open questions for a person"]}
-        """
-        return AIRequest(system: system, user: "Item \(key): \(title)\n\nTranscript:\n\(transcript)", maxTokens: 900)
-    }
-
     static func parse(_ text: String) -> SessionSummary? {
-        let t = unfenced(text)
-        guard let a = t.firstIndex(of: "{"), let b = t.lastIndex(of: "}"),
-              let obj = try? JSONSerialization.jsonObject(with: Data(t[a...b].utf8)) as? [String: Any] else { return nil }
+        guard let obj = replyObject(text) else { return nil }
         func list(_ k: String, _ n: Int) -> [String] {
             (obj[k] as? [String] ?? []).map { String($0.prefix(300)) }.filter { !$0.isEmpty }.prefix(n).map { $0 }
         }
@@ -159,7 +148,7 @@ final class SessionNotes {
         transcript(k) { [weak self] text in
             guard let self else { return }
             guard !text.isEmpty else { self.busy.remove(k); self.publish(); done?(nil); return }
-            ai.send(SessionNotes.summaryRequest(key: k, title: title, transcript: text)) { r in
+            ai.run(.sessionSummary, AgentPrompts.sessionInput(key: k, title: title, transcript: text), id: "sessionSummary:\(k)") { r in
                 self.busy.remove(k)
                 var s: SessionSummary?
                 if case .success(let t) = r { s = SessionNotes.parse(t) }
@@ -173,8 +162,7 @@ final class SessionNotes {
         let k = key.uppercased()
         guard let ai = AIClient.current else { done(nil); return }
         transcript(k) { [weak self] text in
-            let system = "You answer a question about a coding agent session. Use only the transcript. Say so when the transcript does not tell. Be short."
-            ai.send(AIRequest(system: system, user: "Transcript:\n\(text)\n\nQuestion: \(question)", maxTokens: 500)) { r in
+            ai.run(.question, AgentPrompts.questionInput(transcript: text, question: question)) { r in
                 guard let self else { return }
                 if case .success(let a) = r {
                     self.answers[k, default: []].append((question, a.trimmingCharacters(in: .whitespacesAndNewlines)))

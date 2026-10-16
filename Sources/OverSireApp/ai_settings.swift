@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 
 // Settings → AI: the user's endpoint, a Test, and which AI features to use.
 // AI stays off until Test passes for the current format, URL, model and key.

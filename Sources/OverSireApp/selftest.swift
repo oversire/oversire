@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 import RuntimeOrca
 import TrackerPlane
 import OverSireSync
@@ -308,58 +309,7 @@ func runSelfTest() {
     check(orderCfg.isFolded("ACME/1"), "fold is case-insensitive")
     orderCfg.setFolded("acme/1", false)
     check(orderCfg.folded.isEmpty, "unfold")
-    // AI dialects, without network.
-    var aiCfg = AIConfig()
-    aiCfg.baseURL = "https://llm.example.com/v1/"
-    aiCfg.model = "m1"
-    let aiReq = AIRequest(system: "SYS", user: "USER", maxTokens: 300)
-    func jsonBody(_ r: URLRequest?) -> [String: Any] {
-        (r?.httpBody).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-    }
-    let oa = try? OpenAIDialect().urlRequest(aiReq, cfg: aiCfg, key: "k1")
-    check(oa?.url?.absoluteString == "https://llm.example.com/v1/chat/completions", "openai url \(oa?.url?.absoluteString ?? "")")
-    check(oa?.value(forHTTPHeaderField: "Authorization") == "Bearer k1", "openai bearer")
-    check(jsonBody(oa)["reasoning_effort"] as? String == "low" && jsonBody(oa)["model"] as? String == "m1", "openai effort")
-    check((jsonBody(oa)["messages"] as? [[String: Any]])?.first?["role"] as? String == "system", "openai system message")
-    aiCfg.baseURL = "https://llm.example.com/v1"
-    aiCfg.effort = "none"
-    let oaNone = try? OpenAIDialect().urlRequest(aiReq, cfg: aiCfg, key: "k1")
-    check(oaNone?.url?.absoluteString == "https://llm.example.com/v1/chat/completions", "openai url without slash")
-    check(jsonBody(oaNone)["reasoning_effort"] == nil, "effort none leaves out the field")
-    aiCfg.format = .anthropic
-    aiCfg.baseURL = "https://api.anthropic.com/"
-    let an = try? AnthropicDialect().urlRequest(aiReq, cfg: aiCfg, key: "k2")
-    check(an?.url?.absoluteString == "https://api.anthropic.com/v1/messages", "anthropic url")
-    check(an?.value(forHTTPHeaderField: "x-api-key") == "k2" && an?.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01",
-          "anthropic headers")
-    check(jsonBody(an)["max_tokens"] as? Int == 300 && jsonBody(an)["system"] as? String == "SYS", "anthropic body")
-    check(AnthropicDialect.endpoint("https://proxy.example/v1") == "https://proxy.example/v1/messages", "anthropic url with /v1")
-    let oaReply = Data(#"{"choices":[{"message":{"role":"assistant","content":"Hello"}}]}"#.utf8)
-    check((try? OpenAIDialect().text(from: oaReply, status: 200)) == "Hello", "openai reply")
-    let anReply = Data(#"{"content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"Hi"},{"type":"text","text":"!"}]}"#.utf8)
-    check((try? AnthropicDialect().text(from: anReply, status: 200)) == "Hi!", "anthropic reply")
-    let errBody = Data(#"{"error":{"message":"Invalid API key\nmore","type":"auth"}}"#.utf8)
-    do { _ = try OpenAIDialect().text(from: errBody, status: 401); check(false, "401 must throw") }
-    catch { check(error as? AIError == .http(401, "Invalid API key"), "http error \(error)") }
-
-    // Suggestion parsing.
-    let sizeField = ProjectField(id: "FS", name: "Size", options: [StatusOption(id: "o1", name: "S", color: "GRAY"),
-                                                                   StatusOption(id: "o2", name: "L", color: "GRAY")])
-    let draftCtx = DraftContext(projects: [("ocral/\(wsUUID)", "Fritz Tasks"), ("acme/1", "Board")], fields: [sizeField])
-    let reply = """
-    Sure! Here it is:
-    ```json
-    {"title": "  \(String(repeating: "x", count: 80)).", "alternatives": ["Other", "Third"],
-     "fields": {"size": "l", "Priority": "P0", "Size2": "S"}, "project": "OCRAL/\(wsUUID)", "reason": "personal"}
-    ```
-    """
-    let sug = DraftSuggestion.parse(reply, ctx: draftCtx)
-    check(sug?.title.count == 70 && sug?.alternatives == ["Other", "Third"], "suggestion title and alternatives")
-    check(sug?.fields == ["Size": "L"], "unknown fields and options are dropped \(sug?.fields ?? [:])")
-    check(sug?.project == "ocral/\(wsUUID)" && sug?.reason == "personal", "project key is normalized")
-    check(DraftSuggestion.parse(#"{"title":"Fix it","project":"nope/1"}"#, ctx: draftCtx)?.project == nil, "unknown project dropped")
-    check(DraftSuggestion.parse("no json here", ctx: draftCtx) == nil, "no JSON gives nil")
-    check(unfenced("```markdown\n## Context\nText\n```") == "## Context\nText", "fence removed")
+    // The AI dialects, the draft parse and the queue order parse are in OverSireAITests.
 
     // The AI switch needs a test that passed for the current values.
     var gate = AIConfig()
@@ -641,10 +591,6 @@ func runSelfTest() {
         let p = AgentJudge.parse("```json\n{\"verdict\":\"stuck\",\"evidence\":[\"a\",\"b\"],\"nudge\":\"Add a timeout\"}\n```")
         check(p?.0 == .stuck && p?.1 == ["a", "b"] && p?.2 == "Add a timeout", "check: parse the AI reply")
         check(AgentJudge.parse("no json") == nil, "check: a bad reply is nil")
-        let o = AgentJudge.parseOrder(#"{"order":["fritz-3","FRITZ-2"],"reason":"3 first"}"#, keys: ["FRITZ-2", "FRITZ-3"])
-        check(o?.order == ["FRITZ-3", "FRITZ-2"], "order: parse")
-        check(AgentJudge.parseOrder(#"{"order":["FRITZ-2","FRITZ-3"]}"#, keys: ["FRITZ-2", "FRITZ-3"]) == nil, "order: same order is no suggestion")
-        check(AgentJudge.parseOrder(#"{"order":["FRITZ-2"]}"#, keys: ["FRITZ-2", "FRITZ-3"]) == nil, "order: a missing key is refused")
         // Session notes: transcript lines, the size cap, and the summary parse.
         let jsonl = [
             #"{"type":"mode","mode":"normal"}"#,

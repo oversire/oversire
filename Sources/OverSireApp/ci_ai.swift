@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireAI
 import CIGitHubActions
 
 // A short cause of a failed run, from the log and the changed files.
@@ -106,31 +107,13 @@ final class CIAssist {
 
     // MARK: Explain
 
-    static func explainRequest(run r: Run, job: String, log: [String], files: [String]) -> AIRequest {
-        let errs = log.filter(ActionsCI.isError)
-        let context = (Array(errs.suffix(40)) + ["--- last lines ---"] + Array(log.suffix(60))).joined(separator: "\n")
-        let system = """
-        You read a failed GitHub Actions job and give the likely cause in one or two short sentences.
-        Use plain technical English. Do not guess past the log. Say so when the log does not tell.
-        Reply with one JSON object only:
-        {"cause":"the likely cause","fix":"the first thing to try","confidence":"low|medium|high"}
-        """
-        let user = """
-        Workflow: \(r.workflowName ?? r.name) #\(r.number) on \(r.headBranch) (\(r.headSha.prefix(7)))
-        Commit: \(r.displayTitle)
-        Job: \(job)
-        Changed files: \(files.isEmpty ? "unknown" : files.prefix(40).joined(separator: ", "))
-
-        Log:
-        \(context)
-        """
-        return AIRequest(system: system, user: user, maxTokens: 400)
+    static func explainInput(run r: Run, job: String, log: [String], files: [String]) -> AIInput {
+        CIPrompts.failureInput(workflow: r.workflowName ?? r.name, number: r.number, branch: r.headBranch, sha: r.headSha,
+                               commit: r.displayTitle, job: job, files: files, errors: log.filter(ActionsCI.isError), tail: log)
     }
 
     static func parseExplanation(_ text: String) -> RunExplanation? {
-        let t = unfenced(text)
-        guard let a = t.firstIndex(of: "{"), let b = t.lastIndex(of: "}"),
-              let o = try? JSONSerialization.jsonObject(with: Data(t[a...b].utf8)) as? [String: Any],
+        guard let o = replyObject(text),
               let cause = (o["cause"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !cause.isEmpty else { return nil }
         let conf = (o["confidence"] as? String).map { ["low", "medium", "high"].contains($0) ? $0 : "low" } ?? "low"
         return RunExplanation(cause: String(cause.prefix(400)), fix: String((o["fix"] as? String ?? "").prefix(300)), confidence: conf)
@@ -147,20 +130,18 @@ final class CIAssist {
         q.async { [weak self] in
             let res = try? ghRun(["api", "repos/\(repo)/commits/\(r.headSha)", "--jq", ".files[].filename"], timeout: 20)
             let files = res?.ok == true ? String(decoding: res!.stdout, as: UTF8.self).split(separator: "\n").map(String.init) : []
-            ai.send(CIAssist.explainRequest(run: r, job: job.name, log: log, files: files)) { result in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.busy.remove(k)
-                    switch result {
-                    case .success(let t):
-                        if let e = CIAssist.parseExplanation(t) { self.state.explanations[k] = e; self.trim(); self.save() } else {
-                            self.errors[k] = "The AI reply had no cause."
-                            self.publish()
-                        }
-                    case .failure(let e):
-                        self.errors[k] = e.message
+            ai.run(.failureReason, CIAssist.explainInput(run: r, job: job.name, log: log, files: files), id: "failureReason:\(k)") { result in
+                guard let self else { return }
+                self.busy.remove(k)
+                switch result {
+                case .success(let t):
+                    if let e = CIAssist.parseExplanation(t) { self.state.explanations[k] = e; self.trim(); self.save() } else {
+                        self.errors[k] = "The AI reply had no cause."
                         self.publish()
                     }
+                case .failure(let e):
+                    self.errors[k] = e.message
+                    self.publish()
                 }
             }
         }
@@ -212,13 +193,10 @@ final class CIAssist {
         state.digest = Digest(day: today, facts: facts, summary: nil)
         save()
         guard let ai = AIClient.current else { return }
-        let system = "You write a morning digest for a developer in two or three short sentences. Use only the facts. Say first what needs action."
-        ai.send(AIRequest(system: system, user: facts.joined(separator: "\n"), maxTokens: 200)) { [weak self] r in
-            DispatchQueue.main.async {
-                guard let self, case .success(let t) = r, self.state.digest?.day == today else { return }
-                self.state.digest?.summary = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.save()
-            }
+        ai.run(.digest, CIPrompts.digestInput(facts: facts), id: "digest:\(today)") { [weak self] r in
+            guard let self, case .success(let t) = r, self.state.digest?.day == today else { return }
+            self.state.digest?.summary = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.save()
         }
     }
 

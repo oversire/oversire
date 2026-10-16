@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireAI
 
 // ─── AI checks of agents ─────────────────────────────────────────────────────
 // An agent that goes quiet gets a check: does it look done, or stuck? Heuristics decide first.
@@ -90,22 +91,13 @@ final class AgentJudge {
         return nil
     }
 
-    static func request(key: String, title: String, s: AgentSignals) -> AIRequest {
-        let system = """
-        You check a coding agent that went quiet. Decide if its task looks done or if it looks stuck.
-        Reply with one JSON object only: {"verdict":"done|stuck","evidence":["short fact", "..."],"nudge":"one message to send to a stuck agent, or empty"}
-        Use at most 4 facts. Use simple English.
-        """
-        var u = "Item \(key): \(title)\nQuiet for \(Int(s.quietMinutes)) min. Agent state: \(s.phase).\n"
-        u += "CI: \(s.ci?.word ?? "none"). PR open: \(s.prOpen ? "yes" : "no"). Plane status: \(s.status?.label ?? "unknown").\n"
-        u += "Last terminal lines:\n" + s.tail.suffix(60).joined(separator: "\n")
-        return AIRequest(system: system, user: u, maxTokens: 600)
+    static func input(key: String, title: String, s: AgentSignals) -> AIInput {
+        AgentPrompts.checkInput(key: key, title: title, quietMinutes: Int(s.quietMinutes), phase: "\(s.phase)", ci: s.ci?.word ?? "none",
+                                prOpen: s.prOpen, status: s.status?.label ?? "unknown", tail: s.tail)
     }
 
     static func parse(_ text: String) -> (Judgement.Verdict, [String], String?)? {
-        let t = unfenced(text)
-        guard let a = t.firstIndex(of: "{"), let b = t.lastIndex(of: "}"),
-              let obj = try? JSONSerialization.jsonObject(with: Data(t[a...b].utf8)) as? [String: Any],
+        guard let obj = replyObject(text),
               let v = (obj["verdict"] as? String).flatMap(Judgement.Verdict.init(rawValue:)) else { return nil }
         let ev = (obj["evidence"] as? [String] ?? []).prefix(4).map { String($0.prefix(160)) }
         let nudge = (obj["nudge"] as? String).flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
@@ -142,7 +134,7 @@ final class AgentJudge {
                 if let (v, ev) = AgentJudge.heuristic(s, quietLimit: limit) {
                     self.add(key: key, v, ev, nudge: nil, byAI: false)
                 } else if let ai = AIClient.current {
-                    ai.send(AgentJudge.request(key: key, title: found?.item.title ?? "", s: s)) { r in
+                    ai.run(.check, AgentJudge.input(key: key, title: found?.item.title ?? "", s: s), id: "check:\(key)") { r in
                         if case .success(let text) = r, let (v, ev, nudge) = AgentJudge.parse(text) {
                             self.add(key: key, v, ev, nudge: nudge, byAI: true)
                         } else {
@@ -196,31 +188,12 @@ final class AgentJudge {
 
     // MARK: Queue order
 
-    static func orderRequest(_ entries: [QueueEntry], bodies: [String: String]) -> AIRequest {
-        let system = """
-        You order a queue of coding tasks. Put a task first when other tasks need its result.
-        Reply with one JSON object only: {"order":["KEY-1","KEY-2"],"reason":"one short sentence"}
-        """
-        let u = entries.map { "\($0.key): \($0.title)\n\(bodies[$0.key]?.prefix(600) ?? "")" }.joined(separator: "\n\n")
-        return AIRequest(system: system, user: u, maxTokens: 400)
-    }
-
-    static func parseOrder(_ text: String, keys: [String]) -> (order: [String], reason: String)? {
-        let t = unfenced(text)
-        guard let a = t.firstIndex(of: "{"), let b = t.lastIndex(of: "}"),
-              let obj = try? JSONSerialization.jsonObject(with: Data(t[a...b].utf8)) as? [String: Any],
-              let order = obj["order"] as? [String] else { return nil }
-        let clean = order.map { $0.uppercased() }.filter(keys.contains)
-        guard Set(clean) == Set(keys), clean != keys else { return nil }
-        return (clean, obj["reason"] as? String ?? "")
-    }
-
     func suggestOrder(_ lane: QueueLane, store: ProjectStore, done: @escaping ((order: [String], reason: String)?) -> Void) {
         guard AI_CFG.queueOrder, lane.entries.count > 1, let ai = AIClient.current else { done(nil); return }
         var bodies: [String: String] = [:]
         for e in lane.entries { bodies[e.key] = store.item(key: e.key)?.item.body }
-        ai.send(AgentJudge.orderRequest(lane.entries, bodies: bodies)) { r in
-            if case .success(let t) = r { done(AgentJudge.parseOrder(t, keys: lane.entries.map(\.key))) } else { done(nil) }
+        ai.run(.order, AgentPrompts.orderInput(lane.entries, bodies: bodies), id: "order:\(lane.id)") { r in
+            if case .success(let t) = r { done(AgentPrompts.parseOrder(t, keys: lane.entries.map(\.key))) } else { done(nil) }
         }
     }
 

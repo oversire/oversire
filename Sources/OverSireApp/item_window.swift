@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 
 // Draft text of an item in edit mode. The window keeps it, so a rebuild does not lose it.
 struct ItemEdit {

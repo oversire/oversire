@@ -4,26 +4,6 @@ import OverSireTestKit
 @testable import GitHubKit
 @testable import CIGitHubActions
 
-/// Answers by URL. Each request is kept.
-final class RecordedHTTP: HTTPTransport, @unchecked Sendable {
-    private let lock = NSLock()
-    private var answers: [String: (Int, [String: String], String)] = [:]
-    private(set) var requests: [URLRequest] = []
-
-    func on(_ method: String, _ url: String, _ status: Int, headers: [String: String] = [:], _ body: String = "") {
-        lock.withLock { answers[method + " " + url] = (status, headers, body) }
-    }
-
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let key = (request.httpMethod ?? "GET") + " " + request.url!.absoluteString
-        return try lock.withLock {
-            requests.append(request)
-            guard let (status, headers, body) = answers[key] else { throw ProviderError.transport("no answer for \(key)") }
-            return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
-        }
-    }
-}
-
 final class CIGitHubActionsTests: XCTestCase {
     var gh: ReplayGH!
     var ci: ActionsCI!

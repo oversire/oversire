@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireAI
 import RuntimeOrca
 import TrackerPlane
 import CryptoKit
@@ -316,8 +317,6 @@ struct OrcaConfig: Codable, Equatable {
     }
 }
 
-enum AIFormat: String, Codable { case openai, anthropic }
-
 // The API key is in the Keychain, not here.
 struct AIConfig: Codable, Equatable {
     var format = AIFormat.openai
@@ -365,6 +364,8 @@ struct AIConfig: Codable, Equatable {
         digest = try c.decodeIfPresent(Bool.self, forKey: .digest) ?? false
         digestHour = try c.decodeIfPresent(Int.self, forKey: .digestHour) ?? 8
     }
+
+    var apiKey: APIKeyConfig { APIKeyConfig(format: format, baseURL: baseURL, model: model, effort: effort, maxTokens: maxTokens) }
 
     func fingerprint(key: String) -> String {
         let raw = "\(format.rawValue)|\(baseURL)|\(model)|\(key)"

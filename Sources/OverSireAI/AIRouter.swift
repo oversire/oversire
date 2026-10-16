@@ -1,0 +1,42 @@
+import Foundation
+import OverSireCore
+
+/// Runs a task on the first available engine. The AI settings give the order.
+/// Hook points: an AgentBinder engine and a cloud credits engine go into `engines`.
+public struct AIRouter: Sendable {
+    public static let keep = 200
+
+    public let engines: [any AIEngine]
+    let store: (any Store)?
+    let now: @Sendable () -> Date
+
+    public init(engines: [any AIEngine], store: (any Store)? = nil, now: @escaping @Sendable () -> Date = Date.init) {
+        self.engines = engines
+        self.store = store
+        self.now = now
+    }
+
+    public func run(_ task: AITask) async throws -> AIResult {
+        var last = AIError.notConfigured
+        for e in engines where await e.available() {
+            do {
+                let r = AIResult(task: task.id, engine: e.id, text: try await e.run(task), at: now())
+                if task.kind != .ping { await save(r) }
+                return r
+            } catch let AIError.unavailable(why) {
+                last = .unavailable(why)
+            }
+        }
+        throw last
+    }
+
+    // A lost result costs only a new AI call, so a store error does not fail the task.
+    private func save(_ r: AIResult) async {
+        guard let store else { return }
+        try? await store.put(r)
+        guard let all = try? await store.all(AIResult.self), all.count > Self.keep else { return }
+        for old in all.sorted(by: { $0.at < $1.at }).prefix(all.count - Self.keep) {
+            try? await store.delete(AIResult.self, id: old.id)
+        }
+    }
+}

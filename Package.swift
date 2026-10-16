@@ -35,7 +35,7 @@ let package = Package(
         .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"]),
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "OverSireTestKit"]),
         .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),
-        .testTarget(name: "ContractTests", dependencies: ["OverSireCore"]),
+        .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI"]),
         .testTarget(name: "LiveTests", dependencies: ["TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "OverSireTestKit"]),
     ],
     swiftLanguageModes: [.v6]

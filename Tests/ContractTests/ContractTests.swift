@@ -1,5 +1,6 @@
 import XCTest
 import OverSireCore
+import OverSireAI
 
 /// Each file in Contract/fixtures decodes, encodes again and gives the same JSON.
 final class ContractTests: XCTestCase {
@@ -22,6 +23,8 @@ final class ContractTests: XCTestCase {
         "snooze": roundTrip(Snooze.self),
         "note": roundTrip(Note.self),
         "agent-link": roundTrip(AgentLink.self),
+        "ai-task": roundTrip(AITask.self),
+        "ai-result": roundTrip(AIResult.self),
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
