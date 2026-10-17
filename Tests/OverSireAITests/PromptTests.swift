@@ -68,4 +68,20 @@ final class PromptTests: XCTestCase {
                                                                        title: "T", url: "u", body: ""))
         XCTAssertEqual(p.user, "TREBI-9 trebi-9 T u (no description)")
     }
+
+    func testTemplateSyntax() {
+        let v = { (n: String) in ["a": " x ", "b": "", "c": "{{a}}", "text": "T"][n] ?? "" }
+        XCTAssertEqual(PromptTemplate.fill("[{{a}}][{{a|trim}}][{{nope}}]", v), "[ x ][x][]")
+        XCTAssertEqual(PromptTemplate.fill("{{#if a}}A{{a|trim}}{{/if}}{{#if b}}B{{/if}}-{{text}}", v), "Ax-T")
+        XCTAssertEqual(PromptTemplate.fill("{{c}} {\"json\": 1}", v), "{{a}} {\"json\": 1}", "a value is not a template")
+    }
+
+    func testTemplateParse() throws {
+        let t = try PromptTemplate(parsing: "---\ntaskKind: x\nversion: 2\ninputs: text\n---\n\n<!-- user -->\nHi {{text}}\n\n")
+        XCTAssertEqual(t.version, 2)
+        XCTAssertNil(t.maxTokens)
+        XCTAssertEqual(t.render(AIInput(text: "you")), AIPrompt(system: "", user: "Hi you"))
+        XCTAssertThrowsError(try PromptTemplate(parsing: "no front matter"))
+        XCTAssertThrowsError(try PromptTemplate(parsing: "---\ntaskKind: x\nversion: 1\n---\n<!-- system -->\nonly system\n"))
+    }
 }

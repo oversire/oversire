@@ -1,6 +1,6 @@
 import XCTest
 import OverSireCore
-import OverSireAI
+@testable import OverSireAI
 
 /// Each file in Contract/fixtures decodes, encodes again and gives the same JSON.
 final class ContractTests: XCTestCase {
@@ -109,5 +109,23 @@ final class ContractTests: XCTestCase {
             guard s.kind != .memoryUpkeep, s.kind != .digest else { continue }   // these keys name a topic, not a version
             XCTAssertEqual(s.dedupeKey, Suggestion.dedupeKey(subject: s.subject, kind: s.kind, version: s.subjectVersion), name)
         }
+    }
+
+    func testPromptFilesAreInTheApp() throws {
+        let dir = Self.root.appendingPathComponent("prompts")
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".md") && $0 != "README.md" }
+        XCTAssertEqual(Set(names.map { String($0.dropLast(3)) }), Set(PromptFiles.all.keys),
+                       "run scripts/gen-prompts.sh")
+        for name in names {
+            let kind = String(name.dropLast(3))
+            let text = try String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8)
+            XCTAssertEqual(PromptFiles.all[kind], text, "\(name) changed: run scripts/gen-prompts.sh")
+            let t = try PromptTemplate(parsing: text)
+            XCTAssertEqual(t.taskKind.rawValue, kind, name)
+            // Each name in the templates is in the inputs list, and the other way round.
+            let used = Set(text.matches(of: /\{\{(?:#if )?([A-Za-z]+)(?:\|trim)?\}\}/).map { String($0.1) })
+            XCTAssertEqual(used, Set(t.inputs), name)
+        }
+        XCTAssertTrue(PromptFiles.all["draft"]!.contains("at most \(DraftSuggestion.maxTitle) characters"))
     }
 }

@@ -2,31 +2,91 @@ import Foundation
 import OverSireCore
 
 extension AITaskKind {
-    /// The prompt of the kind for the input. Each kind has an AIInput builder next to its prompt.
+    /// The prompt of the kind for the input. The text comes from Contract/prompts/<kind>.md.
+    /// Each kind has an AIInput builder next to its reply parser.
     public func prompt(_ input: AIInput) throws -> AIPrompt {
-        switch self {
-        case .ping: return AIPrompt(system: "Reply with OK.", user: "ping", maxTokens: 32)
-        case .draft: return DraftContext.prompt(input)
-        case .tidy: return DraftContext.tidyPrompt(input)
-        case .check: return AgentPrompts.check(input)
-        case .order: return AgentPrompts.order(input)
-        case .sessionSummary: return AgentPrompts.sessionSummary(input)
-        case .question: return AgentPrompts.question(input)
-        case .triage: return AgentPrompts.triage(input)
-        case .failureReason: return CIPrompts.failureReason(input)
-        case .digest: return CIPrompts.digest(input)
-        default: throw AIError.unsupported(self)
-        }
+        guard let t = PromptTemplate.all[self] else { throw AIError.unsupported(self) }
+        return t.render(input)
     }
 }
 
 extension AIInput {
     public subscript(_ key: String) -> String { context[key] ?? "" }
+}
 
-    /// The system text with the extra instructions of the user.
-    func withExtra(_ system: String) -> String {
-        let e = self["extra"].trimmingCharacters(in: .whitespacesAndNewlines)
-        return e.isEmpty ? system : system + "\n\nExtra instructions from the user:\n" + e
+/// One file of Contract/prompts. Contract/prompts/README.md has the format.
+public struct PromptTemplate: Sendable {
+    public let taskKind: AITaskKind
+    public let version: Int
+    public let maxTokens: Int?
+    public let inputs: [String]
+    let system: String
+    let user: String
+
+    /// The prompt files in the app binary, by kind.
+    public static let all: [AITaskKind: PromptTemplate] = Dictionary(uniqueKeysWithValues: PromptFiles.all.map { name, text in
+        do { return (AITaskKind(rawValue: name), try PromptTemplate(parsing: text)) } catch {
+            preconditionFailure("Contract/prompts/\(name).md: \(error)")
+        }
+    })
+
+    public init(parsing text: String) throws {
+        guard text.hasPrefix("---\n"), let end = text.range(of: "\n---\n") else { throw ProviderError.decoding("no front matter") }
+        var meta: [String: String] = [:]
+        for line in text[text.index(text.startIndex, offsetBy: 4)..<end.lowerBound].split(separator: "\n") {
+            guard let colon = line.firstIndex(of: ":") else { throw ProviderError.decoding("front matter line: \(line)") }
+            meta[line[..<colon].trimmingCharacters(in: .whitespaces)] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
+        guard let kind = meta["taskKind"], let version = meta["version"].flatMap(Int.init) else {
+            throw ProviderError.decoding("front matter needs taskKind and version")
+        }
+        var sections: [String: [Substring]] = [:]
+        var current: String?
+        for line in text[end.upperBound...].split(separator: "\n", omittingEmptySubsequences: false) {
+            if line == "<!-- system -->" || line == "<!-- user -->" {
+                current = String(line.dropFirst(5).dropLast(4))
+                sections[current!] = []
+            } else if let c = current {
+                sections[c]!.append(line)
+            }
+        }
+        func section(_ name: String) -> String? {
+            sections[name].map { String($0.joined(separator: "\n").reversed().drop { $0 == "\n" }.reversed()) }
+        }
+        guard let user = section("user") else { throw ProviderError.decoding("no user template") }
+        taskKind = AITaskKind(rawValue: kind)
+        self.version = version
+        maxTokens = meta["maxTokens"].flatMap(Int.init)
+        inputs = (meta["inputs"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        system = section("system") ?? ""
+        self.user = user
+    }
+
+    public func render(_ input: AIInput) -> AIPrompt {
+        let value = { (name: String) in name == "text" ? input.text : input[name] }
+        return AIPrompt(system: Self.fill(system[...], value), user: Self.fill(user[...], value), maxTokens: maxTokens)
+    }
+
+    /// One pass over the template, so a value that holds "{{" stays as it is.
+    static func fill(_ t: Substring, _ value: (String) -> String) -> String {
+        var out = ""
+        var rest = t
+        while let open = rest.range(of: "{{"), let close = rest[open.upperBound...].range(of: "}}") {
+            out += rest[..<open.lowerBound]
+            let tag = rest[open.upperBound..<close.lowerBound]
+            rest = rest[close.upperBound...]
+            if tag.hasPrefix("#if ") {
+                let end = rest.range(of: "{{/if}}") ?? (rest.endIndex..<rest.endIndex)
+                let shown = !value(tag.dropFirst(4).trimmingCharacters(in: .whitespaces)).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if shown { out += fill(rest[..<end.lowerBound], value) }
+                rest = rest[end.upperBound...]
+            } else {
+                let parts = tag.split(separator: "|", maxSplits: 1)
+                let v = value(String(parts.first ?? ""))
+                out += parts.count > 1 && parts[1] == "trim" ? v.trimmingCharacters(in: .whitespacesAndNewlines) : v
+            }
+        }
+        return out + rest
     }
 }
 

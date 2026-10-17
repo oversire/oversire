@@ -1,6 +1,6 @@
 # OverSire wire contract
 
-This folder defines the types that the app (Swift) and the cloud (TypeScript) share.
+This folder defines the types that the app (Swift), the cloud (TypeScript) and the runner (Go) share.
 Each side has its own types. Both sides run the same fixture files in their tests.
 
 ## Files
@@ -11,7 +11,15 @@ Each side has its own types. Both sides run the same fixture files in their test
   - `actions.json`: `ItemPatch`, `ChangeAction`, `RunAction`, `LaunchRequest`.
   - `ai-task.json`: `AITask`, `AIInput`, `AIResult`.
   - `account.json`: `AccountConfig`.
+  - `store.json`: the store records, `QueueLaneState` and `StoreOp`. Version 2.
+  - `jobs.json`: `Job`, `JobTrigger`, `EventFilter`, `JobRun`. Swift names them `AIJob` and `AIJobRun`.
+  - `suggestion.json`: `Suggestion`, `Proposal`.
+  - `work-order.json`: `WorkOrder`, `WorkOrderDraft`, `SessionOrder`, `WorkOrderResult`.
+  - `memory.json`: `MemoryEntry`, `MemoryDraft`.
+  - `billing.json`: `UsageRow`, `LedgerEntry`, `BillingState`. Money is an integer in micro-USD.
+  - `ai-endpoint.json`: `AIEndpoint`, `AIRoute`.
 - `fixtures/<type>/<case>.json`: sample values. The folder name is the type.
+- `prompts/<taskKind>.md`: the prompt of each AI task kind. `prompts/README.md` has the format.
 
 ## Tests
 
@@ -20,7 +28,7 @@ Swift: `swift test --filter ContractTests`. TypeScript: the contract test in `ov
 
 ## Version rule
 
-Each schema file has `"x-oversire-schema": 1`. The messages that cross the network
+Each schema file has `"x-oversire-schema"`. It is 1 for all files except `store.json`, which is 2. The messages that cross the network
 (`ProviderEvent`, `AITask`, `AIResult`) carry the same number in their `schema` field.
 
 - A new optional field is compatible. Keep the number.

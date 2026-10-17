@@ -19,39 +19,6 @@ public struct DraftContext {
         }
         return AIInput(text: body, context: c)
     }
-
-    static func prompt(_ input: AIInput) -> AIPrompt {
-        let (projects, fields) = (input["projects"], input["fields"])
-        var keys = ["\"title\": the item title, at most \(DraftSuggestion.maxTitle) characters, imperative, no period at the end",
-                    "\"alternatives\": two other titles"]
-        if !fields.isEmpty {
-            keys.append("\"fields\": an object of field name to option name. Use only the given fields and options. Leave out a field when you are not sure")
-        }
-        if !projects.isEmpty {
-            keys.append("\"project\": the key of the best project from the given list")
-            keys.append("\"reason\": why that project, in at most 8 words")
-        }
-        let system = """
-        You turn a note into a GitHub project item.
-        Reply with one JSON object only, with no other text. Keys:
-        \(keys.map { "- " + $0 }.joined(separator: "\n"))
-        """
-        var user = ""
-        if !projects.isEmpty { user += "Projects:\n" + projects + "\n\n" }
-        if !fields.isEmpty { user += "Fields:\n" + fields + "\n\n" }
-        return AIPrompt(system: input.withExtra(system), user: user + "Note:\n" + input.text)
-    }
-
-    static let tidySystem = """
-    Rewrite the user's note as a clear GitHub issue description in Markdown.
-    Keep every fact, link, number, name and code block. Do not add facts.
-    Use short paragraphs and lists. Add a heading only when it helps.
-    Reply with the Markdown only.
-    """
-
-    static func tidyPrompt(_ input: AIInput) -> AIPrompt {
-        AIPrompt(system: input.withExtra(tidySystem), user: input.text, maxTokens: 2048)
-    }
 }
 
 public struct DraftSuggestion: Equatable, Sendable {
