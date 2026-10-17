@@ -86,6 +86,21 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         private func wait() async { try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
     }
 
+    // OVERSIRE_UISHOTS_RUNNING=1: the newest run of the first three repos shows as running, to check the live clock.
+    static func running(_ g: [(String, [Run])]) -> [(String, [Run])] {
+        var g = g
+        var n = 0
+        for i in g.indices where n < 3 {
+            guard let r = g[i].1.first else { continue }
+            let started = isoFmt.string(from: Date().addingTimeInterval(-[70, 900, 30][n]))
+            g[i].1[0] = Run(id: r.id, name: r.name, displayTitle: r.displayTitle, status: "in_progress", conclusion: nil, headBranch: r.headBranch,
+                            headSha: r.headSha, event: r.event, url: r.url, updatedAt: started, createdAt: started, startedAt: started,
+                            number: r.number, workflowName: r.workflowName, actorLogin: r.actorLogin)
+            n += 1
+        }
+        return g
+    }
+
     func refresh(force: Bool, completion: (() -> Void)?) {
         if UIShots.loading {
             _ = busy.begin("Refreshing runs and pull requests: \(REPOS.count) repos")
@@ -95,7 +110,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let repos = REPOS
         Task {
             let (found, prs) = await GHActionsBar.fetch(repos, prs: true)
-            let runs = found.map { ($0.0, $0.1 ?? []) }
+            var runs = found.map { ($0.0, $0.1 ?? []) }
+            if ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_RUNNING"] == "1" { runs = UIShots.running(runs) }
             DispatchQueue.main.async {
                 self.grouped = runs; self.prGrouped = prs
                 if let fx = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FIXTURES"], let d = FileManager.default.contents(atPath: fx + "/prs.json"),

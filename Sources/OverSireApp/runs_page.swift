@@ -8,7 +8,7 @@ final class RunLine: TableRow {
         TableColumn(id: "run", title: "Run", width: 300, min: 160, flexible: true),
         TableColumn(id: "progress", title: "Progress", width: 70, min: 50, optional: true),
         TableColumn(id: "item", title: "Item", width: 112, min: 60),
-        TableColumn(id: "when", title: "When", width: 72, min: 50, optional: true),
+        TableColumn(id: "when", title: "When", width: 90, min: 50, optional: true),
     ])
 
     init(repo: String, run r: Run, data: AppData, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
@@ -20,25 +20,14 @@ final class RunLine: TableRow {
         ]
         let live = r.status != "completed"
         let total = live ? r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) : nil
-        if let total {
-            let bar = NSProgressIndicator()
-            bar.style = .bar
-            bar.isIndeterminate = false
-            bar.controlSize = .small
-            bar.minValue = 0; bar.maxValue = 1
-            bar.doubleValue = min(0.98, runElapsed(r) / max(1, total))
-            bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.widthAnchor.constraint(equalToConstant: 60).isActive = true
-            bar.setAccessibilityLabel("Progress")
-            cells["progress"] = bar
-        }
+        if live { cells["progress"] = RunClock(r, total: total, parts: .bar) }
         if let link = data.workstreams.link(runId: r.id) {
             cells["item"] = Chiplet(link.key, color: Palette.fg, mono: true) { go(.item(link.key, .overview)) }
         } else {
             cells["item"] = Chiplet("unlinked")
         }
-        let when = total.map { "~" + fmtDuration(max(5, $0 - runElapsed(r))) + " left" } ?? relativeTime(lastActivity(r))
-        cells["when"] = NSTextField.text(when, size: 11.5, color: Palette.dim)
+        let when = live ? "running" : relativeTime(lastActivity(r))
+        cells["when"] = live ? RunClock(r, total: total, parts: .times) : NSTextField.text(when, size: 11.5, color: Palette.dim)
         super.init(RunLine.layout, cells: cells, height: 46,
                    label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name), branch \(r.headBranch), \(when)") {
             go(.run(repo: repo, id: r.id))
@@ -48,6 +37,112 @@ final class RunLine: TableRow {
         commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, ignored: IGNORED.contains(r), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
+}
+
+// The live time of a running run: the time passed, the time left and a short bar.
+// It ticks each second while it is in a visible window. Without an estimate the bar is indeterminate.
+final class RunClock: NSStackView {
+    struct Parts: OptionSet {
+        let rawValue: Int
+        static let times = Parts(rawValue: 1), bar = Parts(rawValue: 2), all: Parts = [.times, .bar]
+    }
+    private let run: Run
+    private let total: TimeInterval?
+    private let elapsed = NSTextField.text("", size: 12, weight: .medium)
+    private let left = NSTextField.text("", size: 10.5, color: Palette.dim)
+    private let bar: MiniBar?
+    private let spinner: NSProgressIndicator?
+    private var timer: Timer?
+
+    init(_ r: Run, total: TimeInterval?, parts: Parts = .all) {
+        run = r
+        self.total = total
+        bar = parts.contains(.bar) && total != nil ? MiniBar() : nil
+        spinner = parts.contains(.bar) && total == nil ? NSProgressIndicator() : nil
+        super.init(frame: .zero)
+        orientation = .vertical
+        // In a table column the times align left, like the other cells. Alone at the end of a row they align right.
+        alignment = parts == .times ? .leading : .trailing
+        spacing = 2
+        translatesAutoresizingMaskIntoConstraints = false
+        if parts.contains(.times) {
+            elapsed.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+            left.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+            addArrangedSubview(elapsed)
+            if total != nil { addArrangedSubview(left) }
+        }
+        if let bar { addArrangedSubview(bar) }
+        if let spinner {
+            spinner.style = .bar
+            spinner.controlSize = .small
+            spinner.isIndeterminate = true
+            spinner.translatesAutoresizingMaskIntoConstraints = false
+            spinner.widthAnchor.constraint(equalToConstant: 64).isActive = true
+            addArrangedSubview(spinner)
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        tick()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        timer?.invalidate()
+        timer = nil
+        guard window != nil else { spinner?.stopAnimation(nil); return }
+        spinner?.startAnimation(nil)
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+        t.tolerance = 0.2
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+        tick()
+    }
+
+    private func tick() {
+        if let w = window, !w.occlusionState.contains(.visible) { return }
+        let e = runElapsed(run)
+        elapsed.stringValue = fmtDuration(e)
+        var spoken = "Running, \(fmtDuration(e))"
+        if let total {
+            let rest = total - e
+            left.stringValue = rest > 0 ? "~\(fmtDuration(rest)) left" : "\(fmtDuration(-rest)) over"
+            bar?.set(e / max(1, total), over: rest <= 0)
+            spoken += ", " + (rest > 0 ? "about \(fmtDuration(rest)) left" : "\(fmtDuration(-rest)) over the estimate")
+        } else {
+            spoken += ", no estimate yet"
+        }
+        setAccessibilityLabel(spoken)
+    }
+}
+
+// A thin progress bar. It turns amber when the run passes its estimate.
+final class MiniBar: NSView {
+    private var fraction: CGFloat = 0
+    private var over = false
+
+    init(width: CGFloat = 64) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: width).isActive = true
+        heightAnchor.constraint(equalToConstant: 4).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func set(_ f: Double, over o: Bool) {
+        let v = CGFloat(min(1, max(0, f)))
+        guard v != fraction || o != over else { return }
+        fraction = v
+        over = o
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Palette.line.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2).fill()
+        (over ? Palette.warn : Palette.run).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height), xRadius: 2, yRadius: 2).fill()
+    }
 }
 
 // All runs of the tracked repos, with filters. Linked runs show their item.

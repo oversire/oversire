@@ -169,6 +169,11 @@ final class GlanceVC: NSViewController {
         let sub = [name, r.headBranch, link?.key, relativeTime(lastActivity(r))].compactMap { $0 }.joined(separator: " · ")
         let row = Row([Glyph(t), TwoLine("\(r.workflowName ?? r.name) #\(r.number)", sub)], height: 40,
                       label: "\(t.word): \(r.workflowName ?? r.name) #\(r.number), \(sub)") { [weak self] in self?.open(.run(repo: repo, id: r.id)) }
+        if r.status != "completed" {
+            let history = data.grouped.first { $0.0 == repo }?.1 ?? []
+            row.stack.addArrangedSubview(Spacer())
+            row.stack.addArrangedSubview(RunClock(r, total: r.estimatedTotal(history: history)))
+        }
         if let key = link?.key, data.agentIndex.agent(key)?.card != nil { row.stack.addArrangedSubview(orcaButton(key)) }
         commands.attach(row) { RowMenu.run(repo: repo, run: r, linkedKey: link?.key, ignored: IGNORED.contains(r), caps: $0) }
         return row
