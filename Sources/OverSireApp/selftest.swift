@@ -72,6 +72,14 @@ func runSelfTest() {
     let other = passed("deploy")
     check(overallStatus([("o/a", [other]), ("o/r", [passed("ci"), bad])]).color == C_SUCCESS, "a newer pass of the workflow clears the failure")
     check(overallStatus([("o/a", [other]), ("o/r", [bad])]).color == C_FAILURE, "a failure in any repo turns the icon red")
+    let onBranch = Run(id: "6", name: "ci", displayTitle: "t", status: "completed", conclusion: "success", headBranch: "dependabot/x",
+                       headSha: "s", event: "push", url: "u/selftest-branch", updatedAt: "", createdAt: "", startedAt: nil,
+                       number: 4, workflowName: "ci", actorLogin: nil)
+    check(failingRuns([("o/r", [onBranch, bad])]).isEmpty, "a newer pass on any branch clears the failure")
+    check(Tone(bad).word == "Failed", "a failed run shows as failed")
+    IGNORED.set([bad], ignored: true)
+    check(Tone(bad).word == "Ignored" && failingRuns([("o/r", [bad])]).isEmpty, "an ignored failure shows as ignored and does not count")
+    IGNORED.set([bad], ignored: false)
     check(Badge("main", maxChars: 15).subviews.compactMap { $0 as? NSTextField }.first?.stringValue == "main", "short branch is not cut")
     check(Badge("dependabot/npm/lodash-4.17", maxChars: 15).subviews.compactMap { $0 as? NSTextField }.first?.stringValue == "dependa\u{2026}sh-4.17", "long branch keeps both ends")
     func dispatch(_ wf: String, _ sha: String) -> Run {

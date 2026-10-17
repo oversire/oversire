@@ -45,7 +45,7 @@ final class RunLine: TableRow {
         }
         itemActions(url: r.url, key: r.id, tracker: "GitHub")
         let linked = data.workstreams.link(runId: r.id)?.key
-        commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, caps: $0) }
+        commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, ignored: IGNORED.contains(r), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -53,7 +53,7 @@ final class RunLine: TableRow {
 // All runs of the tracked repos, with filters. Linked runs show their item.
 final class RunsPage: Page {
     private static let latestKey = "runsLatestOnly"
-    private var latestOnly = UserDefaults.standard.bool(forKey: RunsPage.latestKey)
+    private var latestOnly = UserDefaults.standard.object(forKey: RunsPage.latestKey) as? Bool ?? true
     private let more = MoreRows()
     override var buildsLater: Bool { true }
 
@@ -73,7 +73,7 @@ final class RunsPage: Page {
         let ws = data.workstreams
         var all: [(repo: String, run: Run)] = []
         for (repo, runs) in data.grouped {
-            for r in latestOnly ? latestPerWorkflow(runs) : runs { all.append((repo, r)) }
+            for r in latestOnly ? latestPerWorkflow(runs, acrossBranches: true) : runs { all.append((repo, r)) }
         }
         all.sort { newerActivity($0.run, $1.run) }
         let filters = Route.RunFilter.allCases

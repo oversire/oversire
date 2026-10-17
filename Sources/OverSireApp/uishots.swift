@@ -74,6 +74,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     func has(_ c: Capability) -> Bool { ENV.has(c) }
 
     func rerun(repo: String, runs: [Run], failedOnly: Bool) { log.info("uishots: re-run skipped") }
+    func setIgnored(_ runs: [Run], ignored: Bool) { IGNORED.set(runs, ignored: ignored) }
 
     // OVERSIRE_UISHOTS_LOADING=1: no fetch ever ends, so each page shows its loading state.
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"

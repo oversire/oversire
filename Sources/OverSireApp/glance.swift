@@ -19,6 +19,7 @@ final class GlanceVC: NSViewController {
     private var observer: Any?
     private var fingerprint: DataFingerprint?
     private var needsCount = 0
+    private lazy var commands = RowCommander(data: data, go: open)
 
     init(data: AppData, open: @escaping (Route) -> Void) {
         self.data = data
@@ -111,7 +112,7 @@ final class GlanceVC: NSViewController {
     // MARK: Tabs
 
     private func now(_ needs: [NeedsYou]) {
-        section("Needs you", count: needs.count, needs.prefix(5).map { n in NeedsYouRow(n) { [weak self] in self?.open($0) } },
+        section("Needs you", count: needs.count, needs.prefix(5).map { n in NeedsYouRow(n, commands: commands) { [weak self] in self?.open($0) } },
                 more: needs.count > 5 ? ("\(needs.count - 5) more in the inbox", .inbox(.all)) : nil, empty: "Nothing waits for you.")
         let running = data.grouped.flatMap { g in g.1.filter { $0.status != "completed" }.map { (g.0, $0) } }
             .sorted { ($0.1.createdAt) > ($1.1.createdAt) }
@@ -169,6 +170,7 @@ final class GlanceVC: NSViewController {
         let row = Row([Glyph(t), TwoLine("\(r.workflowName ?? r.name) #\(r.number)", sub)], height: 40,
                       label: "\(t.word): \(r.workflowName ?? r.name) #\(r.number), \(sub)") { [weak self] in self?.open(.run(repo: repo, id: r.id)) }
         if let key = link?.key, data.agentIndex.agent(key)?.card != nil { row.stack.addArrangedSubview(orcaButton(key)) }
+        commands.attach(row) { RowMenu.run(repo: repo, run: r, linkedKey: link?.key, ignored: IGNORED.contains(r), caps: $0) }
         return row
     }
 

@@ -13,6 +13,7 @@ enum RowCommand: Equatable {
     case assignMe(itemId: String)
     case startSession(key: String)
     case run(repo: String, runId: String, RunAction)
+    case ignoreFailure(repo: String, runId: String, Bool)
     case copyJobLog(repo: String, jobId: String)
     case approve(repo: String, number: Int)
     case merge(repo: String, number: Int)
@@ -87,7 +88,7 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func run(repo: String, run r: Run, linkedKey: String?, caps: Set<Capability>) -> [MenuEntry] {
+    static func run(repo: String, run r: Run, linkedKey: String?, ignored: Bool, caps: Set<Capability>) -> [MenuEntry] {
         let route = Route.run(repo: repo, id: r.id)
         var out: [MenuEntry] = [.action("Open", .open(route)), .action("Open on GitHub", .openURL(r.url)), .separator,
                                 .action("Copy link", .copy(r.url)), .action("Copy run ID", .copy(r.id)), .action("Copy commit SHA", .copy(r.headSha)),
@@ -97,6 +98,9 @@ enum RowMenu {
         if done && caps.contains(.rerun) { out.append(.action("Re-run all jobs", .run(repo: repo, runId: r.id, .rerun))) }
         if !done && caps.contains(.cancel) { out.append(.action("Cancel run", .run(repo: repo, runId: r.id, .cancel))) }
         if r.isFailure && caps.contains(.logs) { out.append(.action("Explain failure…", .open(route))) }
+        if r.isFailure {
+            out += [.separator, .action(ignored ? "Count this failure again" : "Ignore this failure", .ignoreFailure(repo: repo, runId: r.id, !ignored))]
+        }
         if let linkedKey { out += [.separator, .action("Open linked item", .open(.item(linkedKey, .overview)))] }
         return out.tidy
     }
@@ -218,6 +222,9 @@ final class RowCommander {
                 _ = await REPO_CLIENT.perform(a, repo: repo, id: id)
                 await MainActor.run { self?.data.refresh(force: true, completion: nil) }
             }
+        case .ignoreFailure(let repo, let id, let on):
+            guard let r = data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) else { return }
+            data.setIgnored([r], ignored: on)
         case .copyJobLog(let repo, let id):
             Task { if let log = await REPO_CLIENT.rawLog(repo, jobId: id) { await MainActor.run { RowActions.copy(log) } } }
         case .approve(let repo, let n), .merge(let repo, let n):

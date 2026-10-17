@@ -713,6 +713,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         IGNORED.set(runs, ignored: ignored)
         updateIcon()
         (popover.contentViewController as? TabVC)?.rebuildContent()
+        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
     }
 
     // Git branch and HEAD of the worktrees. At most once a minute, or on demand.

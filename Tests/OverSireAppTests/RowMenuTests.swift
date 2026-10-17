@@ -55,19 +55,22 @@ final class RowMenuTests: XCTestCase {
     }
 
     func testFailedRunMenu() {
-        let m = RowMenu.run(repo: "o/r", run: run(status: "completed", conclusion: "failure"), linkedKey: "SLING-7", caps: all)
+        let m = RowMenu.run(repo: "o/r", run: run(status: "completed", conclusion: "failure"), linkedKey: "SLING-7", ignored: false, caps: all)
         XCTAssertEqual(m.titles, ["Open", "Open on GitHub", "Copy link", "Copy run ID", "Copy commit SHA",
-                                  "Re-run failed jobs", "Re-run all jobs", "Explain failure…", "Open linked item"])
+                                  "Re-run failed jobs", "Re-run all jobs", "Explain failure…", "Ignore this failure", "Open linked item"])
+        XCTAssertEqual(m.command("Ignore this failure"), .ignoreFailure(repo: "o/r", runId: "99", true))
         XCTAssertEqual(m.command("Re-run failed jobs"), .run(repo: "o/r", runId: "99", .rerunFailed))
         XCTAssertEqual(m.command("Copy commit SHA"), .copy("abc123"))
     }
 
     func testRunMenuFollowsCapabilities() {
-        let live = RowMenu.run(repo: "o/r", run: run(status: "in_progress", conclusion: nil), linkedKey: nil, caps: all)
+        let live = RowMenu.run(repo: "o/r", run: run(status: "in_progress", conclusion: nil), linkedKey: nil, ignored: false, caps: all)
         XCTAssertTrue(live.titles.contains("Cancel run"))
         XCTAssertFalse(live.titles.contains("Re-run all jobs"))
-        let bare = RowMenu.run(repo: "o/r", run: run(status: "completed", conclusion: "failure"), linkedKey: nil, caps: [])
-        XCTAssertEqual(bare.titles, ["Open", "Open on GitHub", "Copy link", "Copy run ID", "Copy commit SHA"])
+        XCTAssertFalse(live.titles.contains("Ignore this failure"))
+        let bare = RowMenu.run(repo: "o/r", run: run(status: "completed", conclusion: "failure"), linkedKey: nil, ignored: true, caps: [])
+        XCTAssertEqual(bare.titles, ["Open", "Open on GitHub", "Copy link", "Copy run ID", "Copy commit SHA", "Count this failure again"])
+        XCTAssertEqual(bare.command("Count this failure again"), .ignoreFailure(repo: "o/r", runId: "99", false))
         XCTAssertNotEqual(bare.last, .separator)
     }
 

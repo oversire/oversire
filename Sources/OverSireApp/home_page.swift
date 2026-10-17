@@ -43,16 +43,14 @@ struct NeedsYou: Equatable {
                                 body: c.verdict == .done ? "Approve to start the next item in the queue." : "Approve a nudge, or stop it.",
                                 at: c.at, route: .queue))
         }
-        for (repo, runs) in data.grouped {
-            for r in latestPerWorkflow(runs) where r.isFailure && !IGNORED.contains(r) {
-                let link = ws.link(runId: r.id)
-                let watched = link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false
-                let name = repo.split(separator: "/").last.map(String.init) ?? repo
-                let body = link.map { "\($0.key) · " + (watched ? "the session watches it" : "no session works on it") }
-                    ?? "\(name) · \(r.headBranch) · unlinked"
-                out.append(NeedsYou(kind: .runFailed, title: "\(r.workflowName ?? r.name) #\(r.number) failed", body: body,
-                                    at: lastActivity(r), route: .run(repo: repo, id: r.id)))
-            }
+        for (repo, r) in failingRuns(data.grouped) {
+            let link = ws.link(runId: r.id)
+            let watched = link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false
+            let name = repo.split(separator: "/").last.map(String.init) ?? repo
+            let body = link.map { "\($0.key) · " + (watched ? "the session watches it" : "no session works on it") }
+                ?? "\(name) · \(r.headBranch) · unlinked"
+            out.append(NeedsYou(kind: .runFailed, title: "\(r.workflowName ?? r.name) #\(r.number) failed", body: body,
+                                at: lastActivity(r), route: .run(repo: repo, id: r.id)))
         }
         for (repo, prs) in data.prGrouped {
             for p in prs where !p.mine {
@@ -72,10 +70,15 @@ struct NeedsYou: Equatable {
 
 // A row for one item of Needs you.
 final class NeedsYouRow: Row {
-    init(_ n: NeedsYou, go: @escaping (Route) -> Void) {
+    init(_ n: NeedsYou, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         let when = NSTextField.text(relativeTime(n.at), size: 11.5, color: Palette.dim)
         super.init([Glyph(n.tone), TwoLine(n.title, n.body), when], height: 46,
                    label: "\(n.tone.word): \(n.title). \(n.body)") { go(n.route) }
+        if case .run(let repo, let id) = n.route, let commands,
+           let r = commands.data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) {
+            let linked = commands.data.workstreams.link(runId: id)?.key
+            commands.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, ignored: IGNORED.contains(r), caps: $0) }
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -141,7 +144,7 @@ final class HomePage: Page {
         pageBusy = data.loadingFirst
         let runs = data.grouped.flatMap { g in g.1.map { (repo: g.0, run: $0) } }
         let running = runs.filter { $0.run.status != "completed" }
-        let failing = data.grouped.flatMap { latestPerWorkflow($0.1) }.filter { $0.isFailure && !IGNORED.contains($0) }
+        let failing = failingRuns(data.grouped).map(\.run)
         let agents = Array(data.agentIndex.agents.values)
         let streams = data.workstreams.streams.values
             .filter { s in (s.agent.map { $0.phase != .done && $0.phase != .failed } ?? false) || s.runs.contains { $0.run.status != "completed" } }
@@ -194,7 +197,7 @@ final class HomePage: Page {
         let aside = NSStackView(v: [], spacing: 10)
         aside.addFull(SectionTitle("Needs you", count: needs.count))
         let ny = ListCard()
-        for n in needs.prefix(8) { ny.add(NeedsYouRow(n) { [weak self] in self?.go($0) }) }
+        for n in needs.prefix(8) { ny.add(NeedsYouRow(n, commands: commands) { [weak self] in self?.go($0) }) }
         if needs.count > 8 {
             ny.add(Row([NSTextField.text("\(needs.count - 8) more in the inbox", size: 12, color: Palette.acc)], height: 34) { [weak self] in self?.go(.inbox(.all)) })
         }

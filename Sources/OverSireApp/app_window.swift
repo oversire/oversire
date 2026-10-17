@@ -18,6 +18,7 @@ protocol AppData: AnyObject {
     var ciAssist: CIAssist { get }
     var busy: BusyTracker { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
+    func setIgnored(_ runs: [Run], ignored: Bool)
     func settingsVC(_ p: Route.SettingsPage) -> NSViewController?
     func refresh(force: Bool, completion: (() -> Void)?)
     /// True when an account has the feature. Pages hide what no account has.
@@ -453,7 +454,7 @@ struct SidebarModel {
         let store = data.projectStore
         let runs = data.grouped.flatMap { $0.1 }
         let running = runs.filter { $0.status != "completed" }.count
-        let failing = latestPerWorkflow(runs).filter { $0.isFailure && !IGNORED.contains($0) }.count
+        let failing = failingRuns(data.grouped).count
         let agents = data.agentIndex.agents.values
         let waiting = agents.filter { $0.phase == .waiting }.count
         let unread = store.unreadCount()

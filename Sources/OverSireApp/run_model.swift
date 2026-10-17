@@ -144,10 +144,14 @@ func overallStatus(_ g: [(String, [Run])]) -> (color: NSColor, badge: String?, l
     if all.contains(where: { $0.status == "in_progress" || $0.status == "queued" }) {
         return (C_RUNNING, "hourglass.circle.fill", "Run in progress")
     }
-    // A failure counts until a newer run of the same workflow replaces it (same branch, or any branch).
-    let failed = g.flatMap { latestPerWorkflow($0.1, acrossBranches: LATEST_ACROSS_BRANCHES) }.contains { $0.isFailure && !IGNORED.contains($0) }
-    if failed { return (C_FAILURE, "xmark.circle.fill", "Run failed") }
+    if !failingRuns(g).isEmpty { return (C_FAILURE, "xmark.circle.fill", "Run failed") }
     return (C_SUCCESS, "checkmark.circle.fill", "All runs passing")
+}
+
+// The failures that count: the latest run of each workflow in each repo, over all branches, and not ignored.
+// A newer run of the workflow on any branch replaces an older failure.
+func failingRuns(_ g: [(String, [Run])]) -> [(repo: String, run: Run)] {
+    g.flatMap { repo, runs in latestPerWorkflow(runs, acrossBranches: true).filter { $0.isFailure && !IGNORED.contains($0) }.map { (repo, $0) } }
 }
 
 func hasActive(_ g: [(String, [Run])]) -> Bool {

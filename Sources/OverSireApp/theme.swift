@@ -70,7 +70,10 @@ struct Tone {
         self.symbol = symbol; self.color = color; self.word = word
     }
 
-    init(_ run: Run) { self.init(status: run.status, conclusion: run.conclusion) }
+    init(_ run: Run) {
+        if run.isFailure && IGNORED.contains(run) { self = Tone(symbol: "xmark.circle", color: Palette.dim, word: "Ignored"); return }
+        self.init(status: run.status, conclusion: run.conclusion)
+    }
     init(_ job: Job) { self.init(status: job.status ?? "queued", conclusion: job.conclusion) }
 
     init(status: String, conclusion: String?) {
