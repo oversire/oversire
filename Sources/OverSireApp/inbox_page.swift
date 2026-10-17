@@ -37,6 +37,40 @@ struct InboxEntry {
     var activityId: String? = nil
     var itemKey: String? = nil
     var itemURL: String? = nil
+    var projectKey: String? = nil     // "SLING"
+    var priority: String? = nil       // "High"; nil counts as "None"
+}
+
+// The project and priority filters of the Inbox. An empty set lets each entry pass.
+struct InboxFilter: Codable, Equatable {
+    static let noProject = "No project"
+    static let noPriority = "None"
+    private static let projectsKey = "inbox.filter.projects", prioritiesKey = "inbox.filter.priorities"
+
+    var projects: Set<String> = []
+    var priorities: Set<String> = []
+
+    var isOn: Bool { !projects.isEmpty || !priorities.isEmpty }
+
+    func pass(_ e: InboxEntry) -> Bool {
+        (projects.isEmpty || projects.contains(e.projectKey ?? Self.noProject))
+            && (priorities.isEmpty || priorities.contains(e.priority ?? Self.noPriority))
+    }
+
+    // The priority name of a raw value ("high" or "High"). Other values give nil.
+    static func priorityName(_ raw: String?) -> String? {
+        guard let r = raw?.lowercased() else { return nil }
+        return StatusOption.priorities.first { $0.id == r || $0.name.lowercased() == r }?.name
+    }
+
+    static func load(_ d: UserDefaults = .standard) -> InboxFilter {
+        InboxFilter(projects: Set(d.stringArray(forKey: projectsKey) ?? []), priorities: Set(d.stringArray(forKey: prioritiesKey) ?? []))
+    }
+
+    func save(_ d: UserDefaults = .standard) {
+        d.set(projects.sorted(), forKey: Self.projectsKey)
+        d.set(priorities.sorted(), forKey: Self.prioritiesKey)
+    }
 }
 
 // Builds the inbox and keeps the read state of the lines that are not Plane activity.
@@ -80,7 +114,7 @@ final class InboxFeed {
             let id = "ai|" + c.id
             out.append(InboxEntry(id: id, source: .ai, title: "AI check: \(c.key) · \(c.verdict.word)",
                                   body: c.evidence.joined(separator: " · "), at: c.at,
-                                  unread: c.state == .pending && !read.contains(id), route: .queue))
+                                  unread: c.state == .pending && !read.contains(id), route: .queue, itemKey: c.key))
         }
         for (pk, snap) in store.snapshots {
             for i in snap.intake ?? [] {
@@ -91,7 +125,27 @@ final class InboxFeed {
                                       at: i.createdAt, unread: true, route: nil, intake: (pk, i)))
             }
         }
+        let resolver = ProjectResolver(PROJECTS_CFG)
+        for i in out.indices {
+            var e = out[i]
+            if let (pk, item) = e.intake {
+                e.projectKey = store.snapshots[pk]?.summary.identifier.uppercased()
+                e.priority = InboxFilter.priorityName(item.priority)
+            } else if let found = (e.itemKey ?? linkedKey(e, data)).flatMap({ store.item(key: $0) }) {
+                e.projectKey = found.snap.summary.identifier.uppercased()
+                e.priority = InboxFilter.priorityName(found.item.fields["Priority"])
+            } else if case .run(let repo, _) = e.route {
+                e.projectKey = resolver.project(forRepo: repo)
+            }
+            out[i] = e
+        }
         return out.sorted { $0.at > $1.at }
+    }
+
+    // The item of a run line.
+    private func linkedKey(_ e: InboxEntry, _ data: AppData) -> String? {
+        if case .run(_, let id) = e.route { return data.workstreams.link(runId: id)?.key }
+        return nil
     }
 
     func markRead(_ e: InboxEntry, store: ProjectStore) {
@@ -155,6 +209,9 @@ final class InboxPage: Page {
     private let feed = InboxFeed()
     private var busy: Set<String> = []
     private var note: String?
+    private var filter = InboxFilter.load() { didSet { filter.save(); reload() } }
+    private weak var projectChip: MenuChip?
+    private weak var priorityChip: MenuChip?
 
     private var tab: Route.InboxTab {
         guard case .inbox(let t) = route, Route.InboxTab.visible(data.has).contains(t) else { return .all }
@@ -173,6 +230,7 @@ final class InboxPage: Page {
                 self.reload()
             case .triage(let id):
                 if let (pk, item) = all.first(where: { $0.id == id })?.intake { self.data.intakeAgent.start(projectKey: pk, item: item) }
+            case .onlyProject(let k): self.filter.projects = [k]
             default: return false
             }
             return true
@@ -181,27 +239,85 @@ final class InboxPage: Page {
             data.projectStore.loadIntakeKeys(projectKey: pk) { [weak self] in self?.reload() }
         }
         let tabs = Route.InboxTab.visible(data.has)
-        let counts = tabs.map { t in all.filter { t == .all ? true : $0.source.tab == t }.count }
+        let kept = all.filter(filter.pass)
+        let counts = tabs.map { t in kept.filter { t == .all ? true : $0.source.tab == t }.count }
         col.addFull(PageHeader("Inbox", caption: "Plane, GitHub, Orca and AI checks in one list. Intake waits for triage.",
                                actions: [ActionButton("Mark all read", symbol: "checkmark") { [weak self] in
             guard let self else { return }
-            self.feed.markAllRead(all, store: self.data.projectStore)
+            self.feed.markAllRead(kept, store: self.data.projectStore)
         }]))
         let strip = TabStrip(tabs.map { $0.rawValue.capitalized }, selected: tabs.firstIndex(of: tab) ?? 0, counts: counts)
         strip.onSelect = { [weak self] i in self?.go(.inbox(tabs[i])) }
         col.addArrangedSubview(strip)
+        col.addArrangedSubview(filterBar(all.filter { tab == .all || $0.source.tab == tab }))
         if let note { col.addFull(Banner(.info, title: note)) }
         if tab == .intake {
             col.addFull(NSTextField.text("Keys on a focused line: 1 accept · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
                                          size: 12, color: Palette.dim, lines: 2))
         }
-        let shown = all.filter { tab == .all || $0.source.tab == tab }
+        let shown = kept.filter { tab == .all || $0.source.tab == tab }
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(InboxRow.layout)) }
         for e in shown.prefix(150) { list.add(row(e)) }
         if list.isEmpty, data.loadingFirst { list.add(SkeletonRows(label: "Loading the inbox")) }
-        if list.isEmpty { list.add(EmptyNote(tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero.")) }
+        if list.isEmpty {
+            list.add(EmptyNote(filter.isOn ? "No entry matches the filters." : tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero."))
+        }
         col.addFull(list)
+    }
+
+    // The Project and Priority chips. A menu value shows its count in this tab, with the other filter on.
+    private func filterBar(_ inTab: [InboxEntry]) -> NSView {
+        let projects = InboxPage.counts(inTab.filter { filter.priorities.isEmpty || filter.priorities.contains($0.priority ?? InboxFilter.noPriority) }) {
+            $0.projectKey ?? InboxFilter.noProject
+        }
+        let priorities = InboxPage.counts(inTab.filter { filter.projects.isEmpty || filter.projects.contains($0.projectKey ?? InboxFilter.noProject) }) {
+            $0.priority ?? InboxFilter.noPriority
+        }
+        let order = StatusOption.priorities.map(\.name)
+        let p = chip("Project", filter.projects, projects.sorted { ($0.key == InboxFilter.noProject ? 1 : 0, $0.key) < ($1.key == InboxFilter.noProject ? 1 : 0, $1.key) }) {
+            [weak self] in self?.filter.projects = $0
+        }
+        let q = chip("Priority", filter.priorities, priorities.sorted { (order.firstIndex(of: $0.key) ?? 9) < (order.firstIndex(of: $1.key) ?? 9) }) {
+            [weak self] in self?.filter.priorities = $0
+        }
+        projectChip = p
+        priorityChip = q
+        var views: [NSView] = [p, q]
+        if filter.isOn { views.append(Chiplet("Clear", symbol: "xmark", color: Palette.acc) { [weak self] in self?.filter = InboxFilter() }) }
+        views.append(Spacer())
+        views.append(NSTextField.text("P project · ⇧P priority · ⌘⌫ clear", size: 11.5, color: Palette.dim))
+        return NSStackView(h: views, spacing: 8)
+    }
+
+    private func chip(_ name: String, _ picked: Set<String>, _ values: [(key: String, value: Int)], set: @escaping (Set<String>) -> Void) -> MenuChip {
+        let text = picked.isEmpty ? "Any" : picked.count == 1 ? picked.first! : "\(picked.count) picked"
+        let c = MenuChip("\(name): \(text)", symbol: "chevron.down", color: picked.isEmpty ? Palette.mut : Palette.fg) {
+            let any = MenuAction("Any") { set([]) }
+            any.item.state = picked.isEmpty ? .on : .off
+            return [any] + values.map { v in
+                let a = MenuAction("\(v.key)  \(v.value)") { set(picked.symmetricDifference([v.key])) }
+                a.item.state = picked.contains(v.key) ? .on : .off
+                return a
+            }
+        }
+        if !picked.isEmpty { c.border = Palette.acc }
+        c.setAccessibilityLabel("\(name) filter: \(text)")
+        return c
+    }
+
+    static func counts(_ list: [InboxEntry], by key: (InboxEntry) -> String) -> [String: Int] {
+        list.reduce(into: [:]) { $0[key($1), default: 0] += 1 }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if event.keyCode == 51, mods == .command, filter.isOn { filter = InboxFilter(); return }
+        if event.charactersIgnoringModifiers?.lowercased() == "p", mods.isEmpty || mods == .shift {
+            (mods.isEmpty ? projectChip : priorityChip)?.onClick?()
+            return
+        }
+        super.keyDown(with: event)
     }
 
     private func row(_ e: InboxEntry) -> NSView {
@@ -245,7 +361,7 @@ final class InboxPage: Page {
             }
         }
         let canTriage = e.intake.map { data.intakeAgent.available && data.intakeAgent.state($0.item) == nil } ?? false
-        commands.attach(r) { _ in RowMenu.inbox(e, projectKey: nil, canTriage: canTriage) }
+        commands.attach(r) { _ in RowMenu.inbox(e, projectKey: e.projectKey, canTriage: canTriage) }
         guard let (pk, item) = e.intake, let state = data.intakeAgent.state(item) else { return r }
         let panel = IntakePanel(state, projectKey: pk, item: item, agent: data.intakeAgent) { [weak self] err in
             self?.note = err
