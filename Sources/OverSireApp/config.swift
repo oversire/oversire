@@ -154,12 +154,12 @@ struct NotificationSettings: Codable {
 }
 
 // One column of the project notification matrix. Omitted switches keep the defaults.
-struct NotifyScope: Codable {
+struct NotifyScope: Codable, Equatable {
     var any: Bool
     var mine: Bool
 }
 
-struct ProjectNotificationSettings: Codable {
+struct ProjectNotificationSettings: Codable, Equatable {
     var mention = true
     var comment = NotifyScope(any: false, mine: true)
     var status = NotifyScope(any: false, mine: true)
@@ -206,6 +206,7 @@ struct ProjectsConfig: Codable {
     var folded: [String] = []         // project keys that show only the header
     var capture = CaptureConfig()
     var orca = OrcaConfig()
+    var settings: [String: ProjectLocalSettings] = [:]   // by project key ("OVERSIRE")
 
     init() {}
 
@@ -231,6 +232,38 @@ struct ProjectsConfig: Codable {
         folded = try c.decodeIfPresent([String].self, forKey: .folded) ?? []
         capture = try c.decodeIfPresent(CaptureConfig.self, forKey: .capture) ?? CaptureConfig()
         orca = try c.decodeIfPresent(OrcaConfig.self, forKey: .orca) ?? OrcaConfig()
+        settings = try c.decodeIfPresent([String: ProjectLocalSettings].self, forKey: .settings) ?? [:]
+    }
+
+    func local(_ key: String) -> ProjectLocalSettings { settings[key.uppercased()] ?? ProjectLocalSettings() }
+
+    mutating func setLocal(_ key: String, _ s: ProjectLocalSettings) { settings[key.uppercased()] = s }
+
+    // The Orca root of a project. `orca.roots` (by "slug/uuid") stays a mirror, because older code reads it.
+    func orcaRoot(_ p: ProjectSummary) -> String? {
+        orca.roots[p.ref.storeKey].flatMap { $0.isEmpty ? nil : $0 } ?? local(p.identifier).orcaRoot
+    }
+
+    mutating func setOrcaRoot(_ p: ProjectSummary, _ path: String?) {
+        var l = local(p.identifier)
+        l.orcaRoot = path
+        setLocal(p.identifier, l)
+        orca.roots[p.ref.storeKey] = path
+    }
+
+    // Copies each `orca.roots` entry into the settings of its project.
+    mutating func migrateRoots(_ projects: [ProjectSummary]) {
+        for p in projects {
+            guard let root = orca.roots[p.ref.storeKey], !root.isEmpty, local(p.identifier).orcaRoot == nil else { continue }
+            var l = local(p.identifier)
+            l.orcaRoot = root
+            setLocal(p.identifier, l)
+        }
+    }
+
+    // A local category wins over the category of the tracker status.
+    func category(_ o: StatusOption, project key: String) -> StatusCategory {
+        settings[key.uppercased()]?.categories[o.id] ?? o.category
     }
 
     // Keys in `order` come first. Projects not in it follow by workspace, then title.
@@ -250,6 +283,84 @@ struct ProjectsConfig: Codable {
     mutating func setFolded(_ key: String, _ on: Bool) {
         folded.removeAll { $0.caseInsensitiveCompare(key) == .orderedSame }
         if on { folded.append(key) }
+    }
+}
+
+// Where the icon of a project comes from. Auto takes the first source that exists: tracker, repo, org, letter.
+enum IconChoice: Codable, Hashable {
+    case auto, upload, tracker, repo(String), org(String), letter
+
+    var raw: String {
+        switch self {
+        case .auto: return "auto"
+        case .upload: return "upload"
+        case .tracker: return "tracker"
+        case .repo(let r): return "repo:" + r
+        case .org(let o): return "org:" + o
+        case .letter: return "letter"
+        }
+    }
+
+    init(raw: String) {
+        if raw.hasPrefix("repo:") { self = .repo(String(raw.dropFirst(5))); return }
+        if raw.hasPrefix("org:") { self = .org(String(raw.dropFirst(4))); return }
+        switch raw {
+        case "upload": self = .upload
+        case "tracker": self = .tracker
+        case "letter": self = .letter
+        default: self = .auto
+        }
+    }
+
+    init(from decoder: Decoder) throws { self.init(raw: try decoder.singleValueContainer().decode(String.self)) }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(raw)
+    }
+}
+
+// Project settings that stay on this Mac. They work the same for each tracker.
+struct ProjectLocalSettings: Codable, Equatable {
+    var icon = IconChoice.auto
+    var color: String?
+    var github: [String] = []         // "org" or "owner/repo"
+    var orcaRoot: String?
+    var branchTemplate: String?       // {key}, {KEY}, {slug}, {title}
+    var agent: String?
+    var prompt: String?
+    var notifications: ProjectNotificationSettings?   // nil uses the app default
+    var categories: [String: StatusCategory] = [:]   // status id → category
+    var hidden = false
+    var muted = false
+
+    static let defaultBranch = "{key}/{slug}"
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        icon = try c.decodeIfPresent(IconChoice.self, forKey: .icon) ?? .auto
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        github = try c.decodeIfPresent([String].self, forKey: .github) ?? []
+        orcaRoot = try c.decodeIfPresent(String.self, forKey: .orcaRoot)
+        branchTemplate = try c.decodeIfPresent(String.self, forKey: .branchTemplate)
+        agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        notifications = try c.decodeIfPresent(ProjectNotificationSettings.self, forKey: .notifications)
+        categories = try c.decodeIfPresent([String: StatusCategory].self, forKey: .categories) ?? [:]
+        hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+        muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+    }
+
+    // The branch name of an item: {key} lowercase, {KEY}, {slug} from the title, {title}.
+    func branch(for item: Item) -> String {
+        let slug = item.title.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+            .split(separator: "-", omittingEmptySubsequences: true).prefix(6).joined(separator: "-")
+        return (branchTemplate?.isEmpty == false ? branchTemplate! : ProjectLocalSettings.defaultBranch)
+            .replacingOccurrences(of: "{KEY}", with: item.key)
+            .replacingOccurrences(of: "{key}", with: item.key.lowercased())
+            .replacingOccurrences(of: "{slug}", with: String(slug))
+            .replacingOccurrences(of: "{title}", with: item.title)
     }
 }
 

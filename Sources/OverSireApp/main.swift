@@ -206,7 +206,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             NotificationCenter.default.post(name: AppWindow.changed, object: self)
         }
         cloudSetup.trackedWorkspaces = { [weak self] in self?.trackedPlaneWorkspaces() ?? [] }
-        projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: liveProjectKeys())
+        let resolved = projectCatalog.resolve(PROJECTS_CFG)
+        let before = PROJECTS_CFG.settings
+        PROJECTS_CFG.migrateRoots(resolved)
+        if PROJECTS_CFG.settings != before { saveConfig() }
+        projectStore.track(resolved, live: liveProjectKeys())
         syncPlaneWorkspaces()
         projectCatalog.refreshIfStale()
         applyCaptureHotKey()
