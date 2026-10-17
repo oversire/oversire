@@ -239,6 +239,21 @@ struct ProjectsConfig: Codable {
 
     mutating func setLocal(_ key: String, _ s: ProjectLocalSettings) { settings[key.uppercased()] = s }
 
+    // The notification settings of a project. Nil when the project is muted.
+    func notifications(for key: String) -> ProjectNotificationSettings? {
+        let l = local(key)
+        return l.muted ? nil : (l.notifications ?? notifications)
+    }
+
+    // The agent and the prompt for an item. The project settings come first, then the app defaults.
+    func launch(for item: Item) -> (agent: String, prompt: String) {
+        let l = local(item.key.split(separator: "-").dropLast().joined(separator: "-"))
+        var o = orca
+        if let a = l.agent, !a.isEmpty { o.agent = a }
+        if let p = l.prompt, !p.isEmpty { o.prompt = p }
+        return (o.agent, o.prompt(for: item))
+    }
+
     // The Orca root of a project. `orca.roots` (by "slug/uuid") stays a mirror, because older code reads it.
     func orcaRoot(_ p: ProjectSummary) -> String? {
         orca.roots[p.ref.storeKey].flatMap { $0.isEmpty ? nil : $0 } ?? local(p.identifier).orcaRoot
@@ -263,7 +278,7 @@ struct ProjectsConfig: Codable {
 
     // A local category wins over the category of the tracker status.
     func category(_ o: StatusOption, project key: String) -> StatusCategory {
-        settings[key.uppercased()]?.categories[o.id] ?? o.category
+        settings[key.uppercased()]?.categories[o.id] ?? o.autoCategory
     }
 
     // Keys in `order` come first. Projects not in it follow by workspace, then title.

@@ -386,7 +386,7 @@ struct SidebarModel {
             e(.prs, "Pull requests", "arrow.triangle.pull", badge: prs),
             e(.insights, "Insights", "chart.bar"),
         ]
-        let projects = PROJECTS_CFG.sorted(store.tracked)
+        let projects = PROJECTS_CFG.sorted(store.tracked).filter { !PROJECTS_CFG.local($0.identifier).hidden }
         if !projects.isEmpty {
             out.append(.header("Projects"))
             for p in projects {
@@ -415,6 +415,7 @@ enum PageFactory {
         case .inbox: return InboxPage(r, data: data, router: router)
         case .mine: return MyItemsPage(r, data: data, router: router)
         case .project: return ProjectPage(r, data: data, router: router)
+        case .projectSettings: return ProjectSettingsPage(r, data: data, router: router)
         case .item: return ItemPage(r, data: data, router: router)
         case .runs: return RunsPage(r, data: data, router: router)
         case .run: return RunPage(r, data: data, router: router)

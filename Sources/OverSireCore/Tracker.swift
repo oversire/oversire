@@ -53,6 +53,10 @@ public struct StatusOption: Codable, Hashable, Sendable {
     public let name: String
     public let color: String         // "#F59E0B" or a GitHub-style name
     public var group: String? = nil  // Plane state group: backlog, unstarted, started, completed, cancelled
+    /// A category that the user set for this status. It is not part of the wire format.
+    public var localCategory: StatusCategory? = nil
+
+    private enum CodingKeys: String, CodingKey { case id, name, color, group }
 
     public init(id: String, name: String, color: String, group: String? = nil) {
         self.id = id
@@ -70,8 +74,10 @@ public struct StatusOption: Codable, Hashable, Sendable {
         StatusOption(id: "none", name: "None", color: "#9CA3AF"),
     ]
 
+    public var category: StatusCategory { localCategory ?? autoCategory }
+
     // The group decides first. The name splits "started" into review and blocked.
-    public var category: StatusCategory {
+    public var autoCategory: StatusCategory {
         let n = name.lowercased()
         switch group {
         case "completed", "cancelled": return .done
@@ -217,7 +223,7 @@ public struct ProjectSnapshot: Codable, Sendable {
     public static let priorityFieldId = "priority"
 
     public let summary: ProjectSummary
-    public let statusOptions: [StatusOption]
+    public var statusOptions: [StatusOption]
     public let items: [Item]
     public let fetchedAt: Date
     public var fields: [ProjectField] = []

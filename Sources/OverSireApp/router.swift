@@ -44,6 +44,7 @@ enum Route: Equatable {
     case insights
     case settings(SettingsPage)
     case project(String)            // project identifier, for example FRITZ
+    case projectSettings(String, ProjectSettingsSection)
     case item(String, ItemTab)      // item key, for example FRITZ-17
 
     var path: String {
@@ -59,6 +60,7 @@ enum Route: Equatable {
         case .insights: return "insights"
         case .settings(let p): return "settings/\(p.rawValue)"
         case .project(let k): return "project/\(k)"
+        case .projectSettings(let k, let s): return "project/\(k)/settings/\(s.rawValue)"
         case .item(let k, let t): return t == .overview ? "item/\(k)" : "item/\(k)/\(t.rawValue)"
         }
     }
@@ -100,7 +102,11 @@ enum Route: Equatable {
                                               .flatMap(SettingsPage.init(rawValue:)) ?? .general)
         case "project":
             guard let k = rest.first, !k.isEmpty else { return nil }
-            self = .project(k.uppercased())
+            if rest.count > 1, rest[1].lowercased() == "settings" {
+                self = .projectSettings(k.uppercased(), rest.count > 2 ? ProjectSettingsSection(rawValue: rest[2].lowercased()) ?? .appearance : .appearance)
+            } else {
+                self = .project(k.uppercased())
+            }
         case "item":
             guard let k = rest.first, k.contains("-") else { return nil }
             self = .item(k.uppercased(), rest.count > 1 ? ItemTab(rawValue: rest[1].lowercased()) ?? .overview : .overview)
@@ -116,6 +122,7 @@ enum Route: Equatable {
         case .run: return "runs"
         case .settings: return "settings"
         case .item(let k, _): return "project/" + (k.split(separator: "-").first.map(String.init) ?? k)
+        case .projectSettings(let k, _): return "project/" + k
         default: return path
         }
     }
@@ -127,6 +134,7 @@ enum Route: Equatable {
         case (.item(let a, _), .item(let b, _)): return a == b
         case (.run(let a, let x), .run(let b, let y)): return a == b && x == y
         case (.project(let a), .project(let b)): return a == b
+        case (.projectSettings(let a, _), .projectSettings(let b, _)): return a == b
         default: return self == other
         }
     }
@@ -144,6 +152,7 @@ enum Route: Equatable {
         case .insights: return "Insights"
         case .settings: return "Settings"
         case .project(let k): return k
+        case .projectSettings(let k, _): return "\(k) settings"
         case .item(let k, _): return k
         }
     }
@@ -152,7 +161,7 @@ enum Route: Equatable {
     static let samples: [Route] = [
         .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.providers),
-        .project("FRITZ"), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
+        .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
     ]
 }
 

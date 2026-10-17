@@ -367,7 +367,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         if let p = sender.representedObject as? String, let r = Route(path: p) { open(r) }
     }
 
-    @objc func openSettingsPage() { open(.settings(.general)) }
+    // On a project page, Command-Comma opens the settings of that project.
+    @objc func openSettingsPage() {
+        if appWindow.window?.isKeyWindow == true, case .project(let k) = appWindow.router.current { open(.projectSettings(k, .appearance)); return }
+        open(.settings(.general))
+    }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
@@ -805,11 +809,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // "Needs input" and "Agent done" for an item that OverSire tracks.
     func agentAlert(_ key: String, _ agent: AgentSession) {
-        let n = PROJECTS_CFG.notifications
-        guard agent.phase == .waiting ? n.agentWaiting : n.agentDone else { return }
         let found = projectStore.snapshots.values.lazy.compactMap { s in
             s.items.first { $0.key.uppercased() == key }.map { (s, $0) }
         }.first
+        let n = found.map { PROJECTS_CFG.notifications(for: $0.0.summary.identifier) } ?? PROJECTS_CFG.notifications
+        guard let n, agent.phase == .waiting ? n.agentWaiting : n.agentDone else { return }
         let title = found.map { $0.0.summary.ref.workspace + " › " + $0.0.summary.title } ?? "Orca"
         let subtitle = found.map { "\($0.1.key) \($0.1.title)" } ?? key
         var body = agent.phase == .waiting ? "Session needs input" : "Session done"

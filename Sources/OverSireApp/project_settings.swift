@@ -153,6 +153,17 @@ final class ProjectSettingsVC: NSViewController {
                 let chip = Badge(live ? "Live" : "\(cfg.pollMinutes) min")
                 chip.frame.origin = NSPoint(x: w - 90, y: y + 1)
                 doc.addSubview(chip)
+                if on && !p.closed {
+                    row.frame.size.width = w - 260
+                    let open = NSButton(title: "Settings…", target: self, action: #selector(openProjectSettings(_:)))
+                    open.isBordered = false
+                    open.font = .systemFont(ofSize: 11.5)
+                    open.contentTintColor = Palette.acc
+                    open.identifier = NSUserInterfaceItemIdentifier(p.identifier.uppercased())
+                    open.setAccessibilityLabel("Settings of \(p.title)")
+                    open.frame = NSRect(x: w - 190, y: y + 1, width: 90, height: 20)
+                    doc.addSubview(open)
+                }
                 y += 22
             }
             if projects.isEmpty {
@@ -324,6 +335,11 @@ final class ProjectSettingsVC: NSViewController {
             y += 20
         }
         return y + 4
+    }
+
+    @objc func openProjectSettings(_ sender: NSButton) {
+        guard let k = sender.identifier?.rawValue else { return }
+        (NSApp.delegate as? GHActionsBar)?.open(.projectSettings(k, .appearance))
     }
 
     @objc func toggleCapture(_ sender: NSSwitch) {

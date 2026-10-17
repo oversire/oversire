@@ -395,7 +395,7 @@ final class ProjectStore {
 
     // New, changed and closed intake items. A closed item is accepted when it is now in the list.
     private func notifyIntake(old: ProjectSnapshot?, new snap: ProjectSnapshot) {
-        guard PROJECTS_CFG.notifications.intake, let before = old?.intake, let after = snap.intake else { return }
+        guard PROJECTS_CFG.notifications(for: snap.summary.identifier)?.intake == true, let before = old?.intake, let after = snap.intake else { return }
         let was = Dictionary(before.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let now = Dictionary(after.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var lines: [(IntakeItem, String)] = []
@@ -476,10 +476,28 @@ final class ProjectStore {
 
     // MARK: Private
 
+    // Applies the status categories that the user set in the project settings.
+    static func localized(_ snap: ProjectSnapshot, cfg: ProjectsConfig = PROJECTS_CFG) -> ProjectSnapshot {
+        var s = snap
+        s.statusOptions = s.statusOptions.map { o in
+            var o = o
+            o.localCategory = cfg.local(snap.summary.identifier).categories[o.id]
+            return o
+        }
+        return s
+    }
+
+    // Applies changed status categories to the snapshots in memory.
+    func applyLocalSettings() {
+        snapshots = snapshots.mapValues { ProjectStore.localized($0) }
+        publish()
+    }
+
     private func absorb(_ snap: ProjectSnapshot) {
         let key = snap.summary.ref.storeKey
         let old = snapshots[key]
         let changes = ProjectStore.diff(old, snap)
+        let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
         guard old != nil, !changes.isEmpty else { return }
@@ -505,7 +523,8 @@ final class ProjectStore {
         readActivity.formUnion(own)
         let filtered = zip(changes, entries).filter { !own.contains($1.id) }.map(\.0)
         suppressNotify.subtract(changes.map(\.itemId))
-        notifier.handle(filtered, in: snap, settings: PROJECTS_CFG.notifications)
+        guard let n = PROJECTS_CFG.notifications(for: snap.summary.identifier) else { return }
+        notifier.handle(filtered, in: snap, settings: n)
     }
 
     private func append(_ entries: [ActivityEntry]) {
@@ -532,7 +551,7 @@ final class ProjectStore {
     private func load() {
         if let data = FileManager.default.contents(atPath: statePath),
            let disk = try? JSONDecoder().decode(Disk.self, from: data) {
-            snapshots = disk.snapshots
+            snapshots = disk.snapshots.mapValues { ProjectStore.localized($0) }
             readActivity = Set(disk.readActivity)
             readItems = Set(disk.readItems)
         }

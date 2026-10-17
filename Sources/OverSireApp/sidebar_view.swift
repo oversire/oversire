@@ -23,7 +23,7 @@ enum SidebarLine: Equatable {
 }
 
 // The window sidebar. A source list table, so arrow keys and VoiceOver work.
-final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSource {
+final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSource, NSMenuDelegate {
     var onPick: ((Route) -> Void)?
     private let table = NSTableView()
     private var lines: [SidebarLine] = []
@@ -48,6 +48,8 @@ final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSou
         table.target = self
         table.action = #selector(clicked)
         table.setAccessibilityLabel("Main")
+        table.menu = NSMenu()
+        table.menu?.delegate = self
         scroll.documentView = table
         root.addSubview(scroll)
         NSLayoutConstraint.activate([
@@ -137,6 +139,19 @@ final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSou
     }
 
     func focus() { view.window?.makeFirstResponder(table) }
+
+    // The right-click menu of a project row.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
+        guard row >= 0, case .entry(let e) = lines[row], case .project(let key) = e.route else { return }
+        let items = [
+            MenuAction("Open \(e.title)") { [weak self] in self?.onPick?(e.route) },
+            MenuAction("Project settings…") { [weak self] in self?.onPick?(.projectSettings(key, .appearance)) },
+            MenuAction("Links and Orca workspace…") { [weak self] in self?.onPick?(.projectSettings(key, .links)) },
+        ]
+        for a in items { menu.addItem(a.item) }
+    }
 }
 
 final class SidebarCell: NSTableCellView {

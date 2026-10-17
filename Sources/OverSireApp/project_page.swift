@@ -131,6 +131,10 @@ final class ProjectPage: Page {
         seg.setAccessibilityLabel("Layout")
         actions.append(seg)
         actions.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: snap.summary.url)!) })
+        let gear = ActionButton("", symbol: "gearshape") { [weak self] in self?.go(.projectSettings(self?.projectKey ?? "", .appearance)) }
+        gear.toolTip = "Project settings (⌘,)"
+        gear.setAccessibilityLabel("Project settings")
+        actions.append(gear)
         col.addFull(PageHeader(snap.summary.title, caption: "\(snap.summary.identifier) · \(open) open · updated \(relativeTime(snap.fetchedAt))", actions: actions))
 
         let filters = NSStackView(h: [
