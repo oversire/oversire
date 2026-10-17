@@ -444,6 +444,8 @@ final class TabStrip: NSStackView {
             line.heightAnchor.constraint(equalToConstant: 2).isActive = true
             line.widthAnchor.constraint(equalTo: wrap.widthAnchor).isActive = true
             wrap.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 0, right: 8)
+            // Else a tie with the page column can stretch one tab over the full width.
+            wrap.setHuggingPriority(.required, for: .horizontal)
             addArrangedSubview(wrap)
             buttons.append(b)
         }
@@ -768,7 +770,10 @@ final class ColumnCells {
             v.translatesAutoresizingMaskIntoConstraints = false
             let box: NSView
             if c.flexible {
-                box = NSStackView(h: [v], spacing: 0)
+                let s = NSStackView(h: [v], spacing: 0)
+                // The stack's own hugging (250) ties with the row stack; without this the column does not always stretch.
+                s.setHuggingPriority(.init(1), for: .horizontal)
+                box = s
                 box.setContentHuggingPriority(.init(1), for: .horizontal)
                 box.setContentCompressionResistancePriority(.init(1), for: .horizontal)
                 v.setContentCompressionResistancePriority(.init(1), for: .horizontal)
