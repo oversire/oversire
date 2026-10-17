@@ -25,6 +25,25 @@ final class ContractTests: XCTestCase {
         "agent-link": roundTrip(AgentLink.self),
         "ai-task": roundTrip(AITask.self),
         "ai-result": roundTrip(AIResult.self),
+        "queue-lane-state": roundTrip(QueueLaneState.self),
+        "store-op": roundTrip(StoreOp.self),
+        "job": roundTrip(AIJob.self),
+        "job-run": roundTrip(AIJobRun.self),
+        "suggestion": roundTrip(Suggestion.self),
+        "work-order": roundTrip(WorkOrder.self),
+        "memory-entry": roundTrip(MemoryEntry.self),
+        "usage-row": roundTrip(UsageRow.self),
+        "ledger-entry": roundTrip(LedgerEntry.self),
+        "billing-state": roundTrip(BillingState.self),
+        "ai-endpoint": roundTrip(AIEndpoint.self),
+        "ai-route": roundTrip(AIRoute.self),
+    ]
+
+    // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
+    static let versions: [String: Int] = [
+        "refs.json": 1, "provider-event.json": 1, "actions.json": 1, "ai-task.json": 1, "account.json": 1,
+        "store.json": storeSchemaVersion, "jobs.json": 1, "suggestion.json": 1, "work-order.json": 1, "memory.json": 1,
+        "billing.json": 1, "ai-endpoint.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
@@ -65,11 +84,11 @@ final class ContractTests: XCTestCase {
     func testSchemaFilesCarryTheVersion() throws {
         let dir = Self.root.appendingPathComponent("schema")
         let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }
-        XCTAssertEqual(Set(names), ["refs.json", "provider-event.json", "actions.json", "ai-task.json", "account.json", "store.json"])
+        XCTAssertEqual(Set(names), Set(Self.versions.keys))
         for name in names {
             let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent(name))) as? [String: Any])
             XCTAssertEqual(obj["$schema"] as? String, "https://json-schema.org/draft/2020-12/schema", name)
-            XCTAssertEqual(obj["x-oversire-schema"] as? Int, ProviderEvent.schemaVersion, name)
+            XCTAssertEqual(obj["x-oversire-schema"] as? Int, Self.versions[name], name)
         }
     }
 
@@ -78,6 +97,17 @@ final class ContractTests: XCTestCase {
         for name in try FileManager.default.contentsOfDirectory(atPath: dir.path) where name.hasSuffix(".json") {
             let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent(name))) as? [String: Any])
             XCTAssertEqual(obj["schema"] as? Int, 1, name)
+        }
+    }
+
+    func testDedupeKeyMatchesTheFixtures() throws {
+        let dir = Self.root.appendingPathComponent("fixtures/suggestion")
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        for name in try FileManager.default.contentsOfDirectory(atPath: dir.path) where name.hasSuffix(".json") {
+            let s = try dec.decode(Suggestion.self, from: Data(contentsOf: dir.appendingPathComponent(name)))
+            guard s.kind != .memoryUpkeep, s.kind != .digest else { continue }   // these keys name a topic, not a version
+            XCTAssertEqual(s.dedupeKey, Suggestion.dedupeKey(subject: s.subject, kind: s.kind, version: s.subjectVersion), name)
         }
     }
 }

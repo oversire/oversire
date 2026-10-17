@@ -3,7 +3,7 @@
   "$id": "https://oversire.dev/contract/store.json",
   "title": "OverSire store",
   "description": "The records of the state that OverSire owns. Each record type is one collection. Dates are ISO 8601.",
-  "x-oversire-schema": 1,
+  "x-oversire-schema": 2,
   "$defs": {
     "Date": { "type": "string", "format": "date-time" },
     "QueueEntry": {
@@ -24,11 +24,21 @@
       "properties": {
         "project": { "description": "The store key of the project.", "type": "string" },
         "identifier": { "type": "string" },
-        "entries": { "type": "array", "items": { "$ref": "#/$defs/QueueEntry" } },
-        "lastStarted": { "description": "Item key of the last start in the lane.", "type": "string" },
-        "error": { "description": "Why the lane cannot start.", "type": "string" }
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/QueueEntry" } }
       },
       "required": ["project", "identifier", "entries"],
+      "additionalProperties": false
+    },
+    "QueueLaneState": {
+      "description": "Collection queue-lane-state. The id is the project. The queue writes it, not the user.",
+      "type": "object",
+      "properties": {
+        "project": { "description": "The store key of the project.", "type": "string" },
+        "lastStarted": { "description": "Item key of the last start in the lane.", "type": "string" },
+        "error": { "description": "Why the lane cannot start.", "type": "string" },
+        "updatedAt": { "$ref": "#/$defs/Date" }
+      },
+      "required": ["project", "updatedAt"],
       "additionalProperties": false
     },
     "QueueTrigger": {
@@ -95,6 +105,25 @@
         "at": { "$ref": "#/$defs/Date" }
       },
       "required": ["key", "workspace", "at"],
+      "additionalProperties": false
+    },
+    "StoreOp": {
+      "description": "One write to a synced collection. The hub keeps an op log of them. Last write wins for each collection and id, by hlc.",
+      "type": "object",
+      "properties": {
+        "schema": { "description": "The x-oversire-schema number of store.json that the writer uses.", "type": "integer", "minimum": 1 },
+        "collection": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "op": { "enum": ["put", "delete"] },
+        "record": { "description": "The record of a put. Missing for a delete.", "type": "object" },
+        "hlc": {
+          "description": "Hybrid clock: milliseconds since 1970 (15 digits), a counter (6 digits) and the device id. The text order is the time order.",
+          "type": "string",
+          "pattern": "^[0-9]{15}-[0-9]{6}-.+$"
+        },
+        "device": { "description": "The device id of the writer.", "type": "string", "minLength": 1 }
+      },
+      "required": ["schema", "collection", "id", "op", "hlc", "device"],
       "additionalProperties": false
     }
   }

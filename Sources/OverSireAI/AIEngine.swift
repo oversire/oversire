@@ -143,3 +143,64 @@ public protocol AIEngine: Sendable {
     /// The reply text. Throw AIError.unavailable to give the task to the next engine.
     func run(_ task: AITask) async throws -> String
 }
+
+// ─── Cloud routes ────────────────────────────────────────────────────────────
+// The cloud picks a model endpoint for each task kind. The app does not call them.
+// They are here for the contract and for the console. JSON: Contract/schema/ai-endpoint.json.
+
+public struct AIEndpoint: Hashable, Sendable, Codable {
+    public enum Format: String, Codable, Sendable, CaseIterable { case openai, anthropic }
+
+    public var id: String
+    public var format: Format
+    public var baseURL: URL
+    /// The name of the Worker secret that holds the key. Never the key.
+    public var keySecret: String
+    public var tools: Bool
+    public var structured: Bool
+
+    public init(id: String, format: Format, baseURL: URL, keySecret: String, tools: Bool, structured: Bool) {
+        self.id = id
+        self.format = format
+        self.baseURL = baseURL
+        self.keySecret = keySecret
+        self.tools = tools
+        self.structured = structured
+    }
+}
+
+public struct AIRoute: Hashable, Sendable, Codable {
+    /// Micro-USD for each million tokens.
+    public struct Price: Hashable, Sendable, Codable {
+        public var inputPerMTok: Int
+        public var outputPerMTok: Int
+        public var cachedPerMTok: Int
+
+        public init(inputPerMTok: Int, outputPerMTok: Int, cachedPerMTok: Int) {
+            self.inputPerMTok = inputPerMTok
+            self.outputPerMTok = outputPerMTok
+            self.cachedPerMTok = cachedPerMTok
+        }
+    }
+
+    public var taskKind: AITaskKind
+    public var endpoint: String
+    public var model: String
+    public var effort: String?
+    public var maxTurns: Int
+    public var maxInputTokens: Int
+    public var maxOutputTokens: Int
+    public var price: Price
+
+    public init(taskKind: AITaskKind, endpoint: String, model: String, effort: String? = nil, maxTurns: Int,
+                maxInputTokens: Int, maxOutputTokens: Int, price: Price) {
+        self.taskKind = taskKind
+        self.endpoint = endpoint
+        self.model = model
+        self.effort = effort
+        self.maxTurns = maxTurns
+        self.maxInputTokens = maxInputTokens
+        self.maxOutputTokens = maxOutputTokens
+        self.price = price
+    }
+}

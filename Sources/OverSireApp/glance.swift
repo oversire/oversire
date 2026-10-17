@@ -148,7 +148,7 @@ final class GlanceVC: NSViewController {
 
         let next = data.queue.lanes.compactMap { l in l.entries.first.map { (l, $0) } }
         section("Queue next", count: next.count, next.map { l, e in
-            Row([Glyph("list.number", color: Palette.mut), TwoLine("\(e.key) \(e.title)", "\(l.identifier) · \(e.condition.label)" + (l.error.map { " · \($0)" } ?? ""))],
+            Row([Glyph("list.number", color: Palette.mut), TwoLine("\(e.key) \(e.title)", "\(l.identifier) · \(e.condition.label)" + (data.queue.state(l.project)?.error.map { " · \($0)" } ?? ""))],
                 height: 40, label: "Next in \(l.identifier): \(e.key) \(e.title), \(e.condition.label)") { [weak self] in self?.open(.queue) }
         }, empty: "The queue is empty.")
 

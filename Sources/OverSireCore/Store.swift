@@ -4,6 +4,9 @@ import Foundation
 // The state that OverSire owns (not a vendor). LocalStore keeps it on this Mac.
 // A later CloudStore keeps the same records on the server. Contract/schema/store.json has the JSON form.
 
+/// The x-oversire-schema number of Contract/schema/store.json.
+public let storeSchemaVersion = 2
+
 public protocol StoreRecord: Codable, Hashable, Sendable {
     /// The file or the table of the record type.
     static var collection: String { get }
@@ -60,15 +63,30 @@ public struct QueueLane: StoreRecord {
     public let project: String          // ProjectRef.storeKey
     public var identifier: String
     public var entries: [QueueEntry]
-    public var lastStarted: String?     // "the one above" of the first entry
-    public var error: String?           // why the lane cannot start
 
-    public init(project: String, identifier: String, entries: [QueueEntry] = [], lastStarted: String? = nil, error: String? = nil) {
+    public init(project: String, identifier: String, entries: [QueueEntry] = []) {
         self.project = project
         self.identifier = identifier
         self.entries = entries
+    }
+
+    public var id: String { project }
+}
+
+/// What the queue writes about a lane. The user edits the lane, the queue edits its state.
+public struct QueueLaneState: StoreRecord {
+    public static let collection = "queue-lane-state"
+
+    public let project: String
+    public var lastStarted: String?     // "the one above" of the first entry
+    public var error: String?           // why the lane cannot start
+    public var updatedAt: Date
+
+    public init(project: String, lastStarted: String? = nil, error: String? = nil, updatedAt: Date) {
+        self.project = project
         self.lastStarted = lastStarted
         self.error = error
+        self.updatedAt = updatedAt
     }
 
     public var id: String { project }
@@ -166,4 +184,59 @@ public struct AgentLink: StoreRecord {
     }
 
     public var id: String { key }
+}
+
+// ─── Sync ────────────────────────────────────────────────────────────────────
+
+/// One write to a synced collection. Last write wins for each collection and id, by `hlc`.
+public struct StoreOp: Hashable, Sendable, Codable {
+    public enum Op: String, Codable, Sendable { case put, delete }
+
+    public var schema: Int
+    public let collection: String
+    public let id: String
+    public let op: Op
+    public let record: JSONValue?       // nil for a delete
+    /// Milliseconds (15 digits), a counter (6 digits) and the device id. The text order is the time order.
+    public let hlc: String
+    public let device: String
+
+    public init(collection: String, id: String, op: Op, record: JSONValue? = nil, hlc: String, device: String) {
+        schema = storeSchemaVersion
+        self.collection = collection
+        self.id = id
+        self.op = op
+        self.record = record
+        self.hlc = hlc
+        self.device = device
+    }
+}
+
+/// Any JSON value. Integers stay integers.
+public enum JSONValue: Hashable, Sendable, Codable {
+    case null, bool(Bool), int(Int), double(Double), string(String), array([JSONValue]), object([String: JSONValue])
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null }
+        else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+        else if let i = try? c.decode(Int.self) { self = .int(i) }
+        else if let d = try? c.decode(Double.self) { self = .double(d) }
+        else if let s = try? c.decode(String.self) { self = .string(s) }
+        else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
+        else { self = .object(try c.decode([String: JSONValue].self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .null: try c.encodeNil()
+        case .bool(let b): try c.encode(b)
+        case .int(let i): try c.encode(i)
+        case .double(let d): try c.encode(d)
+        case .string(let s): try c.encode(s)
+        case .array(let a): try c.encode(a)
+        case .object(let o): try c.encode(o)
+        }
+    }
 }

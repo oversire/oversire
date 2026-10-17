@@ -570,6 +570,7 @@ func runSelfTest() {
     // Queue: only the first entry starts, only with a free slot, and only when its condition holds.
     do {
         var lane = QueueLane(project: "ws/p", identifier: "FRITZ")
+        var state: QueueLaneState?
         lane.entries = [QueueEntry(key: "FRITZ-2", title: "b", added: Date()), QueueEntry(key: "FRITZ-3", title: "c", added: Date())]
         var busy = 0, ci = false, done = false
         var hour = 12
@@ -577,25 +578,25 @@ func runSelfTest() {
             let d = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())!
             return QueueWorld(busy: { _ in busy }, slots: { _ in 1 }, ciPassed: { _ in ci }, done: { _ in done }, now: d)
         }
-        check(WorkQueue.due(lane, world: world())?.key == "FRITZ-2", "queue: a free slot starts the first entry")
+        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: a free slot starts the first entry")
         busy = 1
-        check(WorkQueue.due(lane, world: world()) == nil, "queue: no free slot, no start")
+        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: no free slot, no start")
         busy = 0
-        lane.lastStarted = "FRITZ-1"
+        state = QueueLaneState(project: "ws/p", lastStarted: "FRITZ-1", updatedAt: Date())
         lane.entries[0].condition = .ciPassed
-        check(WorkQueue.due(lane, world: world()) == nil, "queue: waits for CI of the one above")
+        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: waits for CI of the one above")
         ci = true
-        check(WorkQueue.due(lane, world: world())?.key == "FRITZ-2", "queue: CI passed, start")
+        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: CI passed, start")
         lane.entries[0].condition = .done
-        check(WorkQueue.due(lane, world: world()) == nil, "queue: waits until the one above is done")
+        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: waits until the one above is done")
         done = true
-        check(WorkQueue.due(lane, world: world())?.key == "FRITZ-2", "queue: the one above is done, start")
+        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: the one above is done, start")
         lane.entries[0].condition = .tonight
-        check(WorkQueue.due(lane, world: world()) == nil, "queue: tonight waits at noon")
+        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: tonight waits at noon")
         hour = 23
-        check(WorkQueue.due(lane, world: world())?.key == "FRITZ-2", "queue: tonight starts at 23:00")
+        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: tonight starts at 23:00")
         lane.entries.removeAll()
-        check(WorkQueue.due(lane, world: world()) == nil, "queue: empty lane")
+        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: empty lane")
     }
 
     // AI checks: heuristics first, then the parse of the AI reply.

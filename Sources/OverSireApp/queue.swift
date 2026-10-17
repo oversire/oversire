@@ -29,10 +29,12 @@ final class WorkQueue {
     static let changed = Notification.Name("WorkQueueChanged")
 
     private(set) var lanes: [QueueLane] = []
+    private(set) var states: [String: QueueLaneState] = [:]   // by project
     private var seen: Set<String> = []       // keys added by a Plane trigger once; a removal stays removed
     private var released: Set<String> = []   // agents that hold no slot, for example after an approved "looks done"
     private let writes: StoreWrites
     private var saved: [String: QueueLane] = [:]
+    private var savedStates: [String: QueueLaneState] = [:]
     private var savedSeen: Set<String> = []
     private let store: ProjectStore
     private let agents: AgentIndex
@@ -47,6 +49,7 @@ final class WorkQueue {
     var count: Int { lanes.reduce(0) { $0 + $1.entries.count } }
     func contains(_ key: String) -> Bool { lanes.contains { $0.entries.contains { $0.key == key.uppercased() } } }
     func lane(_ project: String) -> QueueLane? { lanes.first { $0.project == project } }
+    func state(_ project: String) -> QueueLaneState? { states[project] }
 
     // The first item of each lane.
     func upNext(store: ProjectStore) -> [QueueEntry] { lanes.compactMap(\.entries.first) }
@@ -114,12 +117,13 @@ final class WorkQueue {
     }
 
     // The entry of the lane that may start now, if any. Pure, for the selftest.
-    static func due(_ lane: QueueLane, world: QueueWorld) -> QueueEntry? {
+    static func due(_ lane: QueueLane, state: QueueLaneState?, world: QueueWorld) -> QueueEntry? {
         guard let first = lane.entries.first, world.busy(lane) < world.slots(lane) else { return nil }
+        let above = state?.lastStarted
         switch first.condition {
         case .slot: return first
-        case .ciPassed: return lane.lastStarted.map(world.ciPassed) ?? true ? first : nil
-        case .done: return lane.lastStarted.map(world.done) ?? true ? first : nil
+        case .ciPassed: return above.map(world.ciPassed) ?? true ? first : nil
+        case .done: return above.map(world.done) ?? true ? first : nil
         case .tonight:
             let h = Calendar.current.component(.hour, from: world.now)
             return h >= 22 || h < 6 ? first : nil
@@ -137,7 +141,7 @@ final class WorkQueue {
             done: { [unowned self] k in self.isDone(k) },
             now: Date())
         for lane in lanes {
-            if let e = WorkQueue.due(lane, world: world) { start(e.key, project: lane.project, anchor: nil) }
+            if let e = WorkQueue.due(lane, state: states[lane.project], world: world) { start(e.key, project: lane.project, anchor: nil) }
         }
     }
 
@@ -150,7 +154,7 @@ final class WorkQueue {
             if let anchor {
                 agents.start(item, snap: snap, anchor: anchor)
             } else {
-                lanes[li].error = "Choose an Orca workspace for \(snap.summary.identifier): use Start now once."
+                setState(project) { $0.error = "Choose an Orca workspace for \(snap.summary.identifier): use Start now once." }
                 save()
                 return
             }
@@ -158,10 +162,19 @@ final class WorkQueue {
             agents.start(item, root: root) { _ in }
         }
         lanes[li].entries.removeAll { $0.key == key }
-        lanes[li].lastStarted = key
-        lanes[li].error = nil
+        setState(project) {
+            $0.lastStarted = key
+            $0.error = nil
+        }
         released.remove(key)
         save()
+    }
+
+    private func setState(_ project: String, _ edit: (inout QueueLaneState) -> Void) {
+        var st = states[project] ?? QueueLaneState(project: project, updatedAt: Date())
+        edit(&st)
+        st.updatedAt = Date()
+        states[project] = st
     }
 
     private func isDone(_ key: String) -> Bool {
@@ -189,18 +202,24 @@ final class WorkQueue {
     private func load() {
         lanes = writes.load(QueueLane.self).sorted { $0.identifier < $1.identifier }
         saved = Dictionary(lanes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        states = Dictionary(writes.load(QueueLaneState.self).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        savedStates = states
         seen = Set(writes.load(QueueTrigger.self).map(\.key))
         savedSeen = seen
     }
 
-    // Writes only the lanes and trigger keys that changed.
+    // Writes only the lanes, lane states and trigger keys that changed.
     private func save() {
-        lanes.removeAll { $0.entries.isEmpty && $0.lastStarted == nil && $0.error == nil }
+        lanes.removeAll { l in l.entries.isEmpty && states[l.project].map { $0.lastStarted == nil && $0.error == nil } ?? true }
         let now = Dictionary(lanes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        states = states.filter { now[$0.key] != nil }
         for (id, lane) in now where saved[id] != lane { writes.put(lane) }
         for id in saved.keys where now[id] == nil { writes.delete(QueueLane.self, id: id) }
+        for (id, st) in states where savedStates[id] != st { writes.put(st) }
+        for id in savedStates.keys where states[id] == nil { writes.delete(QueueLaneState.self, id: id) }
         for key in seen.subtracting(savedSeen) { writes.put(QueueTrigger(key: key, at: Date())) }
         saved = now
+        savedStates = states
         savedSeen = seen
         publish()
     }

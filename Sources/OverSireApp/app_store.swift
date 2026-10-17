@@ -44,10 +44,10 @@ extension StoreMigration {
     static func runForApp(_ writes: StoreWrites) async {
         let queueFile = FileManager.default.contents(atPath: QUEUE_PATH)
         let m = StoreMigration(defaults: UserDefaults.standard.dictionaryRepresentation(), queueFile: queueFile)
-        guard m.hasWork else { return }
         let store = writes.store
         switch await Result(awaiting: { try await m.run(into: store) }) {
         case .success:
+            guard m.hasWork else { return }
             UserDefaults.standard.removeObject(forKey: StoreMigration.ignoredKey)
             if queueFile != nil { try? FileManager.default.moveItem(atPath: QUEUE_PATH, toPath: QUEUE_PATH + ".migrated") }
             log.info("Moved the old queue and ignored failures into the store")

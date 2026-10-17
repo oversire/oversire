@@ -99,6 +99,8 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertEqual(old?.at, Date(timeIntervalSince1970: 1), "a record in the store stays")
         let triggers = try await store.all(QueueTrigger.self)
         XCTAssertEqual(triggers.count, 2)
+        let state = try await store.get(QueueLaneState.self, id: "plane/ocral/b1")
+        XCTAssertEqual(state?.lastStarted, "TOWERTAIL-1", "the lane state of queue.json moves too")
 
         XCTAssertFalse(StoreMigration(defaults: ["other": 1], queueFile: nil).hasWork)
     }
@@ -110,5 +112,38 @@ final class StoreMigrationTests: XCTestCase {
             guard case .decoding(let m)? = error as? ProviderError else { return XCTFail("\(error)") }
             XCTAssertTrue(m.hasPrefix("queue.json"), m)
         }
+    }
+
+    // A store folder of version 1: the lanes hold lastStarted and error.
+    func testSplitsLaneStateOfAnOldStore() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-mig-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(#"""
+            {"plane/ocral/b1":{"project":"plane/ocral/b1","identifier":"TOWERTAIL","lastStarted":"TOWERTAIL-1",
+               "entries":[{"key":"TOWERTAIL-2","title":"Login","condition":"ciPassed","added":"2026-10-01T09:00:00Z","source":"you"}]},
+             "plane/ocral/c3":{"project":"plane/ocral/c3","identifier":"OVERSIRE","entries":[],"error":"No repo folder"},
+             "plane/ocral/d4":{"project":"plane/ocral/d4","identifier":"TREBI","entries":[]}}
+            """#.utf8).write(to: dir.appendingPathComponent("queue-lanes.json"))
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let m = StoreMigration(defaults: [:], queueFile: nil, now: now)
+        XCTAssertFalse(m.hasWork, "the split runs without old copies to remove")
+        try await m.run(into: LocalStore(dir: dir))
+
+        let store = LocalStore(dir: dir)
+        let lanes = try await store.all(QueueLane.self)
+        XCTAssertEqual(lanes.count, 3, "no lane is lost")
+        let b1 = try await store.get(QueueLane.self, id: "plane/ocral/b1")
+        XCTAssertEqual(b1?.entries.map(\.key), ["TOWERTAIL-2"])
+        let states = try await store.all(QueueLaneState.self).sorted { $0.project < $1.project }
+        XCTAssertEqual(states, [QueueLaneState(project: "plane/ocral/b1", lastStarted: "TOWERTAIL-1", updatedAt: now),
+                                QueueLaneState(project: "plane/ocral/c3", error: "No repo folder", updatedAt: now)])
+        let file = try String(contentsOf: dir.appendingPathComponent("queue-lanes.json"), encoding: .utf8)
+        XCTAssertFalse(file.contains("lastStarted") || file.contains("No repo folder"), "the lanes lose the old fields")
+
+        // A second run changes nothing.
+        try await StoreMigration(defaults: [:], queueFile: nil, now: now.addingTimeInterval(60)).run(into: store)
+        let again = try await store.all(QueueLaneState.self)
+        XCTAssertEqual(again.map(\.updatedAt), [now, now])
     }
 }

@@ -137,7 +137,7 @@ final class QueuePage: Page {
         let c = Card(padding: 10, spacing: 4)
         c.add(NSStackView(h: [Glyph("folder", color: Palette.acc), NSTextField.text(lane.identifier, size: 13, weight: .semibold),
                               NSTextField.text(root, size: 11.5, color: Palette.dim, mono: true), Spacer(), slotChip], spacing: 7))
-        if let e = lane.error { c.add(Banner(.warning, title: e)) }
+        if let e = q.state(lane.project)?.error { c.add(Banner(.warning, title: e)) }
         let suggestion = orderSuggestion(lane)
         if suggestion == nil, ordering.contains(lane.project) { c.add(InlineSpinner("The AI reads the lane and proposes an order…")) }
         if let s = suggestion {

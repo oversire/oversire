@@ -29,7 +29,7 @@ protocol AppData: AnyObject {
 struct DataFingerprint: Equatable {
     let value: Int
 
-    init(runs: [(String, [Run])], prs: [(String, [ChangeRequest])], agents: [String: AgentSession], snapshots: [ProjectSnapshot], lanes: [QueueLane], streams: [Workstream] = []) {
+    init(runs: [(String, [Run])], prs: [(String, [ChangeRequest])], agents: [String: AgentSession], snapshots: [ProjectSnapshot], lanes: [QueueLane], laneStates: [String: QueueLaneState] = [:], streams: [Workstream] = []) {
         var h = Hasher()
         for (repo, rs) in runs {
             h.combine(repo)
@@ -46,7 +46,7 @@ struct DataFingerprint: Equatable {
             h.combine(s.summary.ref.storeKey); h.combine(s.items); h.combine(s.intake)
         }
         for l in lanes {
-            h.combine(l.project); h.combine(l.error); h.combine(l.lastStarted)
+            h.combine(l.project); h.combine(laneStates[l.project]?.error); h.combine(laneStates[l.project]?.lastStarted)
             for e in l.entries { h.combine(e.key); h.combine(e.condition) }
         }
         for s in streams.sorted(by: { $0.key < $1.key }) {
@@ -58,7 +58,7 @@ struct DataFingerprint: Equatable {
     }
 
     init(_ d: AppData) {
-        self.init(runs: d.grouped, prs: d.prGrouped, agents: d.agentIndex.agents, snapshots: Array(d.projectStore.snapshots.values), lanes: d.queue.lanes,
+        self.init(runs: d.grouped, prs: d.prGrouped, agents: d.agentIndex.agents, snapshots: Array(d.projectStore.snapshots.values), lanes: d.queue.lanes, laneStates: d.queue.states,
                   streams: Array(d.workstreams.streams.values))
     }
 }
