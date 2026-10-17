@@ -275,7 +275,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         right.addFull(NSStackView(h: [NSTextField.text("CI on this work", size: 12.5, weight: .semibold),
                                       NSTextField.text("matched by branch, commit or title", size: 11.5, color: Palette.dim), Spacer()], spacing: 6))
         let runs = ListCard()
-        for r in s.runs.prefix(5) { runs.add(RunLine(repo: r.repo, run: r.run, data: data) { [weak self] in self?.go($0) }) }
+        for r in s.runs.prefix(5) { runs.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
         if runs.isEmpty { runs.add(EmptyNote("No runs yet.", symbol: "circle.dashed")) }
         right.addFull(runs)
         if s.agent != nil, s.ci?.word == Tone.bad.word, s.agent?.phase != .done {

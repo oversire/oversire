@@ -100,6 +100,12 @@ final class InboxFeed {
         save()
     }
 
+    func markUnread(_ e: InboxEntry, store: ProjectStore) {
+        if let a = e.activityId { store.markActivityUnread(a); return }
+        read.remove(e.id)
+        save()
+    }
+
     func markAllRead(_ list: [InboxEntry], store: ProjectStore) {
         for e in list where e.unread && e.source != .intake {
             if let a = e.activityId { store.markActivityRead(a) } else { read.insert(e.id) }
@@ -158,6 +164,19 @@ final class InboxPage: Page {
     override func build(_ col: NSStackView) {
         pageBusy = data.loadingFirst
         let all = feed.entries(data)
+        commands.intercept = { [weak self] c in
+            guard let self else { return false }
+            switch c {
+            case .markRead(let id, let read):
+                guard let e = all.first(where: { $0.id == id }) else { return true }
+                if read { self.feed.markRead(e, store: self.data.projectStore) } else { self.feed.markUnread(e, store: self.data.projectStore) }
+                self.reload()
+            case .triage(let id):
+                if let (pk, item) = all.first(where: { $0.id == id })?.intake { self.data.intakeAgent.start(projectKey: pk, item: item) }
+            default: return false
+            }
+            return true
+        }
         for (pk, snap) in data.projectStore.snapshots where !(snap.intake ?? []).isEmpty {
             data.projectStore.loadIntakeKeys(projectKey: pk) { [weak self] in self?.reload() }
         }
@@ -225,13 +244,8 @@ final class InboxPage: Page {
                 return true
             }
         }
-        r.menuItems = { [weak self] in
-            guard let self else { return [] }
-            var items: [NSMenuItem] = []
-            if e.unread && e.intake == nil { items.append(MenuAction("Mark as read") { self.feed.markRead(e, store: self.data.projectStore) }.item) }
-            if let u = e.url { items.append(MenuAction("Open in Plane") { NSWorkspace.shared.open(URL(string: u)!) }.item) }
-            return items
-        }
+        let canTriage = e.intake.map { data.intakeAgent.available && data.intakeAgent.state($0.item) == nil } ?? false
+        commands.attach(r) { _ in RowMenu.inbox(e, projectKey: nil, canTriage: canTriage) }
         guard let (pk, item) = e.intake, let state = data.intakeAgent.state(item) else { return r }
         let panel = IntakePanel(state, projectKey: pk, item: item, agent: data.intakeAgent) { [weak self] err in
             self?.note = err

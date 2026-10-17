@@ -92,9 +92,12 @@ final class AgentsPage: Page {
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }
         let label = "\(c.name), \(c.repo), \(c.liveTerminals) terminals" + (key.map { ", item \($0)" } ?? ", unlinked")
-        return TableRow(table, cells: cells, trailing: [open], height: 40, label: label) { [weak self] in
+        let row = TableRow(table, cells: cells, trailing: [open], height: 40, label: label) { [weak self] in
             if let key { self?.go(.item(key, .overview)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }
+        let hasAgent = key.flatMap { data.agentIndex.agent($0) } != nil
+        commands.attach(row) { RowMenu.session(card: c, key: key, checkout: co, hasAgent: hasAgent, caps: $0) }
+        return row
     }
 
     private func tone(_ s: AgentSession.Phase) -> Tone { s == .waiting ? .waiting : s == .working ? .working : .done }

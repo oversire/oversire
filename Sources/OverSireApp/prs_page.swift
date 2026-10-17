@@ -19,6 +19,16 @@ final class PRsPage: Page {
             .sorted { a, b in a.pr.mine != b.pr.mine ? !a.pr.mine : a.pr.updatedAt > b.pr.updatedAt }
         col.addFull(PageHeader("Pull requests", caption: "Review requests and my open PRs. A PR links to its item by branch, or by the key in the title or body.",
                                actions: [ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) }]))
+        commands.intercept = { [weak self] c in
+            switch c {
+            case .approve(let repo, let n):
+                if let e = all.first(where: { $0.repo == repo && $0.pr.number == n }) { self?.act(repo, e.pr, .approve(nil), verb: "Approve") }
+            case .merge(let repo, let n):
+                if let e = all.first(where: { $0.repo == repo && $0.pr.number == n }) { self?.act(repo, e.pr, .merge(.squash), verb: "Squash and merge") }
+            default: return false
+            }
+            return true
+        }
         let reviews = all.filter { !$0.pr.mine }, mine = all.filter { $0.pr.mine }
         for (title, list, empty) in [("Review requests", reviews, "No review waits for you."), ("My pull requests", mine, "You have no open pull request.")] {
             col.addFull(SectionTitle(title, count: list.count))
@@ -75,7 +85,8 @@ final class PRsPage: Page {
         }
         r.copyID = "\(p.number)"
         r.copyLink = p.url
-        r.menuItems = { [MenuAction("Open on GitHub") { if let u = URL(string: p.url) { NSWorkspace.shared.open(u) } }.item] }
+        let linked = linkedKey(repo, p)
+        commands.attach(r) { RowMenu.pr(repo: repo, pr: p, linkedKey: linked, caps: $0) }
         return r
     }
 

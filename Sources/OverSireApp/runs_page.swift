@@ -11,7 +11,7 @@ final class RunLine: TableRow {
         TableColumn(id: "when", title: "When", width: 72, min: 50, optional: true),
     ])
 
-    init(repo: String, run r: Run, data: AppData, go: @escaping (Route) -> Void) {
+    init(repo: String, run r: Run, data: AppData, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         let tone = Tone(r)
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
         var cells: [String: NSView] = [
@@ -44,6 +44,8 @@ final class RunLine: TableRow {
             go(.run(repo: repo, id: r.id))
         }
         itemActions(url: r.url, key: r.id, tracker: "GitHub")
+        let linked = data.workstreams.link(runId: r.id)?.key
+        commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -91,7 +93,7 @@ final class RunsPage: Page {
         let shown = all.filter { RunsPage.matches(filter, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(RunLine.layout)) }
-        for r in shown.prefix(200) { list.add(RunLine(repo: r.repo, run: r.run, data: data) { [weak self] in self?.go($0) }) }
+        for r in shown.prefix(200) { list.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
         if list.isEmpty { list.add(data.firstLoad ? SkeletonRows(label: "Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)
     }
@@ -268,6 +270,7 @@ final class RunPage: Page {
                 self?.reload()
             }
             row.selected = j.id == jobId
+            commands.attach(row) { [repo] in RowMenu.job(repo: repo, job: j, caps: $0) }
             jobsCard.add(row)
         }
         if let p = jobsLoad.placeholder(retry: { [weak self] in self?.retryJobs() }) { jobsCard.add(p) }

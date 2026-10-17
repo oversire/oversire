@@ -204,6 +204,12 @@ final class ProjectStore {
         publish()
     }
 
+    func markActivityUnread(_ id: String) {
+        readActivity.remove(id)
+        save()
+        publish()
+    }
+
     func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: "Could not change the status", done: done) { c, ref in
             try await c.update(ref, ItemPatch(status: optionId))
@@ -257,6 +263,10 @@ final class ProjectStore {
         write(itemId, failure: nil, done: done) { c, ref in
             try await c.update(ref, ItemPatch(title: title, bodyMarkdown: body))
         }
+    }
+
+    func assignMe(itemId: String, done: @escaping (Bool) -> Void) {
+        write(itemId, failure: "Could not assign the item", done: done) { c, ref in try await ProjectStore.assignMe(c, ref) }
     }
 
     // The first "in progress" state, plus assign me. A project without such a state only assigns.

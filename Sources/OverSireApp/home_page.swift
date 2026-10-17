@@ -202,7 +202,7 @@ final class HomePage: Page {
         aside.addFull(ny)
         aside.addFull(SectionTitle("Running now", count: running.count))
         let rn = ListCard()
-        for r in running.prefix(8) { rn.add(RunLine(repo: r.repo, run: r.run, data: data) { [weak self] in self?.go($0) }) }
+        for r in running.prefix(8) { rn.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
         if rn.isEmpty { rn.add(data.firstLoad ? SkeletonRows(count: 2, label: "Loading runs") : EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
         aside.addFull(rn)
 

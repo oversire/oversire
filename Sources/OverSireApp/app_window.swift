@@ -126,6 +126,7 @@ class Page: NSViewController {
     var isEditing: Bool { view.window?.firstResponder is NSTextView }
 
     func go(_ r: Route) { router.go(r) }
+    private(set) lazy var commands = RowCommander(data: data) { [weak self] in self?.go($0) }
 
     override func viewWillDisappear() {
         super.viewWillDisappear()
@@ -191,6 +192,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         win.toolbar = tb
 
         sidebar.onPick = { [weak self] r in if self?.router.current != r { self?.router.go(r) } }
+        sidebar.commander = RowCommander(data: data) { [weak self] in self?.router.go($0) }
         router.onChange = { [weak self] r in self?.display(r) }
         observers.append(NotificationCenter.default.addObserver(forName: AppWindow.changed, object: nil, queue: .main) { [weak self] n in
             self?.dataChanged(n)

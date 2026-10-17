@@ -15,7 +15,7 @@ final class ItemLine: TableRow {
          TableColumn(id: "updated", title: "Updated", width: 60, min: 44, optional: true)]
     }
 
-    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, layout: ColumnLayout, go: @escaping (Route) -> Void) {
+    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, layout: ColumnLayout, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         let opt = snap.option(item.statusOptionId)
         var cells: [String: NSView] = [
             "status": StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16),
@@ -35,6 +35,7 @@ final class ItemLine: TableRow {
         let parts = [opt?.name, stream?.agent?.label(), stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
         super.init(layout, cells: cells, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
         itemActions(url: item.url, key: item.key)
+        commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -73,7 +74,7 @@ final class ToggleChip: Chiplet {
 
 // A card on the board: key, title and chips.
 final class BoardCard: Row {
-    init(_ item: Item, stream: Workstream?, go: @escaping (Route) -> Void) {
+    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         var chips: [NSView] = []
         if let a = stream?.agent { chips.append(Pill(Tone(a.phase), text: a.label())) }
         if let ci = stream?.ci { chips.append(Glyph(ci, size: 12)) }
@@ -84,6 +85,7 @@ final class BoardCard: Row {
         super.init([col], height: 54, inset: 10, label: "\(item.key) \(item.title)") { go(.item(item.key, .overview)) }
         fill = Palette.raise; border = Palette.line; radius = 8
         itemActions(url: item.url, key: item.key)
+        commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -149,7 +151,7 @@ final class ProjectPage: Page {
         col.addFull(filters)
 
         let groups = statusGroups(snap, items)
-        if board { col.addFull(boardView(groups, ws)); return }
+        if board { col.addFull(boardView(groups, ws, snap)); return }
         let list = ListCard()
         list.add(TableHeader(table))
         for (opt, its) in groups where !its.isEmpty {
@@ -175,13 +177,13 @@ final class ProjectPage: Page {
         return out
     }
 
-    private func boardView(_ groups: [(StatusOption, [Item])], _ ws: WorkstreamIndex) -> NSView {
+    private func boardView(_ groups: [(StatusOption, [Item])], _ ws: WorkstreamIndex, _ snap: ProjectSnapshot) -> NSView {
         let cols: [NSView] = groups.filter { !$0.1.isEmpty || $0.0.category != .done }.map { opt, its in
             let c = Card(padding: 10, spacing: 8)
             c.add(NSStackView(h: [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
                                   NSTextField.text(opt.name, size: 12.5, weight: .semibold),
                                   NSTextField.text("\(its.count)", size: 12, color: Palette.dim)], spacing: 6))
-            for i in its.prefix(25) { c.add(BoardCard(i, stream: ws.stream(i.key)) { [weak self] in self?.go($0) }) }
+            for i in its.prefix(25) { c.add(BoardCard(i, snap: snap, stream: ws.stream(i.key), commands: commands) { [weak self] in self?.go($0) }) }
             if its.count > 25 { c.add(NSTextField.text("\(its.count - 25) more", size: 12, color: Palette.dim)) }
             if its.isEmpty { c.add(NSTextField.text("No items", size: 12, color: Palette.dim)) }
             return c
@@ -231,7 +233,7 @@ final class MyItemsPage: Page {
         let card = ListCard()
         if !ordered.isEmpty { card.add(TableHeader(table)) }
         for e in ordered.prefix(300) {
-            card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table) { [weak self] in self?.go($0) })
+            card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table, commands: commands) { [weak self] in self?.go($0) })
         }
         pageBusy = data.projectsLoading
         if card.isEmpty { card.add(data.projectsLoading ? SkeletonRows(label: "Loading your items") : EmptyNote("No open items are yours.")) }

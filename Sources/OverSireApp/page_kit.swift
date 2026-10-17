@@ -343,8 +343,22 @@ class Row: Box {
     override func becomeFirstResponder() -> Bool { DispatchQueue.main.async { self.updateFill() }; return true }
     override func resignFirstResponder() -> Bool { DispatchQueue.main.async { self.updateFill() }; return true }
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.keyCode == 49 || event.keyCode == 76 { onClick?() } else { super.keyDown(with: event) }
+        if event.keyCode == 36 || event.keyCode == 49 || event.keyCode == 76 { onClick?(); return }
+        // Shift-F10 or the menu key of a PC keyboard opens the row menu.
+        let shiftF10 = event.keyCode == 109 && event.modifierFlags.contains(.shift)
+        if shiftF10 || event.keyCode == 110, showMenu() { return }
+        super.keyDown(with: event)
     }
+
+    @discardableResult
+    func showMenu() -> Bool {
+        guard let items = menuItems?(), !items.isEmpty else { return false }
+        let m = NSMenu()
+        items.forEach { m.addItem($0) }
+        m.popUp(positioning: nil, at: NSPoint(x: 16, y: isFlipped ? bounds.height - 4 : 4), in: self)
+        return true
+    }
+    override func accessibilityPerformShowMenu() -> Bool { showMenu() }
     override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill() }
     override var focusRingMaskBounds: NSRect { bounds }
     override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }
