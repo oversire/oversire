@@ -38,7 +38,7 @@ let package = Package(
         .testTarget(name: "OverSireSyncTests", dependencies: ["OverSireSync", "OverSireTestKit"]),
         .testTarget(name: "OverSireAITests", dependencies: ["OverSireAI", "OverSireTestKit"]),
         .testTarget(name: "OverSireTestKitTests", dependencies: ["OverSireTestKit"]),
-        .testTarget(name: "TrackerPlaneTests", dependencies: ["TrackerPlane", "OverSireTestKit"]),
+        .testTarget(name: "TrackerPlaneTests", dependencies: ["TrackerPlane", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"]),
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "OverSireTestKit"]),
         .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),

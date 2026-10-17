@@ -38,6 +38,31 @@ public enum TrackerConformance {
         if let cs = await r.step("comments", { try await t.comments(ref) }) {
             r.expect(cs.contains { $0.body?.contains("Conformance comment") == true }, "comments does not list the new comment")
         }
+        r.merge(await settings(t, project: p))
+        return r
+    }
+
+    /// Reads the project settings. Writes nothing: it sends an empty patch and one field that the adapter cannot write.
+    public static func settings(_ t: any Tracker, project p: ProjectRef) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let reader = t as? any ProjectSettingsReading else { return r }
+        if let s = await r.step("settings", { try await reader.settings(p) }) {
+            r.expect(!s.name.isEmpty, "settings gave no name")
+            r.expect(!s.statuses.isEmpty, "settings gave no statuses")
+            r.expect(s.readOnlyFeatures.isSubset(of: Set(s.features.keys)), "a read-only feature is not in features")
+        }
+        guard let editor = t as? any ProjectSettingsEditing else { return r }
+        _ = await r.step("update with an empty patch", { try await editor.update(p, ProjectSettingsPatch()) })
+        let patches: [(ProjectSettingsField, ProjectSettingsPatch)] = [
+            (.name, ProjectSettingsPatch(name: "x")), (.description, ProjectSettingsPatch(description: "x")),
+            (.lead, ProjectSettingsPatch(lead: .some(nil))), (.visibility, ProjectSettingsPatch(visibility: .private)),
+            (.features, ProjectSettingsPatch(features: [:])), (.labels, ProjectSettingsPatch(newLabels: [])),
+        ]
+        if let (field, patch) = patches.first(where: { !editor.editableSettings.contains($0.0) }) {
+            await r.expectError("update \(field.rawValue), which is not editable", { $0 == .unsupported(.projectSettingsEdit) }) {
+                try await editor.update(p, patch)
+            }
+        }
         return r
     }
 }

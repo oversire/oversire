@@ -45,3 +45,12 @@ public final class TemplateTracker: Tracker {
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws { throw ProviderError.unsupported("update") }
     public func comment(_ i: ItemRef, markdown: String) async throws { throw ProviderError.unsupported("comment") }
 }
+
+// Optional: project settings. Conform, and add .projectSettings and .projectSettingsEdit to capabilities.
+// extension TemplateTracker: ProjectSettingsEditing {
+//     public var editableSettings: Set<ProjectSettingsField> { [.name, .description] }
+//     public func settings(_ p: ProjectRef) async throws -> ProjectSettings { throw ProviderError.unsupported(.projectSettings) }
+//     public func update(_ p: ProjectRef, _ patch: ProjectSettingsPatch) async throws {
+//         throw ProviderError.unsupported(.projectSettingsEdit)
+//     }
+// }

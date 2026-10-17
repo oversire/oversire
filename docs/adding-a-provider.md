@@ -116,6 +116,8 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
   - `items` lists the new item, and `items(limit: 1)` gives one item or none.
   - `detail` shows the title from `update`.
   - `comments` contains the body of the new comment.
+  - With `ProjectSettingsReading`, `settings` gives a name and the statuses. With `ProjectSettingsEditing`, an empty patch works and a field that is not in `editableSettings` throws `.unsupported(.projectSettingsEdit)`. This part writes nothing. `TrackerConformance.settings(_:project:)` runs it alone.
+- Project settings (optional): fill the fields of `ProjectSettings` that the vendor has. Leave the others empty. Put only the features that the vendor has in `features`. Put a feature that you can read but not switch in `readOnlyFeatures`. List the fields that you can write in `editableSettings`. The settings page shows "Edit in <vendor>" for the others. Also set `ProjectSummary.logo` in `projects` when the vendor has a project logo.
 
 ### Code host
 
@@ -147,6 +149,8 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.logs` | `LogReading` |
 | `.sessionInput`, `.sessionTail` | `SessionIO` |
 | `.reveal` | `Revealing` |
+| `.projectSettings` | `ProjectSettingsReading` |
+| `.projectSettingsEdit` | `ProjectSettingsEditing` |
 
 Add the capability to `capabilities` and conform to the protocol. The suite fails when one is there without the other. The UI hides a feature that no account supports.
 

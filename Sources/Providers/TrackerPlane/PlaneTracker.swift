@@ -7,7 +7,7 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .timeline, .labels, .links, .subItems, .assets, .webhooks] }
+    public var capabilities: Set<Capability> { [.intake, .timeline, .labels, .links, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
@@ -65,7 +65,7 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
             let identifier = r["identifier"] as? String ?? ""
             return ProjectSummary(ref: ProjectRef(account: account, id: id, key: identifier.isEmpty ? nil : identifier),
                                   identifier: identifier, title: name, url: workspace.projectURL(id),
-                                  closed: !(r["archived_at"] is NSNull || r["archived_at"] == nil))
+                                  closed: !(r["archived_at"] is NSNull || r["archived_at"] == nil), logo: Self.logo(r["logo_props"]))
         }
         lock.withLock { for p in out { identifiers[p.ref.id] = p.identifier } }
         return out.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }

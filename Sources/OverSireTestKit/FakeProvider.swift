@@ -39,6 +39,9 @@ public final class FakeProvider: @unchecked Sendable {
         return try lock.withLock(body)
     }
 
+    /// Runs `body` under the lock, with no failure check.
+    func lockedValue<T>(_ body: () throws -> T) rethrows -> T { try lock.withLock(body) }
+
     /// Call it under `locked`.
     func emit(_ kind: EventKind, _ action: String, _ subject: SubjectRef, title: String? = nil) {
         events.append(ProviderEvent(id: "\(id)-\(events.count + 1)", provider: id, account: account, kind: kind, action: action,

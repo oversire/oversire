@@ -1,0 +1,28 @@
+[
+ {
+  "avatar": "",
+  "avatar_url": null,
+  "display_name": "ee00d43c-cdc2-418d-95d6-3784689ec393-intake",
+  "email": "user@example.com",
+  "first_name": "",
+  "id": "477d6e7f-92d9-43b9-9a71-5c287ef131ea",
+  "is_active": true,
+  "is_bot": true,
+  "last_name": "",
+  "role": 20,
+  "role_slug": "admin"
+ },
+ {
+  "avatar": "",
+  "avatar_url": null,
+  "display_name": "flarco",
+  "email": "user@example.com",
+  "first_name": "Fritz",
+  "id": "6008c025-3b03-4263-89fc-62f1153bfa27",
+  "is_active": true,
+  "is_bot": false,
+  "last_name": "Larco",
+  "role": 20,
+  "role_slug": "admin"
+ }
+]
