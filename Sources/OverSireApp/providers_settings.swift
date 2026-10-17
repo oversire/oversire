@@ -145,7 +145,10 @@ extension SettingsPage {
         let row = NSStackView(v: [top], spacing: 6)
         top.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
         if !caps.isEmpty {
-            row.addArrangedSubview(NSStackView(h: [Spacer(23)] + caps.map { Chiplet($0, mono: true) }, spacing: 4))
+            let wrap = Wrap(caps.map { Chiplet($0, mono: true) })
+            let line = NSStackView(h: [Spacer(23), wrap], spacing: 0, align: .top)
+            row.addArrangedSubview(line)
+            line.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
         }
         if form.probes[a.account] == nil, !form.probing.contains(a.account), ENV.error(a.account) == nil { probe(a.account) }
         return row
@@ -161,7 +164,7 @@ extension SettingsPage {
             }
             SettingsPage.providersForm.probing.remove(id)
             SettingsPage.providersForm.probes[id] = r
-            self?.reload()
+            self?.reloadSoon()
         }
     }
 

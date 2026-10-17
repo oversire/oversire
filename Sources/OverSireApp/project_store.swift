@@ -36,6 +36,7 @@ final class ProjectStore {
     private(set) var liveKeys: Set<String> = []
     private(set) var intakeKeys: [String: Int] = [:]   // work item id → number, for keys such as TREBI-264
     private var loadingKeys: Set<String> = []
+    private var askedKeys: Set<String> = []   // intake work item ids that Plane gave no number for
 
     private let trackers: TrackerDirectory
     private let notifier: ProjectNotifier
@@ -365,16 +366,22 @@ final class ProjectStore {
     // The numbers do not change, so one load per new item is enough.
     func loadIntakeKeys(projectKey: String, done: @escaping () -> Void) {
         guard let snap = snapshots[projectKey], let intake = snap.intake,
-              intake.contains(where: { intakeKeys[$0.workItemId] == nil }), !loadingKeys.contains(projectKey),
+              intake.contains(where: { intakeKeys[$0.workItemId] == nil && !askedKeys.contains($0.workItemId) }), !loadingKeys.contains(projectKey),
               let client = trackers.tracker(snap.summary.ref.workspace) as? any IntakeKeying else { return }
         loadingKeys.insert(projectKey)
         let project = snap.summary.ref
+        let asked = intake.map(\.workItemId)
         Task { [weak self] in
             let r = await Result(awaiting: { try await client.intakeSequences(project) })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.loadingKeys.remove(projectKey)
-                if case .success(let found) = r { self.intakeKeys.merge(found) { $1 }; done() }
+                guard case .success(let found) = r else { return }
+                // An id with no number stays asked. Without this, each page build asks again and builds again.
+                self.askedKeys.formUnion(asked)
+                let before = self.intakeKeys.count
+                self.intakeKeys.merge(found) { $1 }
+                if self.intakeKeys.count != before { done() }
             }
         }
     }

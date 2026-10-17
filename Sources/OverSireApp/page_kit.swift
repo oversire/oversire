@@ -544,10 +544,13 @@ final class TermView: Box {
 
 // The scrolling column of a page. Rebuilds keep the scroll position.
 final class PageScroll: NSScrollView {
-    let column: NSStackView
+    private(set) var column: NSStackView
+    private let maxWidth: CGFloat
+    private var columnConstraints: [NSLayoutConstraint] = []
 
     init(maxWidth: CGFloat = 1100) {
-        column = NSStackView(v: [], spacing: 16)
+        self.maxWidth = maxWidth
+        column = PageScroll.makeColumn()
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         hasVerticalScroller = true
@@ -556,27 +559,51 @@ final class PageScroll: NSScrollView {
         let doc = Flipped()
         doc.translatesAutoresizingMaskIntoConstraints = false
         documentView = doc
-        column.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 28, right: 24)
-        doc.addSubview(column)
-        let w = column.widthAnchor.constraint(equalTo: doc.widthAnchor)
-        w.priority = .defaultHigh
+        // Wide content overflows to the right. It must not push the sidebar or the window.
+        let fill = doc.widthAnchor.constraint(equalTo: contentView.widthAnchor)
+        fill.priority = .init(480)
         NSLayoutConstraint.activate([
             doc.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            doc.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            doc.widthAnchor.constraint(greaterThanOrEqualTo: contentView.widthAnchor),
+            fill,
             doc.topAnchor.constraint(equalTo: contentView.topAnchor),
-            column.topAnchor.constraint(equalTo: doc.topAnchor),
-            column.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
-            column.centerXAnchor.constraint(equalTo: doc.centerXAnchor),
-            column.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth),
-            w,
         ])
+        install(column)
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    private static func makeColumn() -> NSStackView {
+        let c = NSStackView(v: [], spacing: 16)
+        c.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 28, right: 24)
+        return c
+    }
+
+    private func install(_ c: NSStackView) {
+        guard let doc = documentView else { return }
+        doc.addSubview(c)
+        let w = c.widthAnchor.constraint(equalTo: doc.widthAnchor)
+        w.priority = .defaultHigh
+        columnConstraints = [
+            c.topAnchor.constraint(equalTo: doc.topAnchor),
+            c.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
+            c.centerXAnchor.constraint(equalTo: doc.centerXAnchor),
+            c.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth),
+            w,
+        ]
+        NSLayoutConstraint.activate(columnConstraints)
+    }
+
+    // Builds into a new column and swaps it in. One swap is much cheaper than removing each old view from the stack.
     func rebuild(_ build: (NSStackView) -> Void) {
         let y = contentView.bounds.origin.y
-        column.clear()
-        build(column)
+        let next = PageScroll.makeColumn()
+        next.edgeInsets = column.edgeInsets
+        next.spacing = column.spacing
+        build(next)
+        NSLayoutConstraint.deactivate(columnConstraints)
+        column.removeFromSuperview()
+        column = next
+        install(next)
         layoutSubtreeIfNeeded()
         let maxY = max(0, (documentView?.frame.height ?? 0) - contentView.bounds.height)
         contentView.scroll(to: NSPoint(x: 0, y: min(y, maxY)))
@@ -636,6 +663,72 @@ final class ListCard: Box {
     }
 
     var isEmpty: Bool { list.arrangedSubviews.isEmpty }
+
+    // Adds the first rows of a long list, and a "Show more" row for the rest. Each row costs layout time.
+    func add<T>(_ items: [T], more: MoreRows, _ make: @escaping (T) -> NSView) { add(items, more: more, from: 0, make) }
+
+    private func add<T>(_ items: [T], more: MoreRows, from: Int, _ make: @escaping (T) -> NSView) {
+        let end = min(items.count, max(from, more.count))
+        items[from..<end].forEach { add(make($0)) }
+        guard end < items.count else { return }
+        let left = items.count - end
+        let b = ActionButton("Show \(min(left, MoreRows.step)) more", symbol: "chevron.down") { [weak self] in
+            guard let self else { return }
+            more.count = end + MoreRows.step
+            // The button row and its line go. The next rows take their place.
+            self.list.arrangedSubviews.suffix(2).forEach { $0.removeFromSuperview() }
+            self.add(items, more: more, from: end, make)
+        }
+        let row = NSStackView(h: [b, NSTextField.text("\(left) more in the list", size: 11.5, color: Palette.dim), Spacer()], spacing: 8)
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        add(row)
+    }
+}
+
+// How many rows of a long list show. The page keeps it, so a rebuild keeps the rows that the user opened.
+final class MoreRows {
+    static let step = 50
+    var count: Int
+    init(_ count: Int = MoreRows.step) { self.count = count }
+}
+
+// Views in rows that wrap to the next line when the width ends.
+final class Wrap: NSView {
+    private let items: [NSView]
+    private let gap: CGFloat = 6
+
+    init(_ items: [NSView]) {
+        self.items = items
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        for v in items { v.translatesAutoresizingMaskIntoConstraints = true; addSubview(v) }
+        setContentHuggingPriority(.init(1), for: .horizontal)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    private func place(width: CGFloat, apply: Bool) -> CGFloat {
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0
+        for v in items {
+            let s = v.fittingSize
+            if x > 0, x + s.width > width { x = 0; y += line + gap; line = 0 }
+            if apply { v.frame = NSRect(x: x, y: y, width: s.width, height: s.height) }
+            x += s.width + gap
+            line = max(line, s.height)
+        }
+        return y + line
+    }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: place(width: bounds.width > 0 ? bounds.width : 400, apply: false)) }
+
+    private var lastHeight: CGFloat = -1
+
+    override func layout() {
+        super.layout()
+        let h = place(width: bounds.width, apply: true)
+        if h != lastHeight { lastHeight = h; invalidateIntrinsicContentSize() }
+    }
 }
 
 // A grid of equal columns that wraps. Used for tiles and cards.

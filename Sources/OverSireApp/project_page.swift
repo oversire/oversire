@@ -100,6 +100,8 @@ final class ProjectPage: Page {
     private var showDone = false
     private var showSubItems = false
     private let table = ColumnLayout(id: "project", columns: ItemLine.columns())
+    private var more: [String: MoreRows] = [:]   // by status option id
+    override var buildsLater: Bool { true }
 
     private var projectKey: String { if case .project(let k) = route { return k }; return "" }
 
@@ -160,7 +162,9 @@ final class ProjectPage: Page {
                             NSTextField.text("\(its.count)", size: 12, color: Palette.dim), Spacer()], height: 32)
             head.fill = Palette.raise
             list.add(head)
-            for i in its.prefix(200) { list.add(ItemLine(i, snap: snap, stream: ws.stream(i.key), layout: table) { [weak self] in self?.go($0) }) }
+            let m = more[opt.id] ?? MoreRows()
+            more[opt.id] = m
+            list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), layout: table) { self?.go($0) } }
         }
         if list.list.arrangedSubviews.count == 1 { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
         col.addFull(list)
@@ -209,6 +213,8 @@ final class ProjectPage: Page {
 final class MyItemsPage: Page {
     typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
     private let table = ColumnLayout(id: "mine", columns: ItemLine.columns(keyWidth: 120))
+    private let more = MoreRows()
+    override var buildsLater: Bool { true }
 
     static func order(_ list: [Entry]) -> [Entry] {
         list.sorted { a, b in
@@ -232,8 +238,8 @@ final class MyItemsPage: Page {
         col.addFull(PageHeader("My items", caption: "\(ordered.count) open items of yours in all projects. A session that needs input or failing CI comes first."))
         let card = ListCard()
         if !ordered.isEmpty { card.add(TableHeader(table)) }
-        for e in ordered.prefix(300) {
-            card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table, commands: commands) { [weak self] in self?.go($0) })
+        card.add(ordered, more: more) { [weak self, table, commands] e in
+            ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table, commands: commands) { self?.go($0) }
         }
         pageBusy = data.projectsLoading
         if card.isEmpty { card.add(data.projectsLoading ? SkeletonRows(label: "Loading your items") : EmptyNote("No open items are yours.")) }

@@ -54,6 +54,8 @@ final class RunLine: TableRow {
 final class RunsPage: Page {
     private static let latestKey = "runsLatestOnly"
     private var latestOnly = UserDefaults.standard.bool(forKey: RunsPage.latestKey)
+    private let more = MoreRows()
+    override var buildsLater: Bool { true }
 
     private var filter: Route.RunFilter { if case .runs(let f) = route { return f }; return .all }
 
@@ -93,7 +95,7 @@ final class RunsPage: Page {
         let shown = all.filter { RunsPage.matches(filter, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(RunLine.layout)) }
-        for r in shown.prefix(200) { list.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
+        list.add(shown, more: more) { [weak self, data, commands] r in RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) } }
         if list.isEmpty { list.add(data.firstLoad ? SkeletonRows(label: "Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)
     }
@@ -146,6 +148,9 @@ final class RunPage: Page {
     private var timer: Timer?
     private let q = DispatchQueue(label: "com.oversire.app.run-page", qos: .userInitiated)
     static var source: any RunSource = REPO_CLIENT
+    // The jobs of ended runs, by "repo#id". They do not change, so a second visit shows them at once.
+    private static var endedJobs: [String: [Job]] = [:]
+    private var jobsKey: String { "\(repo)#\(runId)" }
 
     private var repo: String { if case .run(let r, _) = route { return r }; return "" }
     private var runId: String { if case .run(_, let id) = route { return id }; return "" }
@@ -169,7 +174,13 @@ final class RunPage: Page {
     private var current: Run? { data.grouped.first { $0.0 == repo }?.1.first { $0.id == runId } ?? run }
 
     private func load() {
-        let (repo, id) = (self.repo, self.runId)
+        let (repo, id, key) = (self.repo, self.runId, jobsKey)
+        if jobs == nil, let j = Self.endedJobs[key] {
+            jobsLoad.absorb(j)
+            pickJob()
+            loadLog()
+        }
+        if current?.status == "completed", Self.endedJobs[key] != nil { return }
         if jobs == nil { pageBusy = true }
         let source = Self.source
         Task { [weak self] in
@@ -180,13 +191,21 @@ final class RunPage: Page {
                 self.pageBusy = false
                 if let r { self.run = r }
                 self.jobsLoad.absorb(j)
-                if self.jobId == nil || !(self.jobs ?? []).contains(where: { $0.id == self.jobId }) {
-                    self.jobId = (self.jobs ?? []).first { JobChip.failed($0) }?.id ?? (self.jobs ?? []).first { $0.status == "in_progress" }?.id ?? self.jobs?.first?.id
+                if let j, r?.status == "completed", j.allSatisfy({ $0.status == "completed" }) {
+                    if Self.endedJobs.count >= 50, let k = Self.endedJobs.keys.first { Self.endedJobs[k] = nil }
+                    Self.endedJobs[key] = j
                 }
+                self.pickJob()
                 self.loadLog()
                 self.reload()
             }
         }
+    }
+
+    // The failed job first, then the running one, then the first.
+    private func pickJob() {
+        guard jobId == nil || !(jobs ?? []).contains(where: { $0.id == jobId }) else { return }
+        jobId = (jobs ?? []).first { JobChip.failed($0) }?.id ?? (jobs ?? []).first { $0.status == "in_progress" }?.id ?? jobs?.first?.id
     }
 
     private func loadLog() {
@@ -360,6 +379,7 @@ final class RunPage: Page {
     private func rerun(failed: Bool) {
         guard let r = current else { return }
         busy = failed ? Self.rerunFailed : Self.rerunAll
+        Self.endedJobs[jobsKey] = nil
         reload()
         data.rerun(repo: repo, runs: [r], failedOnly: failed)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in

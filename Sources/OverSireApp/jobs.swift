@@ -242,11 +242,20 @@ final class JobLogs {
         }
     }
 
-    // The cleaned end of the job log, read again on each call. GitHub gives the log only after the job ends.
+    private var logs: [String: [String]] = [:]  // main thread only
+
+    // The cleaned end of the job log. GitHub gives the log only after the job ends, and a re-run makes new jobs, so the log stays.
     func lines(repo: String, jobId: String, done: @escaping ([String]?) -> Void) {
+        if let l = logs[jobId] { done(l); return }
         Task {
             let l = await REPO_CLIENT.rawLog(repo, jobId: jobId).map(CILog.clean)
-            DispatchQueue.main.async { done(l) }
+            DispatchQueue.main.async {
+                if let l {
+                    if self.logs.count >= 40, let k = self.logs.keys.first { self.logs[k] = nil }
+                    self.logs[jobId] = l
+                }
+                done(l)
+            }
         }
     }
 }

@@ -109,6 +109,16 @@ class Page: NSViewController {
         reload()
     }
 
+    // False while the page waits in the window cache. A reload then only marks the page stale.
+    private(set) var isShown = true
+    private(set) var stale = false
+    private(set) var builtAt = Date.distantPast
+    private var built = false
+
+    // Pages with long lists show a skeleton first and build on the next turn, so a click shows at once.
+    var buildsLater: Bool { false }
+    static var deferBuilds = true
+
     // A new tab or filter of the same page.
     func show(_ r: Route) {
         let tabChanged = r != route
@@ -117,7 +127,50 @@ class Page: NSViewController {
         if tabChanged { scroll.toTop() }
     }
 
-    func reload() { scroll.rebuild { build($0) } }
+    func reload() {
+        guard isShown else { stale = true; return }
+        if !built, buildsLater, Self.deferBuilds {
+            built = true
+            builtAt = Date()
+            scroll.rebuild { skeleton($0) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in self?.reload() }
+            return
+        }
+        built = true
+        stale = false
+        builtAt = Date()
+        scroll.rebuild { build($0) }
+    }
+
+    // One build for many async answers that come close together, for example account probes.
+    func reloadSoon() {
+        guard !reloadQueued else { return }
+        reloadQueued = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.reloadQueued = false
+            self?.reload()
+        }
+    }
+    private var reloadQueued = false
+
+    // The window shows the page again. It builds when the data changed, or the relative times are a minute old.
+    func attach() {
+        isShown = true
+        if stale || -builtAt.timeIntervalSinceNow > 60 { reload() }
+    }
+
+    func detach() { isShown = false }
+
+    // The data changed while the page was in the cache.
+    func markStale() { stale = true }
+
+    // The first view of a page that builds later.
+    func skeleton(_ col: NSStackView) {
+        col.addFull(PageHeader(route.title, caption: "Loading…"))
+        let list = ListCard()
+        list.add(SkeletonRows(count: 8, label: "Loading \(route.title)"))
+        col.addFull(list)
+    }
 
     // Subclasses add their views to the page column.
     func build(_ col: NSStackView) {}
@@ -145,6 +198,9 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     let sidebar = SidebarVC()
     private let host = NSViewController()
     private(set) var page: Page?
+    // Pages that the window showed last, newest first. Back and forward show them without a new build.
+    private var cache: [Page] = []
+    private static let cacheSize = 6
     private var navItem: NSToolbarItemGroup?
     private var refreshButton: RefreshButton?
     private var pendingReload = false
@@ -223,7 +279,12 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         } else {
             page?.view.removeFromSuperview()
             page?.removeFromParent()
-            let p = makePage(r, data, router)
+            page?.detach()
+            let cached = cache.first { $0.route.samePage(r) }
+            let p = cached ?? makePage(r, data, router)
+            cache.removeAll { $0 === p }
+            cache.insert(p, at: 0)
+            if cache.count > Self.cacheSize { cache.removeLast(cache.count - Self.cacheSize) }
             host.addChild(p)
             p.view.translatesAutoresizingMaskIntoConstraints = false
             host.view.addSubview(p.view)
@@ -234,6 +295,8 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
                 p.view.bottomAnchor.constraint(equalTo: host.view.bottomAnchor),
             ])
             page = p
+            p.attach()
+            if cached != nil, p.route != r { p.show(r) }
         }
         window?.title = r.title
         window?.subtitle = r.url.absoluteString
@@ -258,6 +321,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             self.fingerprint = fp
             self.builtAt = Date()
             self.reloadSidebar()
+            self.cache.forEach { if $0 !== self.page { $0.markStale() } }
             guard let page = self.page else { return }
             if page.isEditing { self.pendingReload = true; return }
             page.reload()

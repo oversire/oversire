@@ -212,6 +212,8 @@ final class InboxPage: Page {
     private var filter = InboxFilter.load() { didSet { filter.save(); reload() } }
     private weak var projectChip: MenuChip?
     private weak var priorityChip: MenuChip?
+    private let more = MoreRows()
+    override var buildsLater: Bool { true }
 
     private var tab: Route.InboxTab {
         guard case .inbox(let t) = route, Route.InboxTab.visible(data.has).contains(t) else { return .all }
@@ -258,7 +260,7 @@ final class InboxPage: Page {
         let shown = kept.filter { tab == .all || $0.source.tab == tab }
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(InboxRow.layout)) }
-        for e in shown.prefix(150) { list.add(row(e)) }
+        list.add(shown, more: more) { [unowned self] in self.row($0) }
         if list.isEmpty, data.loadingFirst { list.add(SkeletonRows(label: "Loading the inbox")) }
         if list.isEmpty {
             list.add(EmptyNote(filter.isOn ? "No entry matches the filters." : tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero."))

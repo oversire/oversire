@@ -5,6 +5,7 @@ import OverSireCore
 final class PRsPage: Page {
     private var busy: [String: String] = [:]   // row id → verb
     private var errors: [String: String] = [:]
+    override var buildsLater: Bool { true }
     private let table = ColumnLayout(id: "prs", columns: [
         TableColumn(id: "kind", title: "", width: 58, min: 48),
         TableColumn(id: "title", title: "Pull request", width: 300, min: 160, flexible: true),

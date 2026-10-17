@@ -3,17 +3,18 @@ import OverSireCore
 
 // CI over the last 7 days against the 7 days before, from the deploy log.
 final class InsightsPage: Page {
+    override var buildsLater: Bool { true }
     private var repo: String?
 
     // Pass rate of each day, oldest first. Nil for a day with no finished run. Pure, for the selftest.
     static func daily(_ recs: [DeployRecord], days: Int = 14, now: Date = Date()) -> [(day: Date, rate: Double?)] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: now)
+        // Parse each date one time. A parse per day and record is slow.
+        let byDay = Dictionary(grouping: recs.compactMap { r in parseISO(r.completedAt).map { (day: cal.startOfDay(for: $0), rec: r) } }, by: \.day)
         return (0..<days).reversed().map { back in
             let start = cal.date(byAdding: .day, value: -back, to: today)!
-            let end = cal.date(byAdding: .day, value: 1, to: start)!
-            let s = computeWindow(recordsInWindow(recs, from: start, to: end))
-            return (start, s.passRate)
+            return (start, computeWindow(byDay[start]?.map(\.rec) ?? []).passRate)
         }
     }
 
@@ -22,9 +23,11 @@ final class InsightsPage: Page {
         let repos = Array(Set(recs.map(\.repo))).sorted()
         if let repo { recs = recs.filter { $0.repo == repo } }
         let now = Date(), day = 86_400.0
-        let thisR = recordsInWindow(recs, from: now.addingTimeInterval(-7 * day), to: now.addingTimeInterval(1))
+        let dated = recs.compactMap { r in parseISO(r.completedAt).map { (rec: r, at: $0) } }
+        func window(_ from: Date, _ to: Date) -> [DeployRecord] { dated.filter { $0.at >= from && $0.at < to }.map(\.rec) }
+        let thisR = window(now.addingTimeInterval(-7 * day), now.addingTimeInterval(1))
         let tw = computeWindow(thisR)
-        let lw = computeWindow(recordsInWindow(recs, from: now.addingTimeInterval(-14 * day), to: now.addingTimeInterval(-7 * day)))
+        let lw = computeWindow(window(now.addingTimeInterval(-14 * day), now.addingTimeInterval(-7 * day)))
         let insights = generateInsights(this: tw, last: lw)
 
         let filter = MenuChip(repo.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "All repos", symbol: "line.3.horizontal.decrease") { [weak self] in

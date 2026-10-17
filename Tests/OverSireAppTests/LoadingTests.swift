@@ -85,3 +85,30 @@ final class ActionButtonBusyTests: XCTestCase {
         XCTAssertFalse(b.subviews.contains { $0 is Spinner })
     }
 }
+
+final class MoreRowsTests: XCTestCase {
+    private func buttons(_ v: NSView) -> [NSButton] { (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(buttons) }
+
+    @MainActor
+    func testLongListShowsAPageAndMore() throws {
+        let card = ListCard()
+        let more = MoreRows()
+        card.add(Array(0..<120), more: more) { _ in NSView() }
+        // 50 rows, 49 lines between them, then a line and the button row.
+        XCTAssertEqual(card.list.arrangedSubviews.count, 101)
+        let b = try XCTUnwrap(buttons(card).first { $0.title == "Show 50 more" } as? ActionButton)
+        b.onClick?()
+        XCTAssertEqual(more.count, 100)
+        XCTAssertEqual(card.list.arrangedSubviews.count, 201)
+        try XCTUnwrap(buttons(card).first { $0.title == "Show 20 more" } as? ActionButton).onClick?()
+        XCTAssertEqual(card.list.arrangedSubviews.count, 239)
+        XCTAssertTrue(buttons(card).isEmpty)
+    }
+
+    @MainActor
+    func testRebuildKeepsTheOpenedRows() {
+        let card = ListCard()
+        card.add(Array(0..<120), more: MoreRows(100)) { _ in NSView() }
+        XCTAssertEqual(card.list.arrangedSubviews.count, 201)
+    }
+}
