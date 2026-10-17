@@ -226,6 +226,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             FieldRow("While you look at a run in progress", note: "The popover is open and a run is in progress.", active),
         ]))
         embed(b, note: "OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds, not at the next poll. With the cloud live, a poll only checks the state at the reconcile time. Set up the cloud with the oversire/cloud repo, then connect here with its URL and a device token.")
+        b.addFull(CloudAICard(cloudAIRecords))
     }
 
     private func pollChanged() {

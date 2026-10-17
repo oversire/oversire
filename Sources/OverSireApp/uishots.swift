@@ -78,6 +78,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
 
     // OVERSIRE_UISHOTS_LOADING=1: no fetch ever ends, so each page shows its loading state.
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
+    // OVERSIRE_UISHOTS_CLOUD=0 or 1: the Cloud AI sections show without or with a cloud account.
+    static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
 
     // A source that never answers.
     struct NeverAnswers: RunSource {

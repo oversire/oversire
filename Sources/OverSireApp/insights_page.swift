@@ -40,6 +40,7 @@ final class InsightsPage: Page {
         col.addFull(PageHeader("Insights", caption: "Last 7 days against the 7 days before. OverSire logs each finished run it sees.", actions: [filter, copy]))
         guard !recs.isEmpty else {
             col.addFull(EmptyNote("No run history yet. Keep OverSire open, and look again after some runs finish.", symbol: "chart.bar"))
+            col.addFull(CloudAICard(cloudAIRecords))
             return
         }
 
@@ -69,6 +70,7 @@ final class InsightsPage: Page {
         let notes = Card(title: "What changed")
         for i in insights { notes.add(NSStackView(h: [Glyph("lightbulb", color: Palette.warn, size: 12), NSTextField.text(i, size: 12.5, lines: 0)], spacing: 8, align: .top)) }
         col.addFull(notes)
+        col.addFull(CloudAICard(cloudAIRecords))
     }
 }
 

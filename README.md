@@ -295,6 +295,10 @@ A Cat Eye relay (v3) that you deployed before also works. OverSire moves its URL
 
 - **Retention:** the cloud keeps events for 24 hours by default (1 hour to 30 days). A Mac that was offline reads the events it missed. After a longer gap, it does one full refresh.
 - **Privacy:** the cloud keeps only repo names, Plane workspace slugs, event types and IDs (run, job, pull request, project, work item). It does not log payloads, titles, bodies, or user names. Each webhook is verified with an HMAC secret.
+
+### Cloud AI
+
+OverSire Cloud can also run AI jobs on the server, for example triage of new items, the reason a CI run failed, or a daily digest. A job only writes suggestions. You accept or dismiss each suggestion, and nothing changes before that. An accepted suggestion can send a work order to a runner on your Mac, which starts, reads or stops a coding session. **Settings → Cloud (beta)** and **Insights** show the Jobs, Suggestions and Runner sections. Without a cloud account, they only tell what each one does.
 - **Disconnect:** **Disconnect** deletes the token from the Keychain. The webhooks stay, because other Macs can use them.
 
 ## Using the PRs tab
