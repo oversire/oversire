@@ -66,6 +66,7 @@ final class ProjectStore {
     func track(_ projects: [ProjectSummary], live: Set<String>) {
         tracked = projects
         liveKeys = live
+        PROJECT_ICONS.track(projects)
         restartTimer()
         let keys = projects.map { $0.ref.storeKey }
         refresh(keys, force: false) { _ in }
