@@ -56,6 +56,8 @@ public enum ProviderConformance {
         (.sessionInput, "SessionIO", { $0 is any SessionIO }),
         (.sessionTail, "SessionIO", { $0 is any SessionIO }),
         (.reveal, "Revealing", { $0 is any Revealing }),
+        (.projectSettings, "ProjectSettingsReading", { $0 is any ProjectSettingsReading }),
+        (.projectSettingsEdit, "ProjectSettingsEditing", { $0 is any ProjectSettingsEditing }),
     ]
 
     /// The capabilities agree with the protocols. No I/O.

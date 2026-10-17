@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1b1e25"/><stop offset="1" stop-color="#0f1115"/></linearGradient></defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <g transform="translate(90 154) scale(3.32)">
+    <g fill="none" stroke-width="9" transform="rotate(-80 50 50)">
+      <circle cx="50" cy="50" r="27" stroke="#b98ad6" stroke-dasharray="51 6.5"/>
+      <circle cx="50" cy="50" r="27" stroke="#5aaee8" stroke-dasharray="0 57.5 51 200"/>
+      <circle cx="50" cy="50" r="27" stroke="#e9a21a" stroke-dasharray="0 115 51 200"/>
+    </g>
+    <circle cx="50" cy="50" r="12" fill="#1fb386"/>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="480" y="262" font-size="38" fill="#a6aab3">oversire /</text>
+    <text x="476" y="356" font-size="92" font-weight="bold" fill="#e9eaee">agent-binder</text>
+    <text x="480" y="420" font-size="32" fill="#a6aab3">Drive coding agent CLIs from Swift.</text>
+  </g>
+</svg>

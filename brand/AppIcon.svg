@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- OverSire "Status lens": three arcs (tracker, CI, agents) around one status light. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#24272f"/>
+      <stop offset="1" stop-color="#0f1115"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.7"/>
+      <feOffset dy="1.2"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- Apple icon grid: 824 px body, 100 px margin. -->
+  <g transform="translate(100 100) scale(8.24)">
+    <rect width="100" height="100" rx="22.5" fill="url(#bg)" filter="url(#shadow)"/>
+    <rect x="0.25" y="0.25" width="99.5" height="99.5" rx="22.3" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="0.5"/>
+    <g fill="none" stroke-width="7" transform="rotate(-80 50 50)">
+      <circle cx="50" cy="50" r="27" stroke="#b98ad6" stroke-dasharray="51 6.5"/>
+      <circle cx="50" cy="50" r="27" stroke="#5aaee8" stroke-dasharray="0 57.5 51 200"/>
+      <circle cx="50" cy="50" r="27" stroke="#e9a21a" stroke-dasharray="0 115 51 200"/>
+    </g>
+    <circle cx="50" cy="50" r="11" fill="#1fb386"/>
+    <circle cx="46" cy="46" r="3.2" fill="#ffffff" opacity="0.7"/>
+  </g>
+</svg>

@@ -1,3 +1,5 @@
+<p align="center"><img src="brand/AppIcon.png" width="128" height="128" alt="OverSire icon: three arcs around a green status light"></p>
+
 # OverSire — GitHub Actions & PR Monitor for macOS
 
 > A lightweight, native macOS menu bar app for monitoring GitHub Actions, pull request reviews, Plane projects, and weekly CI health. Open source, about 1.3 MB, accessible, zero Electron.
@@ -17,7 +19,7 @@ OverSire is built on three principles:
 ## Features
 
 ### Actions Tab
-- **Live status icon** — GitHub mark tinted by status, with a small badge glyph (check / cross / hourglass) so state is readable without colour
+- **Live status icon** — a ring of three arcs (tracker, CI, agents) around a status light. The light takes the status colour and shows a glyph (check / cross / hourglass), so state is readable without colour
 - **Pulsing animation** — icon gently pulses when any action is actively running
 - **Rich popover** — scrollable list of recent runs across all your repos, styled like the GitHub Actions UI
 - **Per-run details** — workflow name, run number, branch badge, timestamps, and duration
@@ -334,7 +336,7 @@ The Markdown renderer uses [markdown-it](https://github.com/markdown-it/markdown
 
 ## Menu bar icon states
 
-Colours come from the [Okabe-Ito colour-blind-safe palette](https://jfly.uni-koeln.de/color/), and each state also punches a badge glyph into the icon so it's readable without colour perception.
+Colours come from the [Okabe-Ito colour-blind-safe palette](https://jfly.uni-koeln.de/color/), and each state also shows a glyph in the light at the centre of the ring, so it's readable without colour perception.
 
 | Icon | Badge | Meaning |
 |------|-------|---------|

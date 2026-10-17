@@ -10,13 +10,15 @@ public struct ProjectSummary: Codable, Hashable, Sendable {
     public let title: String
     public let url: String
     public let closed: Bool          // archived
+    public var logo: ProjectLogo? = nil
 
-    public init(ref: ProjectRef, identifier: String, title: String, url: String, closed: Bool) {
+    public init(ref: ProjectRef, identifier: String, title: String, url: String, closed: Bool, logo: ProjectLogo? = nil) {
         self.ref = ref
         self.identifier = identifier
         self.title = title
         self.url = url
         self.closed = closed
+        self.logo = logo
     }
 }
 
