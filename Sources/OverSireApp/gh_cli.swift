@@ -121,6 +121,17 @@ struct RepoClient {
         return nil
     }
 
+    /// nil on success, else the error text.
+    func rerunJob(repo: String, runId: String, jobId: String) async -> String? {
+        let r = await Result(awaiting: {
+            let c = try ci(repo)
+            guard let jr = c as? any JobRerunning else { throw ProviderError.unsupported(.rerunJob) }
+            try await jr.rerun(JobRef(run: Self.runRef(c, repo, id: runId), id: jobId))
+        })
+        if case .failure(let e) = r { return GitHubClient.hint(e) }
+        return nil
+    }
+
     func changes(_ repo: String) async -> [ChangeRequest] {
         switch await Result(awaiting: { let h = try host(repo); return try await h.changes(Self.repoRef(h, repo), ChangeFilter(limit: 20)) }) {
         case .success(let list):

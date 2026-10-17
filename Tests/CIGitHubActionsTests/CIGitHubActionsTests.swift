@@ -113,6 +113,16 @@ final class CIGitHubActionsTests: XCTestCase {
         XCTAssertEqual(gh.calls.last?.args.prefix(5), ["api", "-i", "-X", "POST", "repos/acme/app/actions/runs/77/cancel"])
     }
 
+    func testRerunJob() async throws {
+        gh.on("POST", "repos/acme/app/actions/jobs/9/rerun", answer("201 Created", "{}"))
+        try await ci.rerun(JobRef(run: ref, id: "9"))
+        XCTAssertEqual(gh.calls.last?.args.prefix(5), ["api", "-i", "-X", "POST", "repos/acme/app/actions/jobs/9/rerun"])
+        do {
+            try await ci.rerun(JobRef(run: RunRef(account: ci.account, repo: nil, id: "1"), id: "9"))
+            XCTFail("a job without a repo must throw")
+        } catch {}
+    }
+
     func testPoll() async throws {
         let path = "repos/acme/app/actions/runs?per_page=20"
         func runs(_ status: String, _ updated: String) -> String {

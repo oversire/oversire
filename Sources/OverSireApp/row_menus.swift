@@ -15,6 +15,7 @@ enum RowCommand: Equatable {
     case run(repo: String, runId: String, RunAction)
     case ignoreFailure(repo: String, runId: String, Bool)
     case copyJobLog(repo: String, jobId: String)
+    case rerunJob(repo: String, runId: String, jobId: String)
     case approve(repo: String, number: Int)
     case merge(repo: String, number: Int)
     case revealCard(String)
@@ -105,12 +106,16 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func job(repo: String, job j: Job, caps: Set<Capability>) -> [MenuEntry] {
+    static func job(repo: String, run r: Run, job j: Job, caps: Set<Capability>) -> [MenuEntry] {
         var out: [MenuEntry] = []
         if let u = j.url { out.append(.action("Open job on GitHub", .openURL(u))) }
         if caps.contains(.logs) { out.append(.action("Copy job log", .copyJobLog(repo: repo, jobId: j.id))) }
         if let u = j.url { out.append(.action("Copy job link", .copy(u))) }
-        return out
+        // GitHub re-runs a job only after the full run ends.
+        if caps.contains(.rerunJob) && r.status == RunStatus.completed.rawValue {
+            out += [.separator, .action("Re-run this job", .rerunJob(repo: repo, runId: r.id, jobId: j.id))]
+        }
+        return out.tidy
     }
 
     static func pr(repo: String, pr p: ChangeRequest, linkedKey: String?, caps: Set<Capability>) -> [MenuEntry] {
@@ -175,7 +180,7 @@ final class RowCommander {
         self.go = go
     }
 
-    var caps: Set<Capability> { Set([.rerun, .cancel, .logs, .changeActions, .sessionInput, .reveal].filter(data.has)) }
+    var caps: Set<Capability> { Set([.rerun, .rerunJob, .cancel, .logs, .changeActions, .sessionInput, .reveal].filter(data.has)) }
 
     func items(_ entries: [MenuEntry], anchor: NSView?) -> [NSMenuItem] {
         entries.map { e in
@@ -227,6 +232,14 @@ final class RowCommander {
             data.setIgnored([r], ignored: on)
         case .copyJobLog(let repo, let id):
             Task { if let log = await REPO_CLIENT.rawLog(repo, jobId: id) { await MainActor.run { RowActions.copy(log) } } }
+        case .rerunJob(let repo, let runId, let jobId):
+            Task { [weak self, weak anchor] in
+                let err = await REPO_CLIENT.rerunJob(repo: repo, runId: runId, jobId: jobId)
+                await MainActor.run {
+                    if let err { self?.fail("Could not re-run the job", err, anchor: anchor) }
+                    self?.data.refresh(force: true, completion: nil)
+                }
+            }
         case .approve(let repo, let n), .merge(let repo, let n):
             // Pages that list PRs ask first. Elsewhere the PR opens on GitHub.
             if let u = URL(string: "https://github.com/\(repo)/pull/\(n)") { NSWorkspace.shared.open(u) }
@@ -246,6 +259,14 @@ final class RowCommander {
         saveConfig()
         Task { await PROJECT_ICONS.sync(key) }
         NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+    }
+
+    private func fail(_ title: String, _ detail: String, anchor: NSView?) {
+        let a = NSAlert()
+        a.alertStyle = .warning
+        a.messageText = title
+        a.informativeText = detail
+        if let w = anchor?.window { a.beginSheetModal(for: w) } else { a.runModal() }
     }
 
     private func sendInput(_ key: String, anchor: NSView?) {

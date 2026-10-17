@@ -4,7 +4,7 @@ import XCTest
 
 final class RowMenuTests: XCTestCase {
     private let ref = ProjectRef(account: AccountID(provider: ProviderID(rawValue: "plane"), id: "ocral"), id: "p1", key: "SLING")
-    private let all: Set<Capability> = [.rerun, .cancel, .logs, .changeActions, .sessionInput, .reveal]
+    private let all: Set<Capability> = [.rerun, .rerunJob, .cancel, .logs, .changeActions, .sessionInput, .reveal]
 
     private var snap: ProjectSnapshot {
         ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "https://plane/sling", closed: false),
@@ -77,8 +77,14 @@ final class RowMenuTests: XCTestCase {
     func testJobMenu() {
         let j = Job(id: "5", name: "build", status: "completed", conclusion: "failure", url: "https://github.com/j/5", startedAt: nil,
                     completedAt: nil, runnerName: nil, steps: nil)
-        XCTAssertEqual(RowMenu.job(repo: "o/r", job: j, caps: all).titles, ["Open job on GitHub", "Copy job log", "Copy job link"])
-        XCTAssertEqual(RowMenu.job(repo: "o/r", job: j, caps: []).titles, ["Open job on GitHub", "Copy job link"])
+        let done = run(status: "completed", conclusion: "failure")
+        let m = RowMenu.job(repo: "o/r", run: done, job: j, caps: all)
+        XCTAssertEqual(m.titles, ["Open job on GitHub", "Copy job log", "Copy job link", "Re-run this job"])
+        XCTAssertEqual(m.command("Re-run this job"), .rerunJob(repo: "o/r", runId: "99", jobId: "5"))
+        XCTAssertEqual(RowMenu.job(repo: "o/r", run: done, job: j, caps: []).titles, ["Open job on GitHub", "Copy job link"])
+        let live = RowMenu.job(repo: "o/r", run: run(status: "in_progress", conclusion: nil), job: j, caps: all)
+        XCTAssertFalse(live.titles.contains("Re-run this job"), "GitHub re-runs a job only after the run ends")
+        XCTAssertNotEqual(live.last, .separator)
     }
 
     func testPRMenu() {

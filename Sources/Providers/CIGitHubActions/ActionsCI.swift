@@ -3,13 +3,13 @@ import GitHubKit
 import OverSireCore
 
 /// The GitHub Actions runs of one owner. `repos` limits the poll.
-public final class ActionsCI: CIProvider, LogReading, RateReporting, @unchecked Sendable {
+public final class ActionsCI: CIProvider, LogReading, JobRerunning, RateReporting, @unchecked Sendable {
     public static let tailBytes = 16_000
 
     public let id: ProviderID = .githubActions
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.rerun, .cancel, .logs, .annotations] }
+    public var capabilities: Set<Capability> { [.rerun, .rerunJob, .cancel, .logs, .annotations] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(10), requestsPerHour: 5000) }
 
     let client: GitHubClient
@@ -117,6 +117,12 @@ public final class ActionsCI: CIProvider, LogReading, RateReporting, @unchecked 
         case .cancel: "cancel"
         }
         return ("POST", "repos/\(repo)/actions/runs/\(r.id)/\(verb)")
+    }
+
+    // MARK: JobRerunning
+
+    public func rerun(_ j: JobRef) async throws {
+        _ = try await client.api("POST", "repos/\(try path(j.run))/actions/jobs/\(j.id)/rerun")
     }
 
     // MARK: LogReading

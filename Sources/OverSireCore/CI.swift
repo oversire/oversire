@@ -249,6 +249,11 @@ public protocol CIProvider: Provider {
     func perform(_ a: RunAction, on r: RunRef) async throws
 }
 
+/// Re-runs one job of a run. On the wire: RunAction `rerun` on a `job` subject.
+public protocol JobRerunning: CIProvider {
+    func rerun(_ j: JobRef) async throws
+}
+
 public protocol LogReading: CIProvider {
     /// The last lines of the job log, without time stamps and group markers.
     func log(_ j: JobRef, lines: Int) async throws -> [String]

@@ -118,6 +118,9 @@ public enum CIConformance {
                 r.expect(lines.count <= 5, "log gave \(lines.count) lines for 5")
             }
         }
+        if let jr = ci as? any JobRerunning, ci.capabilities.contains(.rerunJob), let job = jobs.first {
+            _ = await r.step("rerun job", { try await jr.rerun(JobRef(run: ref, id: job.id)) })
+        }
         for a in RunAction.allCases {
             let need: Capability = a == .cancel ? .cancel : .rerun
             if ci.capabilities.contains(need) {

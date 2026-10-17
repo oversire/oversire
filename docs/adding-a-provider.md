@@ -128,6 +128,7 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 
 - `pipelines`, `runs` (newest first), `run`, `jobs`, `failures`.
 - `perform(_:on:)` runs a rerun or a cancel. Throw `.unsupported(.rerun)` or `.unsupported(.cancel)` for an action that you do not support.
+- To re-run one job, add `.rerunJob` and conform to `JobRerunning`. On the wire, this is the RunAction `rerun` on a `job` subject.
 
 ### Agent runtime
 
@@ -147,6 +148,7 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.assets` | `AssetResolving` |
 | `.webhooks` | `WebhookManaging` |
 | `.logs` | `LogReading` |
+| `.rerunJob` | `JobRerunning` |
 | `.sessionInput`, `.sessionTail` | `SessionIO` |
 | `.reveal` | `Revealing` |
 | `.projectSettings` | `ProjectSettingsReading` |

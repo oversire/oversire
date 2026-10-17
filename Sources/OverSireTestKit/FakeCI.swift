@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory CI with one pipeline and one failed run in "fake/app".
-public final class FakeCI: CIProvider, LogReading, @unchecked Sendable {
+public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -13,7 +13,7 @@ public final class FakeCI: CIProvider, LogReading, @unchecked Sendable {
     private var runList: [Run] = []
     private var logLines: [String] = (1...40).map { "line \($0)" } + ["error: the fake failed"]
 
-    public init(account: String = "fake", capabilities: Set<Capability> = [.rerun, .cancel, .logs]) {
+    public init(account: String = "fake", capabilities: Set<Capability> = [.rerun, .rerunJob, .cancel, .logs]) {
         base = FakeProvider(id: "fake-ci", account: account, capabilities: capabilities)
         repo = RepoRef(account: base.account, path: "fake/app", url: URL(string: "https://code.fake/fake/app")!)
         runList = [Self.run(id: "1", status: "completed", conclusion: "failure", attempt: 1)]
@@ -69,6 +69,16 @@ public final class FakeCI: CIProvider, LogReading, @unchecked Sendable {
             case .cancel: runList[at] = Self.run(id: o.id, status: "completed", conclusion: "cancelled", attempt: o.attempt ?? 1)
             }
             base.emit(.run, a.rawValue, .run(RunRef(account: account, repo: repo, id: o.id, attempt: runList[at].attempt ?? 1)))
+        }
+    }
+
+    public func rerun(_ j: JobRef) async throws {
+        guard capabilities.contains(.rerunJob) else { throw ProviderError.unsupported(.rerunJob) }
+        try base.locked {
+            guard let at = runList.firstIndex(where: { $0.id == j.run.id }) else { throw ProviderError.notFound }
+            let o = runList[at]
+            runList[at] = Self.run(id: o.id, status: "queued", conclusion: nil, attempt: (o.attempt ?? 1) + 1)
+            base.emit(.job, "rerun", .job(JobRef(run: RunRef(account: account, repo: repo, id: o.id, attempt: runList[at].attempt ?? 1), id: j.id)))
         }
     }
 

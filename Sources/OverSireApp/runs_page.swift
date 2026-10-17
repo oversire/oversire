@@ -384,7 +384,7 @@ final class RunPage: Page {
                 self?.reload()
             }
             row.selected = j.id == jobId
-            commands.attach(row) { [repo] in RowMenu.job(repo: repo, job: j, caps: $0) }
+            commands.attach(row) { [repo] in RowMenu.job(repo: repo, run: r, job: j, caps: $0) }
             jobsCard.add(row)
         }
         if let p = jobsLoad.placeholder(retry: { [weak self] in self?.retryJobs() }) { jobsCard.add(p) }
