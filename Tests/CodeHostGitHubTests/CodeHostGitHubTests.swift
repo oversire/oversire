@@ -66,10 +66,10 @@ final class CodeHostGitHubTests: XCTestCase {
         XCTAssertEqual(list.map(\.number), [1, 2])
         XCTAssertEqual(list.map(\.mine), [false, true])
         XCTAssertEqual(list[0].labels, [.init(name: "bug", color: "d73a4a")])
-        let vars = gh.body(0)?["variables"] as? [String: Any]
+        let vars = gh.body(1)?["variables"] as? [String: Any]
         XCTAssertEqual(vars?["q"] as? String, "repo:acme/app is:pr is:open review-requested:@me")
         XCTAssertEqual(vars?["n"] as? Int, 20)
-        XCTAssertEqual(gh.calls[0].args, ["api", "-i", "-X", "POST", "graphql", "--input", "-"], "the body goes through stdin")
+        XCTAssertEqual(gh.calls[1].args, ["api", "-i", "-X", "POST", "graphql", "--input", "-"], "the body goes through stdin")
     }
 
     func testEachChangeActionMakesOneRequest() {
@@ -124,6 +124,23 @@ final class CodeHostGitHubTests: XCTestCase {
 
         let again = try await host.poll(since: page.cursor)
         XCTAssertTrue(again.events.isEmpty, "no repeats")
+    }
+
+    func testChangesSkipGraphQLWhenTheOpenListIsTheSame() async throws {
+        let gate = "repos/acme/app/pulls?state=open&per_page=100"
+        gh.on("GET", gate, answer("200 OK", "[]", etag: "\"g1\""), answer("304 Not Modified", "", etag: "\"g1\""),
+              answer("200 OK", "[]", etag: "\"g2\""))
+        gh.on("POST", "graphql", answer("200 OK", #"{"data":{"search":{"nodes":[{"number":4,"title":"Fix"}]}}}"#))
+        let f = ChangeFilter(mine: false)
+        let graphQL = { self.gh.calls.filter { $0.args[4] == "graphql" }.count }
+        _ = try await host.changes(repo, f)
+        XCTAssertEqual(graphQL(), 1)
+        let kept = try await host.changes(repo, f)
+        XCTAssertEqual(kept.map(\.number), [4])
+        XCTAssertEqual(graphQL(), 1, "a 304 keeps the last result")
+        XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: \"g1\""])
+        _ = try await host.changes(repo, ChangeFilter(mine: true))
+        XCTAssertEqual(graphQL(), 3, "a new list or filter searches again")
     }
 
     func testTokenUsesHTTP() async throws {

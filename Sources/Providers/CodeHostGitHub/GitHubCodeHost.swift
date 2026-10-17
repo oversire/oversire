@@ -11,6 +11,8 @@ public final class GitHubCodeHost: CodeHost, RateReporting, @unchecked Sendable 
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 5000) }
 
     let client: GitHubClient
+    private let lock = NSLock()
+    private var lastChanges: [String: (etag: String, filter: ChangeFilter, out: [ChangeRequest], at: Date)] = [:]
 
     public init(owner: String, repos: [String] = [], client: GitHubClient) {
         account = AccountID(provider: .github, id: owner)
@@ -72,7 +74,12 @@ public final class GitHubCodeHost: CodeHost, RateReporting, @unchecked Sendable 
         """
 
     /// Review requests first, then own PRs. Own PRs link runs to items.
+    /// GraphQL has no ETag. A free 304 on the open PR list keeps the last result for up to 10 minutes.
+    /// Reviews and checks do not change that list, so the age limit catches them.
     public func changes(_ r: RepoRef, _ f: ChangeFilter) async throws -> [ChangeRequest] {
+        let last = lock.withLock { lastChanges[r.path] }
+        let gate = try? await client.api("GET", "repos/\(r.path)/pulls?state=open&per_page=100", etag: last?.etag)
+        if gate?.status == 304, let last, last.filter == f, -last.at.timeIntervalSinceNow < 600 { return last.out }
         var out: [ChangeRequest] = []
         if f.reviewRequested { out += try await search(r, "review-requested:@me", f) }
         if f.mine {
@@ -80,6 +87,9 @@ public final class GitHubCodeHost: CodeHost, RateReporting, @unchecked Sendable 
                 p.mine = true
                 out.append(p)
             }
+        }
+        if let gate, let etag = gate.etag ?? (gate.status == 304 ? last?.etag : nil) {
+            lock.withLock { lastChanges[r.path] = (etag, f, out, Date()) }
         }
         return out
     }

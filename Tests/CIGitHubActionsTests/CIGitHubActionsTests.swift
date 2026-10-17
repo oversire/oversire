@@ -43,6 +43,32 @@ final class CIGitHubActionsTests: XCTestCase {
         XCTAssertEqual(one.number, 12)
     }
 
+    func testRunsUseTheETagCache() async throws {
+        let path = "repos/acme/app/actions/runs?per_page=5"
+        let q = RunQuery(repo: ci.repoRef("acme/app"), limit: 5)
+        gh.on("GET", path, answer("200 OK", #"{"workflow_runs":["# + Self.runJSON + "]}", etag: "\"r1\""),
+              answer("304 Not Modified", "", etag: "\"r1\""))
+        _ = try await ci.runs(q)
+        XCTAssertFalse(gh.calls.last?.args.contains("-H") ?? true, "no ETag before the first answer")
+        let again = try await ci.runs(q)
+        XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: \"r1\""])
+        XCTAssertEqual(again.map(\.id), ["77"], "a 304 gives back the kept body")
+    }
+
+    func testETagCacheDropsTheOldest() {
+        let c = ETagCache(maxEntries: 2, maxBytes: 10)
+        c.put("a", etag: "1", body: Data("aaaa".utf8))
+        c.put("b", etag: "2", body: Data("bbbb".utf8))
+        _ = c.get("a")
+        c.put("c", etag: "3", body: Data("cccc".utf8))
+        XCTAssertNil(c.get("b"), "b is the least recent")
+        XCTAssertNotNil(c.get("a"))
+        c.put("d", etag: "4", body: Data("dddddddd".utf8))
+        XCTAssertNil(c.get("a"), "the byte limit drops more")
+        XCTAssertNil(c.get("c"))
+        XCTAssertEqual(c.get("d")?.etag, "4")
+    }
+
     func testStatusEnums() {
         func run(_ status: String, _ conclusion: String?) -> Run {
             Run(id: "1", name: "n", displayTitle: "t", status: status, conclusion: conclusion, headBranch: "", headSha: "", event: "",

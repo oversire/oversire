@@ -130,6 +130,28 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(child.url, "https://app.plane.so/acme/browse/ENG-2/")
     }
 
+    func testItemsLoadOnlyTheDelta() async throws {
+        let list = "\(ws)/projects/P1/issues/"
+        func row(_ id: String, _ n: Int, _ at: String) -> String {
+            #"{"id":"\#(id)","name":"Item \#(n)","sequence_id":\#(n),"state":"s1","last_activity_at":"\#(at)"}"#
+        }
+        http.on("GET", list, #"{"results":[\#(row("i1", 1, "2026-10-16T10:00:00Z")),\#(row("i2", 2, "2026-10-16T09:00:00Z"))],"next_page_results":false}"#)
+        _ = try await plane.items(project, since: nil, limit: 50)
+        let fullLists = { self.http.requests.filter { $0.url?.path() == list && $0.url?.query()?.contains("expand") == true }.count }
+        XCTAssertEqual(fullLists(), 1)
+
+        // i2 changed, i3 is new and i1 is gone. Only i2 and i3 load.
+        plane.indexMaxAge = 0
+        http.on("GET", list, #"{"results":[\#(row("i3", 3, "2026-10-16T12:00:00Z")),\#(row("i2", 2, "2026-10-16T11:00:00Z"))],"next_page_results":false}"#)
+        http.on("GET", "\(list)i2/", row("i2", 2, "2026-10-16T11:00:00Z"))
+        http.on("GET", "\(list)i3/", row("i3", 3, "2026-10-16T12:00:00Z"))
+        let items = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(Set(items.map(\.key)), ["ENG-2", "ENG-3"])
+        XCTAssertEqual(fullLists(), 1, "no full list between the full refreshes")
+        XCTAssertEqual(Set(http.requests.compactMap { $0.url?.path() }.filter { $0.hasSuffix("i2/") || $0.hasSuffix("i3/") }),
+                       ["\(list)i2/", "\(list)i3/"])
+    }
+
     func testWritesMakePlaneJSON() async throws {
         let ref = ItemRef(project: project, id: "i1", key: "ENG-1", url: URL(string: "https://app.plane.so/acme/browse/ENG-1/")!)
         http.on("PATCH", "\(ws)/projects/P1/issues/i1/", "{}")

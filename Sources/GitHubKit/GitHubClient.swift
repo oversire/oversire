@@ -36,11 +36,14 @@ public struct GitHubClient: Sendable {
     let commands: any CommandRunner
     let http: any HTTPTransport
     let token: String?
+    let cache: ETagCache
 
-    public init(commands: any CommandRunner, http: any HTTPTransport, gh: String = GitHubClient.defaultPath, token: String? = nil) {
+    public init(commands: any CommandRunner, http: any HTTPTransport, gh: String = GitHubClient.defaultPath, token: String? = nil,
+                cache: ETagCache = ETagCache()) {
         self.commands = commands
         self.http = http
         self.gh = gh
+        self.cache = cache
         self.token = token.flatMap { $0.isEmpty ? nil : $0 }
     }
 
@@ -65,10 +68,15 @@ public struct GitHubClient: Sendable {
         }
     }
 
+    /// A GET sends the ETag of the kept body. On 304 the kept body is the answer.
     public func json(_ method: String = "GET", _ path: String, body: [String: Any]? = nil) async throws -> Any? {
         let data = try body.map { try JSONSerialization.data(withJSONObject: $0) }
-        let a = try await api(method, path, body: data)
-        return a.body.isEmpty ? nil : try? JSONSerialization.jsonObject(with: a.body)
+        let kept = method == "GET" ? cache.get(path) : nil
+        let a = try await api(method, path, body: data, etag: kept?.etag)
+        var out = a.body
+        if a.status == 304, let kept { out = kept.body }
+        else if method == "GET", let e = a.etag, !a.body.isEmpty { cache.put(path, etag: e, body: a.body) }
+        return out.isEmpty ? nil : try? JSONSerialization.jsonObject(with: out)
     }
 
     /// The `data` object of a GraphQL answer.

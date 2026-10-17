@@ -19,6 +19,9 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
     private var identifiers: [String: String] = [:]                    // project id → "ENG"
     private var indexCache: [String: (stubs: [ItemStub], at: Date)] = [:]
     private var itemCache: [String: [String: Item]] = [:]               // project id → the last items
+    private var fullAt: [String: Date] = [:]                            // project id → the last full list
+    static let fullEvery: TimeInterval = 600
+    var indexMaxAge: TimeInterval = 10
 
     public init(workspace: PlaneWorkspace, token: String, http: any HTTPTransport) {
         api = PlaneAPI(workspace: workspace, token: token, http: http)
@@ -81,20 +84,35 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
     }
 
     /// The items with the newest activity, and the parents and sub-items that complete each tree.
+    /// Between full lists, the index tells which items changed. Only those load again.
+    /// A full list each 10 minutes catches changes that do not move the activity time.
     public func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
         let identifier = try await identifier(of: p)
         let names = await memberNames()
-        let query = [URLQueryItem(name: "expand", value: "assignees,labels"),
-                     URLQueryItem(name: "order_by", value: "-last_activity_at")]
-        var rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: query, max: limit)
-        if let since { rows = rows.filter { (parseISO($0["last_activity_at"] as? String) ?? .distantFuture) >= since } }
-        let previous = lock.withLock { itemCache[p.id] ?? [:] }
-        var kept: [Item] = []
-        if let index = try? await index(p, maxAge: 10) {
-            let (extra, reused) = try await treeRows(p, loaded: Set(rows.compactMap { PlaneAPI.id($0["id"]) }), index: index,
-                                                     previous: previous)
+        let (previous, last) = lock.withLock { (itemCache[p.id] ?? [:], fullAt[p.id]) }
+        let index = try? await index(p, maxAge: indexMaxAge)
+        var rows: [[String: Any]], kept: [Item] = [], loaded: Set<String>
+        if let index, !previous.isEmpty, let last, -last.timeIntervalSinceNow < Self.fullEvery {
+            var top = Array(index.sorted { ($0.activityAt ?? .distantPast) > ($1.activityAt ?? .distantPast) }.prefix(limit))
+            if let since { top = top.filter { ($0.activityAt ?? .distantFuture) >= since } }
+            let need = Set(top.filter { $0.activityAt == nil || previous[$0.id]?.activityAt != $0.activityAt }.map(\.id))
+            kept = top.compactMap { need.contains($0.id) ? nil : previous[$0.id] }
+            // Changed items have the newest activity, so they are near the top of the list.
+            let depth = (top.lastIndex { need.contains($0.id) } ?? 0) + 10
+            rows = try await load(p, need, depth: depth)
+            loaded = Set(top.map(\.id))
+        } else {
+            let query = [URLQueryItem(name: "expand", value: "assignees,labels"),
+                         URLQueryItem(name: "order_by", value: "-last_activity_at")]
+            rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: query, max: limit)
+            if let since { rows = rows.filter { (parseISO($0["last_activity_at"] as? String) ?? .distantFuture) >= since } }
+            loaded = Set(rows.compactMap { PlaneAPI.id($0["id"]) })
+            lock.withLock { fullAt[p.id] = Date() }
+        }
+        if let index {
+            let (extra, reused) = try await treeRows(p, loaded: loaded, index: index, previous: previous)
             rows += extra
-            kept = reused
+            kept += reused
         }
         let items = kept + rows.compactMap { parseItem($0, identifier: identifier, names: names) }
         lock.withLock { itemCache[p.id] = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
@@ -171,7 +189,7 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
     // MARK: Index and trees
 
     /// Kept for 10 s, so a call right after items(...) costs nothing.
-    public func index(_ p: ProjectRef) async throws -> [ItemStub] { try await index(p, maxAge: 10) }
+    public func index(_ p: ProjectRef) async throws -> [ItemStub] { try await index(p, maxAge: indexMaxAge) }
 
     /// All items of the project, with only the fields for the tree. About 150 bytes per item.
     func index(_ p: ProjectRef, maxAge: TimeInterval) async throws -> [ItemStub] {
@@ -206,19 +224,25 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
         for id in tree.subtracting(loaded) {
             if let prev = previous[id], prev.activityAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
         }
-        if need.isEmpty { return ([], kept) }
-        let query = [URLQueryItem(name: "expand", value: "assignees,labels")]
-        var rows: [[String: Any]] = []
+        return ((try? await load(p, need, depth: 2000)) ?? [], kept)
+    }
+
+    // A few items load one by one. More load from the list in activity order, `depth` rows deep.
+    private func load(_ p: ProjectRef, _ need: Set<String>, depth: Int) async throws -> [[String: Any]] {
+        if need.isEmpty { return [] }
+        let expand = URLQueryItem(name: "expand", value: "assignees,labels")
         if need.count <= 3 {
+            var rows: [[String: Any]] = []
             for id in need.sorted() {
-                if let r = try? await api.send("GET", "\(ws)/projects/\(p.id)/issues/\(id)/", query: query) as? [String: Any] {
+                if let r = try? await api.send("GET", "\(ws)/projects/\(p.id)/issues/\(id)/", query: [expand]) as? [String: Any] {
                     rows.append(r)
                 }
             }
-        } else if let all = try? await api.list("\(ws)/projects/\(p.id)/issues/", query: query, max: 2000) {
-            rows = all.filter { PlaneAPI.id($0["id"]).map(need.contains) ?? false }
+            return rows
         }
-        return (rows, kept)
+        let all = try await api.list("\(ws)/projects/\(p.id)/issues/",
+                                     query: [expand, URLQueryItem(name: "order_by", value: "-last_activity_at")], max: depth)
+        return all.filter { PlaneAPI.id($0["id"]).map(need.contains) ?? false }
     }
 
     private func identifier(of p: ProjectRef) async throws -> String {
