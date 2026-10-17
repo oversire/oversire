@@ -6,6 +6,7 @@ final class AgentsPage: Page {
     private var tails: [String: [String]] = [:]
     private var tailAt: [String: Date] = [:]
     private var replies: [String: NSTextField] = [:]
+    private var sending: Set<String> = []
     private var note: (Tone, String)?
     private let table = ColumnLayout(id: "worktrees", columns: [
         TableColumn(id: "worktree", title: "Worktree", width: 200, min: 100),
@@ -130,15 +131,20 @@ final class AgentsPage: Page {
         f.target = self
         f.action = #selector(sendReply(_:))
         replies[key] = f
-        return NSStackView(h: [f, ActionButton("Send", style: .primary) { [weak self, weak f] in if let f { self?.sendReply(f) } }], spacing: 6)
+        let b = ActionButton("Send", style: .primary) { [weak self, weak f] in if let f { self?.sendReply(f) } }
+        if sending.contains(key) { b.busy("Sending…") }
+        return NSStackView(h: [f, b], spacing: 6)
     }
 
     @objc private func sendReply(_ f: NSTextField) {
         guard let key = f.identifier?.rawValue else { return }
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !sending.contains(key) else { return }
+        sending.insert(key)
+        reload()
         data.agentIndex.send(key, text: text) { [weak self] err in
             guard let self else { return }
+            self.sending.remove(key)
             if let err { self.note = (.bad, "Could not send to \(key): \(err.message)") } else {
                 self.replies[key]?.stringValue = ""
                 self.note = nil

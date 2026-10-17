@@ -105,6 +105,7 @@ final class Glyph: NSImageView {
 final class ActionButton: NSButton {
     enum Style { case plain, primary, link, danger }
     var onClick: (() -> Void)?
+    var idle: (title: String, image: NSImage?, enabled: Bool)?   // set while busy
 
     init(_ title: String, symbol: String? = nil, style: Style = .plain, key: String? = nil, _ action: (() -> Void)? = nil) {
         onClick = action

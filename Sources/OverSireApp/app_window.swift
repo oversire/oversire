@@ -16,6 +16,7 @@ protocol AppData: AnyObject {
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }
     var ciAssist: CIAssist { get }
+    var busy: BusyTracker { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func settingsVC(_ p: Route.SettingsPage) -> NSViewController?
     func refresh(force: Bool, completion: (() -> Void)?)
@@ -67,6 +68,17 @@ class Page: NSViewController {
     let router: Router
     private(set) var route: Route
     let scroll = PageScroll()
+    private let bar = PageBar()
+    private var busyToken: BusyTracker.Token?
+
+    // True while the page waits on its own fetch. It shows the page bar and the toolbar spinner.
+    var pageBusy = false {
+        didSet {
+            guard pageBusy != oldValue else { return }
+            bar.isHidden = !pageBusy
+            if pageBusy { busyToken = data.busy.begin("Loading \(route.title)") } else if let t = busyToken { data.busy.end(t); busyToken = nil }
+        }
+    }
 
     init(_ route: Route, data: AppData, router: Router) {
         self.route = route
@@ -79,7 +91,11 @@ class Page: NSViewController {
     override func loadView() {
         let v = Box(fill: Palette.bg, border: nil, radius: 0)
         v.addSubview(scroll)
+        v.addSubview(bar)
         NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+            bar.topAnchor.constraint(equalTo: v.safeAreaLayoutGuide.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: v.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: v.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: v.safeAreaLayoutGuide.topAnchor),
@@ -110,6 +126,11 @@ class Page: NSViewController {
     var isEditing: Bool { view.window?.firstResponder is NSTextView }
 
     func go(_ r: Route) { router.go(r) }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        pageBusy = false
+    }
 }
 
 // The desktop window: sidebar, toolbar with back and forward, and the page.
@@ -124,6 +145,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private let host = NSViewController()
     private(set) var page: Page?
     private var navItem: NSToolbarItemGroup?
+    private var refreshButton: RefreshButton?
     private var pendingReload = false
     private var reloadScheduled = false
     private var forceNext = false
@@ -172,6 +194,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         router.onChange = { [weak self] r in self?.display(r) }
         observers.append(NotificationCenter.default.addObserver(forName: AppWindow.changed, object: nil, queue: .main) { [weak self] n in
             self?.dataChanged(n)
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: BusyTracker.changed, object: data.busy, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.refreshButton?.show(self.data.busy)
         })
         display(router.current)
     }
@@ -285,12 +311,11 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             return i
         case refreshId:
             let i = NSToolbarItem(itemIdentifier: id)
-            i.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+            let b = RefreshButton(target: self, action: #selector(refreshNow))
+            refreshButton = b
+            b.show(data.busy)
+            i.view = b
             i.label = "Refresh"
-            i.toolTip = "Refresh now (⌘R)"
-            i.target = self
-            i.action = #selector(refreshNow)
-            i.isBordered = true
             return i
         default:
             return nil
@@ -399,5 +424,37 @@ enum PageFactory {
         case .prs: return PRsPage(r, data: data, router: router)
         case .insights: return InsightsPage(r, data: data, router: router)
         }
+    }
+}
+
+// The toolbar refresh button. It shows a spinner while OverSire loads, and the tooltip names the work.
+final class RefreshButton: NSButton {
+    private let spinner = Spinner()
+    private let arrow = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+
+    init(target: AnyObject, action: Selector) {
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        bezelStyle = .texturedRounded
+        image = arrow
+        imagePosition = .imageOnly
+        addSubview(spinner)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 32),
+            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        spinner.isHidden = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ busy: BusyTracker) {
+        let on = busy.isBusy
+        spinner.isHidden = !on
+        image = on ? nil : arrow
+        let work = busy.labels.joined(separator: "\n")
+        toolTip = on ? work + "\n\nRefresh now (⌘R)" : "Refresh now (⌘R)"
+        setAccessibilityLabel(on ? "Refresh. " + busy.labels.joined(separator: ". ") : "Refresh")
     }
 }

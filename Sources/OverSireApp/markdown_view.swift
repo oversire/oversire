@@ -103,6 +103,13 @@ final class MarkdownView: NSView, WKNavigationDelegate {
         td.short, th.short { white-space: nowrap; }
         hr { border: 0; border-top: 1px solid rgba(127,127,127,.3); }
         img { max-width: 100%; }
+        .img-wait { display: inline-flex; align-items: center; justify-content: center; width: 240px; height: 140px; max-width: 100%;
+                    border-radius: 6px; background: rgba(127,127,127,.12); }
+        .img-wait::after { content: ""; width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(127,127,127,.35);
+                           border-top-color: rgba(127,127,127,.9); animation: spin .8s linear infinite; }
+        .img-wait img { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .img-wait::after { animation: none; } }
         </style>
         <script>\(asset("highlight.min.js"))</script>
         <script>\(asset("markdown-it.min.js"))</script>
@@ -127,6 +134,17 @@ final class MarkdownView: NSView, WKNavigationDelegate {
             root.innerHTML = md.render(src);
             // Short cells, for example keys like TREBI-297, do not wrap.
             root.querySelectorAll('td, th').forEach(c => { if (c.textContent.trim().length <= 14) c.classList.add('short'); });
+            // A fixed-size box with a spinner holds the place of an image that loads.
+            root.querySelectorAll('img').forEach(i => {
+              if (i.complete) return;
+              const w = document.createElement('span');
+              w.className = 'img-wait';
+              w.setAttribute('role', 'img');
+              w.setAttribute('aria-label', 'Loading image');
+              i.replaceWith(w); w.appendChild(i);
+              const done = () => { w.replaceWith(i); report(); };
+              i.addEventListener('load', done); i.addEventListener('error', done);
+            });
           }
           report();
         }

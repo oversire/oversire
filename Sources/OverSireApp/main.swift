@@ -23,7 +23,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var popover: NSPopover!
     var isPulsing = false
     var iconKey: MenuIconState?
-    var refreshInFlight = false
+    var refreshInFlight = false { didSet { trackRefresh() } }
+    private var refreshToken: BusyTracker.Token?
     var pendingCompletion: (() -> Void)?
     var lastPRRefresh = Date.distantPast
     var grouped: [(String, [Run])] = []
@@ -60,6 +61,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let s = ProjectStore(trackers: ENV, notifier: projectNotifier,
                              statePath: PROJECT_STATE_PATH, activityPath: PROJECT_ACTIVITY_PATH)
         s.relayIsLive = { [weak self] in self?.relay.state == .live }
+        s.busy = busy
         s.onChange = { [weak self] in
             self?.updateIcon()
             self?.reloadList()
@@ -85,6 +87,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }()
     lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: writeBack)
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
+    let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
     lazy var appWindow: AppWindow = {
         AppWindow(data: self)
@@ -404,6 +407,15 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     // long CI run cost a measured 1,148 REST calls/hour that nobody was looking at.
     func updatePolling() {
         relay.setWatching(popover.isShown && hasActive(visibleGrouped(grouped)))
+    }
+
+    private func trackRefresh() {
+        if refreshInFlight, refreshToken == nil {
+            refreshToken = busy.begin("Refreshing runs and pull requests: \(REPOS.count) repos")
+        } else if !refreshInFlight, let t = refreshToken {
+            busy.end(t)
+            refreshToken = nil
+        }
     }
 
     func refresh(force: Bool = false, completion: (() -> Void)? = nil) {

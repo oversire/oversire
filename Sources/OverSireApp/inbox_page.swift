@@ -156,6 +156,7 @@ final class InboxPage: Page {
     }
 
     override func build(_ col: NSStackView) {
+        pageBusy = data.loadingFirst
         let all = feed.entries(data)
         for (pk, snap) in data.projectStore.snapshots where !(snap.intake ?? []).isEmpty {
             data.projectStore.loadIntakeKeys(projectKey: pk) { [weak self] in self?.reload() }
@@ -179,6 +180,7 @@ final class InboxPage: Page {
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(InboxRow.layout)) }
         for e in shown.prefix(150) { list.add(row(e)) }
+        if list.isEmpty, data.loadingFirst { list.add(SkeletonRows(label: "Loading the inbox")) }
         if list.isEmpty { list.add(EmptyNote(tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero.")) }
         col.addFull(list)
     }
@@ -187,10 +189,7 @@ final class InboxPage: Page {
         var actions: [NSView] = []
         if let (pk, item) = e.intake {
             if busy.contains(item.id) {
-                let p = NSProgressIndicator()
-                p.style = .spinning; p.controlSize = .small
-                p.startAnimation(nil)
-                actions.append(p)
+                actions.append(Spinner())
             } else {
                 if data.intakeAgent.available && data.intakeAgent.state(item) == nil {
                     actions.append(ActionButton("Check in Orca", symbol: "sparkles", style: .primary) { [weak self] in

@@ -36,6 +36,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var commentField: NSTextField?
     private var askField: NSTextField?
     private var asking = false
+    private var sending = false
+    private var pendingComment: String?
 
     private var key: String { if case .item(let k, _) = route { return k }; return "" }
     private var tab: Route.ItemTab { if case .item(_, let t) = route { return t }; return .overview }
@@ -59,8 +61,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let store = data.projectStore
         guard let (pk, snap, item) = store.item(key: key) else {
             col.addFull(PageHeader(key, caption: "Work item"))
-            col.addFull(EmptyNote(store.snapshots.isEmpty ? "Loading projects…" : "OverSire has no item \(key). It may be in a project that OverSire does not track, or it was deleted.",
-                                  symbol: "questionmark.square.dashed"))
+            pageBusy = data.projectsLoading
+            if data.projectsLoading {
+                let c = ListCard()
+                c.add(SkeletonRows(count: 4, label: "Loading \(key)"))
+                col.addFull(c)
+            } else {
+                col.addFull(EmptyNote("OverSire has no item \(key). It may be in a project that OverSire does not track, or it was deleted.",
+                                      symbol: "questionmark.square.dashed"))
+            }
             return
         }
         let stream = data.workstreams.stream(key)
@@ -128,7 +137,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
             chips.append(b)
         }
-        if let saving { chips.append(NSTextField.text("Saving \(saving)…", size: 12, color: Palette.dim)) }
+        if let saving { chips.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Saving \(saving)…", size: 12, color: Palette.dim)], spacing: 5)) }
         return NSStackView(v: [keyLine, NSTextField.text(item.title, size: 22, weight: .semibold, lines: 3),
                                NSStackView(h: chips + [Spacer()], spacing: 6)], spacing: 7)
     }
@@ -311,15 +320,20 @@ final class ItemPage: Page, NSTextFieldDelegate {
         f.target = self
         f.action = #selector(sendReply)
         replyField = f
-        return NSStackView(h: [f, ActionButton("Send", style: .primary) { [weak self] in self?.sendReply() }], spacing: 6)
+        let b = ActionButton("Send", style: .primary) { [weak self] in self?.sendReply() }
+        if sending { b.busy("Sending…") }
+        return NSStackView(h: [f, b], spacing: 6)
     }
 
     @objc private func sendReply() {
         guard let f = replyField else { return }
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !sending else { return }
+        sending = true
+        reload()
         data.agentIndex.send(key, text: text) { [weak self] err in
             guard let self else { return }
+            self.sending = false
             if let err { self.note = (.bad, "Could not send: \(err.message)") } else { self.replyField?.stringValue = ""; self.note = nil; self.tailAt = .distantPast }
             self.reload()
         }
@@ -332,7 +346,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
             c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), Chiplet(a.agent.rawValue, symbol: "cpu"),
                                   NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 6))
-            c.add(TermView(lines: tail.isEmpty ? ["Reading the terminal…"] : tail, height: 300))
+            c.add(tail.isEmpty ? InlineSpinner("Reading the terminal…") : TermView(lines: tail, height: 300))
             if a.phase != .done && a.phase != .failed { c.add(replyRow()) }
             main.addFull(c)
         } else {
@@ -347,14 +361,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let k = key
         let busy = notes.busy.contains(k.uppercased())
         let summary = notes.summary(k)
-        let sum = ActionButton(busy ? "Summarizing…" : summary == nil ? "Summarize" : "Summarize again", symbol: "sparkles") { [weak self] in
+        let sum = ActionButton(summary == nil ? "Summarize" : "Summarize again", symbol: "sparkles") { [weak self] in
             notes.summarize(k) { s in
                 guard let self, s == nil else { return }
                 self.note = (.warning, "No summary. AI is off, or OverSire found no transcript.")
                 self.reload()
             }
         }
-        sum.isEnabled = !busy && hasAgent && AI_CFG.enabled && AI_CFG.sessionSummary
+        sum.isEnabled = hasAgent && AI_CFG.enabled && AI_CFG.sessionSummary
+        if busy { sum.busy("Summarizing…") }
         let copy = ActionButton("Copy hand-off", symbol: "doc.on.doc") { [weak self] in
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(notes.handoff(k), forType: .string)
@@ -362,6 +377,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
             self?.reload()
         }
         let c = Card(title: "Summary", trailing: [copy, sum])
+        if busy, summary == nil {
+            c.add(SkeletonRows(count: 3, height: 22, label: "The AI writes the summary"))
+            return c
+        }
         guard let s = summary else {
             let why = !AI_CFG.enabled ? "Turn on AI in Settings › AI to summarize sessions."
                 : !AI_CFG.sessionSummary ? "Session summaries are off in Settings › AI."
@@ -394,8 +413,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
         f.target = self
         f.action = #selector(sendAsk)
         askField = f
-        let b = ActionButton(asking ? "Asking…" : "Ask", style: .primary) { [weak self] in self?.sendAsk() }
-        b.isEnabled = AI_CFG.enabled && !asking
+        let b = ActionButton("Ask", style: .primary) { [weak self] in self?.sendAsk() }
+        b.isEnabled = AI_CFG.enabled
+        if asking {
+            b.busy("Asking…")
+            c.add(SkeletonRows(count: 2, height: 22, label: "The AI writes the answer"))
+        }
         c.add(NSStackView(h: [f, b], spacing: 6))
         return c
     }
@@ -475,10 +498,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
         f.target = self
         f.action = #selector(sendComment)
         commentField = f
-        main.addFull(NSStackView(h: [f, ActionButton("Comment") { [weak self] in self?.sendComment() }], spacing: 6))
+        let send = ActionButton("Comment") { [weak self] in self?.sendComment() }
+        if pendingComment != nil { send.busy("Sending…") }
+        main.addFull(NSStackView(h: [f, send], spacing: 6))
 
         let list = ListCard()
-        if timeline == nil { list.add(EmptyNote("Loading the activity…", symbol: "hourglass")) }
+        if let pendingComment {
+            list.add(Row([Spinner(size: .mini), NSTextField.text(pendingComment, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
+                         height: 34, label: "Sending comment: \(pendingComment)"))
+        }
+        if timeline == nil { list.add(SkeletonRows(count: 4, height: 34, label: "Loading the activity")) }
         for e in all where activitySource == .all || e.source == activitySource {
             var col: [NSView] = [NSTextField.text(e.text, size: 12.5, lines: 2)]
             if let b = e.body?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
@@ -514,9 +543,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
     @objc private func sendComment() {
         guard let f = commentField, let (_, _, item) = data.projectStore.item(key: key) else { return }
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, pendingComment == nil else { return }
+        pendingComment = text
+        f.stringValue = ""
+        reload()
         data.projectStore.comment(itemId: item.id, body: text) { [weak self] ok in
             guard let self else { return }
+            self.pendingComment = nil
+            if !ok { self.commentField?.stringValue = text }
             if ok { self.commentField?.stringValue = ""; self.timeline = nil; self.note = nil } else { self.note = (.bad, self.data.projectStore.lastError ?? "Plane did not take the comment.") }
             self.reload()
         }

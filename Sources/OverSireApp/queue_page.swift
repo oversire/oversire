@@ -4,6 +4,7 @@ import OverSireCore
 // The queue: one lane per project, and the AI checks of quiet agents.
 final class QueuePage: Page {
     private var orders: [String: (order: [String], reason: String)] = [:]   // lane project → AI order
+    private var ordering: Set<String> = []   // lane projects that wait for the AI order
     private var asked: Set<String> = []                                      // lane project + keys, asked once
 
     override func build(_ col: NSStackView) {
@@ -137,7 +138,9 @@ final class QueuePage: Page {
         c.add(NSStackView(h: [Glyph("folder", color: Palette.acc), NSTextField.text(lane.identifier, size: 13, weight: .semibold),
                               NSTextField.text(root, size: 11.5, color: Palette.dim, mono: true), Spacer(), slotChip], spacing: 7))
         if let e = lane.error { c.add(Banner(.warning, title: e)) }
-        if let s = orderSuggestion(lane) {
+        let suggestion = orderSuggestion(lane)
+        if suggestion == nil, ordering.contains(lane.project) { c.add(InlineSpinner("The AI reads the lane and proposes an order…")) }
+        if let s = suggestion {
             c.add(Banner(.info, title: "AI order: " + s.order.joined(separator: ", "), body: s.reason,
                          actions: [ActionButton("Apply") { [weak self] in q.reorder(lane.project, keys: s.order); self?.orders[lane.project] = nil }]))
         }
@@ -189,10 +192,12 @@ final class QueuePage: Page {
         let tag = lane.project + "|" + keys.joined(separator: ",")
         guard AGENTS.aiMode != .off, keys.count > 1, !asked.contains(tag) else { return nil }
         asked.insert(tag)
+        ordering.insert(lane.project)
         data.aiChecks.suggestOrder(lane, store: data.projectStore) { [weak self] s in
             DispatchQueue.main.async {
-                guard let self, let s else { return }
-                self.orders[lane.project] = s
+                guard let self else { return }
+                self.ordering.remove(lane.project)
+                if let s { self.orders[lane.project] = s }
                 self.reload()
             }
         }

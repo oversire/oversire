@@ -103,9 +103,16 @@ final class ProjectPage: Page {
 
     override func build(_ col: NSStackView) {
         let store = data.projectStore
+        pageBusy = data.projectsLoading
         guard let snap = store.snapshots.values.first(where: { $0.summary.identifier.uppercased() == projectKey }) else {
             col.addFull(PageHeader(projectKey, caption: "Project"))
-            col.addFull(EmptyNote(store.snapshots.isEmpty ? "Loading projects…" : "OverSire does not track a project with the key \(projectKey).", symbol: "questionmark.folder"))
+            if data.projectsLoading {
+                let c = ListCard()
+                c.add(SkeletonRows(count: 6, label: "Loading \(projectKey)"))
+                col.addFull(c)
+            } else {
+                col.addFull(EmptyNote("OverSire does not track a project with the key \(projectKey).", symbol: "questionmark.folder"))
+            }
             return
         }
         let ws = data.workstreams
@@ -222,7 +229,8 @@ final class MyItemsPage: Page {
         for e in ordered.prefix(300) {
             card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table) { [weak self] in self?.go($0) })
         }
-        if card.isEmpty { card.add(EmptyNote(data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")) }
+        pageBusy = data.projectsLoading
+        if card.isEmpty { card.add(data.projectsLoading ? SkeletonRows(label: "Loading your items") : EmptyNote("No open items are yours.")) }
         col.addFull(card)
     }
 }

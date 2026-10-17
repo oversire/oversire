@@ -19,6 +19,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                                                                        store: projectStore, trackers: ENV))
     lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json", store: projectStore, trackers: ENV))
+    let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: NSTemporaryDirectory() + "oversire-uishots/ci.json")
     lazy var aiChecks = AgentJudge(path: NSTemporaryDirectory() + "oversire-uishots/checks.json", agents: agentIndex, queue: queue)
     let relay = LiveSync(secrets: SecretStore(service: "com.oversire.app.cloud"), cursors: CursorStore(url: nil))
@@ -61,16 +62,35 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 try? FileManager.default.copyItem(atPath: fx + "/" + name, toPath: tmp + "/" + name)
             }
         }
+        if UIShots.loading { try? FileManager.default.removeItem(atPath: tmp + "/state.json") }
         projectStore = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
                                     statePath: tmp + "/state.json", activityPath: tmp + "/activity.jsonl")
         super.init()
+        projectStore.hold = UIShots.loading
+        projectStore.busy = busy
+        if UIShots.loading { RunPage.source = NeverAnswers() }
     }
 
     func has(_ c: Capability) -> Bool { ENV.has(c) }
 
     func rerun(repo: String, runs: [Run], failedOnly: Bool) { log.info("uishots: re-run skipped") }
 
+    // OVERSIRE_UISHOTS_LOADING=1: no fetch ever ends, so each page shows its loading state.
+    static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
+
+    // A source that never answers.
+    struct NeverAnswers: RunSource {
+        func run(_ repo: String, id: String) async -> Run? { await wait(); return nil }
+        func jobs(_ repo: String, runId: String) async -> [Job]? { await wait(); return nil }
+        private func wait() async { try? await Task.sleep(nanoseconds: 3_600_000_000_000) }
+    }
+
     func refresh(force: Bool, completion: (() -> Void)?) {
+        if UIShots.loading {
+            _ = busy.begin("Refreshing runs and pull requests: \(REPOS.count) repos")
+            completion?()
+            return
+        }
         let repos = REPOS
         Task {
             let (found, prs) = await GHActionsBar.fetch(repos, prs: true)

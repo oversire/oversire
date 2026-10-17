@@ -92,24 +92,58 @@ final class RunsPage: Page {
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(RunLine.layout)) }
         for r in shown.prefix(200) { list.add(RunLine(repo: r.repo, run: r.run, data: data) { [weak self] in self?.go($0) }) }
-        if list.isEmpty { list.add(EmptyNote(data.firstLoad ? "Loading runs…" : "No runs match.", symbol: "circle.dashed")) }
+        if list.isEmpty { list.add(data.firstLoad ? SkeletonRows(label: "Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)
+    }
+}
+
+// Where the run page gets a run and its jobs. `RepoClient` is the real one.
+protocol RunSource: Sendable {
+    func run(_ repo: String, id: String) async -> Run?
+    func jobs(_ repo: String, runId: String) async -> [Job]?
+}
+
+extension RepoClient: RunSource {}
+
+// The jobs of a run as the run page loads them. A nil fetch with no jobs yet is a failure, not a wait.
+struct JobsLoad {
+    private(set) var jobs: [Job]?
+    private(set) var failed = false
+
+    mutating func absorb(_ fetched: [Job]?) {
+        if let fetched { jobs = fetched }
+        failed = jobs == nil
+    }
+
+    mutating func retry() { failed = false }
+
+    // What the jobs card shows in place of the job rows, or nil when it shows rows.
+    func placeholder(retry: @escaping () -> Void) -> NSView? {
+        if failed {
+            return NSStackView(v: [EmptyNote("GitHub did not give the jobs.", symbol: "exclamationmark.triangle"),
+                                   NSStackView(h: [ActionButton("Retry", symbol: "arrow.clockwise", retry), Spacer()], spacing: 0)], spacing: 0)
+        }
+        guard let jobs else { return SkeletonRows(count: 4, height: 34, label: "Loading jobs") }
+        return jobs.isEmpty ? EmptyNote("No jobs.") : nil
     }
 }
 
 // One run: jobs, the log of a job, and the actions re-run and cancel.
 final class RunPage: Page {
     private var run: Run?
-    private var jobs: [Job]?
+    private var jobsLoad = JobsLoad()
+    private var jobs: [Job]? { jobsLoad.jobs }
     private var jobId: String?
     private var log: [String]?
     private var logFor: String?
     private var follow = true
     private var errorsOnly = false
     private var busy: String?
+    private static let rerunFailed = "Re-running the failed jobs…", rerunAll = "Re-running all jobs…", cancelling = "Cancelling…"
     private var note: (Tone, String)?
     private var timer: Timer?
     private let q = DispatchQueue(label: "com.oversire.app.run-page", qos: .userInitiated)
+    static var source: any RunSource = REPO_CLIENT
 
     private var repo: String { if case .run(let r, _) = route { return r }; return "" }
     private var runId: String { if case .run(_, let id) = route { return id }; return "" }
@@ -134,13 +168,16 @@ final class RunPage: Page {
 
     private func load() {
         let (repo, id) = (self.repo, self.runId)
+        if jobs == nil { pageBusy = true }
+        let source = Self.source
         Task { [weak self] in
-            let r = await REPO_CLIENT.run(repo, id: id)
-            let j = await REPO_CLIENT.jobs(repo, runId: id)
+            let r = await source.run(repo, id: id)
+            let j = await source.jobs(repo, runId: id)
             DispatchQueue.main.async {
                 guard let self, self.runId == id else { return }
+                self.pageBusy = false
                 if let r { self.run = r }
-                if let j { self.jobs = j }
+                self.jobsLoad.absorb(j)
                 if self.jobId == nil || !(self.jobs ?? []).contains(where: { $0.id == self.jobId }) {
                     self.jobId = (self.jobs ?? []).first { JobChip.failed($0) }?.id ?? (self.jobs ?? []).first { $0.status == "in_progress" }?.id ?? self.jobs?.first?.id
                 }
@@ -166,7 +203,9 @@ final class RunPage: Page {
     override func build(_ col: NSStackView) {
         guard let r = current else {
             col.addFull(PageHeader(route.title, caption: repo))
-            col.addFull(EmptyNote("Loading the run…", symbol: "hourglass"))
+            let c = ListCard()
+            c.add(SkeletonRows(count: 4, label: "Loading the run"))
+            col.addFull(c)
             return
         }
         let tone = Tone(r)
@@ -175,11 +214,17 @@ final class RunPage: Page {
         let stream = link.flatMap { data.workstreams.stream($0.key) }
 
         var actions: [NSView] = []
-        if r.isFailure { actions.append(ActionButton("Re-run failed jobs", symbol: "arrow.clockwise", style: .primary) { [weak self] in self?.rerun(failed: true) }) }
+        if r.isFailure {
+            let failed = ActionButton("Re-run failed jobs", symbol: "arrow.clockwise", style: .primary) { [weak self] in self?.rerun(failed: true) }
+            if busy == Self.rerunFailed { failed.busy("Re-running…") } else { failed.isEnabled = busy == nil }
+            actions.append(failed)
+        }
         let all = ActionButton("Re-run all") { [weak self] in self?.rerun(failed: false) }
         all.isEnabled = !live && busy == nil
+        if busy == Self.rerunAll { all.busy("Re-running…") }
         let cancel = ActionButton("Cancel", style: .danger) { [weak self] in self?.cancelRun() }
         cancel.isEnabled = live && busy == nil
+        if busy == Self.cancelling { cancel.busy("Cancelling…") }
         actions += [all, cancel, ActionButton("Open in GitHub", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: r.url)!) }]
         let title = "\(r.workflowName ?? r.name) #\(r.number)" + ((r.attempt ?? 1) > 1 ? " · attempt \(r.attempt!)" : "")
         col.addFull(NSStackView(h: [Glyph(tone, size: 26), PageHeader(title, caption: r.displayTitle, actions: actions)], spacing: 12, align: .top))
@@ -225,7 +270,7 @@ final class RunPage: Page {
             row.selected = j.id == jobId
             jobsCard.add(row)
         }
-        if jobs == nil { jobsCard.add(EmptyNote("Loading jobs…", symbol: "hourglass")) } else if jobsCard.isEmpty { jobsCard.add(EmptyNote("No jobs.")) }
+        if let p = jobsLoad.placeholder(retry: { [weak self] in self?.retryJobs() }) { jobsCard.add(p) }
 
         let logCard = Card(title: "Log", trailing: [
             ToggleChip("Follow", on: follow) { [weak self] in self?.follow.toggle(); self?.reload() },
@@ -250,7 +295,7 @@ final class RunPage: Page {
             logCard.add(NSTextField.text("\(job?.name ?? "") · last \(log.count) lines", size: 11.5, color: Palette.dim, mono: true))
             logCard.add(TermView(lines: lines.isEmpty ? ["No error lines."] : lines, height: 420, errors: errs))
         } else {
-            logCard.add(TermView(lines: [job == nil ? "Pick a job." : "Loading the log…"], height: 120))
+            if let job { logCard.add(InlineSpinner("Loading the log of \(job.name)…")) } else { logCard.add(TermView(lines: [jobsLoad.failed ? "No jobs." : "Pick a job."], height: 120)) }
         }
         let two = NSStackView(h: [jobsCard, logCard], spacing: 14, align: .top)
         col.addFull(two)
@@ -281,7 +326,8 @@ final class RunPage: Page {
                 guard let self, let job = self.jobs?.first(where: { $0.id == self.jobId }), let log = self.log else { return }
                 cia.explain(repo: self.repo, run: r, job: job, log: log)
             }
-            again.isEnabled = !cia.busy.contains(k) && log != nil
+            again.isEnabled = log != nil
+            if cia.busy.contains(k) { again.busy("Explaining…") }
             trailing.append(again)
         }
         let c = Card(title: "Likely cause", trailing: trailing)
@@ -290,6 +336,7 @@ final class RunPage: Page {
             if !e.fix.isEmpty { c.add(NSTextField.text("Try: " + e.fix, size: 12.5, color: Palette.mut, lines: 0)) }
         } else if cia.busy.contains(k) {
             c.add(NSTextField.text("The AI reads the log of the failed job and the changed files…", size: 12.5, color: Palette.dim))
+            c.add(SkeletonRows(count: 2, height: 20, label: "The AI writes the cause"))
         } else if let err = cia.errors[k] {
             c.add(NSTextField.text("Could not explain: \(err)", size: 12.5, color: Palette.bad, lines: 0))
         } else if !cia.canExplain {
@@ -301,14 +348,20 @@ final class RunPage: Page {
         return c
     }
 
+    private func retryJobs() {
+        jobsLoad.retry()
+        reload()
+        load()
+    }
+
     private func rerun(failed: Bool) {
         guard let r = current else { return }
-        busy = failed ? "Re-running the failed jobs…" : "Re-running all jobs…"
+        busy = failed ? Self.rerunFailed : Self.rerunAll
         reload()
         data.rerun(repo: repo, runs: [r], failedOnly: failed)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.busy = nil
-            self?.jobs = nil
+            self?.jobsLoad = JobsLoad()
             self?.log = nil
             self?.logFor = nil
             self?.load()
@@ -317,7 +370,7 @@ final class RunPage: Page {
 
     private func cancelRun() {
         let (repo, id) = (self.repo, self.runId)
-        busy = "Cancelling…"
+        busy = Self.cancelling
         reload()
         Task { [weak self] in
             let err = await REPO_CLIENT.perform(.cancel, repo: repo, id: id)

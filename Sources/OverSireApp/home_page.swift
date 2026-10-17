@@ -138,6 +138,7 @@ final class WorkstreamCard: Row {
 
 final class HomePage: Page {
     override func build(_ col: NSStackView) {
+        pageBusy = data.loadingFirst
         let runs = data.grouped.flatMap { g in g.1.map { (repo: g.0, run: $0) } }
         let running = runs.filter { $0.run.status != "completed" }
         let failing = data.grouped.flatMap { latestPerWorkflow($0.1) }.filter { $0.isFailure && !IGNORED.contains($0) }
@@ -197,12 +198,12 @@ final class HomePage: Page {
         if needs.count > 8 {
             ny.add(Row([NSTextField.text("\(needs.count - 8) more in the inbox", size: 12, color: Palette.acc)], height: 34) { [weak self] in self?.go(.inbox(.all)) })
         }
-        if ny.isEmpty { ny.add(EmptyNote("Nothing waits for you.")) }
+        if ny.isEmpty { ny.add(data.loadingFirst ? SkeletonRows(count: 3, label: "Loading") : EmptyNote("Nothing waits for you.")) }
         aside.addFull(ny)
         aside.addFull(SectionTitle("Running now", count: running.count))
         let rn = ListCard()
         for r in running.prefix(8) { rn.add(RunLine(repo: r.repo, run: r.run, data: data) { [weak self] in self?.go($0) }) }
-        if rn.isEmpty { rn.add(EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
+        if rn.isEmpty { rn.add(data.firstLoad ? SkeletonRows(count: 2, label: "Loading runs") : EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
         aside.addFull(rn)
 
         let two = NSStackView(h: [main, aside], spacing: 16, align: .top)

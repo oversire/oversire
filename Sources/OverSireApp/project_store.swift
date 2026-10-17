@@ -52,6 +52,8 @@ final class ProjectStore {
     private var assetCache: [String: (url: String, at: Date)] = [:]
     var relayIsLive: () -> Bool = { false }
     var onChange: (() -> Void)?
+    var busy: BusyTracker?
+    var hold = false   // `--uishots` loading mode: fetches never end
 
     static let noToken = "Add a token for this account in Settings › Providers."
 
@@ -99,11 +101,15 @@ final class ProjectStore {
             (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey])
         }
         let limit = snapshotLimit
+        let label = { (n: Int) in jobs.count == 1 ? "Loading \(jobs[0].0.identifier)" : "Loading projects: \(n) of \(jobs.count)" }
+        let token = busy?.begin(label(0))
+        if hold { return }
         Task { [weak self] in
             guard let self = self else { return }
             var fresh: [ProjectSnapshot] = []
             var error: String?
-            for (p, client, previous) in jobs {
+            for (n, (p, client, previous)) in jobs.enumerated() {
+                if n > 0, let token { await MainActor.run { self.busy?.update(token, label(n)) } }
                 guard let client else { error = "\(p.ref.workspace): " + ProjectStore.noToken; continue }
                 switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
                 case .success(let s): fresh.append(s)
@@ -112,6 +118,7 @@ final class ProjectStore {
             }
             let failed = error != nil
             DispatchQueue.main.async {
+                if let token { self.busy?.end(token) }
                 for k in todo { self.refreshing.remove(k) }
                 self.lastError = error
                 for snap in fresh { self.absorb(snap) }

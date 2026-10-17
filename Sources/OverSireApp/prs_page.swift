@@ -3,7 +3,7 @@ import OverSireCore
 
 // Review requests and my open PRs, with the linked item and the CI of the branch.
 final class PRsPage: Page {
-    private var busy: Set<String> = []
+    private var busy: [String: String] = [:]   // row id → verb
     private var errors: [String: String] = [:]
     private let table = ColumnLayout(id: "prs", columns: [
         TableColumn(id: "kind", title: "", width: 58, min: 48),
@@ -25,7 +25,7 @@ final class PRsPage: Page {
             let card = ListCard()
             if !list.isEmpty { card.add(TableHeader(table)) }
             for e in list { card.add(row(e.repo, e.pr)) }
-            if card.isEmpty { card.add(EmptyNote(data.firstLoad ? "Loading…" : empty)) }
+            if card.isEmpty { card.add(data.firstLoad ? SkeletonRows(count: 3, label: "Loading pull requests") : EmptyNote(empty)) }
             col.addFull(card)
         }
     }
@@ -59,10 +59,8 @@ final class PRsPage: Page {
         }
         if let t = checks(repo, p) { cells["ci"] = Chiplet("CI \(t.word.lowercased())", symbol: t.symbol, color: t.color) }
         var actions: [NSView] = []
-        if busy.contains(id) {
-            let spin = NSProgressIndicator()
-            spin.style = .spinning; spin.controlSize = .small; spin.startAnimation(nil)
-            actions.append(spin)
+        if let verb = busy[id] {
+            actions.append(InlineSpinner(verb + "…"))
         } else {
             if !p.mine { actions.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }) }
             actions.append(MenuChip("Merge", symbol: "arrow.triangle.merge") { [weak self] in
@@ -91,14 +89,14 @@ final class PRsPage: Page {
         let run = { [weak self] (r: NSApplication.ModalResponse) in
             guard r == .alertFirstButtonReturn, let self else { return }
             let id = "\(repo)#\(p.number)"
-            self.busy.insert(id); self.errors[id] = nil
+            self.busy[id] = verb; self.errors[id] = nil
             self.reload()
             lastFetchError = nil
             Task { [weak self] in
                 await REPO_CLIENT.perform(action, repo: repo, number: p.number)
                 await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.busy.remove(id)
+                self.busy[id] = nil
                 if let e = lastFetchError { self.errors[id] = "\(verb) failed: \(e)" }
                 self.data.refresh(force: true, completion: nil)
                 self.reload()
