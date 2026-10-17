@@ -2,14 +2,25 @@ import Cocoa
 import OverSireCore
 
 // One run in a page list: state, workflow and number, repo and branch, item link, time.
-final class RunLine: Row {
+final class RunLine: TableRow {
+    static let layout = ColumnLayout(id: "runs", columns: [
+        TableColumn(id: "state", title: "", width: 16, min: 16),
+        TableColumn(id: "run", title: "Run", width: 300, min: 160, flexible: true),
+        TableColumn(id: "progress", title: "Progress", width: 70, min: 50, optional: true),
+        TableColumn(id: "item", title: "Item", width: 112, min: 60),
+        TableColumn(id: "when", title: "When", width: 72, min: 50, optional: true),
+    ])
+
     init(repo: String, run r: Run, data: AppData, go: @escaping (Route) -> Void) {
         let tone = Tone(r)
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
-        let main = TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(name) · \(r.headBranch) · \(r.displayTitle)")
-        var views: [NSView] = [Glyph(tone), main, Spacer()]
+        var cells: [String: NSView] = [
+            "state": Glyph(tone),
+            "run": TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(name) · \(r.headBranch) · \(r.displayTitle)"),
+        ]
         let live = r.status != "completed"
-        if live, let total = r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) {
+        let total = live ? r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) : nil
+        if let total {
             let bar = NSProgressIndicator()
             bar.style = .bar
             bar.isIndeterminate = false
@@ -17,28 +28,22 @@ final class RunLine: Row {
             bar.minValue = 0; bar.maxValue = 1
             bar.doubleValue = min(0.98, runElapsed(r) / max(1, total))
             bar.translatesAutoresizingMaskIntoConstraints = false
-            bar.widthAnchor.constraint(equalToConstant: 70).isActive = true
+            bar.widthAnchor.constraint(equalToConstant: 60).isActive = true
             bar.setAccessibilityLabel("Progress")
-            views.append(bar)
+            cells["progress"] = bar
         }
         if let link = data.workstreams.link(runId: r.id) {
-            views.append(Chiplet(link.key, color: Palette.fg, mono: true) { go(.item(link.key, .overview)) })
+            cells["item"] = Chiplet(link.key, color: Palette.fg, mono: true) { go(.item(link.key, .overview)) }
         } else {
-            views.append(Chiplet("unlinked"))
+            cells["item"] = Chiplet("unlinked")
         }
-        let when: String
-        if live, let total = r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) {
-            when = "~" + fmtDuration(max(5, total - runElapsed(r))) + " left"
-        } else {
-            when = relativeTime(lastActivity(r))
-        }
-        let t = NSTextField.text(when, size: 11.5, color: Palette.dim)
-        t.alignment = .right
-        t.widthAnchor.constraint(greaterThanOrEqualToConstant: 64).isActive = true
-        views.append(t)
-        super.init(views, height: 46, label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name), branch \(r.headBranch), \(when)") {
+        let when = total.map { "~" + fmtDuration(max(5, $0 - runElapsed(r))) + " left" } ?? relativeTime(lastActivity(r))
+        cells["when"] = NSTextField.text(when, size: 11.5, color: Palette.dim)
+        super.init(RunLine.layout, cells: cells, height: 46,
+                   label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name), branch \(r.headBranch), \(when)") {
             go(.run(repo: repo, id: r.id))
         }
+        itemActions(url: r.url, key: r.id, tracker: "GitHub")
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -85,6 +90,7 @@ final class RunsPage: Page {
         }
         let shown = all.filter { RunsPage.matches(filter, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }
         let list = ListCard()
+        if !shown.isEmpty { list.add(TableHeader(RunLine.layout)) }
         for r in shown.prefix(200) { list.add(RunLine(repo: r.repo, run: r.run, data: data) { [weak self] in self?.go($0) }) }
         if list.isEmpty { list.add(EmptyNote(data.firstLoad ? "Loading runs…" : "No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)

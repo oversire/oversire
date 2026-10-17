@@ -35,7 +35,8 @@ struct InboxEntry {
     var url: String? = nil
     var intake: (projectKey: String, item: IntakeItem)? = nil
     var activityId: String? = nil
-
+    var itemKey: String? = nil
+    var itemURL: String? = nil
 }
 
 // Builds the inbox and keeps the read state of the lines that are not Plane activity.
@@ -54,7 +55,8 @@ final class InboxFeed {
             let source: InboxEntry.Source = { if case .mention = e.change { return .mention }; return .plane }()
             out.append(InboxEntry(id: "plane|" + e.id, source: source, title: "\(key) \(found?.item.title ?? "")".trimmingCharacters(in: .whitespaces),
                                   body: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at, unread: e.unread,
-                                  route: key.isEmpty ? nil : .item(key, .activity), url: e.url, activityId: e.id))
+                                  route: key.isEmpty ? nil : .item(key, .activity), url: e.url, activityId: e.id,
+                                  itemKey: found?.item.key, itemURL: found?.item.url))
         }
         let day = Date().addingTimeInterval(-86400)
         for (repo, runs) in data.grouped {
@@ -64,14 +66,15 @@ final class InboxFeed {
                 let id = "run|\(r.id)|\(r.attempt ?? 1)"
                 out.append(InboxEntry(id: id, source: .run, title: "\(r.workflowName ?? r.name) #\(r.number) · \(t.word)",
                                       body: "\(repo) · \(r.headBranch)" + (link.map { " · \($0.key)" } ?? " · unlinked"),
-                                      at: lastActivity(r), unread: !read.contains(id), route: .run(repo: repo, id: r.id)))
+                                      at: lastActivity(r), unread: !read.contains(id), route: .run(repo: repo, id: r.id), url: r.url))
             }
         }
         for (key, a) in data.agentIndex.agents where a.phase != .working && a.phase != .starting {
             let id = "agent|\(key)|\(a.phase)|\(Int(a.since.timeIntervalSince1970))"
             let what = a.phase == .waiting ? "asks a question" : a.phase == .done ? "is done" : "did not start"
             out.append(InboxEntry(id: id, source: .agent, title: "\(key) session \(what)", body: a.message ?? "",
-                                  at: a.since, unread: !read.contains(id), route: .item(key, .session)))
+                                  at: a.since, unread: !read.contains(id), route: .item(key, .session),
+                                  itemKey: key, itemURL: store.item(key: key)?.2.url))
         }
         for c in data.aiChecks.checks.prefix(30) {
             let id = "ai|" + c.id
@@ -111,24 +114,26 @@ final class InboxFeed {
 }
 
 // An inbox line. Intake lines take the triage keys 1, 2, 3 and H.
-final class InboxRow: Row {
+final class InboxRow: TableRow {
+    static let layout = ColumnLayout(id: "inbox", columns: [
+        TableColumn(id: "unread", title: "", width: 7, min: 7),
+        TableColumn(id: "source", title: "Source", width: 64, min: 48),
+        TableColumn(id: "title", title: "Title", width: 300, min: 160, flexible: true),
+        TableColumn(id: "when", title: "When", width: 56, min: 40, optional: true),
+    ])
     var onKey: ((String) -> Bool)?
 
     init(_ e: InboxEntry, onClick: @escaping () -> Void) {
         let dot = Box(fill: e.unread ? Palette.acc : .clear, border: nil, radius: 3.5)
         dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
         dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
-        let src = Chiplet(e.source.rawValue, color: e.source.color)
-        let srcBox = NSView()
-        srcBox.translatesAutoresizingMaskIntoConstraints = false
-        srcBox.addSubview(src)
-        NSLayoutConstraint.activate([
-            srcBox.widthAnchor.constraint(equalToConstant: 64), srcBox.heightAnchor.constraint(equalTo: src.heightAnchor),
-            src.leadingAnchor.constraint(equalTo: srcBox.leadingAnchor), src.centerYAnchor.constraint(equalTo: srcBox.centerYAnchor),
-        ])
-        let when = NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim)
-        let main = TwoLine(e.title, e.body, weight: e.unread ? .semibold : .regular)
-        super.init([dot, srcBox, main, Spacer(), when], height: 48,
+        let cells: [String: NSView] = [
+            "unread": dot,
+            "source": Chiplet(e.source.rawValue, color: e.source.color),
+            "title": TwoLine(e.title, e.body, weight: e.unread ? .semibold : .regular),
+            "when": NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim),
+        ]
+        super.init(InboxRow.layout, cells: cells, height: 48,
                    label: (e.unread ? "Unread. " : "") + "\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -172,6 +177,7 @@ final class InboxPage: Page {
         }
         let shown = all.filter { tab == .all || $0.source.tab == tab }
         let list = ListCard()
+        if !shown.isEmpty { list.add(TableHeader(InboxRow.layout)) }
         for e in shown.prefix(150) { list.add(row(e)) }
         if list.isEmpty { list.add(EmptyNote(tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero.")) }
         col.addFull(list)
@@ -199,7 +205,15 @@ final class InboxPage: Page {
         }
         actions.forEach { ($0 as? NSButton)?.controlSize = .small }
         let r = InboxRow(e) { [weak self] in self?.open(e) }
-        r.hoverViews = actions
+        if e.intake == nil, let key = e.itemKey, let url = e.itemURL {
+            r.itemActions(url: url, key: key)
+        } else if e.intake == nil, e.source == .run, let url = e.url {
+            r.copyLink = url
+            r.hoverViews = [IconButton("link", label: "Copy link", tip: "Copy link (⇧⌘C)", copy: url),
+                            IconButton("arrow.up.right.square", label: "Open on GitHub", tip: "Open on GitHub") { NSWorkspace.shared.open(URL(string: url)!) }]
+        } else {
+            r.hoverViews = actions
+        }
         if let (pk, item) = e.intake {
             r.onKey = { [weak self] c in
                 switch c {

@@ -5,6 +5,14 @@ import OverSireCore
 final class PRsPage: Page {
     private var busy: Set<String> = []
     private var errors: [String: String] = [:]
+    private let table = ColumnLayout(id: "prs", columns: [
+        TableColumn(id: "kind", title: "", width: 58, min: 48),
+        TableColumn(id: "title", title: "Pull request", width: 300, min: 160, flexible: true),
+        TableColumn(id: "item", title: "Item", width: 112, min: 60),
+        TableColumn(id: "ci", title: "CI", width: 104, min: 50, optional: true),
+        TableColumn(id: "state", title: "State", width: 110, min: 50, optional: true),
+        TableColumn(id: "actions", title: "", width: 170, min: 90),
+    ])
 
     override func build(_ col: NSStackView) {
         let all = data.prGrouped.flatMap { g in g.1.map { (repo: g.0, pr: $0) } }
@@ -15,6 +23,7 @@ final class PRsPage: Page {
         for (title, list, empty) in [("Review requests", reviews, "No review waits for you."), ("My pull requests", mine, "You have no open pull request.")] {
             col.addFull(SectionTitle(title, count: list.count))
             let card = ListCard()
+            if !list.isEmpty { card.add(TableHeader(table)) }
             for e in list { card.add(row(e.repo, e.pr)) }
             if card.isEmpty { card.add(EmptyNote(data.firstLoad ? "Loading…" : empty)) }
             col.addFull(card)
@@ -42,29 +51,32 @@ final class PRsPage: Page {
         var sub = "\(name) #\(p.number) · \(p.headRefName) · +\(p.additions) −\(p.deletions) · \(relativeTime(parseISO(p.updatedAt) ?? Date()))"
         if !p.mine { sub = "@\(p.author.login) · " + sub }
         if let e = errors[id] { sub += " · " + e }
-        var views: [NSView] = [kind, TwoLine(p.title, sub), Spacer()]
+        var cells: [String: NSView] = ["kind": kind, "title": TwoLine(p.title, sub), "state": Chiplet(state)]
         if let key = linkedKey(repo, p) {
-            views.append(Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) })
+            cells["item"] = Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) }
         } else {
-            views.append(NSTextField.text("unlinked", size: 11.5, color: Palette.dim))
+            cells["item"] = NSTextField.text("unlinked", size: 11.5, color: Palette.dim)
         }
-        if let t = checks(repo, p) { views.append(Chiplet("CI \(t.word.lowercased())", symbol: t.symbol, color: t.color)) }
-        views.append(Chiplet(state))
+        if let t = checks(repo, p) { cells["ci"] = Chiplet("CI \(t.word.lowercased())", symbol: t.symbol, color: t.color) }
+        var actions: [NSView] = []
         if busy.contains(id) {
             let spin = NSProgressIndicator()
             spin.style = .spinning; spin.controlSize = .small; spin.startAnimation(nil)
-            views.append(spin)
+            actions.append(spin)
         } else {
-            if !p.mine { views.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }) }
-            views.append(MenuChip("Merge", symbol: "arrow.triangle.merge") { [weak self] in
+            if !p.mine { actions.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }) }
+            actions.append(MenuChip("Merge", symbol: "arrow.triangle.merge") { [weak self] in
                 [("Squash and merge", MergeMethod.squash), ("Rebase and merge", .rebase), ("Merge commit", .merge)].map { t, m in
                     MenuAction(t) { self?.act(repo, p, .merge(m), verb: t) }
                 }
             })
         }
-        let r = Row(views, height: 50, label: "\(p.mine ? "My PR" : "Review request"): \(p.title), \(sub), \(state)") {
+        cells["actions"] = NSStackView(h: actions, spacing: 6)
+        let r = TableRow(table, cells: cells, height: 50, label: "\(p.mine ? "My PR" : "Review request"): \(p.title), \(sub), \(state)") {
             if let u = URL(string: p.url) { NSWorkspace.shared.open(u) }
         }
+        r.copyID = "\(p.number)"
+        r.copyLink = p.url
         r.menuItems = { [MenuAction("Open on GitHub") { if let u = URL(string: p.url) { NSWorkspace.shared.open(u) } }.item] }
         return r
     }

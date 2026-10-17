@@ -120,6 +120,7 @@ final class WorkstreamCard: Row {
         }
         fill = Palette.panel; border = Palette.line; radius = 10
         if let term = col.last as? Box, col.count == 3 { term.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
+        if let item = s.item { itemActions(url: item.url, key: s.key) }
     }
     required init?(coder: NSCoder) { fatalError() }
 

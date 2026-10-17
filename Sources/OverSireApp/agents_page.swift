@@ -7,6 +7,15 @@ final class AgentsPage: Page {
     private var tailAt: [String: Date] = [:]
     private var replies: [String: NSTextField] = [:]
     private var note: (Tone, String)?
+    private let table = ColumnLayout(id: "worktrees", columns: [
+        TableColumn(id: "worktree", title: "Worktree", width: 200, min: 100),
+        TableColumn(id: "repo", title: "Repo", width: 130, min: 60, optional: true),
+        TableColumn(id: "branch", title: "Branch", width: 170, min: 60, optional: true),
+        TableColumn(id: "session", title: "Session", width: 130, min: 60),
+        TableColumn(id: "terms", title: "Terms", width: 44, min: 36, optional: true),
+        TableColumn(id: "item", title: "Item", width: 124, min: 60),
+        TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
+    ])
 
     override var isEditing: Bool { super.isEditing || replies.values.contains { !$0.stringValue.isEmpty } }
 
@@ -32,8 +41,7 @@ final class AgentsPage: Page {
 
         col.addFull(SectionTitle("Worktrees", count: idx.cards.count))
         let list = ListCard()
-        list.add(Row([head("Worktree", 200), head("Repo", 130), head("Branch", 170), head("Session", 130),
-                      head("Terms", 44), head("Item", 124), head("CI", 30), Spacer()], height: 28))
+        list.add(TableHeader(table))
         for c in idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity }) { list.add(cardRow(c)) }
         if idx.cards.isEmpty { list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed")) }
         col.addFull(list)
@@ -43,12 +51,6 @@ final class AgentsPage: Page {
         for e in idx.feed.events.prefix(30) { feed.add(eventRow(e)) }
         if feed.isEmpty { feed.add(EmptyNote("No session changed state since OverSire started.", symbol: "clock")) }
         col.addFull(feed)
-    }
-
-    private func head(_ s: String, _ w: CGFloat) -> NSView {
-        let t = NSTextField.text(s, size: 11.5, weight: .semibold, color: Palette.dim)
-        t.widthAnchor.constraint(equalToConstant: w).isActive = true
-        return t
     }
 
     private func fixed(_ v: NSView, _ w: CGFloat) -> NSView {
@@ -81,16 +83,15 @@ final class AgentsPage: Page {
         name.lineBreakMode = .byTruncatingMiddle
         let branch = NSTextField.text(co?.branch ?? "—", size: 12, color: Palette.mut, mono: true)
         branch.lineBreakMode = .byTruncatingMiddle
-        let views: [NSView] = [
-            fixed(name, 200), fixed(NSTextField.text(c.repo, size: 12, color: Palette.mut), 130), fixed(branch, 170),
-            fixed(agent, 130), fixed(NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), 44),
-            fixed(item, 124), fixed(ci, 30), Spacer(),
-            ActionButton(key == nil ? "Open in Orca" : "Session", style: .plain) { [weak self] in
-                if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
-            },
+        let cells: [String: NSView] = [
+            "worktree": name, "repo": NSTextField.text(c.repo, size: 12, color: Palette.mut), "branch": branch,
+            "session": agent, "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "item": item, "ci": ci,
         ]
+        let open = ActionButton(key == nil ? "Open in Orca" : "Session", style: .plain) { [weak self] in
+            if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
+        }
         let label = "\(c.name), \(c.repo), \(c.liveTerminals) terminals" + (key.map { ", item \($0)" } ?? ", unlinked")
-        return Row(views, height: 40, label: label) { [weak self] in
+        return TableRow(table, cells: cells, trailing: [open], height: 40, label: label) { [weak self] in
             if let key { self?.go(.item(key, .overview)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }
     }

@@ -21,6 +21,7 @@ final class MenuChip: Chiplet {
 
 // The page of one work item: its workstream, session, sub-items and activity, with the properties at the side.
 final class ItemPage: Page, NSTextFieldDelegate {
+    private let subTable = ColumnLayout(id: "subitems", columns: ItemLine.columns())
     private enum Source: String, CaseIterable { case all = "All", plane = "Plane", github = "GitHub", orca = "Orca", oversire = "OverSire" }
 
     private let markdown = MarkdownView(width: 600)
@@ -422,7 +423,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             list.add(Row([ProgressRing(done: progress.done, total: progress.total).sized(16),
                           NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], height: 36))
         }
-        for k in kids { list.add(ItemLine(k, snap: snap, stream: data.workstreams.stream(k.key)) { [weak self] in self?.go($0) }) }
+        for k in kids { list.add(ItemLine(k, snap: snap, stream: data.workstreams.stream(k.key), layout: subTable) { [weak self] in self?.go($0) }) }
         if progress.total > kids.count {
             list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in Plane", size: 12, color: Palette.acc)], height: 32) {
                 NSWorkspace.shared.open(URL(string: item.url)!) })

@@ -2,29 +2,39 @@ import Cocoa
 import OverSireCore
 
 // One item in a page list: status, key, title, sub-items, agent, CI, priority, assignee, time.
-final class ItemLine: Row {
-    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, showProject: Bool = false, go: @escaping (Route) -> Void) {
+final class ItemLine: TableRow {
+    static func columns(keyWidth: CGFloat = 104) -> [TableColumn] {
+        [TableColumn(id: "status", title: "", width: 16, min: 16),
+         TableColumn(id: "key", title: "ID", width: keyWidth, min: 60),
+         TableColumn(id: "title", title: "Title", width: 200, min: 160, flexible: true),
+         TableColumn(id: "sub", title: "Sub", width: 52, min: 36, optional: true),
+         TableColumn(id: "session", title: "Session", width: 112, min: 60, optional: true),
+         TableColumn(id: "ci", title: "CI", width: 56, min: 36, optional: true),
+         TableColumn(id: "priority", title: "Priority", width: 72, min: 50, optional: true),
+         TableColumn(id: "who", title: "Who", width: 34, min: 24, optional: true),
+         TableColumn(id: "updated", title: "Updated", width: 60, min: 44, optional: true)]
+    }
+
+    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, layout: ColumnLayout, go: @escaping (Route) -> Void) {
         let opt = snap.option(item.statusOptionId)
-        let glyph = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16)
-        let key = NSTextField.text(item.key, size: 11.5, color: Palette.dim, mono: true)
-        key.widthAnchor.constraint(equalToConstant: showProject ? 96 : 78).isActive = true
-        let title = NSTextField.text(item.title, size: 13)
-        title.setContentHuggingPriority(.init(1), for: .horizontal)
-        var views: [NSView] = [glyph, key, title]
+        var cells: [String: NSView] = [
+            "status": StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16),
+            "key": NSTextField.text(item.key, size: 11.5, color: Palette.dim, mono: true),
+            "title": NSTextField.text(item.title, size: 13),
+            "updated": NSTextField.text(relativeTime(item.activityAt), size: 11.5, color: Palette.dim),
+        ]
         let prog = snap.progress(of: item.id)
         if prog.total > 0 {
-            views += [ProgressRing(done: prog.done, total: prog.total).sized(14), NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)]
+            cells["sub"] = NSStackView(h: [ProgressRing(done: prog.done, total: prog.total).sized(14),
+                                           NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)], spacing: 4)
         }
-        if let a = stream?.agent { views.append(Pill(Tone(a.phase), text: a.label())) }
-        if let ci = stream?.ci { views.append(Chiplet("CI", symbol: ci.symbol, color: ci.color)) }
-        if let p = item.fields["Priority"], p != "None" { views.append(Chiplet(p)) }
-        if let who = item.assignees.first { views.append(Avatar(who)) }
-        let when = NSTextField.text(relativeTime(item.activityAt), size: 11.5, color: Palette.dim)
-        when.alignment = .right
-        when.widthAnchor.constraint(equalToConstant: 56).isActive = true
-        views.append(when)
+        if let a = stream?.agent { cells["session"] = Pill(Tone(a.phase), text: a.label()) }
+        if let ci = stream?.ci { cells["ci"] = Chiplet("CI", symbol: ci.symbol, color: ci.color) }
+        if let p = item.fields["Priority"], p != "None" { cells["priority"] = Chiplet(p) }
+        if let who = item.assignees.first { cells["who"] = Avatar(who) }
         let parts = [opt?.name, stream?.agent?.label(), stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
-        super.init(views, height: 38, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
+        super.init(layout, cells: cells, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
+        itemActions(url: item.url, key: item.key)
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -73,6 +83,7 @@ final class BoardCard: Row {
         if !chips.isEmpty { col.addArrangedSubview(NSStackView(h: chips, spacing: 5)) }
         super.init([col], height: 54, inset: 10, label: "\(item.key) \(item.title)") { go(.item(item.key, .overview)) }
         fill = Palette.raise; border = Palette.line; radius = 8
+        itemActions(url: item.url, key: item.key)
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -86,6 +97,7 @@ final class ProjectPage: Page {
     private var onlyMine = false
     private var showDone = false
     private var showSubItems = false
+    private let table = ColumnLayout(id: "project", columns: ItemLine.columns())
 
     private var projectKey: String { if case .project(let k) = route { return k }; return "" }
 
@@ -128,15 +140,16 @@ final class ProjectPage: Page {
         let groups = statusGroups(snap, items)
         if board { col.addFull(boardView(groups, ws)); return }
         let list = ListCard()
+        list.add(TableHeader(table))
         for (opt, its) in groups where !its.isEmpty {
             let head = Row([StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
                             NSTextField.text(opt.name, size: 12.5, weight: .semibold),
                             NSTextField.text("\(its.count)", size: 12, color: Palette.dim), Spacer()], height: 32)
             head.fill = Palette.raise
             list.add(head)
-            for i in its.prefix(200) { list.add(ItemLine(i, snap: snap, stream: ws.stream(i.key)) { [weak self] in self?.go($0) }) }
+            for i in its.prefix(200) { list.add(ItemLine(i, snap: snap, stream: ws.stream(i.key), layout: table) { [weak self] in self?.go($0) }) }
         }
-        if list.isEmpty { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
+        if list.list.arrangedSubviews.count == 1 { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
         col.addFull(list)
     }
 
@@ -182,6 +195,7 @@ final class ProjectPage: Page {
 // Open items of the user in all projects. An agent that waits or a failing run comes first.
 final class MyItemsPage: Page {
     typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
+    private let table = ColumnLayout(id: "mine", columns: ItemLine.columns(keyWidth: 120))
 
     static func order(_ list: [Entry]) -> [Entry] {
         list.sorted { a, b in
@@ -204,8 +218,9 @@ final class MyItemsPage: Page {
         let ordered = MyItemsPage.order(list)
         col.addFull(PageHeader("My items", caption: "\(ordered.count) open items of yours in all projects. A session that needs input or failing CI comes first."))
         let card = ListCard()
+        if !ordered.isEmpty { card.add(TableHeader(table)) }
         for e in ordered.prefix(300) {
-            card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, showProject: true) { [weak self] in self?.go($0) })
+            card.add(ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table) { [weak self] in self?.go($0) })
         }
         if card.isEmpty { card.add(EmptyNote(data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")) }
         col.addFull(card)

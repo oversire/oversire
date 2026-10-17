@@ -232,6 +232,9 @@ class Card: Box {
 class Row: Box {
     var onClick: (() -> Void)?
     var menuItems: (() -> [NSMenuItem])?
+    // Command-C and Shift-Command-C copy these while the row has focus.
+    var copyID: String?
+    var copyLink: String?
     let stack: NSStackView
     private var hover = false { didSet { updateFill() } }
     private var tracking: NSTrackingArea?
@@ -319,6 +322,20 @@ class Row: Box {
         let m = NSMenu()
         items.forEach { m.addItem($0) }
         return m
+    }
+    // Copy link, Copy ID and Open on hover, and the copy keys.
+    func itemActions(url: String, key: String, tracker: String = "Plane") {
+        copyID = key
+        copyLink = url
+        hoverViews = RowActions.item(url: url, key: key, tracker: tracker)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, event.charactersIgnoringModifiers?.lowercased() == "c" else { return super.performKeyEquivalent(with: event) }
+        let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if mods == [.command, .shift], let copyLink { RowActions.copy(copyLink); return true }
+        if mods == .command, let copyID { RowActions.copy(copyID); return true }
+        return super.performKeyEquivalent(with: event)
     }
     override var acceptsFirstResponder: Bool { onClick != nil }
     override var canBecomeKeyView: Bool { onClick != nil }
@@ -623,4 +640,341 @@ final class Grid: NSStackView {
         }
     }
     required init(coder: NSCoder) { fatalError() }
+}
+
+// ─── Tables with resizable columns ───────────────────────────────────────────
+
+struct TableColumn {
+    let id: String
+    let title: String
+    var width: CGFloat
+    let min: CGFloat
+    var flexible = false        // takes the remaining width (title column)
+    var optional = false        // the user can hide it
+}
+
+// A view whose column widths follow a ColumnLayout.
+protocol ColumnFollower: AnyObject {
+    func columnsChanged()
+    func cellWidth(_ col: String) -> CGFloat?
+}
+
+// The column widths of one table, shared by the header and all rows. Saved in UserDefaults.
+final class ColumnLayout {
+    let id: String
+    let columns: [TableColumn]
+    private let defaults: UserDefaults
+    private var widths: [String: CGFloat]
+    private let followers = NSHashTable<AnyObject>.weakObjects()
+    var hidden: Set<String> {
+        didSet {
+            defaults.set(Array(hidden).sorted(), forKey: "table.\(id).hidden")
+            notify()
+        }
+    }
+
+    init(id: String, columns: [TableColumn], defaults: UserDefaults = .standard) {
+        self.id = id
+        self.columns = columns
+        self.defaults = defaults
+        let saved = defaults.dictionary(forKey: "table.\(id).widths") as? [String: Double] ?? [:]
+        widths = Dictionary(uniqueKeysWithValues: columns.map { c in (c.id, max(c.min, saved[c.id].map { CGFloat($0) } ?? c.width)) })
+        let known = Set(columns.filter(\.optional).map(\.id))
+        hidden = Set(defaults.stringArray(forKey: "table.\(id).hidden") ?? []).intersection(known)
+    }
+
+    func column(_ col: String) -> TableColumn? { columns.first { $0.id == col } }
+    func width(_ col: String) -> CGFloat { widths[col] ?? 0 }
+    func isVisible(_ col: String) -> Bool { !hidden.contains(col) }
+
+    func setWidth(_ col: String, _ w: CGFloat) {
+        guard let c = column(col), !c.flexible else { return }
+        let v = max(c.min, w.rounded())
+        guard v != widths[col] else { return }
+        widths[col] = v
+        save()
+        notify()
+    }
+
+    // The widest cell of the column, header title included.
+    func fit(_ col: String) {
+        let cells = followers.allObjects.compactMap { ($0 as? ColumnFollower)?.cellWidth(col) }
+        guard let w = cells.max() else { return }
+        setWidth(col, w)
+    }
+
+    func reset() {
+        widths = Dictionary(uniqueKeysWithValues: columns.map { ($0.id, $0.width) })
+        defaults.removeObject(forKey: "table.\(id).widths")
+        hidden = []
+    }
+
+    func follow(_ f: ColumnFollower) { followers.add(f) }
+
+    // The header menu: show or hide optional columns, reset the widths.
+    func menuItems() -> [NSMenuItem] {
+        var items: [NSMenuItem] = columns.filter(\.optional).map { c in
+            let i = MenuAction(c.title) { [weak self] in
+                guard let self else { return }
+                if self.hidden.contains(c.id) { self.hidden.remove(c.id) } else { self.hidden.insert(c.id) }
+            }.item
+            i.state = hidden.contains(c.id) ? .off : .on
+            return i
+        }
+        if !items.isEmpty { items.append(.separator()) }
+        items.append(MenuAction("Reset column widths") { [weak self] in self?.reset() }.item)
+        return items
+    }
+
+    private func save() {
+        let changed = widths.filter { k, v in column(k).map { $0.width != v } ?? false }
+        defaults.set(changed.mapValues { Double($0) }, forKey: "table.\(id).widths")
+    }
+
+    private func notify() { followers.allObjects.forEach { ($0 as? ColumnFollower)?.columnsChanged() } }
+}
+
+// Wraps the cells of a table line. Width constraints follow the layout in place, without a page rebuild.
+final class ColumnCells {
+    let layout: ColumnLayout
+    private(set) var boxes: [String: NSView] = [:]
+    private var constraints: [String: NSLayoutConstraint] = [:]
+    private var content: [String: NSView] = [:]
+
+    init(_ layout: ColumnLayout, _ cells: [String: NSView]) {
+        self.layout = layout
+        content = cells
+    }
+
+    // The views in column order, for a horizontal stack.
+    func views() -> [NSView] {
+        layout.columns.map { c in
+            let v = content[c.id] ?? NSView()
+            v.translatesAutoresizingMaskIntoConstraints = false
+            let box: NSView
+            if c.flexible {
+                box = NSStackView(h: [v], spacing: 0)
+                box.setContentHuggingPriority(.init(1), for: .horizontal)
+                box.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+                v.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+                let min = box.widthAnchor.constraint(greaterThanOrEqualToConstant: c.min)
+                min.priority = .defaultHigh
+                min.isActive = true
+            } else {
+                box = NSStackView(h: [v, Spacer()], spacing: 0)
+                v.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+                let w = box.widthAnchor.constraint(equalToConstant: layout.width(c.id))
+                w.isActive = true
+                constraints[c.id] = w
+            }
+            box.isHidden = !layout.isVisible(c.id)
+            boxes[c.id] = box
+            return box
+        }
+    }
+
+    func update() {
+        for (id, w) in constraints { w.constant = layout.width(id) }
+        for (id, b) in boxes { b.isHidden = !layout.isVisible(id) }
+    }
+
+    // A label in a fixed-width box can fit smaller, so its own text width counts first.
+    func fittingWidth(_ col: String) -> CGFloat? {
+        content[col].map { v in
+            let w = v.intrinsicContentSize.width
+            return ceil(w > 0 ? w : v.fittingSize.width)
+        }
+    }
+}
+
+// A table line: cells keyed by column id.
+class TableRow: Row, ColumnFollower {
+    let cells: ColumnCells
+
+    init(_ layout: ColumnLayout, cells: [String: NSView], trailing: [NSView] = [], height: CGFloat = 38, label: String? = nil,
+         onClick: (() -> Void)? = nil) {
+        self.cells = ColumnCells(layout, cells)
+        let fill: [NSView] = layout.columns.contains(where: \.flexible) ? [] : [Spacer()]
+        super.init(self.cells.views() + fill + trailing, height: height, label: label, onClick: onClick)
+        layout.follow(self)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func columnsChanged() { cells.update() }
+    func cellWidth(_ col: String) -> CGFloat? { cells.fittingWidth(col) }
+}
+
+// The header of a table: titles, drag handles, double-click to fit, right-click menu.
+final class TableHeader: Row, ColumnFollower {
+    private let cells: ColumnCells
+
+    init(_ layout: ColumnLayout) {
+        var titles: [String: NSView] = [:]
+        for c in layout.columns { titles[c.id] = HeaderCell(c, layout: layout) }
+        cells = ColumnCells(layout, titles)
+        let fill: [NSView] = layout.columns.contains(where: \.flexible) ? [] : [Spacer()]
+        super.init(cells.views() + fill, height: 28)
+        stack.edgeInsets = .init()
+        layout.follow(self)
+        menuItems = { layout.menuItems() }
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Column headers")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func columnsChanged() { cells.update() }
+    func cellWidth(_ col: String) -> CGFloat? { cells.fittingWidth(col) }
+}
+
+// One header title. A resizable column has a handle on its trailing edge, and takes keyboard focus:
+// Option-Left and Option-Right change the width by 10 pt.
+final class HeaderCell: NSView {
+    private let column: TableColumn
+    private weak var layout: ColumnLayout?
+    private let label: NSTextField
+
+    init(_ c: TableColumn, layout: ColumnLayout) {
+        column = c
+        self.layout = layout
+        label = .text(c.title.uppercased(), size: 10.5, weight: .semibold, color: Palette.dim)
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        if !c.flexible {
+            let h = ResizeHandle(column: c.id, layout: layout)
+            addSubview(h)
+            NSLayoutConstraint.activate([
+                h.widthAnchor.constraint(equalToConstant: 10),
+                h.centerXAnchor.constraint(equalTo: trailingAnchor),
+                h.topAnchor.constraint(equalTo: topAnchor, constant: -4),
+                h.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 4),
+            ])
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(c.title.isEmpty ? c.id : c.title)
+        if !c.flexible { setAccessibilityHelp("Option-Left and Option-Right change the width") }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    // The header title is narrower than the cells. It counts for "fit" only when no row is wider.
+    override var fittingSize: NSSize { NSSize(width: label.fittingSize.width + 12, height: label.fittingSize.height) }
+
+    override var acceptsFirstResponder: Bool { !column.flexible }
+    override var canBecomeKeyView: Bool { !column.flexible }
+    override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
+    override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds.insetBy(dx: -3, dy: -2), xRadius: 4, yRadius: 4).fill() }
+    override var focusRingMaskBounds: NSRect { bounds.insetBy(dx: -3, dy: -2) }
+
+    override func keyDown(with event: NSEvent) {
+        guard let layout, event.modifierFlags.contains(.option), event.keyCode == 123 || event.keyCode == 124 else { return super.keyDown(with: event) }
+        layout.setWidth(column.id, layout.width(column.id) + (event.keyCode == 124 ? 10 : -10))
+    }
+}
+
+// The drag area between two header titles. A double-click fits the column to its widest cell.
+final class ResizeHandle: NSView {
+    private let column: String
+    private weak var layout: ColumnLayout?
+    private var start: (x: CGFloat, w: CGFloat)?
+    private var hover = false { didSet { needsDisplay = true } }
+
+    init(column: String, layout: ColumnLayout) {
+        self.column = column
+        self.layout = layout
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        toolTip = "Drag to resize. Double-click to fit."
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let w: CGFloat = hover || start != nil ? 2 : 1
+        (hover || start != nil ? Palette.acc : Palette.line).setFill()
+        NSRect(x: (bounds.width - w) / 2, y: bounds.midY - 7, width: w, height: 14).fill()
+    }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hover = true }
+    override func mouseExited(with event: NSEvent) { hover = false }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let layout else { return }
+        if event.clickCount == 2 { layout.fit(column); return }
+        start = (event.locationInWindow.x, layout.width(column))
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let start, let layout else { return }
+        layout.setWidth(column, start.w + event.locationInWindow.x - start.x)
+    }
+    override func mouseUp(with event: NSEvent) { start = nil; needsDisplay = true }
+}
+
+// Small icon buttons that show on a row while the pointer is on it.
+enum RowActions {
+    // Copy link, Copy ID, Open in the tracker.
+    static func item(url: String, key: String, tracker: String = "Plane") -> [NSView] {
+        [IconButton("link", label: "Copy link of \(key)", tip: "Copy link (⇧⌘C)", copy: url),
+         IconButton("number", label: "Copy ID \(key)", tip: "Copy ID (⌘C)", copy: key),
+         IconButton("arrow.up.right.square", label: "Open \(key) in \(tracker)", tip: "Open in \(tracker)") {
+             if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+         }]
+    }
+
+    static func copy(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
+}
+
+// A borderless symbol button. A copy button shows a check for 1 s after the copy.
+final class IconButton: NSButton {
+    private let symbol: String
+    private let run: () -> Void
+    private let copies: Bool
+
+    init(_ symbol: String, label: String, tip: String, copy text: String? = nil, _ run: (() -> Void)? = nil) {
+        self.symbol = symbol
+        copies = text != nil
+        self.run = run ?? { text.map(RowActions.copy) }
+        super.init(frame: .zero)
+        isBordered = false
+        imagePosition = .imageOnly
+        target = self
+        action = #selector(fire)
+        toolTip = tip
+        setAccessibilityLabel(label)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 24).isActive = true
+        heightAnchor.constraint(equalToConstant: 22).isActive = true
+        show(symbol, Palette.mut)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func show(_ s: String, _ c: NSColor) {
+        image = NSImage(systemSymbolName: s, accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 12.5, weight: .medium))
+        contentTintColor = c
+    }
+
+    @objc private func fire() {
+        run()
+        guard copies else { return }
+        show("checkmark", Palette.ok)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.show(self.symbol, Palette.mut)
+        }
+    }
 }
