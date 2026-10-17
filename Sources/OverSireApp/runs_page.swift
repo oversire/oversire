@@ -96,7 +96,7 @@ final class RunsPage: Page {
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(RunLine.layout)) }
         list.add(shown, more: more) { [weak self, data, commands] r in RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) } }
-        if list.isEmpty { list.add(data.firstLoad ? SkeletonRows(label: "Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
+        if list.isEmpty { list.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)
     }
 }
@@ -127,7 +127,7 @@ struct JobsLoad {
             return NSStackView(v: [EmptyNote("GitHub did not give the jobs.", symbol: "exclamationmark.triangle"),
                                    NSStackView(h: [ActionButton("Retry", symbol: "arrow.clockwise", retry), Spacer()], spacing: 0)], spacing: 0)
         }
-        guard let jobs else { return SkeletonRows(count: 4, height: 34, label: "Loading jobs") }
+        guard let jobs else { return LoadingNote("Loading jobs") }
         return jobs.isEmpty ? EmptyNote("No jobs.") : nil
     }
 }
@@ -225,7 +225,7 @@ final class RunPage: Page {
         guard let r = current else {
             col.addFull(PageHeader(route.title, caption: repo))
             let c = ListCard()
-            c.add(SkeletonRows(count: 4, label: "Loading the run"))
+            c.add(LoadingNote("Loading the run"))
             col.addFull(c)
             return
         }
@@ -358,7 +358,7 @@ final class RunPage: Page {
             if !e.fix.isEmpty { c.add(NSTextField.text("Try: " + e.fix, size: 12.5, color: Palette.mut, lines: 0)) }
         } else if cia.busy.contains(k) {
             c.add(NSTextField.text("The AI reads the log of the failed job and the changed files…", size: 12.5, color: Palette.dim))
-            c.add(SkeletonRows(count: 2, height: 20, label: "The AI writes the cause"))
+            c.add(LoadingNote("The AI writes the cause", compact: true))
         } else if let err = cia.errors[k] {
             c.add(NSTextField.text("Could not explain: \(err)", size: 12.5, color: Palette.bad, lines: 0))
         } else if !cia.canExplain {

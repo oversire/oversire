@@ -78,7 +78,10 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let two = NSStackView(h: [navCol, body], spacing: 16, align: .top)
         col.addFull(two)
         navCol.widthAnchor.constraint(equalToConstant: 210).isActive = true
-        body.widthAnchor.constraint(equalTo: two.widthAnchor, constant: -226).isActive = true
+        // Not required: an embedded menu bar pane has a fixed width, and a narrow page scrolls sideways.
+        let bw = body.widthAnchor.constraint(equalTo: two.widthAnchor, constant: -226)
+        bw.priority = .defaultHigh
+        bw.isActive = true
     }
 
     private func symbol(_ p: Route.SettingsPage) -> String {

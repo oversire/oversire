@@ -138,7 +138,7 @@ final class ProjectSettingsPage: Page {
     override func build(_ col: NSStackView) {
         guard let p = project else {
             col.addFull(PageHeader("\(key) settings", caption: "Project settings"))
-            col.addFull(data.projectsLoading ? SkeletonRows(count: 4, label: "Loading \(key)") : EmptyNote("OverSire does not track a project with the key \(key).", symbol: "questionmark.folder"))
+            col.addFull(data.projectsLoading ? LoadingNote("Loading \(key)") : EmptyNote("OverSire does not track a project with the key \(key).", symbol: "questionmark.folder"))
             return
         }
         if loadingKey != key { load(p) }
@@ -481,7 +481,7 @@ final class ProjectSettingsPage: Page {
                 c.add(NSStackView(h: [ActionButton("Retry", symbol: "arrow.clockwise") { [weak self] in self?.refresh() },
                                       ActionButton("Open in \(trackerName)", symbol: "arrow.up.right.square") { [weak self] in self?.openInTracker() }, Spacer()], spacing: 6))
             } else {
-                c.add(SkeletonRows(count: 4, label: "Loading the \(trackerName) settings"))
+                c.add(LoadingNote("Loading the \(trackerName) settings"))
             }
             body.addFull(c)
             return

@@ -45,7 +45,7 @@ final class JobsLoadTests: XCTestCase {
     @MainActor
     func testNilJobsShowAnErrorAndRetry() throws {
         var l = JobsLoad()
-        XCTAssertTrue(l.placeholder(retry: {}) is SkeletonRows)
+        XCTAssertTrue(l.placeholder(retry: {}) is LoadingNote)
         l.absorb(nil)
         XCTAssertTrue(l.failed)
         var retried = false
@@ -54,7 +54,7 @@ final class JobsLoadTests: XCTestCase {
         retry.performClick(nil)
         XCTAssertTrue(retried)
         l.retry()
-        XCTAssertTrue(l.placeholder(retry: {}) is SkeletonRows)
+        XCTAssertTrue(l.placeholder(retry: {}) is LoadingNote)
     }
 
     @MainActor

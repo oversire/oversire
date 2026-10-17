@@ -167,9 +167,7 @@ class Page: NSViewController {
     // The first view of a page that builds later.
     func skeleton(_ col: NSStackView) {
         col.addFull(PageHeader(route.title, caption: "Loading…"))
-        let list = ListCard()
-        list.add(SkeletonRows(count: 8, label: "Loading \(route.title)"))
-        col.addFull(list)
+        col.addFull(LoadingNote("Loading \(route.title)", height: 240))
     }
 
     // Subclasses add their views to the page column.
@@ -203,6 +201,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private static let cacheSize = 6
     private var navItem: NSToolbarItemGroup?
     private var refreshButton: RefreshButton?
+    private var changedWhileHidden = false
     private var pendingReload = false
     private var reloadScheduled = false
     private var forceNext = false
@@ -232,6 +231,9 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         side.minimumThickness = 200
         side.maximumThickness = 320
         side.canCollapse = true
+        // Pages do not push the divider (PageScroll), but a stray constraint below 485 must not move it either.
+        // Below a divider drag (490), so the user can still drag it.
+        side.holdingPriority = .init(485)
         side.isCollapsed = GENERAL.sidebarCollapsed
         split.addSplitViewItem(side)
         let main = NSSplitViewItem(viewController: host)
@@ -320,12 +322,27 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             self.forceNext = false
             self.fingerprint = fp
             self.builtAt = Date()
+            // A window behind other windows builds when it shows again. A build blocks the main thread and the menu bar panel.
+            guard self.isOnScreen else {
+                self.changedWhileHidden = true
+                self.cache.forEach { $0.markStale() }
+                return
+            }
             self.reloadSidebar()
             self.cache.forEach { if $0 !== self.page { $0.markStale() } }
             guard let page = self.page else { return }
             if page.isEditing { self.pendingReload = true; return }
             page.reload()
         }
+    }
+
+    private var isOnScreen: Bool { isVisible && window?.occlusionState.contains(.visible) == true }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard changedWhileHidden, isOnScreen else { return }
+        changedWhileHidden = false
+        reloadSidebar()
+        page?.attach()
     }
 
     func windowDidUpdate(_ notification: Notification) {
@@ -348,9 +365,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private let navId = NSToolbarItem.Identifier("nav")
     private let paletteId = NSToolbarItem.Identifier("palette")
     private let refreshId = NSToolbarItem.Identifier("refresh")
+    private let settingsId = NSToolbarItem.Identifier("settings")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, navId, .flexibleSpace, paletteId, refreshId]
+        [.toggleSidebar, .flexibleSpace, navId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, refreshId, settingsId]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
 
@@ -383,6 +401,16 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             i.view = b
             i.label = "Refresh"
             return i
+        case settingsId:
+            let i = NSToolbarItem(itemIdentifier: id)
+            let b = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")!, target: self,
+                             action: #selector(openSettings))
+            b.bezelStyle = .texturedRounded
+            b.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            b.toolTip = "Settings (⌘,)"
+            i.view = b
+            i.label = "Settings"
+            return i
         default:
             return nil
         }
@@ -401,7 +429,9 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     @objc func goForward(_ sender: Any?) { router.forward() }
     @objc func refreshNow() { data.refresh(force: true, completion: nil) }
     @objc func toggleSidebarNow(_ sender: Any?) { split.toggleSidebar(sender) }
+    func setSidebarWidth(_ w: CGFloat) { split.splitView.setPosition(w, ofDividerAt: 0) }
     @objc func openPalette() { CommandPalette.show(over: self) }
+    @objc func openSettings() { if case .settings = router.current { return }; router.go(.settings(.general)) }
     @objc func goTo(_ sender: NSMenuItem) {
         if let s = sender.representedObject as? String, let r = Route(path: s) { show(r) }
     }
@@ -467,8 +497,6 @@ struct SidebarModel {
         out.append(.header("Views"))
         out.append(e(.runs(.failed), "Failing runs", "xmark.octagon", badge: failing))
         out.append(e(.runs(.unlinked), "Unlinked runs", "link.badge.plus"))
-        out.append(.header(" "))
-        out.append(e(.settings(.general), "Settings", "gearshape"))
         return out
     }
 }

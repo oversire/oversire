@@ -112,7 +112,7 @@ final class ProjectPage: Page {
             col.addFull(PageHeader(projectKey, caption: "Project"))
             if data.projectsLoading {
                 let c = ListCard()
-                c.add(SkeletonRows(count: 6, label: "Loading \(projectKey)"))
+                c.add(LoadingNote("Loading \(projectKey)"))
                 col.addFull(c)
             } else {
                 col.addFull(EmptyNote("OverSire does not track a project with the key \(projectKey).", symbol: "questionmark.folder"))
@@ -242,7 +242,7 @@ final class MyItemsPage: Page {
             ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table, commands: commands) { self?.go($0) }
         }
         pageBusy = data.projectsLoading
-        if card.isEmpty { card.add(data.projectsLoading ? SkeletonRows(label: "Loading your items") : EmptyNote("No open items are yours.")) }
+        if card.isEmpty { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }
         col.addFull(card)
     }
 }

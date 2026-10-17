@@ -106,6 +106,7 @@ final class AgentsPage: Page {
         let title = data.projectStore.item(key: key)?.2.title ?? ""
         let c = Card(border: Palette.warn.withAlphaComponent(0.55))
         let link = ActionButton("\(key) · \(title)", style: .link) { [weak self] in self?.go(.item(key, .session)) }
+        link.truncates()
         c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), link, Chiplet(a.repo.isEmpty ? a.agent.rawValue : a.repo, symbol: "folder", mono: true),
                               NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 8))
         loadTail(key)

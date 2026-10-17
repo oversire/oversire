@@ -261,7 +261,7 @@ final class InboxPage: Page {
         let list = ListCard()
         if !shown.isEmpty { list.add(TableHeader(InboxRow.layout)) }
         list.add(shown, more: more) { [unowned self] in self.row($0) }
-        if list.isEmpty, data.loadingFirst { list.add(SkeletonRows(label: "Loading the inbox")) }
+        if list.isEmpty, data.loadingFirst { list.add(LoadingNote("Loading the inbox")) }
         if list.isEmpty {
             list.add(EmptyNote(filter.isOn ? "No entry matches the filters." : tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero."))
         }

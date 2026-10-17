@@ -198,12 +198,12 @@ final class HomePage: Page {
         if needs.count > 8 {
             ny.add(Row([NSTextField.text("\(needs.count - 8) more in the inbox", size: 12, color: Palette.acc)], height: 34) { [weak self] in self?.go(.inbox(.all)) })
         }
-        if ny.isEmpty { ny.add(data.loadingFirst ? SkeletonRows(count: 3, label: "Loading") : EmptyNote("Nothing waits for you.")) }
+        if ny.isEmpty { ny.add(data.loadingFirst ? LoadingNote("Loading") : EmptyNote("Nothing waits for you.")) }
         aside.addFull(ny)
         aside.addFull(SectionTitle("Running now", count: running.count))
         let rn = ListCard()
         for r in running.prefix(8) { rn.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
-        if rn.isEmpty { rn.add(data.firstLoad ? SkeletonRows(count: 2, label: "Loading runs") : EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
+        if rn.isEmpty { rn.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
         aside.addFull(rn)
 
         let two = NSStackView(h: [main, aside], spacing: 16, align: .top)

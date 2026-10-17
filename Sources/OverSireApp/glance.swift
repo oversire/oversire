@@ -18,6 +18,7 @@ final class GlanceVC: NSViewController {
     private let foot = NSStackView(h: [], spacing: 8)
     private var observer: Any?
     private var fingerprint: DataFingerprint?
+    private var needsCount = 0
 
     init(data: AppData, open: @escaping (Route) -> Void) {
         self.data = data
@@ -67,13 +68,7 @@ final class GlanceVC: NSViewController {
 
     func rebuild() {
         let needs = NeedsYou.collect(data)
-        head.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let strip = TabStrip(Tab.allCases.map(\.title), selected: GlanceVC.tab.rawValue, counts: [needs.isEmpty ? nil : needs.count, nil, nil])
-        strip.onSelect = { [weak self] i in GlanceVC.tab = Tab(rawValue: i) ?? .now; self?.rebuild() }
-        head.addArrangedSubview(strip)
-        head.addArrangedSubview(Spacer())
-        head.addArrangedSubview(ActionButton("", symbol: "macwindow") { [weak self] in self?.open(.home) }.labeled("Open the window"))
-
+        header(needs.count)
         body.arrangedSubviews.forEach { $0.removeFromSuperview() }
         switch GlanceVC.tab {
         case .now: now(needs)
@@ -87,6 +82,30 @@ final class GlanceVC: NSViewController {
         foot.addArrangedSubview(Spacer())
         foot.addArrangedSubview(ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) })
         foot.addArrangedSubview(ActionButton("", symbol: "gearshape") { [weak self] in self?.open(.settings(.menubar)) }.labeled("Settings"))
+    }
+
+    private func header(_ needs: Int) {
+        needsCount = needs
+        head.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let strip = TabStrip(Tab.allCases.map(\.title), selected: GlanceVC.tab.rawValue, counts: [needs == 0 ? nil : needs, nil, nil])
+        strip.onSelect = { [weak self] i in self?.select(Tab(rawValue: i) ?? .now) }
+        head.addArrangedSubview(strip)
+        head.addArrangedSubview(Spacer())
+        head.addArrangedSubview(ActionButton("", symbol: "macwindow") { [weak self] in self?.open(.home) }.labeled("Open the window"))
+    }
+
+    // The strip and a spinner show at once. The tab builds on the next run loop turn, so the click does not wait for it.
+    private func select(_ tab: Tab) {
+        guard tab != GlanceVC.tab else { return }
+        GlanceVC.tab = tab
+        header(needsCount)
+        body.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        body.addFull(LoadingNote("Loading \(tab.title)", height: 200))
+        view.displayIfNeeded()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, GlanceVC.tab == tab else { return }
+            self.rebuild()
+        }
     }
 
     // MARK: Tabs
@@ -105,6 +124,7 @@ final class GlanceVC: NSViewController {
     private func runs() {
         let latest = data.grouped.flatMap { g in latestPerWorkflow(g.1, acrossBranches: true).map { (g.0, $0) } }
             .sorted { newerActivity($0.1, $1.1) }
+        if latest.isEmpty, data.firstLoad { body.addFull(LoadingNote("Loading runs", height: 200)); return }
         section("Latest run of each workflow", count: latest.count, latest.prefix(14).map { runRow($0.0, $0.1) },
                 more: ("All runs", .runs(.all)), empty: data.firstLoad ? "Loading runs…" : "No runs.")
     }

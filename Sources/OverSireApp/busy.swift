@@ -84,65 +84,38 @@ final class InlineSpinner: NSStackView {
     required init(coder: NSCoder) { fatalError() }
 }
 
-// Grey rows that stand in for a list with no data yet. They pulse, except with Reduce Motion.
-final class SkeletonRows: NSStackView {
-    init(count: Int = 5, height: CGFloat = 38, label: String = "Loading") {
+// A centered spinner and a label for content with no data yet. It fades in, so a fast load does not flash.
+// No placeholder rows: their count never matches the real list, so the page jumps when the data comes.
+final class LoadingNote: NSView {
+    init(_ label: String = "Loading", height: CGFloat = 120, compact: Bool = false) {
         super.init(frame: .zero)
-        orientation = .vertical
-        spacing = 0
-        alignment = .leading
         translatesAutoresizingMaskIntoConstraints = false
-        let widths: [CGFloat] = [0.62, 0.48, 0.71, 0.4, 0.55]
-        for i in 0..<count {
-            let row = NSView()
-            row.translatesAutoresizingMaskIntoConstraints = false
-            let a = Bone(), b = Bone()
-            row.addSubview(a)
-            row.addSubview(b)
-            NSLayoutConstraint.activate([
-                row.heightAnchor.constraint(equalToConstant: height),
-                a.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-                a.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                a.widthAnchor.constraint(equalToConstant: 64),
-                b.leadingAnchor.constraint(equalTo: a.trailingAnchor, constant: 16),
-                b.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                b.widthAnchor.constraint(equalTo: row.widthAnchor, multiplier: widths[i % widths.count], constant: -92),
-            ])
-            addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
-        }
+        wantsLayer = true
+        let text = NSTextField.text(label.hasSuffix("…") ? label : label + "…", size: compact ? 12 : 12.5, color: Palette.dim)
+        let s = NSStackView(h: [Spinner(), text], spacing: 8)
+        addSubview(s)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: compact ? 32 : height),
+            s.centerXAnchor.constraint(equalTo: centerXAnchor),
+            s.centerYAnchor.constraint(equalTo: centerYAnchor),
+            s.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+        ])
         setAccessibilityElement(true)
         setAccessibilityRole(.progressIndicator)
         setAccessibilityLabel(label)
     }
-    required init(coder: NSCoder) { fatalError() }
+    required init?(coder: NSCoder) { fatalError() }
 
-    // One grey bar.
-    final class Bone: NSView {
-        init(height: CGFloat = 10) {
-            super.init(frame: .zero)
-            translatesAutoresizingMaskIntoConstraints = false
-            wantsLayer = true
-            layer?.cornerRadius = 4
-            heightAnchor.constraint(equalToConstant: height).isActive = true
-        }
-        required init?(coder: NSCoder) { fatalError() }
-
-        override func updateLayer() { layer?.backgroundColor = Palette.line.cgColor }
-        override var wantsUpdateLayer: Bool { true }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            layer?.removeAnimation(forKey: "pulse")
-            guard window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-            let a = CABasicAnimation(keyPath: "opacity")
-            a.fromValue = 1
-            a.toValue = 0.45
-            a.duration = 0.7
-            a.autoreverses = true
-            a.repeatCount = .infinity
-            layer?.add(a, forKey: "pulse")
-        }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let a = CABasicAnimation(keyPath: "opacity")
+        a.fromValue = 0
+        a.toValue = 1
+        a.duration = 0.25
+        a.beginTime = CACurrentMediaTime() + 0.12
+        a.fillMode = .backwards
+        layer?.add(a, forKey: "fade")
     }
 }
 

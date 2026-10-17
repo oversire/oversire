@@ -64,7 +64,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             pageBusy = data.projectsLoading
             if data.projectsLoading {
                 let c = ListCard()
-                c.add(SkeletonRows(count: 4, label: "Loading \(key)"))
+                c.add(LoadingNote("Loading \(key)"))
                 col.addFull(c)
             } else {
                 col.addFull(EmptyNote("OverSire has no item \(key). It may be in a project that OverSire does not track, or it was deleted.",
@@ -378,7 +378,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
         let c = Card(title: "Summary", trailing: [copy, sum])
         if busy, summary == nil {
-            c.add(SkeletonRows(count: 3, height: 22, label: "The AI writes the summary"))
+            c.add(LoadingNote("The AI writes the summary", compact: true))
             return c
         }
         guard let s = summary else {
@@ -417,7 +417,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         b.isEnabled = AI_CFG.enabled
         if asking {
             b.busy("Asking…")
-            c.add(SkeletonRows(count: 2, height: 22, label: "The AI writes the answer"))
+            c.add(LoadingNote("The AI writes the answer", compact: true))
         }
         c.add(NSStackView(h: [f, b], spacing: 6))
         return c
@@ -507,7 +507,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             list.add(Row([Spinner(size: .mini), NSTextField.text(pendingComment, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
                          height: 34, label: "Sending comment: \(pendingComment)"))
         }
-        if timeline == nil { list.add(SkeletonRows(count: 4, height: 34, label: "Loading the activity")) }
+        if timeline == nil { list.add(LoadingNote("Loading the activity")) }
         for e in all where activitySource == .all || e.source == activitySource {
             var col: [NSView] = [NSTextField.text(e.text, size: 12.5, lines: 2)]
             if let b = e.body?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {

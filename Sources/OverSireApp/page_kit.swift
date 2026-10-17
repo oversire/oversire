@@ -136,6 +136,13 @@ final class ActionButton: NSButton {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func fire() { onClick?() }
+
+    // A long title shrinks with an ellipsis, in place of a wider row. Below labels (250), so it shrinks first.
+    func truncates() {
+        setContentCompressionResistancePriority(.init(200), for: .horizontal)
+        (cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
+        toolTip = toolTip ?? title
+    }
     override func resetCursorRects() { if !isBordered { addCursorRect(bounds, cursor: .pointingHand) } }
 }
 
@@ -547,6 +554,7 @@ final class PageScroll: NSScrollView {
     private(set) var column: NSStackView
     private let maxWidth: CGFloat
     private var columnConstraints: [NSLayoutConstraint] = []
+    private var fill: NSLayoutConstraint!
 
     init(maxWidth: CGFloat = 1100) {
         self.maxWidth = maxWidth
@@ -554,23 +562,35 @@ final class PageScroll: NSScrollView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         hasVerticalScroller = true
+        hasHorizontalScroller = true
         autohidesScrollers = true
         drawsBackground = false
         let doc = Flipped()
         doc.translatesAutoresizingMaskIntoConstraints = false
         documentView = doc
-        // Wide content overflows to the right. It must not push the sidebar or the window.
-        let fill = doc.widthAnchor.constraint(equalTo: contentView.widthAnchor)
-        fill.priority = .init(480)
+        // The fill is a constant that layout() sets to the visible width. It links to no outer view, so wide content
+        // never pushes the sidebar or the window. At 760 it beats label compression (750): text wraps or truncates,
+        // and only fixed widths, such as table columns, scroll sideways.
+        // A link to the clip view stays below the split holding priorities (250), so it cannot size the pane.
+        fill = doc.widthAnchor.constraint(equalToConstant: 0)
+        fill.priority = .init(760)
+        let atLeast = doc.widthAnchor.constraint(greaterThanOrEqualTo: contentView.widthAnchor)
+        atLeast.priority = .init(240)
         NSLayoutConstraint.activate([
             doc.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            doc.widthAnchor.constraint(greaterThanOrEqualTo: contentView.widthAnchor),
+            atLeast,
             fill,
             doc.topAnchor.constraint(equalTo: contentView.topAnchor),
         ])
         install(column)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let w = contentView.bounds.width
+        if fill.constant != w { fill.constant = w }
+    }
 
     private static func makeColumn() -> NSStackView {
         let c = NSStackView(v: [], spacing: 16)
@@ -583,7 +603,9 @@ final class PageScroll: NSScrollView {
         doc.addSubview(c)
         let w = c.widthAnchor.constraint(equalTo: doc.widthAnchor)
         w.priority = .defaultHigh
+        // Content wider than the page scrolls from the left edge. It does not overflow both sides of a centered column.
         columnConstraints = [
+            doc.widthAnchor.constraint(greaterThanOrEqualTo: c.widthAnchor),
             c.topAnchor.constraint(equalTo: doc.topAnchor),
             c.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
             c.centerXAnchor.constraint(equalTo: doc.centerXAnchor),
@@ -793,8 +815,41 @@ final class ColumnLayout {
         hidden = Set(defaults.stringArray(forKey: "table.\(id).hidden") ?? []).intersection(known)
     }
 
+    // The header sets the room. Fixed columns shrink together toward their minimum to fit it,
+    // so the header and all rows stay aligned. Only a table wider than its minimums scrolls.
+    private var room: CGFloat = .greatestFiniteMagnitude
+    private var trailing: CGFloat = 0
+    private var shrink: CGFloat = 0
+
     func column(_ col: String) -> TableColumn? { columns.first { $0.id == col } }
-    func width(_ col: String) -> CGFloat { widths[col] ?? 0 }
+    func width(_ col: String) -> CGFloat {
+        guard let w = widths[col], let c = column(col), !c.flexible else { return widths[col] ?? 0 }
+        return (w - (w - c.min) * shrink).rounded(.down)
+    }
+
+    func fit(room r: CGFloat) {
+        guard abs(r - room) >= 1 else { return }
+        room = r
+        refit()
+    }
+
+    // The widest trailing views of a row, such as buttons.
+    func reserve(_ w: CGFloat) {
+        guard w > trailing else { return }
+        trailing = w
+        refit()
+    }
+
+    private func refit() {
+        let shown = columns.filter { isVisible($0.id) }
+        let fixed = shown.filter { !$0.flexible }
+        let need = shown.reduce(0) { $0 + ($1.flexible ? $1.min : widths[$1.id] ?? 0) } + trailing + CGFloat(shown.count + 1) * 10
+        let slack = fixed.reduce(0) { $0 + (widths[$1.id] ?? 0) - $1.min }
+        let s = need <= room || slack <= 0 ? 0 : min(1, (need - room) / slack)
+        guard abs(s - shrink) > 0.001 else { return }
+        shrink = s
+        notify()
+    }
     func isVisible(_ col: String) -> Bool { !hidden.contains(col) }
 
     func setWidth(_ col: String, _ w: CGFloat) {
@@ -910,6 +965,7 @@ class TableRow: Row, ColumnFollower {
         let fill: [NSView] = layout.columns.contains(where: \.flexible) ? [] : [Spacer()]
         super.init(self.cells.views() + fill + trailing, height: height, label: label, onClick: onClick)
         layout.follow(self)
+        if !trailing.isEmpty { layout.reserve(trailing.reduce(0) { $0 + ceil($1.fittingSize.width) + 10 }) }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -937,6 +993,14 @@ final class TableHeader: Row, ColumnFollower {
 
     func columnsChanged() { cells.update() }
     func cellWidth(_ col: String) -> CGFloat? { cells.fittingWidth(col) }
+
+    // The visible page width, not the own width: a table wider than the page must not raise its own room.
+    override func layout() {
+        super.layout()
+        guard let scroll = enclosingScrollView, let doc = scroll.documentView else { return }
+        let x = convert(NSPoint.zero, to: doc).x
+        cells.layout.fit(room: min(bounds.width, scroll.contentView.bounds.width - 2 * x) - 28)
+    }
 }
 
 // One header title. A resizable column has a handle on its trailing edge, and takes keyboard focus:

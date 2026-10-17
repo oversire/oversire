@@ -36,7 +36,7 @@ final class PRsPage: Page {
             let card = ListCard()
             if !list.isEmpty { card.add(TableHeader(table)) }
             for e in list { card.add(row(e.repo, e.pr)) }
-            if card.isEmpty { card.add(data.firstLoad ? SkeletonRows(count: 3, label: "Loading pull requests") : EmptyNote(empty)) }
+            if card.isEmpty { card.add(data.firstLoad ? LoadingNote("Loading pull requests") : EmptyNote(empty)) }
             col.addFull(card)
         }
     }

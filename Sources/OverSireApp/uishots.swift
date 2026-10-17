@@ -141,7 +141,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let w = AppWindow(data: self)
         window = w
         w.window?.setFrameAutosaveName("")
-        w.window?.setFrame(NSRect(x: 40, y: 40, width: 1280, height: 860), display: true)
+        let env = ProcessInfo.processInfo.environment
+        let width = env["OVERSIRE_UISHOTS_WIDTH"].flatMap(Double.init) ?? 1280
+        w.window?.setFrame(NSRect(x: 40, y: 40, width: width, height: 860), display: true)
+        if let side = env["OVERSIRE_UISHOTS_SIDEBAR"].flatMap(Double.init) { w.setSidebarWidth(side) }
         w.window?.orderFrontRegardless()
         let routes = paths.isEmpty ? Route.samples.map(\.path) + ["palette:item"] : paths
         var steps: [() -> Void] = []
@@ -228,6 +231,6 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         p.arguments = ["-x", "-o", "-l", "\(glance?.windowNumber ?? CommandPalette.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
-        print("UISHOTS \(out)")
+        print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")
     }
 }
