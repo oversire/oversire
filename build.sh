@@ -24,9 +24,9 @@ for arch in ${ARCHS:-$(uname -m)}; do
   BINS+=(".build/$arch-apple-macosx/release/oversire")
 done
 lipo -create "${BINS[@]}" -output OverSire.app/Contents/MacOS/oversire
-# AppIcon.icns comes from AppIcon.svg. See CONTRIBUTING.md to make it again.
+# brand/AppIcon.icns comes from brand/AppIcon.svg. Run brand/make.sh to make it again.
 mkdir -p OverSire.app/Contents/Resources
-cp AppIcon.icns OverSire.app/Contents/Resources/AppIcon.icns
+cp brand/AppIcon.icns OverSire.app/Contents/Resources/AppIcon.icns
 # Markdown rendering: markdown-it and highlight.js. See assets/markdown/README.md.
 rm -rf OverSire.app/Contents/Resources/markdown
 cp -R assets/markdown OverSire.app/Contents/Resources/markdown

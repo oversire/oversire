@@ -49,16 +49,15 @@ The signing secrets are in the `release` environment, which accepts the `main` b
 
 ## App icon
 
-`AppIcon.svg` is the source of `AppIcon.icns`. After you change the SVG, make the icon again (this needs `brew install librsvg`):
+The SVG masters are in `brand/`:
 
-```bash
-mkdir -p AppIcon.iconset
-for s in 16 32 128 256 512; do
-  rsvg-convert -w $s -h $s AppIcon.svg -o AppIcon.iconset/icon_${s}x${s}.png
-  rsvg-convert -w $((s*2)) -h $((s*2)) AppIcon.svg -o AppIcon.iconset/icon_${s}x${s}@2x.png
-done
-iconutil -c icns AppIcon.iconset -o AppIcon.icns
-```
+- `AppIcon.svg`: the app icon ("Status lens"). `AppIcon-small.svg` is a heavier variant for 16 px and 32 px.
+- `MenuBarIcon.svg`: the menu bar template. `Sources/OverSireApp/status_icon.swift` draws the same shape in code. Keep the two the same.
+- `OrgAvatar.svg`: the GitHub org avatar.
+
+After you change an SVG, run `brand/make.sh`. It makes `AppIcon.icns`, `AppIcon.png`, `org-avatar.png` and the social previews `social-<repo>.png` (1280 × 640). It needs `rsvg-convert` (`brew install librsvg`) and `iconutil`.
+
+GitHub has no API for the org avatar or the social preview. Upload them in the browser: the org profile settings, and Settings › General › Social preview of each repo.
 
 ## Reporting bugs
 

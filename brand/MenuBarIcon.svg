@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
+  <!-- Menu bar template (18 pt). status_icon.swift draws the same shape; the light takes the status color. -->
+  <circle cx="9" cy="9" r="6.5" fill="none" stroke="#000" stroke-width="2" stroke-dasharray="11.5 2.1" transform="rotate(-80 9 9)"/>
+  <circle cx="9" cy="9" r="2.6" fill="#000"/>
+</svg>
