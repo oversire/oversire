@@ -57,6 +57,11 @@ final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSou
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
+        NotificationCenter.default.addObserver(forName: ProjectIconStore.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.table.reloadData()
+            self.select(self.selectedKey)
+        }
     }
 
     func set(_ new: [SidebarLine], selected: String) {
@@ -138,7 +143,13 @@ final class SidebarCell: NSTableCellView {
     init(_ e: SidebarEntry) {
         super.init(frame: .zero)
         var views: [NSView] = []
-        if let initial = e.initial {
+        if case .project(let key) = e.route {
+            let icon = NSImageView(image: PROJECT_ICONS.image(for: key, size: 18))
+            icon.translatesAutoresizingMaskIntoConstraints = false
+            icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            icon.heightAnchor.constraint(equalToConstant: 18).isActive = true
+            views.append(icon)
+        } else if let initial = e.initial {
             let b = Box(fill: initial.color, border: nil, radius: 4)
             let t = NSTextField.text(initial.text, size: 10, weight: .bold, color: .white)
             b.addSubview(t)
