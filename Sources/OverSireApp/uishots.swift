@@ -44,6 +44,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private let paths: [String]
     private var window: AppWindow?
     private var glance: NSWindow?
+    private var snapPanel: ShotEditorPanel?
 
     init(dir: String, paths: [String]) {
         self.dir = dir
@@ -353,6 +354,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         // explain:loading, explain:result or explain:error, at the first run row, else at the window center.
                         let row = UIShots.find(root) { ($0 as? Row)?.menuItems != nil && ($0.accessibilityLabel() ?? "").contains("#") } ?? root
                         ExplainPopover.sample(at: row, phase: UIShots.explainPhase(String(p.dropFirst(8))))
+                    } else if p.hasPrefix("snap:") {
+                        self.snapPanel?.close()
+                        self.snapPanel = UIShots.snapSample(String(p.dropFirst(5)), shooting: w)
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if let r = Route(path: p) {
@@ -362,7 +366,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss() }
+                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); self.snapPanel?.close(); self.snapPanel = nil }
             }
         }
         run(steps, 0)
@@ -403,9 +407,43 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(glance?.windowNumber ?? PlanPage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? glance?.windowNumber ?? PlanPage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")
+    }
+}
+
+// MARK: Snap editor samples
+
+extension UIShots {
+    /// snap:<frame>: the shot editor on a shot of the app window. Frames: new, marks, crop, mismatch, confirm, edit.
+    static func snapSample(_ frame: String, shooting w: AppWindow) -> ShotEditorPanel? {
+        guard let view = w.window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let img = rep.cgImage else { return nil }
+        let projects = [SnapProjectChoice(key: "OVERSIRE", title: "OverSire"), SnapProjectChoice(key: "SLING", title: "Sling Platform"),
+                        SnapProjectChoice(key: "TREBI", title: "Trebi"), SnapProjectChoice(key: "FRITZ", title: "Fritz")]
+        let shot = SnapShot(project: frame == "new" ? "" : "SLING", kind: .window, app: "OverSire", windowTitle: "Runs",
+                            pixelSize: CGSize(width: img.width, height: img.height), scale: Double(rep.size.width > 0 ? CGFloat(img.width) / rep.size.width : 2))
+        let existing = frame == "edit"
+        let basket: String? = frame == "new" ? nil : frame == "mismatch" ? "OVERSIRE" : "SLING"
+        var m = SnapEditorModel(shot: shot, existing: existing, basketProject: basket, basketCount: frame == "new" ? 0 : 2, lastProject: nil)
+        if frame != "new" {
+            let W = Double(img.width), H = Double(img.height)
+            m.addMark(SnapRect(x: W * 0.04, y: H * 0.12, w: W * 0.2, h: H * 0.3))
+            m.shot.marks[0].note = "This list shows 3 runs. The repo has 4."
+            m.addMark(SnapRect(x: W * 0.62, y: H * 0.05, w: W * 0.03, h: H * 0.04))
+            m.shot.marks[1].note = "Icon is cut off at 125% zoom."
+            m.shot.note = "The runs page is out of date after a re-run."
+            m.selected = 1
+        }
+        if frame == "crop" { m.startCrop(); m.crop = SnapRect(x: 0, y: 0, w: Double(img.width) * 0.7, h: Double(img.height) * 0.6) }
+        if frame == "mismatch" { m.pick("SLING") }
+        if frame == "confirm" { m.confirming = true }
+        let p = ShotEditorPanel(model: m, image: img, projects: projects, near: nil, actions: .init())
+        p.setFrame(NSRect(x: 60, y: 60, width: 1000, height: 600), display: true)
+        p.present()
+        return p
     }
 }

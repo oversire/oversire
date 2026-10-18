@@ -98,7 +98,7 @@ struct SnapWindow {
 final class SnapCapturer {
     enum Mode { case window, area }
 
-    private let onShot: (SnapShot, Data) -> Void
+    private let onShot: (SnapShot, Data, CGRect) -> Void
     private let guess: () -> SnapProjectGuess
     private var overlays: [SnapOverlay] = []
     private var windows: [SnapWindow] = []
@@ -107,7 +107,7 @@ final class SnapCapturer {
 
     var isActive: Bool { !overlays.isEmpty }
 
-    init(guess: @escaping () -> SnapProjectGuess, onShot: @escaping (SnapShot, Data) -> Void) {
+    init(guess: @escaping () -> SnapProjectGuess, onShot: @escaping (SnapShot, Data, CGRect) -> Void) {
         self.guess = guess
         self.onShot = onShot
     }
@@ -169,22 +169,23 @@ final class SnapCapturer {
 
     func click(at p: CGPoint) {
         guard mode == .window, let w = window(at: p) else { return }
-        finish { try await self.captureWindow(w) }
+        finish(w.frame) { try await self.captureWindow(w) }
     }
 
     func select(_ r: CGRect) {
         guard r.width >= 8, r.height >= 8 else { return hover(at: CGPoint(x: r.midX, y: r.midY)) }
         let under = window(at: CGPoint(x: r.midX, y: r.midY))
-        finish { try await self.captureArea(r, under: under) }
+        finish(r) { try await self.captureArea(r, under: under) }
     }
 
-    private func finish(_ capture: @escaping () async throws -> (SnapShot, Data)) {
+    /// `frame` is the place of the shot on the screen, in Cocoa points. The editor opens next to it.
+    private func finish(_ frame: CGRect, _ capture: @escaping () async throws -> (SnapShot, Data)) {
         overlays.forEach { $0.orderOut(nil) }
         overlays = []
         Task { @MainActor in
             do {
                 let (shot, png) = try await capture()
-                self.onShot(shot, png)
+                self.onShot(shot, png, frame)
             } catch {
                 log.error("Snap capture failed: \(error.localizedDescription, privacy: .public)")
                 NSSound.beep()
@@ -223,7 +224,7 @@ final class SnapCapturer {
 
     private func shot(_ img: CGImage, kind: SnapShot.Kind, app: String, title: String, scale: CGFloat) throws -> (SnapShot, Data) {
         guard let png = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:]) else { throw SnapCaptureError.encode }
-        let project = guess().guess(app: app, title: title) ?? PROJECTS_CFG.capture.snap.lastProject ?? ""
+        let project = guess().guess(app: app, title: title) ?? ""   // empty: no guess
         let s = SnapShot(project: project, kind: kind, app: app, windowTitle: title,
                          pixelSize: CGSize(width: img.width, height: img.height), scale: Double(scale))
         return (s, png)

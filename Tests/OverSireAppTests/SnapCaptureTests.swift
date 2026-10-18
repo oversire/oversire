@@ -65,7 +65,7 @@ final class SnapCaptureLiveTests: XCTestCase {
         try XCTSkipUnless(SnapCapturer.hasPermission, "no Screen Recording permission")
     }
 
-    private func capturer() -> SnapCapturer { SnapCapturer(guess: { SnapProjectGuess([]) }, onShot: { _, _ in }) }
+    private func capturer() -> SnapCapturer { SnapCapturer(guess: { SnapProjectGuess([]) }, onShot: { _, _, _ in }) }
 
     func testWindowAndAreaGiveTheRightPixelSize() async throws {
         let w = try XCTUnwrap(SnapWindow.onScreen().first)
