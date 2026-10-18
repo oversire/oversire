@@ -741,6 +741,24 @@ func runSelfTest() {
         check(md.contains("Working since") && !md.contains("50m"), "block: no running time, so it does not change each minute")
     }
 
+    // Snap basket: render a fixture basket and check the ticket. No screen access.
+    do {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 400, pixelsHigh: 300, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        let png = rep.representation(using: .png, properties: [:])!
+        let shot = SnapShot(project: "FRITZ", kind: .window, app: "Safari", windowTitle: "Jobs", pixelSize: CGSize(width: 400, height: 300),
+                            scale: 2, crop: SnapRect(x: 100, y: 50, w: 200, h: 150), note: "The jobs list is empty.",
+                            marks: [SnapMark(rect: SnapRect(x: 120, y: 60, w: 40, h: 20), note: "No rows")])
+        var b = SnapBasket(project: "FRITZ")
+        b.shots = [shot]
+        let files = (try? SnapRenderer().render(shot, png: png, index: 1)) ?? []
+        check(files.prefix(2).map(\.name) == ["snap-1.png", "snap-1-clean.png"], "snap: marked and clean files")
+        check(NSBitmapImageRep(data: files.first?.data ?? Data())?.pixelsWide == 200, "snap: the crop sets the image size")
+        let md = SnapTicket.markdown(b)
+        check(md.contains("### Shot 1 · snap-1.png") && md.contains("- [1] x 20, y 10, w 40, h 20 px: No rows"), "snap: ticket Markdown")
+        check(SnapTicket.title(b) == "Snap basket · 1 shot · The jobs list is empty.", "snap: ticket title")
+    }
+
     print("SELFTEST OK — \(ins.count) insights, report \(md.count) chars")
 }
 
