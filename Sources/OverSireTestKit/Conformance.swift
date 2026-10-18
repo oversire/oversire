@@ -50,6 +50,7 @@ public enum ProviderConformance {
         (.timeline, "TimelineReading", { $0 is any TimelineReading }),
         (.labels, "LabelManaging", { $0 is any LabelManaging }),
         (.links, "LinkManaging", { $0 is any LinkManaging }),
+        (.relations, "RelationManaging", { $0 is any RelationManaging }),
         (.assets, "AssetResolving", { $0 is any AssetResolving }),
         (.webhooks, "WebhookManaging", { $0 is any WebhookManaging }),
         (.logs, "LogReading", { $0 is any LogReading }),

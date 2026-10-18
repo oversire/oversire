@@ -39,6 +39,28 @@ public enum TrackerConformance {
             r.expect(cs.contains { $0.body?.contains("Conformance comment") == true }, "comments does not list the new comment")
         }
         r.merge(await settings(t, project: p))
+        r.merge(await relations(t, item: ref, project: p))
+        return r
+    }
+
+    /// Adds one blockedBy relation from `item` to a second new item, reads it from both sides, then removes it.
+    public static func relations(_ t: any Tracker, item ref: ItemRef, project p: ProjectRef) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let rm = t as? any RelationManaging, t.capabilities.contains(.relations) else { return r }
+        guard let other = await r.step("create blocker", { try await t.create(ItemDraft(title: "Conformance blocker"), in: p) })
+        else { return r }
+        let rel = ItemRelation(kind: .blockedBy, item: other)
+        _ = await r.step("relations add", { try await rm.apply(RelationPatch(add: [rel]), to: ref) })
+        if let list = await r.step("relations", { try await rm.relations(of: ref) }) {
+            r.expect(list.contains { $0.kind == .blockedBy && $0.item.id == other.id }, "relations does not list the new blocker")
+        }
+        if let back = await r.step("relations of the blocker", { try await rm.relations(of: other) }) {
+            r.expect(back.contains { $0.kind == .blocks && $0.item.id == ref.id }, "the blocker does not list blocks \(ref.key)")
+        }
+        _ = await r.step("relations remove", { try await rm.apply(RelationPatch(remove: [rel]), to: ref) })
+        if let list = await r.step("relations after remove", { try await rm.relations(of: ref) }) {
+            r.expect(!list.contains { $0.item.id == other.id }, "remove did not remove the blocker")
+        }
         return r
     }
 

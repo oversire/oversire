@@ -24,6 +24,7 @@ public struct AIJobKind: RawRepresentable, Hashable, Sendable, Codable, Expressi
     public static let changeSummary: AIJobKind = "changeSummary"
     public static let tidy: AIJobKind = "tidy"
     public static let memoryUpkeep: AIJobKind = "memoryUpkeep"
+    public static let sequence: AIJobKind = "sequence"
 }
 
 // MARK: Jobs
@@ -237,10 +238,43 @@ public struct WorkOrderResult: Hashable, Sendable, Codable {
     }
 }
 
+/// Why the hub holds a work order.
+public struct WorkOrderHold: Hashable, Sendable, Codable {
+    public var blockers: [ItemRef]
+    public var areas: [String]
+    public var since: Date
+
+    public init(blockers: [ItemRef] = [], areas: [String] = [], since: Date) {
+        self.blockers = blockers
+        self.areas = areas
+        self.since = since
+    }
+}
+
 public struct WorkOrder: StoreRecord {
     public static let collection = "work-orders"
 
-    public enum State: String, Codable, Sendable, CaseIterable { case queued, sent, acked, done, failed, expired }
+    /// Open set: a state that this app does not know keeps its raw value.
+    public struct State: RawRepresentable, Hashable, Sendable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public init(stringLiteral value: String) { rawValue = value }
+        public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            try c.encode(rawValue)
+        }
+        public var description: String { rawValue }
+
+        /// The hub keeps the order while its item has an open blocker or a busy area. A runner never gets it.
+        public static let held: State = "held"
+        public static let queued: State = "queued"
+        public static let sent: State = "sent"
+        public static let acked: State = "acked"
+        public static let done: State = "done"
+        public static let failed: State = "failed"
+        public static let expired: State = "expired"
+    }
 
     public let id: String
     public let runner: String            // device id
@@ -250,10 +284,11 @@ public struct WorkOrder: StoreRecord {
     public let createdAt: Date
     public let expiresAt: Date
     public var state: State
+    public var hold: WorkOrderHold?
     public var result: WorkOrderResult?
 
     public init(id: String, runner: String, runtime: ProviderID, order: SessionOrder, suggestion: String,
-                createdAt: Date, expiresAt: Date, state: State = .queued, result: WorkOrderResult? = nil) {
+                createdAt: Date, expiresAt: Date, state: State = .queued, hold: WorkOrderHold? = nil, result: WorkOrderResult? = nil) {
         self.id = id
         self.runner = runner
         self.runtime = runtime
@@ -262,10 +297,11 @@ public struct WorkOrder: StoreRecord {
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.state = state
+        self.hold = hold
         self.result = result
     }
 
-    private enum CodingKeys: String, CodingKey { case id, runner, runtime, suggestion, createdAt, expiresAt, state, result }
+    private enum CodingKeys: String, CodingKey { case id, runner, runtime, suggestion, createdAt, expiresAt, state, hold, result }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -277,6 +313,7 @@ public struct WorkOrder: StoreRecord {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         expiresAt = try c.decode(Date.self, forKey: .expiresAt)
         state = try c.decode(State.self, forKey: .state)
+        hold = try c.decodeIfPresent(WorkOrderHold.self, forKey: .hold)
         result = try c.decodeIfPresent(WorkOrderResult.self, forKey: .result)
     }
 
@@ -290,6 +327,7 @@ public struct WorkOrder: StoreRecord {
         try c.encode(createdAt, forKey: .createdAt)
         try c.encode(expiresAt, forKey: .expiresAt)
         try c.encode(state, forKey: .state)
+        try c.encodeIfPresent(hold, forKey: .hold)
         try c.encodeIfPresent(result, forKey: .result)
     }
 }
@@ -298,18 +336,41 @@ public struct WorkOrder: StoreRecord {
 
 public enum MemoryScope: String, Codable, Sendable, CaseIterable { case user, project, subject }
 
-/// The proposal of a suggestion. On accept, the hub writes a MemoryEntry.
+/// A fact, or the vision (the true north) of a project. JSON: a missing kind is a fact.
+public enum MemoryKind: String, Codable, Sendable, CaseIterable { case fact, vision }
+
+/// The proposal of a suggestion. On accept, the hub writes a MemoryEntry. The hub refuses kind vision.
 public struct MemoryDraft: Hashable, Sendable, Codable {
     public static let maxText = 500
 
     public var scope: MemoryScope
     public var scopeRef: SubjectRef?     // nil for scope user
     public var text: String
+    public var kind: MemoryKind
 
-    public init(scope: MemoryScope, scopeRef: SubjectRef? = nil, text: String) {
+    public init(scope: MemoryScope, scopeRef: SubjectRef? = nil, text: String, kind: MemoryKind = .fact) {
         self.scope = scope
         self.scopeRef = scopeRef
         self.text = text
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey { case scope, scopeRef, text, kind }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        scope = try c.decode(MemoryScope.self, forKey: .scope)
+        scopeRef = try c.decodeIfPresent(SubjectRef.self, forKey: .scopeRef)
+        text = try c.decode(String.self, forKey: .text)
+        kind = try c.decodeIfPresent(MemoryKind.self, forKey: .kind) ?? .fact
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(scope, forKey: .scope)
+        try c.encodeIfPresent(scopeRef, forKey: .scopeRef)
+        try c.encode(text, forKey: .text)
+        if kind != .fact { try c.encode(kind, forKey: .kind) }
     }
 }
 
@@ -323,19 +384,63 @@ public struct MemoryEntry: StoreRecord {
     public var scope: MemoryScope
     public var scopeRef: SubjectRef?
     public var text: String
+    public var kind: MemoryKind
     public var source: Source
     public var suggestion: String?
     public var updatedAt: Date
 
-    public init(id: String, scope: MemoryScope, scopeRef: SubjectRef? = nil, text: String, source: Source = .user,
-                suggestion: String? = nil, updatedAt: Date) {
+    public init(id: String, scope: MemoryScope, scopeRef: SubjectRef? = nil, text: String, kind: MemoryKind = .fact,
+                source: Source = .user, suggestion: String? = nil, updatedAt: Date) {
         self.id = id
         self.scope = scope
         self.scopeRef = scopeRef
         self.text = text
+        self.kind = kind
         self.source = source
         self.suggestion = suggestion
         self.updatedAt = updatedAt
+    }
+
+    /// The vision of a project. The fixed id makes one vision for each project.
+    public static func vision(_ text: String, of project: ProjectRef, updatedAt: Date) -> MemoryEntry {
+        MemoryEntry(id: visionID(of: project), scope: .project, scopeRef: .project(project), text: text, kind: .vision,
+                    updatedAt: updatedAt)
+    }
+
+    public static func visionID(of project: ProjectRef) -> String { "vision-\(project.storeKey)" }
+
+    /// The vision entry of the project, if any.
+    public static func vision(for project: ProjectRef, in entries: [MemoryEntry]) -> MemoryEntry? {
+        entries.first {
+            guard $0.kind == .vision, $0.scope == .project, case .project(let p)? = $0.scopeRef else { return false }
+            return p.storeKey == project.storeKey
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, scope, scopeRef, text, kind, source, suggestion, updatedAt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        scope = try c.decode(MemoryScope.self, forKey: .scope)
+        scopeRef = try c.decodeIfPresent(SubjectRef.self, forKey: .scopeRef)
+        text = try c.decode(String.self, forKey: .text)
+        kind = try c.decodeIfPresent(MemoryKind.self, forKey: .kind) ?? .fact
+        source = try c.decode(Source.self, forKey: .source)
+        suggestion = try c.decodeIfPresent(String.self, forKey: .suggestion)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(scope, forKey: .scope)
+        try c.encodeIfPresent(scopeRef, forKey: .scopeRef)
+        try c.encode(text, forKey: .text)
+        if kind != .fact { try c.encode(kind, forKey: .kind) }
+        try c.encode(source, forKey: .source)
+        try c.encodeIfPresent(suggestion, forKey: .suggestion)
+        try c.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -348,10 +453,13 @@ public enum Proposal: Hashable, Sendable {
     case runAction(RunAction)
     case workOrder(WorkOrderDraft)
     case memory(MemoryDraft)
+    case sequence(SequenceDraft)
+    /// A type that this app does not know. It keeps the JSON as it is.
+    case unknown(type: String, json: JSONValue)
 }
 
 extension Proposal: Codable {
-    private enum CodingKeys: String, CodingKey { case type, patch, action, order, memory }
+    private enum CodingKeys: String, CodingKey { case type, patch, action, order, memory, sequence }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -361,13 +469,16 @@ extension Proposal: Codable {
         case "runAction": self = .runAction(try c.decode(RunAction.self, forKey: .action))
         case "workOrder": self = .workOrder(try c.decode(WorkOrderDraft.self, forKey: .order))
         case "memory": self = .memory(try c.decode(MemoryDraft.self, forKey: .memory))
-        case let t: throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown proposal \(t)")
+        case "sequence": self = .sequence(try c.decode(SequenceDraft.self, forKey: .sequence))
+        case let t: self = .unknown(type: t, json: try JSONValue(from: decoder))
         }
     }
 
     public func encode(to encoder: Encoder) throws {
+        if case .unknown(_, let json) = self { return try json.encode(to: encoder) }
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .unknown: break
         case .itemPatch(let p):
             try c.encode("itemPatch", forKey: .type)
             try c.encode(p, forKey: .patch)
@@ -383,8 +494,53 @@ extension Proposal: Codable {
         case .memory(let m):
             try c.encode("memory", forKey: .type)
             try c.encode(m, forKey: .memory)
+        case .sequence(let q):
+            try c.encode("sequence", forKey: .type)
+            try c.encode(q, forKey: .sequence)
         }
     }
+}
+
+/// The proposal of a sequence job: relations of the subject item and its code areas.
+public struct SequenceDraft: Hashable, Sendable, Codable {
+    public static let maxAreas = 6
+
+    public var relations: RelationPatch
+    /// Empty: no change to the areas.
+    public var areas: [String]
+
+    public init(relations: RelationPatch = RelationPatch(), areas: [String] = []) {
+        self.relations = relations
+        self.areas = areas
+    }
+
+    public enum Line: Hashable, Sendable {
+        case add(ItemRelation), remove(ItemRelation), areas([String])
+    }
+
+    /// The lines that SuggestionEdit.drop counts: each add, each remove, then one line for all areas.
+    public var lines: [Line] {
+        relations.add.map(Line.add) + relations.remove.map(Line.remove) + (areas.isEmpty ? [] : [.areas(areas)])
+    }
+
+    public func dropping(_ indexes: Set<Int>) -> SequenceDraft {
+        var out = SequenceDraft()
+        for (i, line) in lines.enumerated() where !indexes.contains(i) {
+            switch line {
+            case .add(let r): out.relations.add.append(r)
+            case .remove(let r): out.relations.remove.append(r)
+            case .areas(let a): out.areas = a
+            }
+        }
+        return out
+    }
+}
+
+/// What the user removed before Accept. Only a removal: the user cannot add text through it.
+public struct SuggestionEdit: Hashable, Sendable, Codable {
+    public var drop: [Int]
+
+    public init(drop: [Int]) { self.drop = drop }
 }
 
 public struct Suggestion: StoreRecord {
@@ -408,6 +564,8 @@ public struct Suggestion: StoreRecord {
     public var decidedBy: String?        // device id
     public var jobRun: String?
     public var error: String?
+    /// Set with state accepted. The hub applies it to the proposal and removes it.
+    public var edit: SuggestionEdit?
 
     public init(id: String, subject: SubjectRef, kind: AIJobKind, title: String, body: String, proposal: Proposal? = nil,
                 state: State = .open, subjectVersion: String, createdAt: Date, expiresAt: Date, decidedAt: Date? = nil,

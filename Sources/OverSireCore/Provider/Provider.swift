@@ -27,6 +27,7 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let timeline: Capability = "timeline"
     public static let labels: Capability = "labels"
     public static let links: Capability = "links"
+    public static let relations: Capability = "relations"
     public static let subItems: Capability = "subItems"
     public static let assets: Capability = "assets"
     public static let webhooks: Capability = "webhooks"

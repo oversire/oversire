@@ -447,6 +447,55 @@ public struct ItemPatch: Hashable, Sendable, Codable {
 }
 
 /// A new item.
+/// Open set, seen from the item that holds the relation: A blocks B is B blockedBy A.
+public struct RelationKind: RawRepresentable, Hashable, Sendable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(stringLiteral value: String) { rawValue = value }
+    public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+    public var description: String { rawValue }
+
+    public static let blockedBy: RelationKind = "blockedBy"
+    public static let blocks: RelationKind = "blocks"
+    public static let relatesTo: RelationKind = "relatesTo"
+
+    /// The same relation, seen from the other item.
+    public var inverse: RelationKind {
+        switch self {
+        case .blockedBy: return .blocks
+        case .blocks: return .blockedBy
+        default: return self
+        }
+    }
+}
+
+public struct ItemRelation: Hashable, Sendable, Codable {
+    public var kind: RelationKind
+    public var item: ItemRef             // the other item
+
+    public init(kind: RelationKind, item: ItemRef) {
+        self.kind = kind
+        self.item = item
+    }
+}
+
+/// A write to the relations of one item. The adapter adds before it removes.
+public struct RelationPatch: Hashable, Sendable, Codable {
+    public var add: [ItemRelation]
+    public var remove: [ItemRelation]
+
+    public init(add: [ItemRelation] = [], remove: [ItemRelation] = []) {
+        self.add = add
+        self.remove = remove
+    }
+
+    public var isEmpty: Bool { add.isEmpty && remove.isEmpty }
+}
+
 public struct ItemDraft: Hashable, Sendable {
     public var title: String
     public var bodyMarkdown: String?
@@ -544,6 +593,12 @@ public protocol LabelManaging: Tracker {
 public protocol LinkManaging: Tracker {
     func links(_ i: ItemRef) async throws -> [URL]
     func addLink(_ i: ItemRef, url: URL, title: String) async throws
+}
+
+/// The tracker keeps the relations between items. OverSire keeps no second graph.
+public protocol RelationManaging: Tracker {
+    func relations(of item: ItemRef) async throws -> [ItemRelation]
+    func apply(_ patch: RelationPatch, to item: ItemRef) async throws
 }
 
 /// A fast list of all items for trees and key links.

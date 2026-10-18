@@ -186,6 +186,44 @@ public struct AgentLink: StoreRecord {
     public var id: String { key }
 }
 
+/// The code areas of one item. Area tags live only in the store, not as tracker labels.
+public struct ItemAreas: StoreRecord {
+    public static let collection = "item-areas"
+
+    public enum Source: String, Codable, Sendable { case user, suggestion }
+
+    public let id: String               // ItemAreas.id(of:)
+    public let item: ItemRef
+    public var areas: [String]
+    public var source: Source
+    public var suggestion: String?
+    public var updatedAt: Date
+
+    public init(item: ItemRef, areas: [String], source: Source = .user, suggestion: String? = nil, updatedAt: Date) {
+        id = Self.id(of: item)
+        self.item = item
+        self.areas = areas
+        self.source = source
+        self.suggestion = suggestion
+        self.updatedAt = updatedAt
+    }
+
+    public static func id(of item: ItemRef) -> String { "\(item.project.storeKey)/\(item.id)" }
+
+    /// Lower case, [a-z0-9-], at most 32 characters, at most 6 tags, no repeats. Other tags drop.
+    public static func clean(_ tags: [String]) -> [String] {
+        var out: [String] = []
+        for t in tags {
+            let tag = t.lowercased().trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ", with: "-")
+            guard !tag.isEmpty, tag.count <= 32, tag.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }),
+                  !out.contains(tag) else { continue }
+            out.append(tag)
+            if out.count == SequenceDraft.maxAreas { break }
+        }
+        return out
+    }
+}
+
 // ─── Sync ────────────────────────────────────────────────────────────────────
 
 /// One write to a synced collection. Last write wins for each collection and id, by `hlc`.

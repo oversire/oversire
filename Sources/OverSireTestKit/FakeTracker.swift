@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory tracker with one project "FAKE" and four statuses.
-public final class FakeTracker: Tracker, ProjectSettingsEditing, @unchecked Sendable {
+public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -16,9 +16,10 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, @unchecked Send
     private var commentList: [String: [Comment]] = [:]
     private var settingsList: [String: ProjectSettings] = [:]
     private var patchList: [ProjectSettingsPatch] = []
+    private var relationList: [String: [ItemRelation]] = [:]   // item id → relations
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
-    public init(account: String = "fake", capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit]) {
+    public init(account: String = "fake", capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]
@@ -106,6 +107,30 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, @unchecked Send
             itemList[i.project.id]![at].commentCount += 1
             itemList[i.project.id]![at].lastComment = c
             base.emit(.comment, "created", .item(i))
+        }
+    }
+
+    // MARK: Relations
+
+    /// Keeps each relation on both items: A blocks B ⇔ B blockedBy A.
+    public func relations(of item: ItemRef) async throws -> [ItemRelation] {
+        guard capabilities.contains(.relations) else { throw ProviderError.unsupported(.relations) }
+        return try base.locked { relationList[item.id] ?? [] }
+    }
+
+    public func apply(_ patch: RelationPatch, to item: ItemRef) async throws {
+        guard capabilities.contains(.relations) else { throw ProviderError.unsupported(.relations) }
+        try base.locked {
+            guard itemList[item.project.id]?.contains(where: { $0.id == item.id }) == true else { throw ProviderError.notFound }
+            for r in patch.add where !(relationList[item.id] ?? []).contains(where: { $0.kind == r.kind && $0.item.id == r.item.id }) {
+                relationList[item.id, default: []].append(r)
+                relationList[r.item.id, default: []].append(ItemRelation(kind: r.kind.inverse, item: item))
+            }
+            for r in patch.remove {
+                relationList[item.id]?.removeAll { $0.kind == r.kind && $0.item.id == r.item.id }
+                relationList[r.item.id]?.removeAll { $0.kind == r.kind.inverse && $0.item.id == item.id }
+            }
+            base.emit(.item, "updated", .item(item))
         }
     }
 

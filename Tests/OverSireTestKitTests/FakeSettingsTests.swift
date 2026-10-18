@@ -33,6 +33,7 @@ final class FakeSettingsTests: XCTestCase {
     func testCapabilitiesMustMatch() {
         let r = ProviderConformance.capabilities(FakeTracker(capabilities: []))
         XCTAssertEqual(Set(r.problems), ["ProjectSettingsReading needs the capability projectSettings",
-                                         "ProjectSettingsEditing needs the capability projectSettingsEdit"])
+                                         "ProjectSettingsEditing needs the capability projectSettingsEdit",
+                                         "RelationManaging needs the capability relations"])
     }
 }

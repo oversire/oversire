@@ -43,6 +43,9 @@ final class ContractTests: XCTestCase {
         "runner-session": roundTrip(RunnerSession.self),
         "ai-endpoint": roundTrip(AIEndpoint.self),
         "ai-route": roundTrip(AIRoute.self),
+        "item-relation": roundTrip(ItemRelation.self),
+        "relation-patch": roundTrip(RelationPatch.self),
+        "item-areas": roundTrip(ItemAreas.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
