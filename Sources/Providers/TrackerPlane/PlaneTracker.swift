@@ -3,11 +3,11 @@ import OverSireCore
 
 /// The Plane adapter. One instance for each workspace, because a token works only in its own workspace.
 public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, LabelManaging, LinkManaging, ItemIndexing,
-    AssetResolving, WebhookManaging, @unchecked Sendable {
+    RelationManaging, AssetResolving, WebhookManaging, @unchecked Sendable {
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .timeline, .labels, .links, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit] }
+    public var capabilities: Set<Capability> { [.intake, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
@@ -20,6 +20,7 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
     private var indexCache: [String: (stubs: [ItemStub], at: Date)] = [:]
     private var itemCache: [String: [String: Item]] = [:]               // project id → the last items
     private var fullAt: [String: Date] = [:]                            // project id → the last full list
+    private var refCache: [String: ItemRef] = [:]                       // item id → ref, for relations
     static let fullEvery: TimeInterval = 600
     var indexMaxAge: TimeInterval = 10
 
@@ -396,6 +397,59 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
         case (_, "archived_at"?): return new == nil ? .reopened : .closed
         default: return nil
         }
+    }
+
+    // MARK: Relations
+
+    /// Plane type → OverSire kind. Plane also has duplicate and the start and finish dates; OverSire drops them.
+    static let relationKinds: [String: RelationKind] = ["blocked_by": .blockedBy, "blocking": .blocks, "relates_to": .relatesTo]
+
+    public func relations(of item: ItemRef) async throws -> [ItemRelation] {
+        let o = try await api.send("GET", "\(ws)/projects/\(item.project.id)/work-items/\(item.id)/relations/") as? [String: Any] ?? [:]
+        var out: [ItemRelation] = []
+        for (type, kind) in Self.relationKinds.sorted(by: { $0.key < $1.key }) {
+            for id in (o[type] as? [Any] ?? []).compactMap(PlaneAPI.id) {
+                if let ref = try await ref(id, near: item.project) { out.append(ItemRelation(kind: kind, item: ref)) }
+            }
+        }
+        return out
+    }
+
+    /// Adds before it removes. Plane removes a relation by the other item only.
+    public func apply(_ patch: RelationPatch, to item: ItemRef) async throws {
+        let path = "\(ws)/projects/\(item.project.id)/work-items/\(item.id)/relations/"
+        let types = Dictionary(Self.relationKinds.map { ($0.value, $0.key) }, uniquingKeysWith: { a, _ in a })
+        for (kind, rels) in Dictionary(grouping: patch.add, by: \.kind).sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            guard let type = types[kind] else { throw ProviderError.unsupported(.relations) }
+            _ = try await api.send("POST", path, body: ["relation_type": type, "issues": rels.map(\.item.id)])
+        }
+        for id in Set(patch.remove.map(\.item.id)).sorted() {
+            _ = try await api.send("POST", path + "remove/", body: ["related_issue": id])
+        }
+    }
+
+    // The list gives ids only. A key comes from the last items, or from one GET. An item of another project is nil.
+    private func ref(_ id: String, near p: ProjectRef) async throws -> ItemRef? {
+        let known: ItemRef? = lock.withLock {
+            if let r = refCache[id] { return r }
+            for (pid, items) in itemCache {
+                guard let i = items[id] else { continue }
+                let project = pid == p.id ? p : ProjectRef(account: account, id: pid, key: identifiers[pid])
+                return ItemRef(project: project, id: i.id, key: i.key, url: URL(string: workspace.itemURL(i.key))!)
+            }
+            return nil
+        }
+        if let known { return known }
+        let o: [String: Any]?
+        do {
+            o = try await api.send("GET", "\(ws)/projects/\(p.id)/work-items/\(id)/",
+                                   query: [URLQueryItem(name: "fields", value: "id,sequence_id")]) as? [String: Any]
+        } catch ProviderError.notFound { return nil }
+        guard let seq = PlaneAPI.int(o?["sequence_id"]) else { return nil }
+        let key = "\(try await identifier(of: p))-\(seq)"
+        let ref = ItemRef(project: p, id: id, key: key, url: URL(string: workspace.itemURL(key))!)
+        lock.withLock { refCache[id] = ref }
+        return ref
     }
 
     // MARK: Labels, links, assets

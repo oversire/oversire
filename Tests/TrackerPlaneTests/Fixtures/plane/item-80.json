@@ -1,0 +1,12 @@
+{
+  "id": "2a8bef3d-61fd-48c6-93e0-5df1836b50d5",
+  "name": "5. Plane adapter (app): relations",
+  "sequence_id": 80,
+  "state_id": "35ecea76-46e4-4c77-91bc-c20f2305c469",
+  "priority": "high",
+  "project_id": "9ba476d7-ad30-44cf-b9ef-3fa1e42ed926",
+  "archived_at": null,
+  "created_at": "2026-10-18T02:40:17.970321Z",
+  "updated_at": "2026-10-18T03:05:15.996331Z",
+  "parent_id": "0a8e1859-0613-47a1-be57-631e4a8974ff"
+}
