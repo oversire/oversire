@@ -302,6 +302,8 @@ A Cat Eye relay (v3) that you deployed before also works. OverSire moves its URL
 OverSire Cloud can also run AI jobs on the server, for example triage of new items, the reason a CI run failed, or a daily digest. A job only writes suggestions. You accept or dismiss each suggestion, and nothing changes before that. An accepted suggestion can send a work order to a runner on your Mac, which starts, reads or stops a coding session. **Settings → Cloud (beta)** and **Insights** show the Jobs, Suggestions and Runner sections. Without a cloud account, they only tell what each one does.
 
 The runner is [oversire-runner](https://github.com/oversire/runner), a small program that dials out to the cloud. To use this Mac, click **Use this Mac** in the Cloud AI section. The app downloads the runner, checks its SHA-256 and its Developer ID signature, installs it in `~/Library/Application Support/OverSire/runner/`, pairs it and starts it as a login item. The runner only does orders that its allow list (`~/.config/oversire-runner/allow.json`) permits.
+
+A runner without Orca can use its own runtime, `oversire`. It starts a coding agent CLI in a git worktree for each item. **Sessions** shows these runner sessions. When an agent asks for a permission, the page shows the request with **Allow** and **Deny**. No answer before the time limit is a deny.
 - **Disconnect:** **Disconnect** deletes the token from the Keychain. The webhooks stay, because other Macs can use them.
 
 ## Using the PRs tab

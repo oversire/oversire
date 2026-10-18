@@ -10,12 +10,14 @@ struct CloudAIRecords {
     var suggestions: [Suggestion] = []
     var orders: [WorkOrder] = []
     var runners: [RunnerState] = []
+    var sessions: [RunnerSession] = []
     /// The hub writes it. Nil until the first sync.
     var billing: BillingState?
 
     static func load(_ w: StoreWrites) -> CloudAIRecords {
         CloudAIRecords(jobs: w.load(AIJob.self), suggestions: w.load(Suggestion.self), orders: w.load(WorkOrder.self),
-                       runners: UIShots.cloud == true ? UIShots.runners : w.load(RunnerState.self), billing: w.load(BillingState.self).first ?? UIShots.billing)
+                       runners: UIShots.cloud == true ? UIShots.runners : w.load(RunnerState.self),
+                       sessions: UIShots.cloud == true ? UIShots.runnerSessions : w.load(RunnerSession.self), billing: w.load(BillingState.self).first ?? UIShots.billing)
     }
 
     var jobsStatus: String {

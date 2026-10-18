@@ -237,6 +237,11 @@ struct RelayAPI {
 
     /// A pairing code of the runner role, for a runner on this Mac.
     func runnerCode() -> Result<PairingCode, RelayFailure> { send("POST", "/v1/pairing") }
+    /// The hub sends the answer to the runner as a work order.
+    func answer(session: String, permission: String, allow: Bool) -> Result<OK, RelayFailure> {
+        let id = session.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) ?? session
+        return send("POST", "/v1/runner-sessions/\(id)/permission", body: ["permission": permission, "allow": allow])
+    }
 
     func discover() -> Discovery? {
         guard case .success(let d) = send("GET", "/", as: Discovery.self), CLOUD_APPS.contains(d.app) else { return nil }

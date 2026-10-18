@@ -70,6 +70,18 @@ struct Tone {
         self.symbol = symbol; self.color = color; self.word = word
     }
 
+    init(_ s: RunnerSession.State) {
+        switch s {
+        case .queued: self = .queued
+        case .starting: self = Tone(symbol: "circle.dashed", color: Palette.run, word: "Starting")
+        case .working: self = .working
+        case .waitingInput: self = .waiting
+        case .waitingPermission: self = Tone(symbol: "hand.raised.fill", color: Palette.warn, word: "Asks for permission")
+        case .done: self = .done
+        case .failed: self = .bad
+        }
+    }
+
     init(_ run: Run) {
         if run.isFailure && IGNORED.contains(run) { self = Tone(symbol: "xmark.circle", color: Palette.dim, word: "Ignored"); return }
         self.init(status: run.status, conclusion: run.conclusion)

@@ -92,6 +92,34 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         return [RunnerState(device: "D1", version: "0.1.0", contract: 1, runtimes: ["orca"], os: "darwin/arm64", online: true, lastSeen: Date())]
     }
 
+    static var runnerSessions: [RunnerSession] {
+        guard cloud == true else { return [] }
+        let item = { (key: String) in
+            ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: String(key.split(separator: "-")[0])),
+                    id: key, key: key, url: URL(string: "https://app.plane.so/ocral/browse/\(key)/")!)
+        }
+        let ref = { (ws: String, id: String) in
+            SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "oversire", id: "local"), id: ws), id: id)
+        }
+        return [
+            RunnerSession(id: "s-7f3a", runner: "D1", session: ref("towertail-workspace/TOWERTAIL-2", "s-7f3a"), order: "o1", agent: "claude",
+                          repo: "/home/ada/src/towertail-workspace", branch: "towertail-2", item: item("TOWERTAIL-2"), state: .waitingPermission,
+                          summary: "Added the retry to the sync client. Wants to run the tests.",
+                          permission: PermissionPrompt(id: "p-1", tool: "Bash", text: "npm test", expiresAt: Date().addingTimeInterval(540)),
+                          startedAt: Date().addingTimeInterval(-1680), updatedAt: Date().addingTimeInterval(-60)),
+            RunnerSession(id: "s-91c0", runner: "D1", session: ref("oversire/OVERSIRE-80", "s-91c0"), order: "o2", agent: "codex",
+                          repo: "/home/ada/src/oversire", branch: "oversire-80", item: item("OVERSIRE-80"), state: .working,
+                          summary: "Reads the store tests.", startedAt: Date().addingTimeInterval(-600), updatedAt: Date().addingTimeInterval(-20)),
+            RunnerSession(id: "s-2b44", runner: "D1", session: ref("oversire/OVERSIRE-81", "s-2b44"), order: "o3", agent: "claude",
+                          repo: "/home/ada/src/oversire", item: item("OVERSIRE-81"), state: .queued,
+                          startedAt: Date().addingTimeInterval(-120), updatedAt: Date().addingTimeInterval(-120)),
+            RunnerSession(id: "s-0d17", runner: "D1", session: ref("oversire/OVERSIRE-77", "s-0d17"), order: "o4", agent: "gemini",
+                          repo: "/home/ada/src/oversire", branch: "oversire-77", item: item("OVERSIRE-77"), state: .failed,
+                          error: "The worktree has changes that are not committed.", startedAt: Date().addingTimeInterval(-7200),
+                          updatedAt: Date().addingTimeInterval(-6900)),
+        ]
+    }
+
     // A source that never answers.
     struct NeverAnswers: RunSource {
         func run(_ repo: String, id: String) async -> Run? { await wait(); return nil }

@@ -174,6 +174,21 @@ final class SyncedStoreTests: XCTestCase {
         XCTAssertEqual(pending, 0, "a local write stays local")
     }
 
+    func testRunnerSessionsComeDown() async throws {
+        let hub = FakeStoreHub()
+        let ref = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "oversire", id: "local"), id: "oversire/OVERSIRE-80"), id: "s-1")
+        let s = RunnerSession(id: "s-1", runner: "D1", session: ref, order: "o1", agent: "claude", repo: "/src/oversire", state: .waitingPermission,
+                              permission: PermissionPrompt(id: "p-1", tool: "Bash", text: "npm test", expiresAt: Date(timeIntervalSince1970: 1_790_000_600)),
+                              startedAt: Date(timeIntervalSince1970: 1_790_000_000), updatedAt: Date(timeIntervalSince1970: 1_790_000_000))
+        _ = try await hub.replication().push([StoreOp(collection: RunnerSession.collection, id: s.id, op: .put, record: try JSONValue(s),
+                                                      hlc: "1790000000000-0000-hub", device: "hub")])
+        let a = client("a", hub)
+        await a.sync()
+        let got = try await a.get(RunnerSession.self, id: "s-1")
+        XCTAssertEqual(got?.permission?.id, "p-1")
+        XCTAssertEqual(got?.state, .waitingPermission)
+    }
+
     func testSeedSendsOldRecordsAndKeepsTheServerCopy() async throws {
         let hub = FakeStoreHub()
         let b = client("b", hub, wall: Wall(1_790_000_000_000))
