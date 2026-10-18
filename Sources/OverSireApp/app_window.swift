@@ -12,6 +12,7 @@ protocol AppData: AnyObject {
     var relay: LiveSync { get }
     var workstreams: WorkstreamIndex { get }
     var queue: WorkQueue { get }
+    var memory: ProjectMemory { get }
     var aiChecks: AgentJudge { get }
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }

@@ -2,16 +2,17 @@ import Cocoa
 import OverSireCore
 
 enum ProjectSettingsSection: String, CaseIterable {
-    case appearance, links, sessions, notifications
+    case appearance, links, memory, sessions, notifications
     case general, workflow, labels, members, features
 
-    var title: String { rawValue == "notifications" ? "Notifications" : rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
-    var local: Bool { [.appearance, .links, .sessions, .notifications].contains(self) }
+    var title: String { self == .memory ? "Vision and memory" : rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    var local: Bool { [.appearance, .links, .memory, .sessions, .notifications].contains(self) }
 
     var symbol: String {
         switch self {
         case .appearance: return "paintpalette"
         case .links: return "link"
+        case .memory: return "scope"
         case .sessions: return "terminal"
         case .notifications: return "bell"
         case .general: return "info.circle"
@@ -98,6 +99,48 @@ final class TextInput: NSTextField, NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) { commit(stringValue) }
 }
 
+// A text field with a character limit. It reports each change. Command-S saves and Esc reverts.
+final class LimitedInput: NSTextField, NSTextFieldDelegate {
+    var onChange: ((String) -> Void)?
+    var onSave: (() -> Void)?
+    var onRevert: (() -> Void)?
+
+    init(_ value: String, placeholder: String = "", label: String, lines: Int) {
+        super.init(frame: .zero)
+        stringValue = value
+        placeholderString = placeholder
+        font = .systemFont(ofSize: 12.5)
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityLabel(label)
+        delegate = self
+        usesSingleLineMode = false
+        cell?.wraps = true
+        cell?.isScrollable = false
+        heightAnchor.constraint(equalToConstant: CGFloat(lines) * 17 + 8).isActive = true
+        setContentHuggingPriority(.init(1), for: .horizontal)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func controlTextDidChange(_ obj: Notification) { onChange?(stringValue) }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        switch sel {
+        case #selector(NSResponder.cancelOperation(_:)): onRevert?(); return true
+        case #selector(NSResponder.insertNewline(_:)): textView.insertNewlineIgnoringFieldEditor(nil); return true
+        default: return false
+        }
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if currentEditor() != nil, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "s" {
+            onSave?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 // Settings of one project. "In OverSire" stays on this Mac; "In the tracker" changes the project for everyone.
 final class ProjectSettingsPage: Page {
     static let okabe = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999"]
@@ -111,6 +154,8 @@ final class ProjectSettingsPage: Page {
     private var saving = false
     private var note: (Tone, String)?
     private var linkField: NSTextField?
+    private var visionDraft: String?
+    private var editingFact: String?    // a fact id, or "" for a new entry
     private var iconObserver: Any?
 
     private var key: String { if case .projectSettings(let k, _) = route { return k }; return "" }
@@ -123,7 +168,7 @@ final class ProjectSettingsPage: Page {
     }
     private var local: ProjectLocalSettings { PROJECTS_CFG.local(key) }
 
-    override var isEditing: Bool { super.isEditing || !draft.isEmpty }
+    override var isEditing: Bool { super.isEditing || !draft.isEmpty || visionDraft != nil }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -158,6 +203,7 @@ final class ProjectSettingsPage: Page {
         switch section {
         case .appearance: appearance(body, p)
         case .links: links(body, p)
+        case .memory: memory(body, p)
         case .sessions: sessions(body)
         case .notifications: notifications(body)
         default: tracker(body, p)
@@ -385,6 +431,118 @@ final class ProjectSettingsPage: Page {
         guard panel.runModal() == .OK, let url = panel.url, let p = project else { return }
         PROJECTS_CFG.setOrcaRoot(p, url.path)
         saveConfig()
+        reload()
+    }
+
+    // MARK: Vision and memory
+
+    private func memory(_ body: NSStackView, _ p: ProjectSummary) {
+        let mem = data.memory
+        let saved = mem.vision(of: p.ref)
+        let c = card("Vision", local: true)
+        c.add(NSTextField.text("The true north of \(p.title). Triage and the queue order read it. Keep it short.", size: 12, color: Palette.dim, lines: 2))
+        let text = visionDraft ?? saved?.text ?? ""
+        let input = LimitedInput(text, placeholder: "What this project is for, and what is out of scope.", label: "Project vision", lines: 5)
+        let counter = NSTextField.text("", size: 11.5, color: Palette.dim)
+        let revert = ActionButton("Revert") { [weak self] in self?.revertVision() }
+        let save = ActionButton("Save", style: .primary) { [weak self] in self?.saveVision(p) }
+        let update = { [weak self] (t: String) in
+            let n = t.trimmingCharacters(in: .whitespacesAndNewlines).count
+            let over = n > MemoryDraft.maxText
+            counter.stringValue = over ? "⚠ \(n) / \(MemoryDraft.maxText) · \(n - MemoryDraft.maxText) over the limit" : "\(n) / \(MemoryDraft.maxText)"
+            counter.textColor = over ? Palette.bad : Palette.dim
+            counter.setAccessibilityLabel(over ? "\(n) of \(MemoryDraft.maxText) characters, \(n - MemoryDraft.maxText) over the limit" : "\(n) of \(MemoryDraft.maxText) characters")
+            let changed = t != (saved?.text ?? "")
+            save.isEnabled = changed && !over
+            revert.isEnabled = changed
+            self?.visionDraft = changed ? t : nil
+        }
+        input.onChange = update
+        input.onSave = { [weak self] in self?.saveVision(p) }
+        input.onRevert = { [weak self] in self?.revertVision() }
+        update(text)
+        c.add(input)
+        let who = saved.map { "Last saved by \(source($0)) · \(relativeTime($0.updatedAt))" } ?? "No vision yet"
+        c.add(NSStackView(h: [counter, NSTextField.text("·", size: 11.5, color: Palette.dim), NSTextField.text(who, size: 11.5, color: Palette.dim), Spacer(), revert, save], spacing: 6))
+        c.add(NSTextField.text("⌘S saves. Esc reverts. One vision for each project, at most \(MemoryDraft.maxText) characters.", size: 11, color: Palette.dim))
+        body.addFull(c)
+
+        let facts = mem.facts(of: p.ref)
+        let add = ActionButton("Add entry", symbol: "plus") { [weak self] in self?.editFact("") }
+        let c2 = card("Project memory", local: true, trailing: [add])
+        c2.add(NSTextField.text("Short facts that AI jobs read. An accepted AI suggestion adds one here.", size: 12, color: Palette.dim, lines: 2))
+        let list = ListCard()
+        for f in facts { list.add(factRow(f, p)) }
+        if editingFact == "" { list.add(factEditor(nil, p)) }
+        if facts.isEmpty && editingFact != "" {
+            list.add(Row([NSTextField.text("No entries", size: 12, color: Palette.dim), Spacer()], height: 36, label: "No memory entries"))
+        }
+        c2.add(list)
+        body.addFull(c2)
+    }
+
+    private func source(_ e: MemoryEntry) -> String { e.source == .user ? "You" : "AI · accepted" }
+
+    private func factRow(_ f: MemoryEntry, _ p: ProjectSummary) -> NSView {
+        if editingFact == f.id { return factEditor(f, p) }
+        let src = Chiplet(source(f), symbol: f.source == .user ? "person" : "sparkles", color: f.source == .user ? Palette.mut : Palette.acc)
+        let edit = ActionButton("Edit") { [weak self] in self?.editFact(f.id) }
+        let del = ActionButton("Delete", style: .danger) { [weak self] in
+            self?.data.memory.remove(id: f.id)
+            self?.reload()
+        }
+        edit.setAccessibilityLabel("Edit entry: \(f.text)")
+        del.setAccessibilityLabel("Delete entry: \(f.text)")
+        return Row([NSTextField.text(f.text, size: 12.5, lines: 3), Spacer(), src, edit, del], height: 44,
+                   label: "\(f.text). Source: \(source(f)). \(relativeTime(f.updatedAt))")
+    }
+
+    // One line to add or change a fact. Return saves, Esc cancels.
+    private func factEditor(_ f: MemoryEntry?, _ p: ProjectSummary) -> NSView {
+        let input = LimitedInput(f?.text ?? "", placeholder: "For example: the app never stores GitHub tokens.", label: f == nil ? "New memory entry" : "Memory entry", lines: 2)
+        let commit = { [weak self, weak input] in
+            guard let self, let input else { return }
+            do {
+                try self.data.memory.saveFact(input.stringValue, id: f?.id, of: p.ref)
+                self.editingFact = nil
+                self.note = nil
+            } catch ProjectMemory.SaveError.tooLong(let n) {
+                self.note = (.warning, "An entry has at most \(MemoryDraft.maxText) characters. This one has \(n).")
+            } catch {
+                self.editingFact = nil
+            }
+            self.reload()
+        }
+        input.onSave = commit
+        input.onRevert = { [weak self] in self?.editingFact = nil; self?.reload() }
+        let save = ActionButton("Save", style: .primary) { commit() }
+        let cancel = ActionButton("Cancel") { [weak self] in self?.editingFact = nil; self?.reload() }
+        DispatchQueue.main.async { [weak input] in input?.window?.makeFirstResponder(input) }
+        let r = NSStackView(h: [input, cancel, save], spacing: 6)
+        r.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        return r
+    }
+
+    private func editFact(_ id: String) {
+        editingFact = id
+        reload()
+    }
+
+    private func saveVision(_ p: ProjectSummary) {
+        guard let t = visionDraft else { return }
+        do {
+            try data.memory.saveVision(t, of: p.ref)
+            visionDraft = nil
+            note = nil
+        } catch ProjectMemory.SaveError.tooLong(let n) {
+            note = (.warning, "The vision has at most \(MemoryDraft.maxText) characters. It has \(n). Make it shorter to save.")
+        } catch {}
+        reload()
+    }
+
+    private func revertVision() {
+        visionDraft = nil
+        view.window?.makeFirstResponder(nil)
         reload()
     }
 

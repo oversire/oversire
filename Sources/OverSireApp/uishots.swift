@@ -15,6 +15,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
+    lazy var memory = ProjectMemory(writes: writes)
     lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json",
                                                                                        store: projectStore, trackers: ENV))
     lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
