@@ -11,6 +11,20 @@ struct RelayConfig: Codable {
     var workerURL = ""
     var deviceID = ""            // from /v1/whoami; the cloud owns the device tokens
     var reconcileInterval: TimeInterval?
+    var hookRoute: String?       // from /v1/whoami; nil on a single-tenant relay
+
+    var hookURLs: HookURLs { HookURLs(worker: workerURL, route: hookRoute) }
+}
+
+/// The webhook URLs of this cloud. An account has a hook route. The old single-tenant relay has none.
+struct HookURLs: Equatable {
+    let worker: String
+    let route: String?
+
+    var github: String { route.map { "\(worker)/hooks/github/\($0)" } ?? oldGitHub }
+    var oldGitHub: String { "\(worker)/webhook" }
+    func plane(_ slug: String) -> String { route.map { "\(worker)/hooks/plane/\($0).\(slug)" } ?? oldPlane(slug) }
+    func oldPlane(_ slug: String) -> String { "\(worker)/plane/\(slug)" }
 }
 
 var RELAY = RelayConfig()
@@ -219,7 +233,6 @@ struct RelayAPI {
     struct OK: Decodable {}
     struct Discovery: Decodable { let app: String; let version: String? }
     struct Secret: Decodable { let secret: String }
-    struct WhoAmI: Decodable { let deviceId: String }
 
     func discover() -> Discovery? {
         guard case .success(let d) = send("GET", "/", as: Discovery.self), CLOUD_APPS.contains(d.app) else { return nil }
@@ -282,24 +295,26 @@ final class HookManager {
 
     enum Lookup { case found(Int), missing, failed(HookStatus) }
 
-    func find(repo: String, url: String) -> Lookup {
+    /// The first hook at one of `urls`.
+    func find(repo: String, urls: [String]) -> Lookup {
         guard let r = gh(["api", "repos/\(repo)/hooks?per_page=100", "--jq", "[.[] | {id, url: .config.url}]"]) else {
             return .failed(.error("gh failed to start"))
         }
         if !r.ok { return .failed(denied(r) ? .pollingOnly("No admin access") : .error(String(r.stderr.prefix(80)))) }
         let hooks = (try? JSONDecoder().decode([GHHook].self, from: r.stdout)) ?? []
-        return hooks.first { $0.url == url }.map { .found($0.id) } ?? .missing
+        return urls.lazy.compactMap { u in hooks.first { $0.url == u } }.first.map { .found($0.id) } ?? .missing
     }
 
     // Creates or updates the hook of one repo, records it in the relay, and pings it.
-    func ensure(repo: String, workerURL: String, secret: String, api: RelayAPI) -> HookStatus {
-        let url = workerURL + "/webhook"
+    // A hook at the old URL moves to the new one.
+    func ensure(repo: String, urls: HookURLs, secret: String, api: RelayAPI) -> HookStatus {
+        let url = urls.github
         let body: [String: Any] = [
             "name": "web", "active": true, "events": RELAY_EVENTS,
             "config": ["url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"],
         ]
         let existing: Int?
-        switch find(repo: repo, url: url) {
+        switch find(repo: repo, urls: [url, urls.oldGitHub]) {
         case .failed(let s): setStatus(repo, s); return s
         case .missing: existing = nil
         case .found(let id): existing = id
@@ -318,9 +333,9 @@ final class HookManager {
     }
 
     // Reads the last deliveries. 401 means the secrets do not match.
-    func check(repo: String, workerURL: String) -> HookStatus {
+    func check(repo: String, urls: HookURLs) -> HookStatus {
         let id: Int
-        switch find(repo: repo, url: workerURL + "/webhook") {
+        switch find(repo: repo, urls: [urls.github, urls.oldGitHub]) {
         case .failed(let s): setStatus(repo, s); return s
         case .missing: setStatus(repo, .error("No hook")); return .error("No hook")
         case .found(let found): id = found
@@ -349,22 +364,22 @@ final class HookManager {
     }
 
     static func planeKey(_ slug: String) -> String { "plane:\(slug)" }
-    static func planeURL(_ slug: String, workerURL: String) -> String { "\(workerURL)/plane/\(slug)" }
 
     // Plane shows a webhook secret only when it creates the hook. A hook that the
     // relay has no secret for is deleted and created again. Needs a workspace admin.
-    func ensurePlane(_ client: any WebhookManaging, workerURL: String, relayHookId: String?, api: RelayAPI) async -> HookStatus {
+    // A hook at the old URL is deleted, and one at the new URL is made.
+    func ensurePlane(_ client: any WebhookManaging, urls: HookURLs, relayHookId: String?, api: RelayAPI) async -> HookStatus {
         let slug = client.account.id
         let key = HookManager.planeKey(slug)
-        let url = HookManager.planeURL(slug, workerURL: workerURL)
+        let url = urls.plane(slug)
         let existing: [WebhookRegistration]
         switch await Result(awaiting: { try await client.webhooks() }) {
-        case .success(let list): existing = list.filter { $0.url.absoluteString == url }
+        case .success(let list): existing = list.filter { [url, urls.oldPlane(slug)].contains($0.url.absoluteString) }
         case .failure(let e):
             let s = planeDenied(e) ? HookStatus.pollingOnly("Not a workspace admin") : .error(e.message)
             setStatus(key, s); return s
         }
-        if let hook = existing.first(where: { $0.id == relayHookId }), hook.active, existing.count == 1 {
+        if let hook = existing.first(where: { $0.id == relayHookId }), hook.active, existing.count == 1, hook.url.absoluteString == url {
             setStatus(key, .waiting)
             return .waiting
         }
@@ -385,15 +400,15 @@ final class HookManager {
     }
 
     // Plane has no delivery log in its API, so the relay gives the last delivery.
-    func checkPlane(_ client: any WebhookManaging, workerURL: String, relayHook: RelayPlaneHook?) async -> HookStatus {
+    func checkPlane(_ client: any WebhookManaging, urls: HookURLs, relayHook: RelayPlaneHook?) async -> HookStatus {
         let key = HookManager.planeKey(client.account.id)
-        let url = HookManager.planeURL(client.account.id, workerURL: workerURL)
+        let candidates = [urls.plane(client.account.id), urls.oldPlane(client.account.id)]
         let s: HookStatus
         switch await Result(awaiting: { try await client.webhooks() }) {
         case .failure(let e):
             s = planeDenied(e) ? .pollingOnly("Not a workspace admin") : .error(e.message)
         case .success(let list):
-            if let hook = list.first(where: { $0.url.absoluteString == url }) {
+            if let hook = candidates.lazy.compactMap({ u in list.first { $0.url.absoluteString == u } }).first {
                 if !hook.active { s = .error("Off in Plane. Click Add to turn it on.") }
                 else if relayHook?.hookId != hook.id { s = .error("The relay has no secret. Click Add.") }
                 else if let at = relayHook?.lastDelivery { s = .live(relativeAgo(Date(timeIntervalSince1970: at / 1000))) }
@@ -489,7 +504,13 @@ final class CloudSetup {
         guard !RELAY.workerURL.isEmpty else { return s }
         s.version = api.discover().flatMap { Int($0.version ?? "") }
         switch api.health() {
-        case .success(let h): s.joined = true; s.health = h
+        case .success(let h):
+            s.joined = true; s.health = h
+            // A migrated relay now has a hook route. Repair moves the hooks to the new URLs.
+            if case .success(let w) = api.whoami(), w.hookRoute != onMain({ RELAY.hookRoute }) {
+                onMain { RELAY.hookRoute = w.hookRoute; saveConfig() }
+                append("The cloud has new webhook URLs. Click Repair to move the hooks.")
+            }
         case .failure(let f): s.joinError = secrets.get(SecretStore.deviceToken) == nil ? nil : f.description
         }
         return s
@@ -512,24 +533,36 @@ final class CloudSetup {
         return u
     }
 
-    // Checks the URL and the token, then registers this Mac. Blocking.
-    func connect(url raw: String, token: String) -> Bool {
-        guard let url = CloudSetup.normalize(raw) else { append("Enter an https URL"); return false }
+    // Checks the URL and the token, then registers this Mac. `credential` is a pairing code or a device token.
+    func connect(url raw: String, credential: String) async -> Bool {
+        guard let url = CloudSetup.normalize(raw), let base = URL(string: url) else { append("Enter an https URL"); return false }
         let open = RelayAPI(base: url, token: nil)
         guard let d = open.discover() else { append("No OverSire cloud answers at \(url)"); return false }
         guard Int(d.version ?? "") ?? 0 >= CLOUD_MIN_VERSION else { append("The cloud at \(url) is too old"); return false }
+        let pairing = CloudPairing(base: base, http: URLSessionTransport.noRedirects)
+        var token = credential
+        if let code = CloudPairing.code(credential) {
+            switch await Result(awaiting: { try await pairing.pair(code: code, name: Host.current().localizedName ?? "Mac") }) {
+            case .success(let r): token = r.token; append("Paired as device \(r.deviceId) (\(r.role.rawValue))")
+            case .failure(.unauthorized): append("The pairing code is not valid or is too old. Get a new one in the console."); return false
+            case .failure(let e): append("Pairing: \(e.message)"); return false
+            }
+        }
         let api = RelayAPI(base: url, token: token)
         var id = onMain { RELAY.deviceID }
-        switch api.whoami() {
-        case .success(let w): id = w.deviceId
+        var route: String?
+        switch await Result(awaiting: { try await pairing.whoami(token: token) }) {
+        case .success(let w): id = w.deviceId; route = w.hookRoute
         case .failure(.unauthorized): append("The cloud rejected the token"); return false
         case .failure(let f):
             // A v3 relay has no whoami. Its health call still checks the token.
             if case .failure(let h) = api.health() { append(h.description); return false }
-            if id.isEmpty { append("Device ID unknown (\(f.description)). Hooks of other Macs stay.") }
+            if id.isEmpty { append("Device ID unknown (\(f.message)). Hooks of other Macs stay.") }
         }
         secrets.set(SecretStore.deviceToken, token)
-        onMain { RELAY.workerURL = url; RELAY.deviceID = id; RELAY.enabled = true; saveConfig() }
+        // The webhook secret of an account is not the one of the old relay.
+        secrets.delete(SecretStore.webhookSecret)
+        onMain { RELAY.workerURL = url; RELAY.deviceID = id; RELAY.hookRoute = route; RELAY.enabled = true; saveConfig() }
         if case .failure(let f) = api.registerSelf(name: Host.current().localizedName ?? "Mac", repos: onMain { REPOS }, orgs: trackedOrgs()) {
             append("Register this Mac: \(f.description)"); return false
         }
@@ -600,10 +633,10 @@ final class CloudSetup {
 
     func installHooks(repos: [String]) -> Bool {
         guard let secret = webhookSecret() else { append("The webhook secret is not available"); return false }
-        let api = self.api, url = RELAY.workerURL
+        let api = self.api, urls = RELAY.hookURLs
         var ok = true
         for repo in repos {
-            let s = hooks.ensure(repo: repo, workerURL: url, secret: secret, api: api)
+            let s = hooks.ensure(repo: repo, urls: urls, secret: secret, api: api)
             append("\(repo): \(describe(s))")
             if case .error = s { ok = false }
             if case .pollingOnly = s {
@@ -614,22 +647,22 @@ final class CloudSetup {
     }
 
     func checkHooks(repos: [String]) {
-        let url = RELAY.workerURL
-        guard !url.isEmpty else { return }
+        let urls = RELAY.hookURLs
+        guard !urls.worker.isEmpty else { return }
         work.async {
-            DispatchQueue.concurrentPerform(iterations: repos.count) { _ = self.hooks.check(repo: repos[$0], workerURL: url) }
+            DispatchQueue.concurrentPerform(iterations: repos.count) { _ = self.hooks.check(repo: repos[$0], urls: urls) }
             DispatchQueue.main.async { self.onChange?() }
         }
     }
 
     func installPlaneHooks(_ slugs: [String]) async -> Bool {
         guard case .success(let h) = api.health() else { append("Cloud health check failed"); return false }
-        let api = self.api, url = RELAY.workerURL
+        let api = self.api, urls = RELAY.hookURLs
         var ok = true
         for slug in slugs {
             guard let client = await MainActor.run(body: { planeClient(slug) }) else { append("\(slug): no token"); ok = false; continue }
             let known = h.planeHooks.first { $0.workspace == slug }?.hookId
-            let s = await hooks.ensurePlane(client, workerURL: url, relayHookId: known, api: api)
+            let s = await hooks.ensurePlane(client, urls: urls, relayHookId: known, api: api)
             append("\(slug) (Plane): \(describe(s))")
             if case .error = s { ok = false }
             if case .pollingOnly = s { append("A Plane webhook needs a workspace admin. \(slug) stays on polling.") }
@@ -638,14 +671,14 @@ final class CloudSetup {
     }
 
     func checkPlaneHooks(_ slugs: [String]) {
-        let url = RELAY.workerURL
-        guard !url.isEmpty, !slugs.isEmpty else { return }
+        let urls = RELAY.hookURLs
+        guard !urls.worker.isEmpty, !slugs.isEmpty else { return }
         let api = self.api
         let clients = slugs.compactMap { planeClient($0) }
         Task {
             let h = try? api.health().get()
             for c in clients {
-                _ = await self.hooks.checkPlane(c, workerURL: url, relayHook: h?.planeHooks.first { $0.workspace == c.account.id })
+                _ = await self.hooks.checkPlane(c, urls: urls, relayHook: h?.planeHooks.first { $0.workspace == c.account.id })
             }
             DispatchQueue.main.async { self.onChange?() }
         }

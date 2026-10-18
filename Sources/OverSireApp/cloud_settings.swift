@@ -104,9 +104,9 @@ final class CloudSettingsVC: NSViewController {
             urlRow.addSubview(uf); urlField = uf
             body.addSubview(urlRow); y += 30
             let tokRow = NSView(frame: NSRect(x: 0, y: y, width: w, height: 30))
-            tokRow.addSubview(label("Token", x: 16, y: 7, width: 60, size: 12))
+            tokRow.addSubview(label("Code", x: 16, y: 7, width: 60, size: 12))
             let tf = NSSecureTextField(frame: NSRect(x: 80, y: 4, width: w - 96, height: 22))
-            tf.placeholderString = connected ? "Saved in the Keychain" : "Device token from npm run add-device"
+            tf.placeholderString = connected ? "Saved in the Keychain" : "Pairing code from the console, or a device token"
             tf.font = .systemFont(ofSize: 12)
             tokRow.addSubview(tf); tokenField = tf
             body.addSubview(tokRow); y += 32
@@ -335,10 +335,10 @@ final class CloudSettingsVC: NSViewController {
         let url = urlField?.stringValue ?? ""
         let typed = tokenField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard let token = typed.isEmpty ? setup.secrets.get(SecretStore.deviceToken) : typed else {
-            setup.append("Enter the device token"); return
+            setup.append("Enter a pairing code from the console"); return
         }
         let s = setup
-        s.perform("Connect to \(url)", { s.connect(url: url, token: token) }) { [weak self] ok in
+        s.perform("Connect to \(url)", { await s.connect(url: url, credential: token) }) { [weak self] ok in
             guard let self else { return }
             if ok {
                 self.urlDraft = nil

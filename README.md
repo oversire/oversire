@@ -285,9 +285,9 @@ A release build (from the [releases page](https://github.com/oversire/oversire/r
 
 By default, OverSire polls GitHub and Plane. OverSire cloud adds a push path: GitHub and Plane send webhooks to the cloud, and the cloud tells each Mac about changes in about one second. Polling stays on as a slow fallback (every 10 minutes by default).
 
-The cloud runs from the private `oversire/cloud` repo. Its README tells how to deploy it and how to make a device token for each Mac.
+The cloud runs from the private `oversire/cloud` repo. Its README tells how to deploy it. Each user has an OverSire Cloud account. You log in to the console with a code that comes by mail.
 
-To connect a Mac, open **Settings → Cloud (beta)**. Enter the cloud URL and the device token, then click **Connect**. OverSire keeps the token in the Keychain. Then click **Install hooks**. OverSire adds a webhook to each tracked repo (`gh` must have admin access to the repo; other repos stay on polling).
+To connect a Mac, get a pairing code in the console. Then open **Settings → Cloud (beta)**. Enter the cloud URL and the pairing code, then click **Connect**. The cloud gives this Mac a device token for the code, one time only. OverSire keeps the token in the Keychain. A device token from an old single-tenant relay also works in the same field. Then click **Install hooks**. OverSire adds a webhook to each tracked repo (`gh` must have admin access to the repo; other repos stay on polling).
 
 Each Plane workspace gets one webhook to `https://<cloud>/plane/<slug>`. **Settings → Cloud (beta) → Plane webhooks** shows one row per workspace. OverSire adds the webhook when you add a workspace, and deletes it when you remove the workspace. The cloud keeps the secret of each webhook and checks the `X-Plane-Signature` of each delivery. A workspace without a webhook polls every `pollMinutes` (5 by default). Note: Plane sends no webhook event for changes made through its v1 API. OverSire refreshes after its own changes. Plane has no intake webhook events. An intake item is also a work item, so its changes come as work item events. OverSire then reads the intake list again.
 
