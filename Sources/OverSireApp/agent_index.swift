@@ -292,6 +292,9 @@ final class AgentIndex: NSObject {
         }
     }
 
+    /// The key of the item that OverSire started last.
+    var lastStarted: String? { links.values.max { $0.at < $1.at }?.key }
+
     func clearFailure(_ key: String) {
         let k = key.uppercased()
         guard launches[k]?.error != nil else { return }

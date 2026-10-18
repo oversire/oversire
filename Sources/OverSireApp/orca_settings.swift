@@ -1,8 +1,8 @@
 import Cocoa
 import OverSireCore
 
-// Settings → Projects → Orca: the agent, the prompt template, and the Orca workspace of each
-// Plane project. The Orca account (CLI and environment) is on the Providers page.
+// Settings → Projects → Orca: the Orca workspace of each Plane project. The agent, the prompt and the
+// start commands are on Settings › Runtime. The Orca account (CLI and environment) is on the Providers page.
 extension ProjectSettingsVC {
     /// A runtime that reports the version of its tool.
     protocol VersionReporting: AgentRuntime { func version() async throws -> String }
@@ -15,7 +15,6 @@ extension ProjectSettingsVC {
     }
     static var orcaProbe: OrcaProbe?
     static var orcaProbing = false
-    static let orcaAgents = ["claude", "codex", "opencode"]
 
     func orcaSection(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
         var y = y + 4
@@ -49,26 +48,11 @@ extension ProjectSettingsVC {
         doc.addSubview(st)
         y += 24
 
-        let agents = ProjectSettingsVC.orcaAgents + (ProjectSettingsVC.orcaAgents.contains(cfg.runtime.agent) ? [] : [cfg.runtime.agent])
-        y = popupRow("Agent", agents, agents.firstIndex(of: cfg.runtime.agent) ?? 0, #selector(orcaAgentChanged(_:)), y: y, in: doc)
-
-        let pl = NSTextField(labelWithString: "Prompt")
-        pl.font = .systemFont(ofSize: 12)
-        pl.frame = NSRect(x: 16, y: y + 4, width: 80, height: 18)
-        doc.addSubview(pl)
-        let pf = NSTextField(frame: NSRect(x: 80, y: y, width: w - 96, height: 24))
-        pf.stringValue = cfg.runtime.prompt
-        pf.placeholderString = RuntimeConfig.defaultPrompt
-        pf.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        pf.identifier = NSUserInterfaceItemIdentifier("orca-prompt")
-        pf.target = self; pf.action = #selector(orcaPromptChanged(_:))
-        doc.addSubview(pf)
-        y += 28
-        let hint = NSTextField(labelWithString: "{url}, {key} (lowercase), {KEY} and {title}. Keep {url} first: Orca keeps only the start of a prompt.")
-        hint.font = .systemFont(ofSize: 10.5); hint.textColor = .tertiaryLabelColor
-        hint.frame = NSRect(x: 80, y: y, width: w - 96, height: 14)
-        doc.addSubview(hint)
-        y += 24
+        let agent = NSTextField(labelWithString: "Agent \(cfg.runtime.agent). Change the agent, the prompt and the start commands in Settings › Runtime.")
+        agent.font = .systemFont(ofSize: 11); agent.textColor = .secondaryLabelColor
+        agent.frame = NSRect(x: 16, y: y, width: w - 32, height: 16)
+        doc.addSubview(agent)
+        y += 26
 
         // Project → Orca workspace.
         let heads: [(String, CGFloat)] = [("Plane project", 16), ("Orca workspace", 170), ("Root CLAUDE.md", w - 130)]
@@ -160,8 +144,6 @@ extension ProjectSettingsVC {
         probeOrca()
         rebuild()
     }
-    @objc func orcaPromptChanged(_ sender: NSTextField) { cfg.runtime.prompt = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
-    @objc func orcaAgentChanged(_ sender: NSPopUpButton) { cfg.runtime.agent = sender.titleOfSelectedItem ?? "claude" }
     @objc func orcaRootChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue else { return }
         cfg.orca.roots[key] = sender.selectedItem?.representedObject as? String ?? ""

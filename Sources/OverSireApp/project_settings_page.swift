@@ -549,11 +549,11 @@ final class ProjectSettingsPage: Page {
     private func sessions(_ body: NSStackView) {
         let l = local
         let c = card("Agent sessions", local: true)
-        let agents = ProjectSettingsVC.orcaAgents
+        let agents = AgentCommandsCard.known
         let titles = ["App default (\(PROJECTS_CFG.runtime.agent))"] + agents
         c.add(field("Agent", PopUp(titles, selected: l.agent.flatMap { agents.firstIndex(of: $0) }.map { $0 + 1 } ?? 0, label: "Agent") { [weak self] i in
             self?.editLocal { $0.agent = i == 0 ? nil : agents[i - 1] }
-        }, help: "The agent CLI that Orca starts for this project."))
+        }, help: "The agent CLI that the runtime starts for this project. The app default and the start command of each agent are in Settings › Runtime."))
         c.add(SwitchRow("Use the app default prompt", note: PROJECTS_CFG.runtime.prompt, on: l.prompt == nil) { [weak self] on in
             guard let self else { return }
             self.editLocal { $0.prompt = on ? nil : PROJECTS_CFG.runtime.prompt }

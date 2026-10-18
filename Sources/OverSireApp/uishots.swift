@@ -86,6 +86,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
     // OVERSIRE_UISHOTS_CLOUD=0 or 1: the Cloud AI sections show without or with a cloud account.
     static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
+    // OVERSIRE_UISHOTS_COMMANDS=1: Settings › Runtime shows one custom start command and one bad draft.
+    static let commands = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_COMMANDS"] == "1"
     // OVERSIRE_UISHOTS_PLANNER=1: a vision, relations, areas, a queue lane and a plan change in the OVERSIRE project.
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
 
@@ -276,6 +278,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         assignRepoColors(REPOS)
         let catalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
         projectStore.track(catalog.resolve(PROJECTS_CFG), live: [])
+        if UIShots.commands {
+            PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]
+            AgentCommandsCard.drafts = ["codex": "codex --full-auto; echo done"]
+        }
         agentIndex.poll()
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         refresh(force: true) { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.shoot() } }

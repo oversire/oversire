@@ -27,7 +27,7 @@ final class QueuePage: Page {
         ], spacing: 8))
         if data.agentIndex.ready == nil {
             col.addFull(Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
-                               actions: [ActionButton("Orca settings") { [weak self] in self?.go(.settings(.orca)) }]))
+                               actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.runtime)) }]))
         }
 
         let left = NSStackView(v: [SectionTitle("AI checks", count: data.aiChecks.pending.count)], spacing: 10)

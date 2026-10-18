@@ -14,7 +14,7 @@ enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
-        case general, providers, projects, repos, linking, writeback, live, orca, queue, planner, ai, notifications, menubar, shortcuts
+        case general, providers, projects, repos, linking, writeback, live, runtime, queue, planner, ai, notifications, menubar, shortcuts
 
         var title: String {
             switch self {
@@ -25,7 +25,7 @@ enum Route: Equatable {
             case .linking: return "Linking"
             case .writeback: return "Write back to Plane"
             case .live: return "Cloud (beta)"
-            case .orca: return "Orca"
+            case .runtime: return "Runtime"
             case .queue: return "Sessions and queue"
             case .planner: return "Planner"
             case .ai: return "AI"
@@ -103,8 +103,8 @@ enum Route: Equatable {
             self = .run(repo: rest[0] + "/" + rest[1], id: rest[2])
         case "prs": self = .prs
         case "insights": self = .insights
-        // "accounts" is the old name of the Projects page.
-        case "settings": self = .settings(rest.first.map { $0.lowercased() == "accounts" ? "projects" : $0.lowercased() }
+        // "accounts" and "orca" are the old names of the Projects and Runtime pages.
+        case "settings": self = .settings(rest.first.map { ["accounts": "projects", "orca": "runtime"][$0.lowercased()] ?? $0.lowercased() }
                                               .flatMap(SettingsPage.init(rawValue:)) ?? .general)
         case "project":
             guard let k = rest.first, !k.isEmpty else { return nil }
@@ -167,7 +167,7 @@ enum Route: Equatable {
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
         .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .plan, .runs(.all), .runs(.unlinked),
-        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.providers),
+        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.providers), .settings(.runtime),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
     ]
 }

@@ -36,7 +36,7 @@ final class AgentsPage: Page {
         if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty { runnerSessions(col, sessions) }
         guard idx.ready != nil else {
             col.addFull(Banner(.idle, title: "Orca is off or not installed.", body: "Turn on Orca to see sessions and worktrees here.",
-                               actions: [ActionButton("Orca settings") { [weak self] in self?.go(.settings(.orca)) }]))
+                               actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.runtime)) }]))
             return
         }
 

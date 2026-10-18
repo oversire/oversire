@@ -55,6 +55,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             nav.add(r)
         }
         let body = NSStackView(v: [], spacing: 10)
+        if page != .runtime { AgentCommandsCard.drafts = [:] }
         switch page {
         case .general: general(body)
         case .providers: providers(body)
@@ -63,7 +64,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .linking: linking(body)
         case .writeback: writeBack(body)
         case .live: live(body)
-        case .orca: orca(body)
+        case .runtime: runtime(body)
         case .queue: queue(body)
         case .planner: planner(body)
         case .ai: ai(body)
@@ -94,7 +95,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .linking: return "link"
         case .writeback: return "square.and.pencil"
         case .live: return "dot.radiowaves.left.and.right"
-        case .orca: return "terminal"
+        case .runtime: return "terminal"
         case .queue: return "list.number"
         case .planner: return "rectangle.split.3x1"
         case .ai: return "sparkles"
@@ -199,12 +200,56 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         ]))
     }
 
+    private func runtime(_ b: NSStackView) {
+        let r = PROJECTS_CFG.runtime
+        let agents = AgentCommandsCard.known + (AgentCommandsCard.known.contains(r.agent) ? [] : [r.agent])
+        let agent = PopUp(agents, selected: agents.firstIndex(of: r.agent) ?? 0, label: "Default agent") { i in
+            PROJECTS_CFG.runtime.agent = agents[i]
+            saveConfig()
+            AgentCommandsCard.changed()
+        }
+        let prompt = TextInput(r.prompt, placeholder: RuntimeConfig.defaultPrompt, label: "Prompt", mono: true) { v in
+            PROJECTS_CFG.runtime.prompt = v.trimmingCharacters(in: .whitespacesAndNewlines)
+            saveConfig()
+        }
+        prompt.widthAnchor.constraint(greaterThanOrEqualToConstant: 340).isActive = true
+        b.addFull(card("Agent", [
+            FieldRow("Default agent", note: "For each runtime. A project can choose another agent.", agent),
+            FieldRow("Prompt", note: "{url}, {key} (lowercase), {KEY} and {title}. Keep {url} first.", prompt),
+        ]))
+        b.addFull(AgentCommandsCard(examples: commandExamples, usedBy: commandUsers))
+        orca(b)
+    }
+
+    // The last started item, then a sample key of the first tracked project.
+    private var commandExamples: [AgentCommandsCard.Example] {
+        var out: [AgentCommandsCard.Example] = []
+        if let k = data.agentIndex.lastStarted {
+            out.append(.init(key: k, title: data.projectStore.item(key: k)?.item.title ?? k))
+        }
+        let project = data.projectStore.tracked.map(\.identifier).sorted().first ?? "ENG"
+        out.append(.init(key: project + "-42", title: "Fix the retry on 503"))
+        return out
+    }
+
+    // Each runtime account, and each runtime of an online runner. Orca types a command; agent-wire does not.
+    private var commandUsers: [AgentCommandsCard.User] {
+        var out = ENV.accounts(.runtime).map { a in
+            AgentCommandsCard.User(name: "\(a.account.provider.rawValue.capitalized) · \(a.account.id == "local" ? "this Mac" : a.account.id)",
+                                   terminal: a.account.provider == .orca)
+        }
+        for r in cloudAIRecords?.runners ?? [] where r.online {
+            out += r.runtimes.map { AgentCommandsCard.User(name: "Runner \(r.device) · \($0.rawValue)", terminal: $0 == .orca) }
+        }
+        return out
+    }
+
     private func orca(_ b: NSStackView) {
         let o = PROJECTS_CFG.orca
         let ready = data.agentIndex.ready != nil
         b.addFull(Banner(o.enabled ? (ready ? .ok : .warning) : .idle,
                          title: o.enabled ? (ready ? "Orca is on." : "Orca is on, but OverSire could not read it.") : "Orca is off.",
-                         body: "CLI \(o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac") · agent \(PROJECTS_CFG.runtime.agent)",
+                         body: "CLI \(o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac")",
                          actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.projects)) }]))
         var rows: [NSView] = []
         for p in data.projectStore.tracked.sorted(by: { $0.identifier < $1.identifier }) {

@@ -452,6 +452,7 @@ func runSelfTest() {
     check(Route(url: URL(string: "https://item/FRITZ-17")!) == nil, "other schemes are not routes")
     check(Route(url: URL(string: "oversire://item/17")!) == nil, "an item needs a key")
     check(Route(url: URL(string: "oversire://settings/nope")!) == .settings(.general), "unknown settings page opens General")
+    check(Route(url: URL(string: "oversire://settings/orca")!) == .settings(.runtime), "the old Orca settings link opens Runtime")
     check(Route(url: URL(string: "cateye://item/FRITZ-17")!) == .item("FRITZ-17", .overview), "old cateye links still open")
 
     // Accounts from the old settings. Only Keychain key names, never tokens.
