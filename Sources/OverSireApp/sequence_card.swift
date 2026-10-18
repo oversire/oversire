@@ -108,8 +108,9 @@ final class SequenceCard: Card {
         let title = NSTextField.text(found?.item.title ?? r.item.key, size: 12.5)
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let views: [NSView] = [ring, NSTextField.text(r.item.key, size: 11.5, color: Palette.mut, mono: true), title,
-                               NSTextField.text(status, size: 11.5, color: Palette.dim), Spacer()]
+        let word = NSTextField.text(status, size: 11.5, color: Palette.dim)
+        word.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let views: [NSView] = [ring, NSTextField.text(r.item.key, size: 11.5, color: Palette.mut, mono: true), title, word, Spacer()]
         let kind = groups.first { $0.0 == r.kind }?.1 ?? r.kind.rawValue
         let row = Row(views, height: 28, inset: 4, label: "\(kind) \(r.item.key), \(found?.item.title ?? ""), \(status)") { actions.open(r.item.key) }
         let remove = MenuAction("Remove") { actions.remove(r) }

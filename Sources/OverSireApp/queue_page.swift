@@ -189,10 +189,12 @@ final class QueuePage: Page {
         case nil: gate = Chiplet(pick.next == e.key ? "✓ Ready · starts next" : "✓ Ready", color: Palette.ok)
         }
         let areas: [NSView] = (q.areaBook()?.areas(key: e.key) ?? []).map { AreaChip($0) }
-        let actions = NSStackView(h: [Spacer(34), gate] + areas + [cond, Spacer(), up, down, start, remove], spacing: 4)
-        let v = NSStackView(v: [top, actions], spacing: 2)
+        let gates = NSStackView(h: [Spacer(34), gate] + areas + [Spacer()], spacing: 4)
+        let actions = NSStackView(h: [Spacer(34), cond, Spacer(), up, down, start, remove], spacing: 4)
+        let v = NSStackView(v: [top, gates, actions], spacing: 2)
         top.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
         actions.widthAnchor.constraint(equalTo: v.widthAnchor, constant: -6).isActive = true
+        gates.widthAnchor.constraint(equalTo: v.widthAnchor, constant: -6).isActive = true
         return v
     }
 

@@ -11,6 +11,7 @@ final class RelationCache {
     private(set) var byKey: [String: [ItemRelation]] = [:]      // upper-case key → relations
     private(set) var loading: Set<String> = []
     private(set) var errors: [String: String] = [:]
+    private var seeded: Set<String> = []
 
     /// `ref`: the ItemRef of a key, from the snapshots.
     init(tracker: @escaping (ItemRef) -> (any RelationManaging)?, ref: @escaping (String) -> ItemRef?) {
@@ -33,7 +34,7 @@ final class RelationCache {
 
     /// Loads the keys that are not loaded. `force` loads them again.
     func load(_ keys: [String], force: Bool = false) {
-        for k in Set(keys.map { $0.uppercased() }) where !loading.contains(k) && (force || byKey[k] == nil) {
+        for k in Set(keys.map { $0.uppercased() }) where !loading.contains(k) && !seeded.contains(k) && (force || byKey[k] == nil) {
             guard let r = ref(k), let t = tracker(r), t.capabilities.contains(.relations) else { continue }
             loading.insert(k)
             Task { [weak self] in
@@ -73,8 +74,9 @@ final class RelationCache {
         }
     }
 
-    /// For `--uishots` and tests: relations without a tracker.
+    /// For `--uishots` and tests: relations without a tracker. A load does not replace them.
     func seed(_ key: String, _ rels: [ItemRelation]) {
         byKey[key.uppercased()] = rels
+        seeded.insert(key.uppercased())
     }
 }

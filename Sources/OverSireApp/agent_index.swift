@@ -98,6 +98,9 @@ final class AgentIndex: NSObject {
     static let linkAge: TimeInterval = 30 * 86400
     private var observer: NSObjectProtocol?
 
+    /// For `--uishots`: a session without Orca. The next poll replaces it.
+    func seed(_ key: String, _ a: AgentSession) { agents[key.uppercased()] = a }
+
     init(writes: StoreWrites? = nil) {
         self.writes = writes
         super.init()
