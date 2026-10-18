@@ -293,6 +293,7 @@ Each Plane workspace gets one webhook to `https://<cloud>/plane/<slug>`. **Setti
 
 A Cat Eye relay (v3) that you deployed before also works. OverSire moves its URL and token on the first start.
 
+- **Synced state:** a Mac that is paired with an account syncs its own state with the cloud: queue lanes, ignored failures, pins, snoozes, notes, agent links, memory, jobs, suggestions and work orders. Each write goes to disk at once and waits in an outbox (`~/.config/oversire/sync/<device>/`) until the cloud accepts it, so OverSire works offline. The last write wins for each record. The web console (`https://<cloud>/console`) shows the suggestions, and you can accept or dismiss them from a phone. Without a cloud account, OverSire makes no cloud calls.
 - **Retention:** the cloud keeps events for 24 hours by default (1 hour to 30 days). A Mac that was offline reads the events it missed. After a longer gap, it does one full refresh.
 - **Privacy:** the cloud keeps only repo names, Plane workspace slugs, event types and IDs (run, job, pull request, project, work item). It does not log payloads, titles, bodies, or user names. Each webhook is verified with an HMAC secret.
 

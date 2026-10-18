@@ -14,12 +14,53 @@ protocol StartReading { func stored<R: StoreRecord>(_ type: R.Type) -> [R] }
 
 extension LocalStore: StartReading {}
 
+extension SyncedStore: StartReading {
+    nonisolated func stored<R: StoreRecord>(_ type: R.Type) -> [R] { local.stored(type) }
+}
+
 /// The UI path to the store. Writes run in call order and the caller does not wait.
 final class StoreWrites: @unchecked Sendable {
-    let store: any Store
+    /// Posted on the main thread for a record that came from the cloud. userInfo["collection"] is its collection.
+    static let remoteChanged = Notification.Name("StoreRemoteChanged")
+
+    private let lock = NSLock()
+    private var current: any Store
+    private let local: LocalStore?
+    private var link: CloudLink?            // main thread only
+    private var watch: Task<Void, Never>?   // main thread only
     private var last: Task<Void, Never>?   // main thread only
 
-    init(store: any Store) { self.store = store }
+    var store: any Store { lock.withLock { current } }
+
+    init(store: any Store) {
+        current = store
+        local = store as? LocalStore
+    }
+
+    /// Free mode (nil) keeps the LocalStore. A paired Mac syncs the same files with the cloud. Main thread only.
+    func use(_ link: CloudLink?) {
+        guard let local, link != self.link else { return }
+        self.link = link
+        watch?.cancel()
+        if let old = store as? SyncedStore { Task { await old.stop() } }
+        let next = ENV.store(local: local, link: link)
+        lock.withLock { current = next }
+        guard let synced = next as? SyncedStore else { return }
+        watch = Task {
+            for await c in await synced.remoteChanges() {
+                await MainActor.run {
+                    NotificationCenter.default.post(name: Self.remoteChanged, object: self, userInfo: ["collection": c.collection])
+                    NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+                }
+            }
+        }
+        syncNow()
+    }
+
+    /// Sends the outbox and reads the cloud ops now. Free mode does nothing.
+    func syncNow() {
+        if let synced = store as? SyncedStore { Task { await synced.sync() } }
+    }
 
     func put<R: StoreRecord>(_ r: R) { run(R.collection) { try await $0.put(r) } }
 

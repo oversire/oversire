@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireSync
 import GitHubKit
 import TrackerPlane
 import CodeHostGitHub
@@ -267,5 +268,25 @@ extension AppEnvironment {
             PROJECTS_CFG.allOf.removeAll { $0 == id.id }
             PROJECTS_CFG.picked.removeAll { $0.hasPrefix(id.id + "/") }
         }
+    }
+}
+
+// ─── OverSire state ──────────────────────────────────────────────────────────
+
+/// The cloud account of a paired Mac.
+struct CloudLink: Equatable {
+    let base: URL
+    let token: String
+    let device: String
+}
+
+extension AppEnvironment {
+    /// Free mode: the LocalStore only, with no cloud calls. A paired Mac: a SyncedStore over the same files.
+    /// The sync state of each device has its own folder, so a new pairing starts clean.
+    func store(local: LocalStore, link: CloudLink?) -> any Store {
+        guard let link else { return local }
+        let dir = URL(fileURLWithPath: CONFIG_DIR).appendingPathComponent("sync").appendingPathComponent(link.device)
+        return SyncedStore(local: local, replication: CloudReplication(base: link.base, token: link.token, http: URLSessionTransport()),
+                           device: link.device, dir: dir, cursors: CursorStore(url: dir.appendingPathComponent("cursor.json")))
     }
 }

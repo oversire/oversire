@@ -96,6 +96,7 @@ final class AgentIndex: NSObject {
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
 
     static let linkAge: TimeInterval = 30 * 86400
+    private var observer: NSObjectProtocol?
 
     init(writes: StoreWrites? = nil) {
         self.writes = writes
@@ -103,6 +104,11 @@ final class AgentIndex: NSObject {
         let old = Date().addingTimeInterval(-AgentIndex.linkAge)
         for l in writes?.load(AgentLink.self) ?? [] {
             if l.at < old { writes?.delete(AgentLink.self, id: l.id) } else { links[l.key] = l }
+        }
+        guard let writes else { return }
+        observer = NotificationCenter.default.addObserver(forName: StoreWrites.remoteChanged, object: writes, queue: .main) { [weak self] n in
+            guard let self, n.userInfo?["collection"] as? String == AgentLink.collection else { return }
+            self.links = Dictionary(writes.load(AgentLink.self).map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         }
     }
 

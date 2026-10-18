@@ -196,15 +196,18 @@ final class LiveSync {
     }
 
     private func makeCloud(generation gen: Int) -> CloudSource? {
-        guard canRun, let base = URL(string: RELAY.workerURL) else { return nil }
+        guard canRun, let base = URL(string: RELAY.workerURL) else { STORE_WRITES.use(nil); return nil }
         guard let token = secrets.get(SecretStore.deviceToken) else {
+            STORE_WRITES.use(nil)
             state = .error("This Mac has not joined the cloud")
             return nil
         }
+        // The old single-tenant relay has no store.
+        STORE_WRITES.use(RELAY.hookRoute == nil ? nil : CloudLink(base: base, token: token, device: RELAY.deviceID))
         return CloudSource(base: base, token: token, http: URLSessionTransport(), socket: URLSessionWebSockets(), cursors: cursors,
                            onResync: { a in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.resync(a) } }
-        })
+        }, onStore: { DispatchQueue.main.async { STORE_WRITES.syncNow() } })
     }
 
     private func watchNetwork() {
@@ -212,7 +215,10 @@ final class LiveSync {
         let m = NWPathMonitor()
         m.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
-            DispatchQueue.main.async { if let self, self.cloud != nil, self.state != .live { self.start() } }
+            DispatchQueue.main.async {
+                STORE_WRITES.syncNow()
+                if let self, self.cloud != nil, self.state != .live { self.start() }
+            }
         }
         m.start(queue: .main)
         pathMonitor = m

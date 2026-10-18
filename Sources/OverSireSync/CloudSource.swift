@@ -25,6 +25,7 @@ public actor CloudSource: EventSource {
     private let clock: any Clock<Duration>
     private let pingEvery: Duration
     private let onResync: @Sendable (AccountID?) -> Void
+    private let onStore: @Sendable () -> Void
 
     private var state: SourceHealth = .off
     private var continuation: AsyncStream<ProviderEvent>.Continuation?
@@ -37,9 +38,11 @@ public actor CloudSource: EventSource {
     public private(set) var lastSync: Date?
 
     /// onResync: the log has a gap (nil: all accounts) or an event names no subject.
+    /// onStore: the store op log has new ops. It also runs after each connect.
     public init(base: URL, token: String, http: any HTTPTransport, socket: any WebSocketConnecting, cursors: CursorStore,
                 clock: any Clock<Duration> = ContinuousClock(), pingEvery: Duration = .seconds(30),
-                onResync: @escaping @Sendable (AccountID?) -> Void = { _ in }) {
+                onResync: @escaping @Sendable (AccountID?) -> Void = { _ in },
+                onStore: @escaping @Sendable () -> Void = {}) {
         self.base = base
         self.token = token
         self.http = http
@@ -48,6 +51,7 @@ public actor CloudSource: EventSource {
         self.clock = clock
         self.pingEvery = pingEvery
         self.onResync = onResync
+        self.onStore = onStore
     }
 
     public nonisolated func events() -> AsyncStream<ProviderEvent> {
@@ -103,6 +107,7 @@ public actor CloudSource: EventSource {
                 setHealth(.live)
                 backoff.reset()
                 pongSeen = true
+                onStore()
                 await sync()
                 try await withThrowingTaskGroup(of: Void.self) { g in
                     g.addTask { while true { await self.handle(try await conn.receive()) } }
@@ -131,6 +136,7 @@ public actor CloudSource: EventSource {
 
     private func handle(_ message: String) {
         if message == "pong" { pongSeen = true; return }
+        if message.contains("\"store\"") { pongSeen = true; onStore(); return }
         guard message.contains("\"poke\"") else { return }
         pongSeen = true
         Task { await self.sync() }

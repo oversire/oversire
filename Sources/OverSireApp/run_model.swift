@@ -8,9 +8,15 @@ final class IgnoredFailures {
     private let writes: StoreWrites
     private var keys: [String: Date]
 
+    private var observer: NSObjectProtocol?
+
     init(writes: StoreWrites) {
         self.writes = writes
         keys = Dictionary(writes.load(IgnoredFailure.self).map { ($0.id, $0.at) }, uniquingKeysWith: max)
+        observer = NotificationCenter.default.addObserver(forName: StoreWrites.remoteChanged, object: writes, queue: .main) { [weak self] n in
+            guard let self, n.userInfo?["collection"] as? String == IgnoredFailure.collection else { return }
+            self.keys = Dictionary(self.writes.load(IgnoredFailure.self).map { ($0.id, $0.at) }, uniquingKeysWith: max)
+        }
     }
 
     static func key(_ r: Run) -> String { "\(r.url)#\(r.attempt ?? 1)" }

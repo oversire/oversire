@@ -38,12 +38,17 @@ final class WorkQueue {
     private var savedSeen: Set<String> = []
     private let store: ProjectStore
     private let agents: AgentIndex
+    private var observer: NSObjectProtocol?
 
     init(writes: StoreWrites, store: ProjectStore, agents: AgentIndex) {
         self.writes = writes
         self.store = store
         self.agents = agents
         load()
+        observer = NotificationCenter.default.addObserver(forName: StoreWrites.remoteChanged, object: writes, queue: .main) { [weak self] n in
+            guard let c = n.userInfo?["collection"] as? String, [QueueLane.collection, QueueTrigger.collection].contains(c) else { return }
+            self?.load()
+        }
     }
 
     var count: Int { lanes.reduce(0) { $0 + $1.entries.count } }

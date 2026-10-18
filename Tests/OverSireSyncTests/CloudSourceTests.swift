@@ -273,4 +273,16 @@ final class CloudSourceTests: XCTestCase {
         guard case .event(let old)? = entries[2].signal(at: at), case .run(let o) = old.subject else { return XCTFail("\(entries[2])") }
         XCTAssertEqual(o.id, "8")
     }
+
+    func testAStoreHintCallsOnStore() async throws {
+        let conn = FakeConnection()
+        let hints = Locked(0)
+        let source = CloudSource(base: base, token: "t-1", http: FakeCloud(), socket: FakeSocket([.success(conn)]),
+                                 cursors: CursorStore(url: nil), onStore: { hints.with { $0 += 1 } })
+        _ = source.events()
+        await eventually("connect") { hints.get() == 1 }
+        conn.push(#"{"type":"store","head":7}"#)
+        await eventually("hint") { hints.get() == 2 }
+        await source.stop()
+    }
 }
