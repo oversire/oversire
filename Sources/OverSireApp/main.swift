@@ -230,6 +230,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
             }
         }
+        // A loaded blocker can free or hold a queue entry.
+        NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.queue.tick(workstreams: self.workstreams)
+            NotificationCenter.default.post(name: AppWindow.changed, object: self)
+        }
         NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: projectCatalog, queue: .main) { [weak self] _ in
             guard let self = self, !self.projectCatalog.refreshing else { return }
             self.projectStore.track(self.projectCatalog.resolve(PROJECTS_CFG), live: self.liveProjectKeys())

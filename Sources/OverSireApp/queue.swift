@@ -2,7 +2,7 @@ import Cocoa
 import OverSireCore
 
 // ─── Work queue ──────────────────────────────────────────────────────────────
-// Items wait in one lane per project. The first item of a lane starts in Orca when a slot is free
+// Items wait in one lane per project. The first item with no open blocker starts in Orca when a slot is free
 // and its start condition holds.
 
 extension QueueEntry.Condition {
@@ -23,6 +23,64 @@ struct QueueWorld {
     var ciPassed: (String) -> Bool
     var done: (String) -> Bool
     var now: Date
+    var blockers: (String) -> [String]? = { _ in [] }   // open blockers of a key; nil while the relations load
+    var areas: (String) -> [String] = { _ in [] }       // code areas of a key (cloud)
+    var busyAreas: [String: String] = [:]               // area → the key that runs in it (cloud)
+}
+
+// Why the queue skips an entry.
+enum QueueHold: Equatable {
+    case waits(on: [String])
+    case area(String, runs: String)
+    case unknown
+
+    var isArea: Bool { if case .area = self { return true } else { return false } }
+
+    var reason: String {
+        switch self {
+        case .waits(let keys): return "⏸ Waits on " + keys.joined(separator: ", ")
+        case .area(let a, let k): return "⊘ Area busy: \(a) · \(k) runs"
+        case .unknown: return "Reads the relations…"
+        }
+    }
+}
+
+extension QueueLane {
+    struct Pick {
+        var entry: QueueEntry?            // the entry to start now
+        var next: String?                 // the first entry with no hold
+        var holds: [String: QueueHold]    // key → hold
+    }
+
+    /// The first entry with no open blocker and no busy area starts when a slot is free and its condition holds.
+    /// The condition keeps the lane order: a later entry does not pass the next entry because of it. Pure.
+    func pick(state: QueueLaneState?, world: QueueWorld) -> Pick {
+        var p = Pick(holds: [:])
+        for e in entries {
+            if let hold = Self.hold(e.key, world: world) { p.holds[e.key] = hold; continue }
+            if p.next == nil { p.next = e.key }
+        }
+        guard let first = entries.first(where: { $0.key == p.next }), world.busy(self) < world.slots(self) else { return p }
+        let above = state?.lastStarted
+        let holds: Bool
+        switch first.condition {
+        case .slot: holds = true
+        case .ciPassed: holds = above.map(world.ciPassed) ?? true
+        case .done: holds = above.map(world.done) ?? true
+        case .tonight:
+            let h = Calendar.current.component(.hour, from: world.now)
+            holds = h >= 22 || h < 6
+        }
+        if holds { p.entry = first }
+        return p
+    }
+
+    private static func hold(_ key: String, world: QueueWorld) -> QueueHold? {
+        guard let open = world.blockers(key) else { return .unknown }
+        if !open.isEmpty { return .waits(on: open) }
+        for a in world.areas(key) { if let k = world.busyAreas[a], k != key { return .area(a, runs: k) } }
+        return nil
+    }
 }
 
 final class WorkQueue {
@@ -121,32 +179,29 @@ final class WorkQueue {
         return n
     }
 
-    // The entry of the lane that may start now, if any. Pure, for the selftest.
-    static func due(_ lane: QueueLane, state: QueueLaneState?, world: QueueWorld) -> QueueEntry? {
-        guard let first = lane.entries.first, world.busy(lane) < world.slots(lane) else { return nil }
-        let above = state?.lastStarted
-        switch first.condition {
-        case .slot: return first
-        case .ciPassed: return above.map(world.ciPassed) ?? true ? first : nil
-        case .done: return above.map(world.done) ?? true ? first : nil
-        case .tonight:
-            let h = Calendar.current.component(.hour, from: world.now)
-            return h >= 22 || h < 6 ? first : nil
-        }
+    func world(workstreams: WorkstreamIndex?) -> QueueWorld {
+        QueueWorld(
+            busy: { [unowned self] in self.busy($0) },
+            slots: { AGENTS.slots($0.project) },
+            ciPassed: { k in workstreams?.stream(k)?.ci?.word == Tone.ok.word },
+            done: { [unowned self] k in self.store.isDone(key: k) },
+            now: Date(),
+            blockers: { [unowned self] k in
+                let rel = self.store.relations
+                // A failed load does not hold the item for ever. The item page shows the error.
+                guard rel.supports(k), rel.relations(k) != nil || rel.errors[k.uppercased()] == nil else { return [] }
+                return rel.relations(k) == nil ? nil : self.store.blockers(of: k)
+            })
     }
 
     // Adds items from Plane triggers, then starts what is due. Call it after each data change.
     func tick(workstreams: WorkstreamIndex) {
         absorbTriggers()
+        store.relations.load(lanes.flatMap { $0.entries.map(\.key) })
         guard AGENTS.autoStart, agents.ready != nil else { return }
-        let world = QueueWorld(
-            busy: { [unowned self] in self.busy($0) },
-            slots: { AGENTS.slots($0.project) },
-            ciPassed: { workstreams.stream($0)?.ci?.word == Tone.ok.word },
-            done: { [unowned self] k in self.store.isDone(key: k) },
-            now: Date())
+        let world = world(workstreams: workstreams)
         for lane in lanes {
-            if let e = WorkQueue.due(lane, state: states[lane.project], world: world) { start(e.key, project: lane.project, anchor: nil) }
+            if let e = lane.pick(state: states[lane.project], world: world).entry { start(e.key, project: lane.project, anchor: nil) }
         }
     }
 

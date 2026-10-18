@@ -567,7 +567,7 @@ func runSelfTest() {
         check(got == ["new ask", "old ask", "check", "loose", "watched", "review", "intake"], "needs-you rank: \(got)")
     }
 
-    // Queue: only the first entry starts, only with a free slot, and only when its condition holds.
+    // Queue: only the first entry with no hold starts, only with a free slot, and only when its condition holds.
     do {
         var lane = QueueLane(project: "ws/p", identifier: "FRITZ")
         var state: QueueLaneState?
@@ -578,25 +578,29 @@ func runSelfTest() {
             let d = Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: Date())!
             return QueueWorld(busy: { _ in busy }, slots: { _ in 1 }, ciPassed: { _ in ci }, done: { _ in done }, now: d)
         }
-        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: a free slot starts the first entry")
+        check(lane.pick(state: state, world: world()).entry?.key == "FRITZ-2", "queue: a free slot starts the first entry")
         busy = 1
-        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: no free slot, no start")
+        check(lane.pick(state: state, world: world()).entry == nil, "queue: no free slot, no start")
         busy = 0
         state = QueueLaneState(project: "ws/p", lastStarted: "FRITZ-1", updatedAt: Date())
         lane.entries[0].condition = .ciPassed
-        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: waits for CI of the one above")
+        check(lane.pick(state: state, world: world()).entry == nil, "queue: waits for CI of the one above")
         ci = true
-        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: CI passed, start")
+        check(lane.pick(state: state, world: world()).entry?.key == "FRITZ-2", "queue: CI passed, start")
         lane.entries[0].condition = .done
-        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: waits until the one above is done")
+        check(lane.pick(state: state, world: world()).entry == nil, "queue: waits until the one above is done")
         done = true
-        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: the one above is done, start")
+        check(lane.pick(state: state, world: world()).entry?.key == "FRITZ-2", "queue: the one above is done, start")
         lane.entries[0].condition = .tonight
-        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: tonight waits at noon")
+        check(lane.pick(state: state, world: world()).entry == nil, "queue: tonight waits at noon")
         hour = 23
-        check(WorkQueue.due(lane, state: state, world: world())?.key == "FRITZ-2", "queue: tonight starts at 23:00")
+        check(lane.pick(state: state, world: world()).entry?.key == "FRITZ-2", "queue: tonight starts at 23:00")
+        var held = world()
+        held.blockers = { $0 == "FRITZ-2" ? ["FRITZ-1"] : [] }
+        let p = lane.pick(state: nil, world: held)
+        check(p.holds["FRITZ-2"]?.reason == "⏸ Waits on FRITZ-1" && p.entry?.key == "FRITZ-3", "queue: a held entry gives its reason")
         lane.entries.removeAll()
-        check(WorkQueue.due(lane, state: state, world: world()) == nil, "queue: empty lane")
+        check(lane.pick(state: state, world: world()).entry == nil, "queue: empty lane")
     }
 
     // AI checks: heuristics first, then the parse of the AI reply.

@@ -151,12 +151,13 @@ final class QueuePage: Page {
                        TwoLine(title, nil, titleSize: 12.5, weight: .regular), Pill(Tone(a.phase), text: a.label())],
                       height: 34, inset: 6, label: "\(k) runs: \(a.label())") { [weak self] in self?.go(.item(k, .session)) })
         }
-        for (n, e) in lane.entries.enumerated() { c.add(entryRow(e, n: n, lane: lane)) }
+        let pick = lane.pick(state: q.state(lane.project), world: q.world(workstreams: nil))
+        for (n, e) in lane.entries.enumerated() { c.add(entryRow(e, n: n, lane: lane, pick: pick)) }
         if lane.entries.isEmpty { c.add(NSTextField.text("The lane is empty.", size: 12.5, color: Palette.dim)) }
         return c
     }
 
-    private func entryRow(_ e: QueueEntry, n: Int, lane: QueueLane) -> NSView {
+    private func entryRow(_ e: QueueEntry, n: Int, lane: QueueLane, pick: QueueLane.Pick) -> NSView {
         let q = data.queue
         let num = NSTextField.text("\(n + 1)", size: 12, weight: .semibold, color: Palette.dim)
         num.alignment = .center
@@ -178,7 +179,14 @@ final class QueuePage: Page {
                       + (source.map { [$0] } ?? []), height: 30, inset: 6, label: "Number \(n + 1): \(e.key) \(e.title)") { [weak self] in
             self?.go(.item(e.key, .overview))
         }
-        let actions = NSStackView(h: [Spacer(34), cond, Spacer(), up, down, start, remove], spacing: 4)
+        let gate: Chiplet
+        switch pick.holds[e.key] {
+        case let h? where h == .unknown: gate = Chiplet(h.reason, color: Palette.dim)
+        case let h? where h.isArea: gate = Chiplet(h.reason, color: Palette.bad)
+        case let h?: gate = Chiplet(h.reason, color: Palette.warn)
+        case nil: gate = Chiplet(pick.next == e.key ? "✓ Ready · starts next" : "✓ Ready", color: Palette.ok)
+        }
+        let actions = NSStackView(h: [Spacer(34), gate, cond, Spacer(), up, down, start, remove], spacing: 4)
         let v = NSStackView(v: [top, actions], spacing: 2)
         top.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
         actions.widthAnchor.constraint(equalTo: v.widthAnchor, constant: -6).isActive = true
@@ -189,12 +197,15 @@ final class QueuePage: Page {
     private func orderSuggestion(_ lane: QueueLane) -> (order: [String], reason: String)? {
         let keys = lane.entries.map(\.key)
         if let s = orders[lane.project], Set(s.order) == Set(keys), s.order != keys { return s }
-        let tag = lane.project + "|" + keys.joined(separator: ",")
+        let store = data.projectStore
+        guard !keys.contains(where: { store.relations.loading.contains($0.uppercased()) }) else { return nil }
+        let blockers = Dictionary(uniqueKeysWithValues: keys.map { ($0, store.blockers(of: $0)) }).filter { !$0.value.isEmpty }
+        let tag = lane.project + "|" + keys.joined(separator: ",") + "|" + blockers.keys.sorted().map { $0 + ":" + blockers[$0]!.joined(separator: ",") }.joined(separator: ";")
         guard AGENTS.aiMode != .off, keys.count > 1, !asked.contains(tag) else { return nil }
         asked.insert(tag)
         ordering.insert(lane.project)
         let vision = data.projectStore.tracked.first { $0.ref.storeKey == lane.project }.flatMap { data.memory.vision(of: $0.ref)?.text }
-        data.aiChecks.suggestOrder(lane, store: data.projectStore, vision: vision, blockers: [:]) { [weak self] s in
+        data.aiChecks.suggestOrder(lane, store: data.projectStore, vision: vision, blockers: blockers) { [weak self] s in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.ordering.remove(lane.project)

@@ -13,9 +13,39 @@ final class WorkQueueTests: XCTestCase {
 
     func testDueReadsTheLaneState() {
         let started = QueueLaneState(project: lane.project, lastStarted: "OVERSIRE-1", updatedAt: Date())
-        XCTAssertNil(WorkQueue.due(lane, state: started, world: world(ciPassed: false)))
-        XCTAssertEqual(WorkQueue.due(lane, state: started, world: world(ciPassed: true))?.key, "OVERSIRE-2")
-        XCTAssertEqual(WorkQueue.due(lane, state: nil, world: world(ciPassed: false))?.key, "OVERSIRE-2")
+        XCTAssertNil(lane.pick(state: started, world: world(ciPassed: false)).entry)
+        XCTAssertEqual(lane.pick(state: started, world: world(ciPassed: true)).entry?.key, "OVERSIRE-2")
+        XCTAssertEqual(lane.pick(state: nil, world: world(ciPassed: false)).entry?.key, "OVERSIRE-2")
+    }
+
+    func testPickSkipsBlockedEntries() {
+        func entry(_ n: Int, _ c: QueueEntry.Condition = .slot) -> QueueEntry { QueueEntry(key: "OVERSIRE-\(n)", title: "\(n)", condition: c, added: Date()) }
+        let started = QueueLaneState(project: lane.project, lastStarted: "OVERSIRE-1", updatedAt: Date())
+        struct Case { var name: String; var entries: [QueueEntry]; var open: [String: [String]]; var start: String?; var holds: [String: QueueHold] }
+        let cases = [
+            Case(name: "no blockers", entries: [entry(2), entry(3)], open: [:], start: "OVERSIRE-2", holds: [:]),
+            Case(name: "head blocked", entries: [entry(2), entry(3)], open: ["OVERSIRE-2": ["OVERSIRE-9"]],
+                 start: "OVERSIRE-3", holds: ["OVERSIRE-2": .waits(on: ["OVERSIRE-9"])]),
+            Case(name: "all blocked", entries: [entry(2), entry(3)], open: ["OVERSIRE-2": ["OVERSIRE-9"], "OVERSIRE-3": ["OVERSIRE-2", "OVERSIRE-9"]],
+                 start: nil, holds: ["OVERSIRE-2": .waits(on: ["OVERSIRE-9"]), "OVERSIRE-3": .waits(on: ["OVERSIRE-2", "OVERSIRE-9"])]),
+            Case(name: "blocker done", entries: [entry(2), entry(3)], open: ["OVERSIRE-2": []], start: "OVERSIRE-2", holds: [:]),
+            Case(name: "condition and blocker", entries: [entry(2, .ciPassed), entry(3, .ciPassed), entry(4)], open: ["OVERSIRE-2": ["OVERSIRE-9"]],
+                 start: nil, holds: ["OVERSIRE-2": .waits(on: ["OVERSIRE-9"])]),
+        ]
+        for c in cases {
+            var w = world(ciPassed: false)
+            w.blockers = { c.open[$0] ?? [] }
+            let p = QueueLane(project: lane.project, identifier: "OVERSIRE", entries: c.entries).pick(state: started, world: w)
+            XCTAssertEqual(p.entry?.key, c.start, c.name)
+            XCTAssertEqual(p.holds, c.holds, c.name)
+        }
+        var w = world(ciPassed: true)
+        w.blockers = { $0 == "OVERSIRE-2" ? nil : [] }
+        let p = QueueLane(project: lane.project, identifier: "OVERSIRE", entries: [entry(2), entry(3)]).pick(state: started, world: w)
+        XCTAssertEqual(p.holds["OVERSIRE-2"], .unknown, "relations that load hold the entry")
+        XCTAssertEqual(p.entry?.key, "OVERSIRE-3")
+        w.busy = { _ in 1 }
+        XCTAssertNil(QueueLane(project: lane.project, identifier: "OVERSIRE", entries: [entry(3)]).pick(state: started, world: w).entry, "no free slot")
     }
 
     func testLoadsTheStateAndKeepsALaneWithAnError() async throws {
