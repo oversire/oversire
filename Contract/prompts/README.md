@@ -3,6 +3,9 @@
 One file for each AI task kind: `<taskKind>.md`. The app (Swift), the cloud (TypeScript) and the runner (Go) render the same files.
 The caller builds the `AIInput`. The file turns the input into the system text and the user text.
 
+`jobs/<kind>.md` holds the prompts of the cloud jobs, one for each `Job` kind. Only the cloud renders them. The app does not embed them.
+Each job prompt replies `{"suggest":false}` or `{"suggest":true,"title","body","proposal"?}`. The cloud makes a `Suggestion` from the reply.
+
 ## File format
 
 ```text
