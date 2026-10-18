@@ -53,7 +53,9 @@ struct AgentsConfig: Codable, Equatable {
     If it is a bug, find the steps to reproduce it, and reproduce it with read-only commands if you can.
     If the ticket is too vague, list the facts that are missing.
     End with one JSON object on one line and nothing after it:
-    {"verdict":"clear|vague|reproduced|not_reproduced|duplicate","findings":["..."],"block":"markdown to add to the ticket","priority":"urgent|high|medium|low|none","labels":["..."]}
+    {"verdict":"clear|vague|reproduced|not_reproduced|duplicate|off_vision","findings":["..."],"block":"markdown to add to the ticket","priority":"urgent|high|medium|low|none","labels":["..."]}
+
+    {vision}
 
     Ticket {KEY}: {title}
     {url}

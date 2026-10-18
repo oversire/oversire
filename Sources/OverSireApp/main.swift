@@ -86,7 +86,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         w.onError = { log.error("\($0)") }
         return w
     }()
-    lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: writeBack)
+    lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: writeBack, memory: memory)
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)

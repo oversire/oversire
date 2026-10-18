@@ -284,7 +284,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
         c.add(scroll)
-        c.add(NSTextField.text("{KEY}, {title}, {url} and {body} take the values of the item.", size: 11.5, color: Palette.dim))
+        c.add(NSTextField.text("{KEY}, {title}, {url} and {body} take the values of the item. {vision} adds the project vision, or nothing.", size: 11.5, color: Palette.dim))
         b.addFull(c)
     }
 

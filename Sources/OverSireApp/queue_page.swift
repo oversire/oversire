@@ -193,7 +193,8 @@ final class QueuePage: Page {
         guard AGENTS.aiMode != .off, keys.count > 1, !asked.contains(tag) else { return nil }
         asked.insert(tag)
         ordering.insert(lane.project)
-        data.aiChecks.suggestOrder(lane, store: data.projectStore) { [weak self] s in
+        let vision = data.projectStore.tracked.first { $0.ref.storeKey == lane.project }.flatMap { data.memory.vision(of: $0.ref)?.text }
+        data.aiChecks.suggestOrder(lane, store: data.projectStore, vision: vision, blockers: [:]) { [weak self] s in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.ordering.remove(lane.project)

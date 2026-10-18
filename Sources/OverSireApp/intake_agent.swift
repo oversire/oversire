@@ -21,7 +21,11 @@ struct IntakeReport: Codable, Equatable {
         default: return .warning
         }
     }
-    var word: String { verdict.replacingOccurrences(of: "_", with: " ").capitalized }
+    var word: String { offVision ? "Off vision" : verdict.replacingOccurrences(of: "_", with: " ").capitalized }
+    /// The ticket works against the project vision. It only informs: no action changes.
+    var offVision: Bool { verdict == "off_vision" }
+    /// The findings to show. Off vision shows one reason.
+    var shown: [String] { offVision ? Array(findings.prefix(1)) : Array(findings.prefix(6)) }
 
     // The last JSON object in the output that has a verdict. Terminal lines can wrap, so lines join first.
     static func parse(_ lines: [String]) -> IntakeReport? {
@@ -67,10 +71,12 @@ final class IntakeAgent {
     private var timer: Timer?
     private let store: ProjectStore
     private let writeBack: PlaneWriteBack
+    private let memory: ProjectMemory
 
-    init(store: ProjectStore, writeBack: PlaneWriteBack) {
+    init(store: ProjectStore, writeBack: PlaneWriteBack, memory: ProjectMemory) {
         self.store = store
         self.writeBack = writeBack
+        self.memory = memory
     }
 
     private var runtime: (any TerminalOpening)? { ENV.runtime as? any TerminalOpening }
@@ -79,8 +85,8 @@ final class IntakeAgent {
 
     func state(_ item: IntakeItem) -> State? { states[item.id] }
 
-    static func prompt(_ template: String, key: String, title: String, url: String, body: String) -> String {
-        let input = AgentPrompts.triageInput(template: template, key: key, title: title, url: url, body: body)
+    static func prompt(_ template: String, key: String, title: String, url: String, body: String, vision: String? = nil) -> String {
+        let input = AgentPrompts.triageInput(template: template, key: key, title: title, url: url, body: body, vision: vision)
         return (try? AITaskKind.triage.prompt(input).user) ?? ""
     }
 
@@ -99,7 +105,8 @@ final class IntakeAgent {
             let detail = try? r.get()
             let body = detail?.body ?? ""
             let key = (self.store.intakeKeys[item.workItemId] ?? detail?.sequence).map { "\(snap.summary.identifier)-\($0)" } ?? snap.summary.identifier
-            let prompt = IntakeAgent.prompt(AGENTS.intakePrompt, key: key, title: item.name, url: url, body: body)
+            let vision = self.memory.vision(of: snap.summary.ref)?.text
+            let prompt = IntakeAgent.prompt(AGENTS.intakePrompt, key: key, title: item.name, url: url, body: body, vision: vision)
                 .replacingOccurrences(of: "\n", with: " ")
             let path = AGENTS.intakeScratch ? root + "/.wt/intake-" + key.lowercased() : root
             let title = "intake-" + key
@@ -207,7 +214,7 @@ final class IntakePanel: Card {
         case .report(let rep, _):
             border = rep.tone.color.withAlphaComponent(0.55)
             head.addArrangedSubview(Pill(rep.tone, text: rep.word))
-            for f in rep.findings.prefix(6) {
+            for f in rep.shown {
                 let dot = NSTextField.text("•", color: Palette.dim)
                 dot.setContentCompressionResistancePriority(.required, for: .horizontal)
                 let text = NSTextField.text(f, size: 12.5, lines: 3)

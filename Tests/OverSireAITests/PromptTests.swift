@@ -81,6 +81,28 @@ final class PromptTests: XCTestCase {
         XCTAssertEqual(p.user, "TREBI-9 trebi-9 T u (no description)")
     }
 
+    func testTriageVision() throws {
+        let t = "Check {KEY}.\n\n{vision}\n\nBody: {body}"
+        let with = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: t, key: "K-1", title: "T", url: "u", body: "b",
+                                                                          vision: "Small and native."))
+        XCTAssertTrue(with.user.contains("Project vision (the true north of the project):\nSmall and native.\n"), with.user)
+        XCTAssertTrue(with.user.contains("off_vision"))
+        let without = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: t, key: "K-1", title: "T", url: "u", body: "b"))
+        XCTAssertEqual(without.user, "Check K-1.\n\nBody: b", "no vision leaves no block and no empty lines")
+        let empty = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: t, key: "K-1", title: "T", url: "u", body: "b", vision: ""))
+        XCTAssertEqual(empty.user, without.user)
+        let custom = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: "{KEY}\n\n\n{body}", key: "K-1", title: "T", url: "u",
+                                                                            body: "b", vision: "North"))
+        XCTAssertEqual(custom.user, "K-1\n\n\nb", "a custom template without {vision} stays as it is")
+    }
+
+    func testOrderInputVisionAndBlockers() {
+        let e = [QueueEntry(key: "P-1", title: "One", added: .distantPast), QueueEntry(key: "P-2", title: "Two", added: .distantPast)]
+        XCTAssertEqual(AgentPrompts.orderInput(e, bodies: [:]).text, "P-1: One\n\n\nP-2: Two\n")
+        let i = AgentPrompts.orderInput(e, bodies: ["P-2": "b"], vision: "North", blockers: ["P-1": ["P-2"], "P-2": []])
+        XCTAssertEqual(i.text, "Project vision:\nNorth\n\nTasks:\nP-1: One\nBlocked by: P-2\n\n\nP-2: Two\nb")
+    }
+
     func testTemplateSyntax() {
         let v = { (n: String) in ["a": " x ", "b": "", "c": "{{a}}", "text": "T"][n] ?? "" }
         XCTAssertEqual(PromptTemplate.fill("[{{a}}][{{a|trim}}][{{nope}}]", v), "[ x ][x][]")

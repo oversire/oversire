@@ -15,8 +15,15 @@ public enum AgentPrompts {
 
     // MARK: Queue order
 
-    public static func orderInput(_ entries: [QueueEntry], bodies: [String: String]) -> AIInput {
-        AIInput(text: entries.map { "\($0.key): \($0.title)\n\(bodies[$0.key]?.prefix(600) ?? "")" }.joined(separator: "\n\n"))
+    /// `vision`: the project vision. `blockers`: the open blocker keys of each entry.
+    public static func orderInput(_ entries: [QueueEntry], bodies: [String: String], vision: String? = nil,
+                                  blockers: [String: [String]] = [:]) -> AIInput {
+        let list = entries.map { e in
+            let held = blockers[e.key].flatMap { $0.isEmpty ? nil : "Blocked by: \($0.joined(separator: ", "))\n" } ?? ""
+            return "\(e.key): \(e.title)\n\(held)\(bodies[e.key]?.prefix(600) ?? "")"
+        }.joined(separator: "\n\n")
+        guard let vision, !vision.isEmpty else { return AIInput(text: list) }
+        return AIInput(text: "Project vision:\n\(vision)\n\nTasks:\n\(list)")
     }
 
     /// The new order of `keys`, or nil when the reply is not a change of the same keys.
@@ -39,12 +46,29 @@ public enum AgentPrompts {
 
     // MARK: Triage
 
-    /// The template fields: {KEY}, {key}, {title}, {url} and {body}. An agent in plan mode runs the prompt,
-    /// so the filled template is the whole user text.
-    public static func triageInput(template: String, key: String, title: String, url: String, body: String) -> AIInput {
-        let prompt = template.replacingOccurrences(of: "{KEY}", with: key).replacingOccurrences(of: "{key}", with: key.lowercased())
+    /// The template fields: {KEY}, {key}, {title}, {url}, {body} and {vision}. An agent in plan mode runs the prompt,
+    /// so the filled template is the whole user text. {vision} becomes a "Project vision" block, or nothing.
+    public static func triageInput(template: String, key: String, title: String, url: String, body: String,
+                                   vision: String? = nil) -> AIInput {
+        var prompt = template.replacingOccurrences(of: "{KEY}", with: key).replacingOccurrences(of: "{key}", with: key.lowercased())
             .replacingOccurrences(of: "{title}", with: title).replacingOccurrences(of: "{url}", with: url)
             .replacingOccurrences(of: "{body}", with: body.isEmpty ? "(no description)" : String(body.prefix(6000)))
-        return AIInput(text: body, context: ["prompt": prompt, "key": key, "title": title, "url": url])
+        if prompt.contains("{vision}") {
+            let block = vision.flatMap { $0.isEmpty ? nil : visionBlock($0) } ?? ""
+            prompt = prompt.replacingOccurrences(of: "{vision}", with: block)
+            while prompt.contains("\n\n\n") { prompt = prompt.replacingOccurrences(of: "\n\n\n", with: "\n\n") }
+            prompt = prompt.trimmingCharacters(in: .newlines)
+        }
+        var context = ["prompt": prompt, "key": key, "title": title, "url": url]
+        if let vision, !vision.isEmpty { context["vision"] = vision }
+        return AIInput(text: body, context: context)
+    }
+
+    static func visionBlock(_ vision: String) -> String {
+        """
+        Project vision (the true north of the project):
+        \(vision)
+        If the ticket works against this vision, use the verdict off_vision. Give the one reason as the first finding.
+        """
     }
 }

@@ -188,11 +188,14 @@ final class AgentJudge {
 
     // MARK: Queue order
 
-    func suggestOrder(_ lane: QueueLane, store: ProjectStore, done: @escaping ((order: [String], reason: String)?) -> Void) {
+    /// `vision`: the project vision. `blockers`: the open blocker keys of each entry.
+    func suggestOrder(_ lane: QueueLane, store: ProjectStore, vision: String?, blockers: [String: [String]],
+                      done: @escaping ((order: [String], reason: String)?) -> Void) {
         guard AI_CFG.queueOrder, lane.entries.count > 1, let ai = AIClient.current else { done(nil); return }
         var bodies: [String: String] = [:]
         for e in lane.entries { bodies[e.key] = store.item(key: e.key)?.item.body }
-        ai.run(.order, AgentPrompts.orderInput(lane.entries, bodies: bodies), id: "order:\(lane.id)") { r in
+        let input = AgentPrompts.orderInput(lane.entries, bodies: bodies, vision: vision, blockers: blockers)
+        ai.run(.order, input, id: "order:\(lane.id)") { r in
             if case .success(let t) = r { done(AgentPrompts.parseOrder(t, keys: lane.entries.map(\.key))) } else { done(nil) }
         }
     }
