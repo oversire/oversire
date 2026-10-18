@@ -228,6 +228,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         applyCaptureHotKey()
         applyWindowHotKey()
         snap.applyHotKeys()
+        snap.restore()
+        NotificationCenter.default.addObserver(forName: SnapStore.changed, object: snap.store, queue: .main) { [weak self] _ in self?.updateIcon() }
         NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: agentIndex, queue: .main) { [weak self] _ in
             self?.scanCheckouts()
             self?.reloadList()
@@ -666,6 +668,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let k = MenuIconState(runs: visibleGrouped(grouped), waitingAgents: agentIndex.agents.values.filter { $0.phase == .waiting }.count,
                               unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot)
         statusItem.button?.toolTip = "OverSire \u{2014} \(k.label)"
+        // The shots in the open snap baskets, as a count next to the icon.
+        let shots = snap.shotCount
+        statusItem.button?.imagePosition = .imageLeading
+        statusItem.button?.title = shots > 0 ? "\(shots)" : ""
+        statusItem.button?.setAccessibilityValue(shots > 0 ? "\(shots) shot\(shots == 1 ? "" : "s") in the snap basket" : nil)
         // Setting the image redraws the item on each display, which fires the appearance
         // observer again. Without this check the two loop and use a full CPU core.
         guard k != iconKey else { return }

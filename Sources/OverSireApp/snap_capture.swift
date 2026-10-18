@@ -106,6 +106,7 @@ final class SnapCapturer {
     private var previousApp: NSRunningApplication?
 
     var isActive: Bool { !overlays.isEmpty }
+    var onEnd: (() -> Void)?   // after a cancel, a shot or a failure
 
     init(guess: @escaping () -> SnapProjectGuess, onShot: @escaping (SnapShot, Data, CGRect) -> Void) {
         self.guess = guess
@@ -151,6 +152,7 @@ final class SnapCapturer {
         overlays = []
         previousApp?.activate()
         previousApp = nil
+        onEnd?()
     }
 
     func toggleMode(at p: CGPoint) {
@@ -190,6 +192,7 @@ final class SnapCapturer {
                 log.error("Snap capture failed: \(error.localizedDescription, privacy: .public)")
                 NSSound.beep()
             }
+            self.onEnd?()
         }
     }
 

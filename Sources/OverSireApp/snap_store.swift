@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 /// The baskets on disk. One folder for each basket: basket.json, plus shot-<id>.json and shot-<id>.png
 /// (the original) for each shot. The rendered files go to out/. Use it on the main thread.
@@ -13,6 +14,7 @@ final class SnapStore {
         var state: SnapBasket.State
         var createdAt: Date
         var order: [UUID]
+        var item: ItemRef?
     }
 
     let dir: URL
@@ -69,9 +71,10 @@ final class SnapStore {
 
     func markSent(_ id: String, key: String, session: String?) throws { try set(id, .sent(key: key, session: session)) }
 
-    func set(_ id: String, _ state: SnapBasket.State) throws {
+    func set(_ id: String, _ state: SnapBasket.State, item: ItemRef? = nil) throws {
         guard var b = basket(id) else { return }
         b.state = state
+        if let item { b.item = item }
         try save(b)
     }
 
@@ -104,7 +107,7 @@ final class SnapStore {
         e.dateEncodingStrategy = .iso8601
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         for s in b.shots { try e.encode(s).write(to: shotURL(s.id, in: b.id), options: .atomic) }
-        let file = BasketFile(id: b.id, project: b.project, state: b.state, createdAt: b.createdAt, order: b.shots.map(\.id))
+        let file = BasketFile(id: b.id, project: b.project, state: b.state, createdAt: b.createdAt, order: b.shots.map(\.id), item: b.item)
         try e.encode(file).write(to: folder(b.id).appendingPathComponent("basket.json"), options: .atomic)
         if let i = baskets.firstIndex(where: { $0.id == b.id }) { baskets[i] = b } else { baskets.insert(b, at: 0) }
         baskets.sort { $0.createdAt > $1.createdAt }
@@ -126,6 +129,7 @@ final class SnapStore {
             var b = SnapBasket(project: f.project, at: f.createdAt)
             b.id = f.id
             b.state = f.state
+            b.item = f.item
             b.shots = f.order.compactMap { id in
                 guard let data = try? Data(contentsOf: shotURL(id, in: f.id)), let s = try? d.decode(SnapShot.self, from: data) else {
                     log.warning("Snap shot \(id.uuidString, privacy: .public) in \(name, privacy: .public) is bad. OverSire skips it.")

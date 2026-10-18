@@ -1,4 +1,5 @@
 import Foundation
+import OverSireCore
 
 // ─── Snap Basket model ───────────────────────────────────────────────────────
 // A basket holds the shots of one project. One basket becomes one intake item.
@@ -121,6 +122,7 @@ struct SnapBasket: Codable, Hashable, Identifiable {
     var shots: [SnapShot]        // the order in the ticket
     var state: State
     var createdAt: Date
+    var item: ItemRef?           // the ticket, once sent
 
     init(project: String, at: Date = Date()) {
         let f = DateFormatter()

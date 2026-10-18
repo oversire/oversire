@@ -45,6 +45,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private var window: AppWindow?
     private var glance: NSWindow?
     private var snapPanel: ShotEditorPanel?
+    private var basketPanel: BasketPanel?
 
     init(dir: String, paths: [String]) {
         self.dir = dir
@@ -357,6 +358,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("snap:") {
                         self.snapPanel?.close()
                         self.snapPanel = UIShots.snapSample(String(p.dropFirst(5)), shooting: w)
+                    } else if p.hasPrefix("basket:") {
+                        self.basketPanel?.orderOut(nil)
+                        self.basketPanel = UIShots.basketSample(String(p.dropFirst(7)), shooting: w)
+                        if p == "basket:send", let panel = self.basketPanel { self.shootMenu(of: panel, name: "\(theme.rawValue)-basket-send-menu") }
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if let r = Route(path: p) {
@@ -366,7 +371,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); self.snapPanel?.close(); self.snapPanel = nil }
+                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil }
             }
         }
         run(steps, 0)
@@ -407,7 +412,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? glance?.windowNumber ?? PlanPage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? glance?.windowNumber ?? PlanPage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")
@@ -445,5 +450,72 @@ extension UIShots {
         p.setFrame(NSRect(x: 60, y: 60, width: 1000, height: 600), display: true)
         p.present()
         return p
+    }
+}
+
+// MARK: Basket panel samples
+
+extension UIShots {
+    /// basket:<frame>: the basket panel with 3 shots of the app window. Frames: collapsed, open, remove, send, discard, two.
+    static func basketSample(_ frame: String, shooting w: AppWindow) -> BasketPanel? {
+        guard let view = w.window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let img = rep.cgImage else { return nil }
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory() + "oversire-uishots/captures-\(UUID().uuidString)")
+        let store = SnapStore(dir: dir)
+        let W = Double(img.width), H = Double(img.height)
+        let notes = [("The runs page is out of date after a re-run.", SnapRect(x: 0, y: 0, w: W * 0.5, h: H * 0.5), 2),
+                     ("", SnapRect(x: W * 0.3, y: H * 0.2, w: W * 0.4, h: H * 0.3), 0),
+                     ("The queue count does not match the list.", SnapRect(x: W * 0.5, y: 0, w: W * 0.5, h: H * 0.6), 1)]
+        var ids: [UUID] = []
+        for (i, (note, crop, marks)) in notes.enumerated() {
+            let m = (0..<marks).map { k in SnapMark(rect: SnapRect(x: crop.x + crop.w * (0.1 + 0.4 * Double(k)), y: crop.y + crop.h * 0.2,
+                                                                 w: crop.w * 0.3, h: crop.h * 0.3), note: "") }
+            let s = SnapShot(project: "SLING", kind: i == 1 ? .area : .window, app: "OverSire", windowTitle: "Runs",
+                             pixelSize: CGSize(width: img.width, height: img.height), scale: 2, crop: crop, note: note, marks: m)
+            try? store.add(s, png: rep.representation(using: .png, properties: [:]) ?? Data())
+            ids.append(s.id)
+        }
+        if frame == "two" {
+            try? store.add(SnapShot(project: "TREBI", kind: .window, app: "OverSire", windowTitle: "Home",
+                                    pixelSize: CGSize(width: img.width, height: img.height), scale: 2), png: rep.representation(using: .png, properties: [:]) ?? Data())
+        }
+        let projects = [SnapProjectChoice(key: "SLING", title: "Sling Platform"), SnapProjectChoice(key: "TREBI", title: "Trebi")]
+        let p = BasketPanel(store: store, projects: { projects }, actions: .init())
+        var st = SnapBasketState(baskets: store.openBaskets, project: "SLING")
+        st.open = !["collapsed", "send", "sending"].contains(frame)
+        if frame == "remove" { st.confirmShot = ids[1] }
+        if frame == "discard" { st.confirmAll = true }
+        if frame == "sending" { st.sending = st.current?.id }
+        if frame == "sent" {
+            st = SnapBasketState(baskets: [], project: "SLING")
+            st.notice = .init(text: "Created SLING-412 with 3 shots.", link: URL(string: "https://plane.so"))
+        }
+        if frame == "failed" {
+            st.open = false
+            st.notice = .init(text: SnapSendError.noAttachments.localizedDescription, bad: true, copy: st.current?.id)
+        }
+        p.present(st)
+        return p
+    }
+
+    /// Opens the Send menu, shoots the panel and the menu as one screen area, then closes the menu.
+    /// The menu blocks the default run loop mode, so the timer runs in the common modes.
+    func shootMenu(of panel: BasketPanel, name: String) {
+        guard let menu = panel.popSendMenu() else { return }
+        let out = (dir as NSString).appendingPathComponent(name + ".png")
+        let t = Timer(timeInterval: 0.8, repeats: false) { _ in
+            let f = panel.frame
+            let top = NSScreen.screens[0].frame.maxY
+            let r = "\(Int(f.minX) - 10),\(Int(top - f.maxY) - 260),\(Int(f.width) + 240),\(Int(f.height) + 270)"
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            p.arguments = ["-x", "-R", r, out]
+            try? p.run()
+            p.waitUntilExit()
+            print("UISHOTS \(out)")
+            menu.cancelTracking()
+        }
+        RunLoop.main.add(t, forMode: .common)
     }
 }

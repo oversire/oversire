@@ -433,6 +433,7 @@ struct SnapConfig: Codable, Equatable {
     var keepDays = 30
     var sendMode = SendMode.agent
     var lastProject: String?
+    var panelOrigins: [String: CGPoint] = [:]   // the basket panel place, for each screen
 
     init() {}
 
@@ -447,6 +448,7 @@ struct SnapConfig: Codable, Equatable {
         keepDays = max(1, try c.decodeIfPresent(Int.self, forKey: .keepDays) ?? 30)
         sendMode = (try? c.decodeIfPresent(SendMode.self, forKey: .sendMode)) ?? .agent
         lastProject = try c.decodeIfPresent(String.self, forKey: .lastProject)
+        panelOrigins = try c.decodeIfPresent([String: CGPoint].self, forKey: .panelOrigins) ?? [:]
     }
 }
 
@@ -459,6 +461,7 @@ struct RuntimeConfig: Codable, Equatable {
     var agent = "claude"
     var prompt = RuntimeConfig.defaultPrompt
     var commands: [String: String] = [:]
+    var snapPrompt = SnapTicket.defaultPrompt   // the prompt of a sent snap basket
 
     init() {}
 
@@ -467,6 +470,7 @@ struct RuntimeConfig: Codable, Equatable {
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? RuntimeConfig.defaultPrompt
         commands = try c.decodeIfPresent([String: String].self, forKey: .commands) ?? [:]
+        snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
     }
 
     func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: agent)) }

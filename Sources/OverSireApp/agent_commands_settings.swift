@@ -80,6 +80,28 @@ final class AgentCommandsCard: NSStackView {
                              spacing: 8))
         card.add(NSTextField.text("{name} workspace name (the item key) · {KEY} item key · {key} lowercase key · {title} item title. "
                                   + "OverSire quotes each value for the shell.", size: 11.5, color: Palette.dim, lines: 2))
+
+        card.add(Self.line())
+        let snapReset = ActionButton("Reset", style: .link) {
+            PROJECTS_CFG.runtime.snapPrompt = SnapTicket.defaultPrompt
+            saveConfig()
+            Self.changed()
+        }
+        snapReset.isEnabled = PROJECTS_CFG.runtime.snapPrompt != SnapTicket.defaultPrompt
+        snapReset.setAccessibilityLabel("Reset the snap basket prompt")
+        card.add(NSStackView(h: [NSTextField.text("Snap basket prompt", size: 12.5, weight: .semibold), Spacer(), snapReset], spacing: 8))
+        let prompt = SnapNoteView(placeholder: SnapTicket.defaultPrompt)
+        prompt.text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        prompt.string = PROJECTS_CFG.runtime.snapPrompt
+        prompt.text.setAccessibilityLabel("Snap basket prompt")
+        prompt.onChange = { t in
+            PROJECTS_CFG.runtime.snapPrompt = t.isEmpty ? SnapTicket.defaultPrompt : t
+            saveConfig()
+        }
+        prompt.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        card.add(prompt)
+        card.add(NSTextField.text("The first message of the agent after Send. {key} ticket key · {item} item id · {intake} intake id · "
+                                  + "{count} shot count · {workspace} · {project} · {dir} folder of the images.", size: 11.5, color: Palette.dim, lines: 2))
     }
     required init?(coder: NSCoder) { fatalError() }
 

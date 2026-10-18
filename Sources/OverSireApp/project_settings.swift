@@ -11,6 +11,8 @@ final class ProjectSettingsVC: NSViewController {
     var doc: Flipped?
     var scroll: NSScrollView?
     var observer: NSObjectProtocol?
+    var snapObserver: NSObjectProtocol?
+    var snapHistory: [SnapBasket] = []
     var shortcutField: ShortcutField?
     static var captureError: String?
     static var snapError: String?
@@ -24,7 +26,7 @@ final class ProjectSettingsVC: NSViewController {
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { if let o = observer { NotificationCenter.default.removeObserver(o) } }
+    deinit { [observer, snapObserver].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver) }
 
     override func loadView() {
         let w = POP_W
@@ -44,6 +46,10 @@ final class ProjectSettingsVC: NSViewController {
         preferredContentSize = NSSize(width: w, height: POP_MAX_H)
         observer = NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: catalog, queue: .main) { [weak self] _ in
             self?.rebuild()
+        }
+        snapObserver = NotificationCenter.default.addObserver(forName: SnapStore.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.snapController?.store.history(limit: 5) != self.snapHistory else { return }
+            self.rebuild()
         }
         rebuild()
         catalog.refreshIfStale()
@@ -411,6 +417,7 @@ final class ProjectSettingsVC: NSViewController {
                      SnapConfig.SendMode.allCases.firstIndex(of: snap.sendMode) ?? 0, #selector(snapSendChanged(_:)), y: y, in: doc)
         let days = Self.keepDays.firstIndex(of: snap.keepDays) ?? 1
         y = popupRow("Keep history", Self.keepDays.map { "\($0) days" }, days, #selector(snapKeepChanged(_:)), y: y, in: doc)
+        y = snapHistorySection(y: y, w: w, in: doc)
         if let msg = ProjectSettingsVC.snapError {
             let e = NSTextField(labelWithString: msg)
             e.font = .systemFont(ofSize: 11); e.textColor = C_FAILURE
@@ -419,6 +426,57 @@ final class ProjectSettingsVC: NSViewController {
             y += 20
         }
         return y + 4
+    }
+
+    var snapController: SnapController? { (NSApp.delegate as? GHActionsBar)?.snap }
+
+    /// The last five sent baskets, with Open or Retry.
+    func snapHistorySection(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
+        snapHistory = snapController?.store.history(limit: 5) ?? []
+        guard !snapHistory.isEmpty else { return y }
+        var y = y
+        let t = NSTextField(labelWithString: "Sent baskets")
+        t.font = .systemFont(ofSize: 11, weight: .semibold); t.textColor = .secondaryLabelColor
+        t.frame = NSRect(x: 16, y: y, width: 200, height: 16)
+        doc.addSubview(t)
+        y += 22
+        for (i, b) in snapHistory.enumerated() {
+            let n = b.shots.count
+            let what: String
+            var button: (String, Selector)?
+            switch b.state {
+            case .sent(let key, _): what = "Sent as \(key)"; button = ("Open", #selector(snapOpen(_:)))
+            case .partial(let key, let missing): what = "\(key): \(missing.count) image\(missing.count == 1 ? "" : "s") missing"; button = ("Retry", #selector(snapRetry(_:)))
+            case .copied: what = "Copied as Markdown"
+            case .open: continue
+            }
+            let icon = NSImageView(image: PROJECT_ICONS.image(for: b.project, size: 14))
+            icon.frame = NSRect(x: 16, y: y + 2, width: 14, height: 14)
+            doc.addSubview(icon)
+            let l = NSTextField(labelWithString: "\(b.project) · \(n) shot\(n == 1 ? "" : "s") · \(relativeAgo(b.createdAt)) · \(what)")
+            l.font = .systemFont(ofSize: 12); l.lineBreakMode = .byTruncatingTail
+            l.frame = NSRect(x: 36, y: y + 1, width: w - 120, height: 18)
+            doc.addSubview(l)
+            if let (title, sel) = button {
+                let btn = NSButton(title: title, target: self, action: sel)
+                btn.bezelStyle = .rounded; btn.font = .systemFont(ofSize: 11); btn.tag = i
+                btn.frame = NSRect(x: w - 76, y: y - 3, width: 64, height: 26)
+                doc.addSubview(btn)
+            }
+            y += 26
+        }
+        return y + 4
+    }
+
+    @objc func snapOpen(_ sender: NSButton) {
+        guard snapHistory.indices.contains(sender.tag), let u = snapHistory[sender.tag].item?.url else { return NSSound.beep() }
+        NSWorkspace.shared.open(u)
+    }
+
+    @objc func snapRetry(_ sender: NSButton) {
+        guard snapHistory.indices.contains(sender.tag) else { return }
+        sender.isEnabled = false
+        snapController?.retry(snapHistory[sender.tag])
     }
 
     @objc func snapPermission() { SnapCapturer.requestPermission() }
