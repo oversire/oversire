@@ -25,7 +25,7 @@ struct QueueWorld {
     var now: Date
     var blockers: (String) -> [String]? = { _ in [] }   // open blockers of a key; nil while the relations load
     var areas: (String) -> [String] = { _ in [] }       // code areas of a key (cloud)
-    var busyAreas: [String: String] = [:]               // area → the key that runs in it (cloud)
+    var busyAreas: (QueueLane) -> [String: String] = { _ in [:] }   // area → the key that runs in it (cloud)
 }
 
 // Why the queue skips an entry.
@@ -56,8 +56,9 @@ extension QueueLane {
     /// The condition keeps the lane order: a later entry does not pass the next entry because of it. Pure.
     func pick(state: QueueLaneState?, world: QueueWorld) -> Pick {
         var p = Pick(holds: [:])
+        let busyAreas = world.busyAreas(self)
         for e in entries {
-            if let hold = Self.hold(e.key, world: world) { p.holds[e.key] = hold; continue }
+            if let hold = Self.hold(e.key, world: world, busyAreas: busyAreas) { p.holds[e.key] = hold; continue }
             if p.next == nil { p.next = e.key }
         }
         guard let first = entries.first(where: { $0.key == p.next }), world.busy(self) < world.slots(self) else { return p }
@@ -75,10 +76,10 @@ extension QueueLane {
         return p
     }
 
-    private static func hold(_ key: String, world: QueueWorld) -> QueueHold? {
+    private static func hold(_ key: String, world: QueueWorld, busyAreas: [String: String]) -> QueueHold? {
         guard let open = world.blockers(key) else { return .unknown }
         if !open.isEmpty { return .waits(on: open) }
-        for a in world.areas(key) { if let k = world.busyAreas[a], k != key { return .area(a, runs: k) } }
+        for a in world.areas(key) { if let k = busyAreas[a], k != key { return .area(a, runs: k) } }
         return nil
     }
 }
@@ -97,6 +98,8 @@ final class WorkQueue {
     private let store: ProjectStore
     private let agents: AgentIndex
     private var observer: NSObjectProtocol?
+    /// The area book with a cloud account, else nil.
+    var areaBook: () -> ItemAreaBook? = { nil }
 
     init(writes: StoreWrites, store: ProjectStore, agents: AgentIndex) {
         self.writes = writes
@@ -170,13 +173,13 @@ final class WorkQueue {
     // MARK: Ticks
 
     // Agents of the lane that hold a slot: starting, working or waiting, and not released.
-    func busy(_ lane: QueueLane) -> Int {
+    func busy(_ lane: QueueLane) -> Int { running(lane).count }
+
+    func running(_ lane: QueueLane) -> [String] {
         let prefix = lane.identifier.uppercased() + "-"
-        var n = 0
-        for (k, a) in agents.agents where k.hasPrefix(prefix) && !released.contains(k) {
-            if a.phase == .starting || a.phase == .working || a.phase == .waiting { n += 1 }
-        }
-        return n
+        return agents.agents.filter { k, a in
+            k.hasPrefix(prefix) && !released.contains(k) && [.starting, .working, .waiting].contains(a.phase)
+        }.map(\.key)
     }
 
     func world(workstreams: WorkstreamIndex?) -> QueueWorld {
@@ -191,7 +194,9 @@ final class WorkQueue {
                 // A failed load does not hold the item for ever. The item page shows the error.
                 guard rel.supports(k), rel.relations(k) != nil || rel.errors[k.uppercased()] == nil else { return [] }
                 return rel.relations(k) == nil ? nil : self.store.blockers(of: k)
-            })
+            },
+            areas: { [unowned self] k in self.areaBook()?.areas(key: k) ?? [] },
+            busyAreas: { [unowned self] lane in self.areaBook()?.busy(running: self.running(lane)) ?? [:] })
     }
 
     // Adds items from Plane triggers, then starts what is due. Call it after each data change.

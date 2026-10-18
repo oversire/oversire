@@ -116,6 +116,7 @@ final class QueuePage: Page {
         let q = data.queue
         if q.lanes.isEmpty { col.addFull(EmptyNote("The queue is empty. Add items here, or from an item page.", symbol: "list.bullet")) }
         for lane in q.lanes { col.addFull(laneCard(lane)) }
+        if let held = cloudAIRecords?.orders.filter({ $0.state == .held }), !held.isEmpty { col.addFull(heldCard(held)) }
         let plane = Card(title: "Start from Plane")
         var how: [String] = []
         if !AGENTS.startLabel.isEmpty { how.append("add the label \"\(AGENTS.startLabel)\" to an item") }
@@ -147,8 +148,9 @@ final class QueuePage: Page {
         let prefix = lane.identifier.uppercased() + "-"
         for (k, a) in data.agentIndex.agents.sorted(by: { $0.key < $1.key }) where k.hasPrefix(prefix) && [.starting, .working, .waiting].contains(a.phase) {
             let title = data.projectStore.item(key: k)?.item.title ?? ""
+            let areas: [NSView] = (q.areaBook()?.areas(key: k) ?? []).map { AreaChip($0) }
             c.add(Row([Glyph("play.fill", color: Palette.run, size: 11).fixedWidth(22), Chiplet(k, color: Palette.fg, mono: true),
-                       TwoLine(title, nil, titleSize: 12.5, weight: .regular), Pill(Tone(a.phase), text: a.label())],
+                       TwoLine(title, nil, titleSize: 12.5, weight: .regular)] + areas + [Pill(Tone(a.phase), text: a.label())],
                       height: 34, inset: 6, label: "\(k) runs: \(a.label())") { [weak self] in self?.go(.item(k, .session)) })
         }
         let pick = lane.pick(state: q.state(lane.project), world: q.world(workstreams: nil))
@@ -186,11 +188,29 @@ final class QueuePage: Page {
         case let h?: gate = Chiplet(h.reason, color: Palette.warn)
         case nil: gate = Chiplet(pick.next == e.key ? "✓ Ready · starts next" : "✓ Ready", color: Palette.ok)
         }
-        let actions = NSStackView(h: [Spacer(34), gate, cond, Spacer(), up, down, start, remove], spacing: 4)
+        let areas: [NSView] = (q.areaBook()?.areas(key: e.key) ?? []).map { AreaChip($0) }
+        let actions = NSStackView(h: [Spacer(34), gate] + areas + [cond, Spacer(), up, down, start, remove], spacing: 4)
         let v = NSStackView(v: [top, actions], spacing: 2)
         top.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
         actions.widthAnchor.constraint(equalTo: v.widthAnchor, constant: -6).isActive = true
         return v
+    }
+
+    // Work orders that the hub holds before a runner gets them.
+    private func heldCard(_ orders: [WorkOrder]) -> NSView {
+        let c = Card(title: "Held work orders", trailing: [SequenceCard.cloudMark()])
+        for o in orders.sorted(by: { $0.createdAt < $1.createdAt }) {
+            guard case .start(let req) = o.order else { continue }
+            let key = req.item?.key ?? URL(fileURLWithPath: req.repo).lastPathComponent
+            let text = o.hold?.text ?? "Held"
+            let title = data.projectStore.item(key: key)?.item.title ?? ""
+            c.add(Row([Glyph("pause.circle", color: Palette.warn, size: 12).fixedWidth(22), Chiplet(key, color: Palette.fg, mono: true),
+                       TwoLine(title, nil, titleSize: 12.5, weight: .regular), Chiplet(text, color: Palette.warn)],
+                      height: 32, inset: 6, label: "\(key): \(text)") { [weak self] in self?.go(.item(key, .overview)) })
+        }
+        c.add(NSTextField.text("The cloud sends each order to the runner when its blockers are done and its areas are free.",
+                               size: 11.5, color: Palette.dim, lines: 2))
+        return c
     }
 
     // Asks AI once per lane order. A reply that keeps the order is no suggestion.

@@ -13,6 +13,8 @@ protocol AppData: AnyObject {
     var workstreams: WorkstreamIndex { get }
     var queue: WorkQueue { get }
     var memory: ProjectMemory { get }
+    var areas: ItemAreaBook { get }
+    var suggestions: SuggestionBook { get }
     var aiChecks: AgentJudge { get }
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }

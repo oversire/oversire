@@ -327,6 +327,11 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             SwitchRow("Intake agent", note: "Check intake items in an Orca terminal in plan mode. Needs Orca, not an AI key.", on: AI_CFG.intakeAgent) { AI_CFG.intakeAgent = $0 },
             SwitchRow("Session summary", note: "Summarize the session on the item page.", on: AI_CFG.sessionSummary) { AI_CFG.sessionSummary = $0 },
         ]))
+        if !hasCloud {
+            b.addFull(NSStackView(h: [SequenceCard.cloudMark(), NSTextField.text(
+                "Sequencing needs OverSire Cloud: it proposes blockers and code areas, and holds items whose area is busy.",
+                size: 12, color: Palette.dim, lines: 2), Spacer()], spacing: 8))
+        }
         b.addFull(card("CI", [
             SwitchRow("Explain failures", note: "A short cause for a failed run that no session watches.", on: AI_CFG.ciExplain) { AI_CFG.ciExplain = $0 },
             SwitchRow("Flaky workflows", note: "Mark a workflow that failed and then passed on the same commit. Re-run its next failure once before the alert.", on: AI_CFG.flaky) { AI_CFG.flaky = $0 },

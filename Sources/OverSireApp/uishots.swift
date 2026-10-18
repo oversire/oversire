@@ -16,6 +16,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: writes)
+    lazy var areas = ItemAreaBook(writes: writes)
+    lazy var suggestions = SuggestionBook(writes: writes)
     lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json",
                                                                                        store: projectStore, trackers: ENV), memory: memory)
     lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
@@ -69,6 +71,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         super.init()
         projectStore.hold = UIShots.loading
         projectStore.busy = busy
+        queue.areaBook = { [unowned self] in UIShots.cloud == true ? self.areas : nil }
         if UIShots.loading { RunPage.source = NeverAnswers() }
     }
 

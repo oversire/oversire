@@ -94,5 +94,17 @@ final class CloudAICard: NSStackView {
 
 extension Page {
     /// Nil without a cloud account.
-    var cloudAIRecords: CloudAIRecords? { UIShots.cloud ?? data.relay.canRun ? .load(STORE_WRITES) : nil }
+    var cloudAIRecords: CloudAIRecords? { hasCloud ? .load(STORE_WRITES) : nil }
+
+    var hasCloud: Bool { UIShots.cloud ?? data.relay.canRun }
+
+    /// The sequence suggestion card. Accept and Dismiss write the decision through the store.
+    func suggestionCard(_ s: Suggestion, draft: SequenceDraft) -> NSView {
+        let book = data.suggestions
+        let device = RELAY.deviceID.isEmpty ? nil : RELAY.deviceID
+        return SequenceSuggestionCard(s, draft: draft, store: data.projectStore,
+                                      accept: { [weak self] drop in book.accept(s.id, drop: drop, by: device); self?.reload() },
+                                      dismiss: { [weak self] in book.dismiss(s.id, by: device); self?.reload() },
+                                      open: { [weak self] k in self?.go(.item(k, .overview)) })
+    }
 }

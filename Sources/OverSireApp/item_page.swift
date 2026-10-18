@@ -236,6 +236,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                                 body: "Start it in Orca now, or add it to the queue of \(snap.summary.title).",
                                 actions: [start, ActionButton("Add to queue") { [weak self] in self?.data.queue.add(item, snap: snap) }]))
         }
+        if let card = suggestion(item) { main.addFull(card) }
         if let seq = sequence(item) { main.addFull(seq) }
         let d = Card(title: "Description")
         let body = (item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -293,9 +294,38 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
     }
 
-    private func areas(_ item: Item) -> [String]? { nil }
+    /// Nil without a cloud account.
+    private func areas(_ item: Item) -> [String]? {
+        guard hasCloud, let ref = itemRef(item) else { return nil }
+        return data.areas.areas(of: ref)
+    }
 
-    private func editAreas(_ item: Item) {}
+    private func itemRef(_ item: Item) -> ItemRef? {
+        data.projectStore.item(key: item.key).flatMap { item.ref(in: $0.snap.summary.ref) }
+    }
+
+    private func editAreas(_ item: Item) {
+        guard let ref = itemRef(item) else { return }
+        let a = NSAlert()
+        a.messageText = "Code areas of \(item.key)"
+        a.informativeText = "The queue does not start two items with the same area at a time. Use commas between the areas. "
+            + "An area has lower-case letters, digits and hyphens. At most \(SequenceDraft.maxAreas) areas."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        f.stringValue = data.areas.areas(of: ref).joined(separator: ", ")
+        f.placeholderString = "api, status-page"
+        a.accessoryView = f
+        a.addButton(withTitle: "Save")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        data.areas.save(f.stringValue.split(separator: ",").map(String.init), for: ref)
+        reload()
+    }
+
+    private func suggestion(_ item: Item) -> NSView? {
+        guard hasCloud, let s = data.suggestions.openSequence(for: item.key), let draft = s.sequence else { return nil }
+        return suggestionCard(s, draft: draft)
+    }
 
     private func workstream(_ s: Workstream, snap: ProjectSnapshot, item: Item) -> NSView {
         var trailing: [NSView] = []

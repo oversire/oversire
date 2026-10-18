@@ -216,7 +216,7 @@ final class InboxPage: Page {
     override var buildsLater: Bool { true }
 
     private var tab: Route.InboxTab {
-        guard case .inbox(let t) = route, Route.InboxTab.visible(data.has).contains(t) else { return .all }
+        guard case .inbox(let t) = route, Route.InboxTab.visible(data.has, cloud: hasCloud).contains(t) else { return .all }
         return t
     }
 
@@ -240,9 +240,10 @@ final class InboxPage: Page {
         for (pk, snap) in data.projectStore.snapshots where !(snap.intake ?? []).isEmpty {
             data.projectStore.loadIntakeKeys(projectKey: pk) { [weak self] in self?.reload() }
         }
-        let tabs = Route.InboxTab.visible(data.has)
+        let tabs = Route.InboxTab.visible(data.has, cloud: hasCloud)
         let kept = all.filter(filter.pass)
-        let counts = tabs.map { t in kept.filter { t == .all ? true : $0.source.tab == t }.count }
+        let sequences = hasCloud ? data.suggestions.openSequences() : []
+        let counts = tabs.map { t in t == .suggestions ? sequences.count : kept.filter { t == .all ? true : $0.source.tab == t }.count }
         col.addFull(PageHeader("Inbox", caption: "Plane, GitHub, Orca and AI checks in one list. Intake waits for triage.",
                                actions: [ActionButton("Mark all read", symbol: "checkmark") { [weak self] in
             guard let self else { return }
@@ -251,6 +252,10 @@ final class InboxPage: Page {
         let strip = TabStrip(tabs.map { $0.rawValue.capitalized }, selected: tabs.firstIndex(of: tab) ?? 0, counts: counts)
         strip.onSelect = { [weak self] i in self?.go(.inbox(tabs[i])) }
         col.addArrangedSubview(strip)
+        if tab == .suggestions {
+            suggestions(col, sequences)
+            return
+        }
         col.addArrangedSubview(filterBar(all.filter { tab == .all || $0.source.tab == tab }))
         if let note { col.addFull(Banner(.info, title: note)) }
         if tab == .intake {
@@ -266,6 +271,13 @@ final class InboxPage: Page {
             list.add(EmptyNote(filter.isOn ? "No entry matches the filters." : tab == .intake ? "No intake waits for triage." : "Nothing here. Inbox zero."))
         }
         col.addFull(list)
+    }
+
+    private func suggestions(_ col: NSStackView, _ list: [Suggestion]) {
+        col.addFull(NSStackView(h: [NSTextField.text("The cloud proposes blockers, related items and code areas. Nothing changes before you accept.",
+                                                     size: 12, color: Palette.dim, lines: 2), Spacer(), SequenceCard.cloudMark()], spacing: 8))
+        if list.isEmpty { col.addFull(EmptyNote("No open suggestions.", symbol: "lightbulb")) }
+        for s in list { if let d = s.sequence { col.addFull(suggestionCard(s, draft: d)) } }
     }
 
     // The Project and Priority chips. A menu value shows its count in this tab, with the other filter on.

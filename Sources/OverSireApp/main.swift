@@ -80,6 +80,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
+    lazy var areas = ItemAreaBook(writes: STORE_WRITES)
+    lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
     lazy var aiChecks = AgentJudge(path: CHECKS_PATH, agents: agentIndex, queue: queue)
     lazy var writeBack: PlaneWriteBack = {
         let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, trackers: ENV)
@@ -225,11 +227,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         agentIndex.startTimer()
-        for n in [WorkQueue.changed, AgentJudge.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed] {
+        for n in [WorkQueue.changed, AgentJudge.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed] {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
             }
         }
+        queue.areaBook = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.areas : nil }
         // A loaded blocker can free or hold a queue entry.
         NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }

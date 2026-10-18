@@ -39,7 +39,8 @@ final class FakeProvidersTests: XCTestCase {
     func testIntakeTabNeedsTheCapability() {
         XCTAssertFalse(Route.InboxTab.visible { _ in false }.contains(.intake))
         XCTAssertTrue(Route.InboxTab.visible { $0 == .intake }.contains(.intake))
-        XCTAssertEqual(Route.InboxTab.visible { _ in false }.count, Route.InboxTab.allCases.count - 1)
+        XCTAssertEqual(Route.InboxTab.visible { _ in false }.count, Route.InboxTab.allCases.count - 2)
+        XCTAssertTrue(Route.InboxTab.visible({ _ in false }, cloud: true).contains(.suggestions), "suggestions need a cloud account")
     }
 
     func testKeysUseTheTrackerFormats() {

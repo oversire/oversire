@@ -135,3 +135,49 @@ final class SequenceCard: Card {
         return s
     }
 }
+
+// A sequence suggestion of the hub: one check box for each line. Accept sends the cleared lines as edit.drop.
+final class SequenceSuggestionCard: Card {
+    private var cleared: Set<Int> = []
+
+    init(_ s: Suggestion, draft: SequenceDraft, store: ProjectStore, now: Date = Date(),
+         accept: @escaping (Set<Int>) -> Void, dismiss: @escaping () -> Void, open: @escaping (String) -> Void) {
+        super.init(fill: Palette.intake.withAlphaComponent(0.06), border: Palette.intake.withAlphaComponent(0.55))
+        let key = s.subjectKey ?? ""
+        let title = NSTextField.text(store.item(key: key)?.item.title ?? s.title, size: 13, weight: .semibold)
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        add(NSStackView(h: [Chiplet("Sequencing", symbol: "arrow.triangle.branch", color: Palette.intake),
+                            Chiplet(key, color: Palette.fg, mono: true) { open(key) }, title, Spacer(), SequenceCard.cloudMark()], spacing: 7))
+        add(NSTextField.text(s.body, size: 12.5, color: Palette.mut, lines: 4))
+        for (i, line) in draft.lines.enumerated() {
+            let box = NSButton(checkboxWithTitle: Self.text(line, store: store), target: self, action: #selector(toggled(_:)))
+            box.tag = i
+            box.state = .on
+            box.font = .systemFont(ofSize: 12.5)
+            add(box)
+        }
+        let ok = ActionButton("Accept", style: .primary) { [weak self] in accept(self?.cleared ?? []) }
+        ok.setAccessibilityLabel("Accept the checked lines")
+        add(NSStackView(h: [ok, ActionButton("Dismiss") { dismiss() }, Spacer(),
+                            NSTextField.text(s.expiresText(now: now), size: 11.5, color: Palette.dim)], spacing: 6))
+        setAccessibilityLabel("Sequencing suggestion for \(key): \(s.title)")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func toggled(_ b: NSButton) {
+        if b.state == .on { cleared.remove(b.tag) } else { cleared.insert(b.tag) }
+    }
+
+    static func text(_ line: SequenceDraft.Line, store: ProjectStore) -> String {
+        func rel(_ r: ItemRelation) -> String {
+            let kind = r.kind == .relatesTo ? "Related to" : SequenceCard.groups.first { $0.0 == r.kind }?.1 ?? r.kind.rawValue
+            return [kind, r.item.key, store.item(key: r.item.key)?.item.title].compactMap { $0 }.joined(separator: " ")
+        }
+        switch line {
+        case .add(let r): return "+ " + rel(r)
+        case .remove(let r): return "− Remove: " + rel(r).prefix(1).lowercased() + rel(r).dropFirst()
+        case .areas(let a): return "+ Areas " + a.map { "◇ " + $0 }.joined(separator: "  ")
+        }
+    }
+}
