@@ -395,6 +395,7 @@ struct CaptureConfig: Codable, Equatable {
     var modifiers: UInt32 = 0x1800      // control + option
     var pasteClipboard = true
     var aiTitle = true
+    var snap = SnapConfig()
 
     init() {}
 
@@ -405,6 +406,47 @@ struct CaptureConfig: Codable, Equatable {
         modifiers = try c.decodeIfPresent(UInt32.self, forKey: .modifiers) ?? 0x1800
         pasteClipboard = try c.decodeIfPresent(Bool.self, forKey: .pasteClipboard) ?? true
         aiTitle = try c.decodeIfPresent(Bool.self, forKey: .aiTitle) ?? true
+        snap = try c.decodeIfPresent(SnapConfig.self, forKey: .snap) ?? SnapConfig()
+    }
+}
+
+// Snap Basket. The shortcuts default to ⌃⌥⌘S (snap) and ⌃⌥⌘B (basket panel).
+struct SnapConfig: Codable, Equatable {
+    enum SendMode: String, Codable, CaseIterable {
+        case agent, plane, markdown
+
+        var label: String {
+            switch self {
+            case .agent: return "Draft ticket with agent"
+            case .plane: return "Create item in Plane"
+            case .markdown: return "Copy as Markdown"
+            }
+        }
+    }
+
+    var enabled = true
+    var keyCode: UInt32 = 1             // S
+    var modifiers: UInt32 = 0x1900      // control + option + command
+    var basketKeyCode: UInt32 = 11      // B
+    var basketModifiers: UInt32 = 0x1900
+    var voice = true
+    var keepDays = 30
+    var sendMode = SendMode.agent
+    var lastProject: String?
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        keyCode = try c.decodeIfPresent(UInt32.self, forKey: .keyCode) ?? 1
+        modifiers = try c.decodeIfPresent(UInt32.self, forKey: .modifiers) ?? 0x1900
+        basketKeyCode = try c.decodeIfPresent(UInt32.self, forKey: .basketKeyCode) ?? 11
+        basketModifiers = try c.decodeIfPresent(UInt32.self, forKey: .basketModifiers) ?? 0x1900
+        voice = try c.decodeIfPresent(Bool.self, forKey: .voice) ?? true
+        keepDays = max(1, try c.decodeIfPresent(Int.self, forKey: .keepDays) ?? 30)
+        sendMode = (try? c.decodeIfPresent(SendMode.self, forKey: .sendMode)) ?? .agent
+        lastProject = try c.decodeIfPresent(String.self, forKey: .lastProject)
     }
 }
 
