@@ -143,7 +143,7 @@ final class WorkQueue {
             busy: { [unowned self] in self.busy($0) },
             slots: { AGENTS.slots($0.project) },
             ciPassed: { workstreams.stream($0)?.ci?.word == Tone.ok.word },
-            done: { [unowned self] k in self.isDone(k) },
+            done: { [unowned self] k in self.store.isDone(key: k) },
             now: Date())
         for lane in lanes {
             if let e = WorkQueue.due(lane, state: states[lane.project], world: world) { start(e.key, project: lane.project, anchor: nil) }
@@ -180,11 +180,6 @@ final class WorkQueue {
         edit(&st)
         st.updatedAt = Date()
         states[project] = st
-    }
-
-    private func isDone(_ key: String) -> Bool {
-        guard let (_, snap, item) = store.item(key: key) else { return false }
-        return snap.option(item.statusOptionId)?.category == .done
     }
 
     // Items with the start label or the bot assignee join the lane of their project, once.

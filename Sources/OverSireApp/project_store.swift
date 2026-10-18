@@ -51,6 +51,9 @@ final class ProjectStore {
     private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
     private var suppressNotify = Set<String>()
     private var assetCache: [String: (url: String, at: Date)] = [:]
+    private(set) lazy var relations = RelationCache(
+        tracker: { [weak self] in self?.trackers.tracker($0.project.workspace) as? any RelationManaging },
+        ref: { [weak self] key in self?.item(key: key).flatMap { $0.item.ref(in: $0.snap.summary.ref) } })
     var relayIsLive: () -> Bool = { false }
     var onChange: (() -> Void)?
     var busy: BusyTracker?
@@ -123,8 +126,15 @@ final class ProjectStore {
                 if let token { self.busy?.end(token) }
                 for k in todo { self.refreshing.remove(k) }
                 self.lastError = error
-                for snap in fresh { self.absorb(snap) }
+                var changed = Set<String>()
+                for snap in fresh {
+                    let old = Dictionary((self.snapshots[snap.summary.ref.storeKey]?.items ?? []).map { ($0.id, $0.activityAt) },
+                                         uniquingKeysWith: { a, _ in a })
+                    changed.formUnion(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
+                    self.absorb(snap)
+                }
                 self.save()
+                self.relations.refresh(changed: changed)
                 self.publish()
                 done(!failed)
             }
@@ -445,6 +455,14 @@ final class ProjectStore {
         }
         return nil
     }
+
+    func isDone(key: String) -> Bool {
+        guard let (_, snap, item) = item(key: key) else { return false }
+        return snap.option(item.statusOptionId)?.category == .done
+    }
+
+    /// The open blocker keys of an item, from the relation cache.
+    func blockers(of key: String) -> [String] { relations.blockers(of: key) { isDone(key: $0) } }
 
     var snapshotLimit: Int {
         let n = PROJECTS_CFG.itemsPerProject

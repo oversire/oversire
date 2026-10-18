@@ -8,6 +8,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         let detail: String
         let symbol: String
         let kind: String         // "Page", "Item", "Run", "Action"
+        var key = ""             // the item key, for kind "Item"
         let run: () -> Void
     }
 
@@ -21,6 +22,20 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         if !query.isEmpty { p.field.stringValue = query; p.filter(query) }
     }
 
+    /// The palette as an item picker: it lists only items, by key or title. Return calls `chosen` with the key.
+    static func pickItem(over owner: AppWindow, prompt: String, exclude: Set<String>, _ chosen: @escaping (String) -> Void) {
+        current?.close()
+        let p = CommandPalette(owner: owner, picking: true)
+        current = p
+        p.field.placeholderString = prompt
+        p.field.setAccessibilityLabel(prompt)
+        p.all = p.all.filter { $0.kind == "Item" && !exclude.contains($0.key) }.map { e in
+            Entry(title: e.title, detail: e.detail, symbol: e.symbol, kind: e.kind, key: e.key) { chosen(e.key) }
+        }
+        p.filter("")
+        p.open()
+    }
+
     static func dismiss() { current?.close() }
     static var windowNumber: Int? { current?.panel.windowNumber }
 
@@ -30,9 +45,11 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
     private let table = NSTableView()
     private var all: [Entry] = []
     private var shown: [Entry] = []
+    private let picking: Bool
 
-    private init(owner: AppWindow) {
+    private init(owner: AppWindow, picking: Bool = false) {
         self.owner = owner
+        self.picking = picking
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
                         styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
         super.init()
@@ -64,7 +81,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         table.doubleAction = #selector(pick)
         table.setAccessibilityLabel("Results")
         scroll.documentView = table
-        let hint = NSTextField.text("↑↓ move · ↩ open · esc close", size: 11, color: Palette.dim)
+        let hint = NSTextField.text(picking ? "↑↓ move · ↩ choose · esc close" : "↑↓ move · ↩ open · esc close", size: 11, color: Palette.dim)
         root.addSubview(field); root.addSubview(scroll); root.addSubview(hint)
         NSLayoutConstraint.activate([
             field.topAnchor.constraint(equalTo: root.topAnchor, constant: 30),
@@ -125,7 +142,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         for s in data.projectStore.snapshots.values {
             for i in s.sortedItems {
                 let st = s.statusName(i.statusOptionId) ?? ""
-                out.append(Entry(title: "\(i.key)  \(i.title)", detail: st, symbol: "circle.dashed", kind: "Item", run: go(.item(i.key, .overview))))
+                out.append(Entry(title: "\(i.key)  \(i.title)", detail: st, symbol: "circle.dashed", kind: "Item", key: i.key, run: go(.item(i.key, .overview))))
             }
         }
         for (repo, runs) in data.grouped {
@@ -153,7 +170,9 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
     // Every word must appear in the title or the detail. Items whose key starts with the query come first.
     private func filter(_ q: String) {
         let words = q.lowercased().split(separator: " ").map(String.init)
-        if words.isEmpty {
+        if words.isEmpty && picking {
+            shown = all
+        } else if words.isEmpty {
             shown = all.filter { $0.kind == "Page" || $0.kind == "Action" || $0.kind == "Project" }
         } else {
             shown = all.filter { e in

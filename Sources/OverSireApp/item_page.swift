@@ -38,6 +38,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var asking = false
     private var sending = false
     private var pendingComment: String?
+    private var relationObserver: Any?
 
     private var key: String { if case .item(let k, _) = route { return k }; return "" }
     private var tab: Route.ItemTab { if case .item(_, let t) = route { return t }; return .overview }
@@ -46,7 +47,13 @@ final class ItemPage: Page, NSTextFieldDelegate {
         markdown.translatesAutoresizingMaskIntoConstraints = true
         markdown.onHeight = { [weak self] h in self?.markdownHeight?.constant = max(24, h) }
         super.viewDidLoad()
+        relationObserver = NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.tab == .overview, !self.isEditing else { return }
+            self.reload()
+        }
     }
+
+    deinit { relationObserver.map(NotificationCenter.default.removeObserver) }
 
     override func show(_ r: Route) {
         if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = [] }; tailAt = .distantPast }
@@ -229,6 +236,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                                 body: "Start it in Orca now, or add it to the queue of \(snap.summary.title).",
                                 actions: [start, ActionButton("Add to queue") { [weak self] in self?.data.queue.add(item, snap: snap) }]))
         }
+        if let seq = sequence(item) { main.addFull(seq) }
         let d = Card(title: "Description")
         let body = (item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if body.isEmpty {
@@ -248,6 +256,46 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
         main.addFull(d)
     }
+
+    // MARK: Sequence
+
+    private func sequence(_ item: Item) -> NSView? {
+        let rc = data.projectStore.relations
+        guard rc.supports(item.key) else { return nil }
+        rc.load([item.key])
+        let actions = SequenceCard.Actions(
+            open: { [weak self] k in self?.go(.item(k, .overview)) },
+            add: { [weak self] k in self?.pickRelation(k, for: item) },
+            remove: { [weak self] r in self?.writeRelations(RelationPatch(remove: [r]), item: item) },
+            editAreas: { [weak self] in self?.editAreas(item) })
+        return SequenceCard(relations: rc.relations(item.key), store: data.projectStore, openBlockers: data.projectStore.blockers(of: item.key),
+                            areas: areas(item), error: rc.errors[item.key.uppercased()], actions: actions)
+    }
+
+    private func pickRelation(_ kind: RelationKind, for item: Item) {
+        guard let w = view.window?.windowController as? AppWindow else { return }
+        let title = SequenceCard.groups.first { $0.0 == kind }?.1 ?? ""
+        let have = Set((data.projectStore.relations.relations(item.key) ?? []).map(\.item.key))
+        CommandPalette.pickItem(over: w, prompt: "\(title) \(item.key): type a key or a title", exclude: have.union([item.key])) { [weak self] k in
+            guard let self, let found = self.data.projectStore.item(key: k), let ref = found.item.ref(in: found.snap.summary.ref) else { return }
+            self.writeRelations(RelationPatch(add: [ItemRelation(kind: kind, item: ref)]), item: item)
+        }
+    }
+
+    private func writeRelations(_ patch: RelationPatch, item: Item) {
+        saving = "relations"
+        reload()
+        data.projectStore.relations.apply(patch, to: item.key) { [weak self] err in
+            guard let self else { return }
+            self.saving = nil
+            self.note = err.map { (.bad, "Could not change the relations: \($0)") }
+            self.reload()
+        }
+    }
+
+    private func areas(_ item: Item) -> [String]? { nil }
+
+    private func editAreas(_ item: Item) {}
 
     private func workstream(_ s: Workstream, snap: ProjectSnapshot, item: Item) -> NSView {
         var trailing: [NSView] = []
