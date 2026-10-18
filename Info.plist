@@ -20,6 +20,10 @@
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>OverSire uses the microphone when you speak a note for a snap.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>OverSire turns your spoken snap notes into text on this Mac.</string>
     <key>LSUIElement</key>
     <true/>
     <key>CFBundleURLTypes</key>

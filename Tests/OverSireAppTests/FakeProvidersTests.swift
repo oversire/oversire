@@ -6,8 +6,8 @@ import OverSireSync
 @testable import OverSireApp
 
 final class FakeProvidersTests: XCTestCase {
-    private func seeded() async throws -> (FakeTracker, ProjectSummary) {
-        let t = FakeTracker()
+    private func seeded(_ caps: Set<Capability> = [.projectSettings, .relations]) async throws -> (FakeTracker, ProjectSummary) {
+        let t = FakeTracker(capabilities: caps)
         _ = try await t.create(ItemDraft(title: "First fake item"), in: t.project)
         _ = try await t.create(ItemDraft(title: "Second fake item"), in: t.project)
         return (t, try await t.projects()[0])

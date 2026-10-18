@@ -140,7 +140,10 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
 
     // MARK: Intake and attachments
 
-    public func intake(_ p: ProjectRef) async throws -> [IntakeItem] { try base.locked { intakeList[p.id] ?? [] } }
+    public func intake(_ p: ProjectRef) async throws -> [IntakeItem] {
+        guard capabilities.contains(.intake) else { throw ProviderError.unsupported(.intake) }
+        return try base.locked { intakeList[p.id] ?? [] }
+    }
 
     public func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail {
         try base.locked {

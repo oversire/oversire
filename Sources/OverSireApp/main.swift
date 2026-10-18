@@ -77,6 +77,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var catalogTimer: Timer?
     var captureHotKey: GlobalHotKey?
     var windowHotKey: GlobalHotKey?
+    lazy var snap = SnapController(projects: { [weak self] in self?.projectStore.tracked ?? [] })
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
@@ -226,6 +227,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         projectCatalog.refreshIfStale()
         applyCaptureHotKey()
         applyWindowHotKey()
+        snap.applyHotKeys()
         NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: agentIndex, queue: .main) { [weak self] _ in
             self?.scanCheckouts()
             self?.reloadList()

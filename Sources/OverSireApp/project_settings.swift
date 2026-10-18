@@ -13,6 +13,8 @@ final class ProjectSettingsVC: NSViewController {
     var observer: NSObjectProtocol?
     var shortcutField: ShortcutField?
     static var captureError: String?
+    static var snapError: String?
+    var snapFields: [ShortcutField] = []
     static var expanded: Set<String> = []
 
     init(catalog: ProjectCatalog, store: ProjectStore, cfg: ProjectsConfig) {
@@ -71,6 +73,8 @@ final class ProjectSettingsVC: NSViewController {
             y = refreshSection(y: y, w: w, in: doc)
             y = header("QUICK CAPTURE", y: y, button: nil)
             y = captureSection(y: y, w: w, in: doc)
+            y = header("SNAP BASKET", y: y, button: nil)
+            y = snapSection(y: y, w: w, in: doc)
             y = header("ORCA", y: y, button: nil)
             y = orcaSection(y: y, w: w, in: doc)
             let save = NSButton(title: "Save & Apply", target: self, action: #selector(doSave))
@@ -337,6 +341,104 @@ final class ProjectSettingsVC: NSViewController {
         return y + 4
     }
 
+    static let keepDays = [7, 30, 90]
+
+    func snapSection(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
+        var y = y + 4
+        let snap = cfg.capture.snap
+        let ok = SnapCapturer.hasPermission
+        let dot = NSTextField(labelWithString: ok ? "●" : "○")
+        dot.font = .systemFont(ofSize: 11); dot.textColor = ok ? C_SUCCESS : C_FAILURE
+        dot.frame = NSRect(x: 16, y: y + 2, width: 14, height: 16)
+        doc.addSubview(dot)
+        let perm = NSTextField(labelWithString: ok ? "Screen Recording is on" : "Screen Recording is off. Snaps need it.")
+        perm.font = .systemFont(ofSize: 12)
+        perm.frame = NSRect(x: 34, y: y + 2, width: w - 160, height: 18)
+        doc.addSubview(perm)
+        if !ok {
+            let b = NSButton(title: "Turn on…", target: self, action: #selector(snapPermission))
+            b.bezelStyle = .rounded; b.font = .systemFont(ofSize: 11)
+            b.frame = NSRect(x: w - 100, y: y - 2, width: 88, height: 26)
+            doc.addSubview(b)
+        }
+        y += 30
+        let sw = NSSwitch(frame: NSRect(x: 16, y: y, width: 40, height: 22))
+        sw.state = snap.enabled ? .on : .off
+        sw.target = self; sw.action = #selector(toggleSnap(_:))
+        doc.addSubview(sw)
+        let l = NSTextField(labelWithString: "Global shortcuts for snaps")
+        l.font = .systemFont(ofSize: 12)
+        l.frame = NSRect(x: 64, y: y + 2, width: 200, height: 18)
+        doc.addSubview(l)
+        y += 30
+        snapFields = []
+        let rows: [(String, KeyShortcut, Selector)] = [
+            ("Take a snap", KeyShortcut(keyCode: snap.keyCode, modifiers: snap.modifiers), #selector(snapTry)),
+            ("Show the basket", KeyShortcut(keyCode: snap.basketKeyCode, modifiers: snap.basketModifiers), #selector(basketTry)),
+        ]
+        for (i, r) in rows.enumerated() {
+            let t = NSTextField(labelWithString: r.0)
+            t.font = .systemFont(ofSize: 12)
+            t.frame = NSRect(x: 64, y: y + 2, width: 160, height: 18)
+            doc.addSubview(t)
+            let f = ShortcutField(r.1)
+            f.frame = NSRect(x: w - 230, y: y - 2, width: 110, height: 26)
+            f.isEnabled = snap.enabled
+            f.onChange = { [weak self] code, mods in
+                if i == 0 { self?.cfg.capture.snap.keyCode = code; self?.cfg.capture.snap.modifiers = mods }
+                else { self?.cfg.capture.snap.basketKeyCode = code; self?.cfg.capture.snap.basketModifiers = mods }
+            }
+            f.onRecording = { on in (NSApp.delegate as? GHActionsBar)?.snap.suspendHotKeys(on) }
+            doc.addSubview(f)
+            snapFields.append(f)
+            let clear = NSButton(title: "Clear", target: self, action: #selector(clearSnapShortcut(_:)))
+            clear.bezelStyle = .rounded; clear.font = .systemFont(ofSize: 11); clear.tag = i
+            clear.frame = NSRect(x: w - 116, y: y - 2, width: 60, height: 26)
+            doc.addSubview(clear)
+            let tryIt = NSButton(title: "Try", target: self, action: r.2)
+            tryIt.bezelStyle = .rounded; tryIt.font = .systemFont(ofSize: 11)
+            tryIt.frame = NSRect(x: w - 60, y: y - 2, width: 48, height: 26)
+            doc.addSubview(tryIt)
+            y += 32
+        }
+        let voice = NSButton(checkboxWithTitle: "Speak notes (on-device speech)", target: self, action: #selector(toggleSnapVoice(_:)))
+        voice.font = .systemFont(ofSize: 12)
+        voice.state = snap.voice ? .on : .off
+        voice.frame = NSRect(x: 64, y: y, width: w - 80, height: 18)
+        doc.addSubview(voice)
+        y += 28
+        y = popupRow("Send basket with", SnapConfig.SendMode.allCases.map(\.label),
+                     SnapConfig.SendMode.allCases.firstIndex(of: snap.sendMode) ?? 0, #selector(snapSendChanged(_:)), y: y, in: doc)
+        let days = Self.keepDays.firstIndex(of: snap.keepDays) ?? 1
+        y = popupRow("Keep history", Self.keepDays.map { "\($0) days" }, days, #selector(snapKeepChanged(_:)), y: y, in: doc)
+        if let msg = ProjectSettingsVC.snapError {
+            let e = NSTextField(labelWithString: msg)
+            e.font = .systemFont(ofSize: 11); e.textColor = C_FAILURE
+            e.frame = NSRect(x: 64, y: y, width: w - 80, height: 16)
+            doc.addSubview(e)
+            y += 20
+        }
+        return y + 4
+    }
+
+    @objc func snapPermission() { SnapCapturer.requestPermission() }
+    @objc func toggleSnap(_ sender: NSSwitch) {
+        cfg.capture.snap.enabled = sender.state == .on
+        snapFields.forEach { $0.isEnabled = cfg.capture.snap.enabled }
+    }
+    @objc func clearSnapShortcut(_ sender: NSButton) {
+        if sender.tag == 0 { cfg.capture.snap.modifiers = 0 } else { cfg.capture.snap.basketModifiers = 0 }
+        let s = cfg.capture.snap
+        guard snapFields.count == 2 else { return }
+        snapFields[0].set(KeyShortcut(keyCode: s.keyCode, modifiers: s.modifiers))
+        snapFields[1].set(KeyShortcut(keyCode: s.basketKeyCode, modifiers: s.basketModifiers))
+    }
+    @objc func toggleSnapVoice(_ sender: NSButton) { cfg.capture.snap.voice = sender.state == .on }
+    @objc func snapSendChanged(_ sender: NSPopUpButton) { cfg.capture.snap.sendMode = SnapConfig.SendMode.allCases[sender.indexOfSelectedItem] }
+    @objc func snapKeepChanged(_ sender: NSPopUpButton) { cfg.capture.snap.keepDays = Self.keepDays[sender.indexOfSelectedItem] }
+    @objc func snapTry() { (NSApp.delegate as? GHActionsBar)?.snap.snap() }
+    @objc func basketTry() { (NSApp.delegate as? GHActionsBar)?.snap.toggleBasket() }
+
     @objc func openProjectSettings(_ sender: NSButton) {
         guard let k = sender.identifier?.rawValue else { return }
         (NSApp.delegate as? GHActionsBar)?.open(.projectSettings(k, .appearance))
@@ -444,7 +546,9 @@ final class ProjectSettingsVC: NSViewController {
         let app = NSApp.delegate as? GHActionsBar
         let ok = app?.applyCaptureHotKey() ?? true
         ProjectSettingsVC.captureError = ok ? nil : "macOS did not accept \(cfg.capture.shortcutLabel). Another app may use it."
+        let snapFailed = app?.snap.applyHotKeys() ?? []
+        ProjectSettingsVC.snapError = snapFailed.isEmpty ? nil : "macOS did not accept \(snapFailed.joined(separator: ", ")). Another app may use it."
         app?.applyProjectSelection()
-        if !ok { app?.showSettings(.projects) }
+        if !ok || !snapFailed.isEmpty { app?.showSettings(.projects) }
     }
 }

@@ -29,7 +29,7 @@ let package = Package(
                            "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca"],
             // The UI code predates strict concurrency. It moves to .v6 page by page.
             swiftSettings: [.swiftLanguageMode(.v5)],
-            linkerSettings: ["Cocoa", "UserNotifications", "Network", "Carbon", "WebKit"].map { .linkedFramework($0) }
+            linkerSettings: ["Cocoa", "UserNotifications", "Network", "Carbon", "WebKit", "ScreenCaptureKit", "Speech", "CoreImage"].map { .linkedFramework($0) }
         ),
         .target(name: "OverSireTestKit", dependencies: ["OverSireCore", "OverSireSync", "OverSireAI"]),
 
