@@ -9,12 +9,13 @@ struct CloudAIRecords {
     var jobs: [AIJob] = []
     var suggestions: [Suggestion] = []
     var orders: [WorkOrder] = []
+    var runners: [RunnerState] = []
     /// The hub writes it. Nil until the first sync.
     var billing: BillingState?
 
     static func load(_ w: StoreWrites) -> CloudAIRecords {
         CloudAIRecords(jobs: w.load(AIJob.self), suggestions: w.load(Suggestion.self), orders: w.load(WorkOrder.self),
-                       billing: w.load(BillingState.self).first ?? UIShots.billing)
+                       runners: UIShots.cloud == true ? UIShots.runners : w.load(RunnerState.self), billing: w.load(BillingState.self).first ?? UIShots.billing)
     }
 
     var jobsStatus: String {
@@ -26,7 +27,10 @@ struct CloudAIRecords {
     }
     var runnerStatus: String {
         let waiting = orders.filter { [.queued, .sent, .acked].contains($0.state) }.count
-        return waiting == 0 ? "No work orders" : "\(waiting) waiting"
+        let orders = waiting == 0 ? "No work orders" : "\(waiting) waiting"
+        guard !runners.isEmpty else { return orders }
+        let online = runners.filter(\.online).count
+        return "\(online) of \(runners.count) runner\(runners.count == 1 ? "" : "s") online · " + orders
     }
     var creditsStatus: String? {
         guard let b = billing else { return nil }
@@ -52,7 +56,7 @@ final class CloudAICard: NSStackView {
         let rows: [(String, String, String, String?)] = [
             ("Jobs", "clock", "AI jobs on a schedule or on an event. A job only writes suggestions.", records?.jobsStatus),
             ("Suggestions", "lightbulb", "You accept or dismiss each one. Nothing changes before that.", records?.suggestionsStatus),
-            ("Runner", "terminal", "This Mac does the work orders of accepted suggestions.", records?.runnerStatus),
+            ("Runner", "terminal", "A runner does the work orders of accepted suggestions.", records?.runnerStatus),
         ]
         for (title, symbol, note, status) in rows {
             let glyph = Glyph(symbol, color: Palette.dim, size: 13)
@@ -61,6 +65,7 @@ final class CloudAICard: NSStackView {
             if let status { views.append(NSTextField.text(status, size: 12, color: Palette.dim)) }
             card.add(Row(views, height: 52, label: [title, note, status].compactMap { $0 }.joined(separator: ". ")))
         }
+        if records != nil { card.add(RunnerSetupRow()) }
         if let credits = records?.creditsStatus {
             let warn = records?.billing?.notice80Sent == true
             let glyph = Glyph(warn ? "exclamationmark.triangle" : "creditcard", color: warn ? Palette.warn : Palette.dim, size: 13)

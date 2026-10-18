@@ -38,6 +38,8 @@ final class ContractTests: XCTestCase {
         "usage-row": roundTrip(UsageRow.self),
         "ledger-entry": roundTrip(LedgerEntry.self),
         "billing-state": roundTrip(BillingState.self),
+        "runner-message": roundTrip(RunnerMessage.self),
+        "runner-state": roundTrip(RunnerState.self),
         "ai-endpoint": roundTrip(AIEndpoint.self),
         "ai-route": roundTrip(AIRoute.self),
     ]
@@ -45,8 +47,8 @@ final class ContractTests: XCTestCase {
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
     static let versions: [String: Int] = [
         "refs.json": 1, "provider-event.json": 1, "actions.json": 1, "ai-task.json": 1, "account.json": 1,
-        "store.json": storeSchemaVersion, "jobs.json": 1, "suggestion.json": 1, "work-order.json": 1, "memory.json": 1,
-        "billing.json": 1, "ai-endpoint.json": 1,
+        "store.json": storeSchemaVersion, "jobs.json": 1, "suggestion.json": 1, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
+        "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {

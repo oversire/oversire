@@ -87,6 +87,11 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                             notice80Sent: true)
     }
 
+    static var runners: [RunnerState] {
+        guard cloud == true else { return [] }
+        return [RunnerState(device: "D1", version: "0.1.0", contract: 1, runtimes: ["orca"], os: "darwin/arm64", online: true, lastSeen: Date())]
+    }
+
     // A source that never answers.
     struct NeverAnswers: RunSource {
         func run(_ repo: String, id: String) async -> Run? { await wait(); return nil }

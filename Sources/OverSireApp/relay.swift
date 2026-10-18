@@ -233,6 +233,10 @@ struct RelayAPI {
     struct OK: Decodable {}
     struct Discovery: Decodable { let app: String; let version: String? }
     struct Secret: Decodable { let secret: String }
+    struct PairingCode: Decodable { let code: String }
+
+    /// A pairing code of the runner role, for a runner on this Mac.
+    func runnerCode() -> Result<PairingCode, RelayFailure> { send("POST", "/v1/pairing") }
 
     func discover() -> Discovery? {
         guard case .success(let d) = send("GET", "/", as: Discovery.self), CLOUD_APPS.contains(d.app) else { return nil }

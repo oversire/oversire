@@ -10,10 +10,10 @@ public actor SyncedStore: Store {
     /// The collections that sync. Derived state and caches do not.
     public static let collections: [any StoreRecord.Type] = [
         QueueLane.self, QueueTrigger.self, IgnoredFailure.self, Pin.self, Snooze.self, Note.self, AgentLink.self,
-        MemoryEntry.self, AIJob.self, Suggestion.self, WorkOrder.self,
+        MemoryEntry.self, AIJob.self, Suggestion.self,
     ]
     /// The collections that only the hub writes. They come down and never go up.
-    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self]
+    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self, WorkOrder.self, RunnerState.self]
     private static let byName = Dictionary(uniqueKeysWithValues: collections.map { ($0.collection, $0) })
     private static let pulled = Dictionary(uniqueKeysWithValues: (collections + hubOnly).map { ($0.collection, $0) })
 
