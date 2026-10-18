@@ -133,7 +133,7 @@ final class QueuePage: Page {
         let busy = q.busy(lane)
         let root = PROJECTS_CFG.orca.roots[lane.project].map { ($0 as NSString).lastPathComponent } ?? "no Orca workspace"
         let slotChip = MenuChip("\(busy)/\(slots) slots", symbol: "square.stack") { [weak self] in
-            (1...4).map { n in MenuAction("\(n) session\(n == 1 ? "" : "s") at a time") { AGENTS.slots[lane.project] = n; saveConfig(); self?.reload() } }
+            (1...4).map { n in MenuAction("\(n) session\(n == 1 ? "" : "s") at a time") { AGENTS.slots[lane.project] = n; saveConfig(); self?.syncSlots(lane.project, n); self?.reload() } }
         }
         let c = Card(padding: 10, spacing: 4)
         c.add(NSStackView(h: [Glyph("folder", color: Palette.acc), NSTextField.text(lane.identifier, size: 13, weight: .semibold),
@@ -148,7 +148,7 @@ final class QueuePage: Page {
         let prefix = lane.identifier.uppercased() + "-"
         for (k, a) in data.agentIndex.agents.sorted(by: { $0.key < $1.key }) where k.hasPrefix(prefix) && [.starting, .working, .waiting].contains(a.phase) {
             let title = data.projectStore.item(key: k)?.item.title ?? ""
-            let areas: [NSView] = (q.areaBook()?.areas(key: k) ?? []).map { AreaChip($0) }
+            let areas: [NSView] = (q.areaBook()?.areas(key: k) ?? []).map { AreaChip($0, kind: data.planner.kind($0, project: lane.project)) }
             c.add(Row([Glyph("play.fill", color: Palette.run, size: 11).fixedWidth(22), Chiplet(k, color: Palette.fg, mono: true),
                        TwoLine(title, nil, titleSize: 12.5, weight: .regular)] + areas + [Pill(Tone(a.phase), text: a.label())],
                       height: 34, inset: 6, label: "\(k) runs: \(a.label())") { [weak self] in self?.go(.item(k, .session)) })
@@ -188,7 +188,7 @@ final class QueuePage: Page {
         case let h?: gate = Chiplet(h.reason, color: Palette.warn)
         case nil: gate = Chiplet(pick.next == e.key ? "✓ Ready · starts next" : "✓ Ready", color: Palette.ok)
         }
-        let areas: [NSView] = (q.areaBook()?.areas(key: e.key) ?? []).map { AreaChip($0) }
+        let areas: [NSView] = (q.areaBook()?.areas(key: e.key) ?? []).map { AreaChip($0, kind: data.planner.kind($0, project: lane.project)) }
         let gates = NSStackView(h: [Spacer(34), gate] + areas + [Spacer()], spacing: 4)
         let actions = NSStackView(h: [Spacer(34), cond, Spacer(), up, down, start, remove], spacing: 4)
         let v = NSStackView(v: [top, gates, actions], spacing: 2)
@@ -198,9 +198,15 @@ final class QueuePage: Page {
         return v
     }
 
+    // The hub gate reads the slots from the Planner settings.
+    private func syncSlots(_ project: String, _ n: Int) {
+        guard hasCloud, data.planner.settings(project).slots != n else { return }
+        data.planner.update(project) { $0.slots = n }
+    }
+
     // Work orders that the hub holds before a runner gets them.
     private func heldCard(_ orders: [WorkOrder]) -> NSView {
-        let c = Card(title: "Held work orders", trailing: [SequenceCard.cloudMark()])
+        let c = Card(title: "Held work orders", trailing: [PlannerCard.cloudMark()])
         for o in orders.sorted(by: { $0.createdAt < $1.createdAt }) {
             guard case .start(let req) = o.order else { continue }
             let key = req.item?.key ?? URL(fileURLWithPath: req.repo).lastPathComponent

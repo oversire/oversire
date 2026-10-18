@@ -237,7 +237,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                                 actions: [start, ActionButton("Add to queue") { [weak self] in self?.data.queue.add(item, snap: snap) }]))
         }
         if let card = suggestion(item) { main.addFull(card) }
-        if let seq = sequence(item) { main.addFull(seq) }
+        if let card = plannerCard(item) { main.addFull(card) }
         let d = Card(title: "Description")
         let body = (item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if body.isEmpty {
@@ -258,24 +258,26 @@ final class ItemPage: Page, NSTextFieldDelegate {
         main.addFull(d)
     }
 
-    // MARK: Sequence
+    // MARK: Planner
 
-    private func sequence(_ item: Item) -> NSView? {
+    private func plannerCard(_ item: Item) -> NSView? {
         let rc = data.projectStore.relations
         guard rc.supports(item.key) else { return nil }
         rc.load([item.key])
-        let actions = SequenceCard.Actions(
+        let actions = PlannerCard.Actions(
             open: { [weak self] k in self?.go(.item(k, .overview)) },
             add: { [weak self] k in self?.pickRelation(k, for: item) },
             remove: { [weak self] r in self?.writeRelations(RelationPatch(remove: [r]), item: item) },
             editAreas: { [weak self] in self?.editAreas(item) })
-        return SequenceCard(relations: rc.relations(item.key), store: data.projectStore, openBlockers: data.projectStore.blockers(of: item.key),
-                            areas: areas(item), error: rc.errors[item.key.uppercased()], actions: actions)
+        let project = data.projectStore.item(key: item.key)?.snap.summary.ref.storeKey ?? ""
+        let planner = data.planner
+        return PlannerCard(relations: rc.relations(item.key), store: data.projectStore, openBlockers: data.projectStore.blockers(of: item.key),
+                            areas: areas(item), kind: { planner.kind($0, project: project) }, error: rc.errors[item.key.uppercased()], actions: actions)
     }
 
     private func pickRelation(_ kind: RelationKind, for item: Item) {
         guard let w = view.window?.windowController as? AppWindow else { return }
-        let title = SequenceCard.groups.first { $0.0 == kind }?.1 ?? ""
+        let title = PlannerCard.groups.first { $0.0 == kind }?.1 ?? ""
         let have = Set((data.projectStore.relations.relations(item.key) ?? []).map(\.item.key))
         CommandPalette.pickItem(over: w, prompt: "\(title) \(item.key): type a key or a title", exclude: have.union([item.key])) { [weak self] k in
             guard let self, let found = self.data.projectStore.item(key: k), let ref = found.item.ref(in: found.snap.summary.ref) else { return }
@@ -309,7 +311,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let a = NSAlert()
         a.messageText = "Code areas of \(item.key)"
         a.informativeText = "The queue does not start two items with the same area at a time. Use commas between the areas. "
-            + "An area has lower-case letters, digits and hyphens. At most \(SequenceDraft.maxAreas) areas."
+            + "An area has lower-case letters, digits and hyphens. At most \(ItemAreas.maxAreas) areas."
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         f.stringValue = data.areas.areas(of: ref).joined(separator: ", ")
         f.placeholderString = "api, status-page"
@@ -323,8 +325,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func suggestion(_ item: Item) -> NSView? {
-        guard hasCloud, let s = data.suggestions.openSequence(for: item.key), let draft = s.sequence else { return nil }
-        return suggestionCard(s, draft: draft)
+        guard hasCloud, data.suggestions.openPlan(naming: item.key) != nil else { return nil }
+        return Banner(.info, title: "The Planner has a plan change for \(item.key).",
+                      actions: [ActionButton("Review") { [weak self] in self?.go(.plan) }])
     }
 
     private func workstream(_ s: Workstream, snap: ProjectSnapshot, item: Item) -> NSView {

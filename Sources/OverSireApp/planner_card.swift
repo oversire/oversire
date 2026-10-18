@@ -1,18 +1,18 @@
 import Cocoa
 import OverSireCore
 
-// A chip with a dashed border, for a code area tag. The ◇ glyph tells it apart without the border.
+// A chip with a dashed border, for a code area tag. The glyph tells the kind without the border: ◆ core, ◇ feature.
 final class AreaChip: Chiplet {
     private let dash = CAShapeLayer()
 
-    init(_ area: String) {
-        super.init("◇ \(area)", mono: true)
+    init(_ area: String, kind: AreaKind = .feature) {
+        super.init("\(kind.isCore ? "◆" : "◇") \(area)", mono: true)
         border = nil
         dash.fillColor = nil
         dash.lineWidth = 1
         dash.lineDashPattern = [3, 2]
         layer?.addSublayer(dash)
-        setAccessibilityLabel("Area \(area)")
+        setAccessibilityLabel("\(kind.isCore ? "Core" : "Feature") area \(area)")
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -29,8 +29,8 @@ final class AreaChip: Chiplet {
     }
 }
 
-// The Sequence card on the item page: the tracker relations and, with a cloud account, the code areas.
-final class SequenceCard: Card {
+// The Planner card on the item page: the tracker relations and, with a cloud account, the code areas.
+final class PlannerCard: Card {
     struct Actions {
         var open: (String) -> Void
         var add: (RelationKind) -> Void
@@ -42,10 +42,11 @@ final class SequenceCard: Card {
     private var keep: [MenuAction] = []
 
     /// `relations` nil shows a skeleton. `areas` nil hides the Areas row (no cloud account).
-    init(relations: [ItemRelation]?, store: ProjectStore, openBlockers: [String], areas: [String]?, error: String?, actions: Actions) {
+    init(relations: [ItemRelation]?, store: ProjectStore, openBlockers: [String], areas: [String]?, kind: (String) -> AreaKind = { _ in .core },
+         error: String?, actions: Actions) {
         let addButton = ActionButton("Add relation…", symbol: "plus")
-        super.init(title: "Sequence", trailing: [addButton])
-        setAccessibilityLabel("Sequence")
+        super.init(title: "Planner", trailing: [addButton])
+        setAccessibilityLabel("Planner")
         addButton.onClick = { [weak self, weak addButton] in
             guard let self, let add = addButton else { return }
             let m = NSMenu()
@@ -57,7 +58,7 @@ final class SequenceCard: Card {
         }
         guard let relations else {
             for _ in 0..<3 { add(Self.skeletonRow()) }
-            setAccessibilityLabel("Sequence. Loading the relations.")
+            setAccessibilityLabel("Planner. Loading the relations.")
             return
         }
         if let error { add(NSTextField.text("Could not load the relations: \(error)", size: 12, color: Palette.bad, lines: 2)) }
@@ -71,7 +72,7 @@ final class SequenceCard: Card {
         if let areas {
             let edit = ActionButton("Edit", style: .link) { actions.editAreas() }
             edit.setAccessibilityLabel("Edit areas")
-            let chips: [NSView] = areas.isEmpty ? [NSTextField.text("None", size: 12.5, color: Palette.dim)] : areas.map { AreaChip($0) }
+            let chips: [NSView] = areas.isEmpty ? [NSTextField.text("None", size: 12.5, color: Palette.dim)] : areas.map { AreaChip($0, kind: kind($0)) }
             add(Self.line("Areas", NSStackView(h: chips + [Self.cloudMark(), edit, Spacer()], spacing: 6)))
         }
         let total = relations.filter { $0.kind == .blockedBy }.count
@@ -137,48 +138,73 @@ final class SequenceCard: Card {
     }
 }
 
-// A sequence suggestion of the hub: one check box for each line. Accept sends the cleared lines as edit.drop.
-final class SequenceSuggestionCard: Card {
+// A plan change of the hub: each line as a sentence with a check box and its reason. Accept sends the cleared lines as edit.drop.
+final class PlanReviewView: NSStackView {
     private var cleared: Set<Int> = []
+    private let count: Int
+    private var ok: ActionButton!
 
-    init(_ s: Suggestion, draft: SequenceDraft, store: ProjectStore, now: Date = Date(),
-         accept: @escaping (Set<Int>) -> Void, dismiss: @escaping () -> Void, open: @escaping (String) -> Void) {
-        super.init(fill: Palette.intake.withAlphaComponent(0.06), border: Palette.intake.withAlphaComponent(0.55))
-        let key = s.subjectKey ?? ""
-        let title = NSTextField.text(store.item(key: key)?.item.title ?? s.title, size: 13, weight: .semibold)
-        title.lineBreakMode = .byTruncatingTail
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        add(NSStackView(h: [Chiplet("Sequencing", symbol: "arrow.triangle.branch", color: Palette.intake),
-                            Chiplet(key, color: Palette.fg, mono: true) { open(key) }, title, Spacer(), SequenceCard.cloudMark()], spacing: 7))
-        add(NSTextField.text(s.body, size: 12.5, color: Palette.mut, lines: 4))
+    init(_ s: Suggestion, draft: PlanDraft, store: ProjectStore, kind: @escaping (String) -> AreaKind, now: Date = Date(),
+         accept: @escaping (Set<Int>) -> Void, dismiss: @escaping () -> Void) {
+        count = draft.lines.count
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = 8
+        translatesAutoresizingMaskIntoConstraints = false
+        if let o = draft.overlaps {
+            addFull(NSTextField.text("These changes lower the overlaps from \(o.before) to \(o.after).", size: 12.5, color: Palette.mut, lines: 2))
+        }
         for (i, line) in draft.lines.enumerated() {
-            let box = NSButton(checkboxWithTitle: Self.text(line, store: store), target: self, action: #selector(toggled(_:)))
+            let box = NSButton(checkboxWithTitle: Self.sentence(line, store: store, kind: { draft.kinds?[$0] ?? kind($0) }),
+                               target: self, action: #selector(toggled(_:)))
             box.tag = i
             box.state = .on
             box.font = .systemFont(ofSize: 12.5)
-            add(box)
+            box.setAccessibilityHelp(line.reason)
+            let why = NSTextField.text(line.reason, size: 11.5, color: Palette.dim, lines: 2)
+            let v = NSStackView(v: [box, why], spacing: 1)
+            why.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 20).isActive = true
+            why.trailingAnchor.constraint(equalTo: v.trailingAnchor).isActive = true
+            addFull(v)
         }
-        let ok = ActionButton("Accept", style: .primary) { [weak self] in accept(self?.cleared ?? []) }
+        ok = ActionButton(Self.acceptTitle(count), style: .primary) { [weak self] in accept(self?.cleared ?? []) }
         ok.setAccessibilityLabel("Accept the checked lines")
-        add(NSStackView(h: [ok, ActionButton("Dismiss") { dismiss() }, Spacer(),
-                            NSTextField.text(s.expiresText(now: now), size: 11.5, color: Palette.dim)], spacing: 6))
-        setAccessibilityLabel("Sequencing suggestion for \(key): \(s.title)")
+        addFull(NSStackView(h: [ok, ActionButton("Dismiss") { dismiss() }, Spacer(),
+                                NSTextField.text(s.expiresText(now: now), size: 11.5, color: Palette.dim)], spacing: 6))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Plan change: \(s.title)")
     }
-    required init?(coder: NSCoder) { fatalError() }
+    required init(coder: NSCoder) { fatalError() }
 
     @objc private func toggled(_ b: NSButton) {
         if b.state == .on { cleared.remove(b.tag) } else { cleared.insert(b.tag) }
+        ok.title = Self.acceptTitle(count - cleared.count)
+        ok.isEnabled = cleared.count < count
     }
 
-    static func text(_ line: SequenceDraft.Line, store: ProjectStore) -> String {
+    static func acceptTitle(_ n: Int) -> String { "Accept \(n)" }
+
+    /// The line in plain words, without +, − or a diff.
+    static func sentence(_ line: PlanDraft.Line, store: ProjectStore, kind: (String) -> AreaKind) -> String {
         func rel(_ r: ItemRelation) -> String {
-            let kind = r.kind == .relatesTo ? "Related to" : SequenceCard.groups.first { $0.0 == r.kind }?.1 ?? r.kind.rawValue
-            return [kind, r.item.key, store.item(key: r.item.key)?.item.title].compactMap { $0 }.joined(separator: " ")
+            switch r.kind {
+            case .blockedBy: return "blocked by \(r.item.key)"
+            case .blocks: return "blocking \(r.item.key)"
+            default: return "related to \(r.item.key)"
+            }
         }
+        func area(_ a: String) -> String { "\(kind(a).isCore ? "◆" : "◇") \(a)" }
         switch line {
-        case .add(let r): return "+ " + rel(r)
-        case .remove(let r): return "− Remove: " + rel(r).prefix(1).lowercased() + rel(r).dropFirst()
-        case .areas(let a): return "+ Areas " + a.map { "◇ " + $0 }.joined(separator: "  ")
+        case .order(let l):
+            return l.after.map { "Start \(l.item.key) after \($0.key)." } ?? "Start \(l.item.key) first."
+        case .relation(let l):
+            let parts = l.add.map { "Mark \(l.item.key) as \(rel($0))." } + l.remove.map { "\(l.item.key) is no longer \(rel($0))." }
+            return parts.joined(separator: " ")
+        case .area(let l):
+            let parts = l.add.map { "Add the area \(area($0)) to \(l.item.key)." } + l.remove.map { "Remove the area \(area($0)) from \(l.item.key)." }
+            return parts.joined(separator: " ")
         }
     }
 }

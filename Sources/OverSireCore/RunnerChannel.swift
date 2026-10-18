@@ -11,6 +11,8 @@ public enum RunnerMessage: Hashable, Sendable {
     case result(order: String, state: WorkOrder.State, result: WorkOrderResult? = nil)
     /// Runner to hub: the new state of a session of the oversire runtime.
     case session(RunnerSession)
+    /// Runner to hub: the changed paths of the worktree of an order, after a turn.
+    case paths(order: String, paths: ChangedPaths)
     case welcome(device: String, contract: Int)
     case refused(reason: String, contracts: [Int])
     case order(WorkOrder)
@@ -30,7 +32,7 @@ public enum RunnerMessage: Hashable, Sendable {
 }
 
 extension RunnerMessage: Codable {
-    private enum CodingKeys: String, CodingKey { case type, version, contract, runtimes, os, allow, order, state, result, device, reason, contracts, session }
+    private enum CodingKeys: String, CodingKey { case type, version, contract, runtimes, os, allow, order, state, result, device, reason, contracts, session, paths }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -48,6 +50,7 @@ extension RunnerMessage: Codable {
             self = .result(order: try c.decode(String.self, forKey: .order), state: state,
                            result: try c.decodeIfPresent(WorkOrderResult.self, forKey: .result))
         case "session": self = .session(try c.decode(RunnerSession.self, forKey: .session))
+        case "paths": self = .paths(order: try c.decode(String.self, forKey: .order), paths: try c.decode(ChangedPaths.self, forKey: .paths))
         case "welcome": self = .welcome(device: try c.decode(String.self, forKey: .device), contract: try c.decode(Int.self, forKey: .contract))
         case "refused": self = .refused(reason: try c.decode(String.self, forKey: .reason), contracts: try c.decode([Int].self, forKey: .contracts))
         case "order": self = .order(try c.decode(WorkOrder.self, forKey: .order))
@@ -77,6 +80,10 @@ extension RunnerMessage: Codable {
         case let .session(s):
             try c.encode("session", forKey: .type)
             try c.encode(s, forKey: .session)
+        case let .paths(order, paths):
+            try c.encode("paths", forKey: .type)
+            try c.encode(order, forKey: .order)
+            try c.encode(paths, forKey: .paths)
         case let .welcome(device, contract):
             try c.encode("welcome", forKey: .type)
             try c.encode(device, forKey: .device)

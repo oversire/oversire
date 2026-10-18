@@ -15,6 +15,7 @@ protocol AppData: AnyObject {
     var memory: ProjectMemory { get }
     var areas: ItemAreaBook { get }
     var suggestions: SuggestionBook { get }
+    var planner: PlannerBook { get }
     var aiChecks: AgentJudge { get }
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }
@@ -465,6 +466,7 @@ struct SidebarModel {
             n + s.rootItems.filter { $0.isMine(s.me) && s.option($0.statusOptionId)?.category != .done }.count
         }
         let prs = data.prGrouped.reduce(0) { $0 + $1.1.count }
+        let plans = UIShots.cloud ?? data.relay.canRun ? data.suggestions.openPlans().count : 0
         let intake = store.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }
 
         func e(_ r: Route, _ title: String, _ symbol: String, badge: Int? = nil, alert: Int = 0, tone: NSColor? = nil,
@@ -482,6 +484,7 @@ struct SidebarModel {
             e(.mine, "My items", "person.crop.circle", badge: mine),
             e(.agents, "Sessions", "cpu", badge: agents.count, alert: waiting, tone: Palette.warn, what: "need input"),
             e(.queue, "Queue", "list.number"),
+            e(.plan, "Plan", "rectangle.split.3x1", badge: plans),
             e(.runs(.all), "Runs", "play.circle", badge: running, alert: failing, tone: Palette.bad, what: "failing"),
             e(.prs, "Pull requests", "arrow.triangle.pull", badge: prs),
             e(.insights, "Insights", "chart.bar"),
@@ -519,6 +522,7 @@ enum PageFactory {
         case .run: return RunPage(r, data: data, router: router)
         case .agents: return AgentsPage(r, data: data, router: router)
         case .queue: return QueuePage(r, data: data, router: router)
+        case .plan: return PlanPage(r, data: data, router: router)
         case .settings: return SettingsPage(r, data: data, router: router)
         case .prs: return PRsPage(r, data: data, router: router)
         case .insights: return InsightsPage(r, data: data, router: router)

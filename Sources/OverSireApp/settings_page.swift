@@ -65,6 +65,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .live: live(body)
         case .orca: orca(body)
         case .queue: queue(body)
+        case .planner: planner(body)
         case .ai: ai(body)
         case .notifications: notifications(body)
         case .menubar: menuBar(body)
@@ -95,6 +96,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .live: return "dot.radiowaves.left.and.right"
         case .orca: return "terminal"
         case .queue: return "list.number"
+        case .planner: return "rectangle.split.3x1"
         case .ai: return "sparkles"
         case .notifications: return "bell"
         case .menubar: return "menubar.rectangle"
@@ -327,11 +329,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             SwitchRow("Intake agent", note: "Check intake items in an Orca terminal in plan mode. Needs Orca, not an AI key.", on: AI_CFG.intakeAgent) { AI_CFG.intakeAgent = $0 },
             SwitchRow("Session summary", note: "Summarize the session on the item page.", on: AI_CFG.sessionSummary) { AI_CFG.sessionSummary = $0 },
         ]))
-        if !hasCloud {
-            b.addFull(NSStackView(h: [SequenceCard.cloudMark(), NSTextField.text(
-                "Sequencing needs OverSire Cloud: it proposes blockers and code areas, and holds items whose area is busy.",
-                size: 12, color: Palette.dim, lines: 2), Spacer()], spacing: 8))
-        }
         b.addFull(card("CI", [
             SwitchRow("Explain failures", note: "A short cause for a failed run that no session watches.", on: AI_CFG.ciExplain) { AI_CFG.ciExplain = $0 },
             SwitchRow("Flaky workflows", note: "Mark a workflow that failed and then passed on the same commit. Re-run its next failure once before the alert.", on: AI_CFG.flaky) { AI_CFG.flaky = $0 },
@@ -344,6 +341,129 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             SwitchRow("Pick the project", on: AI_CFG.pickProject) { AI_CFG.pickProject = $0 },
         ]))
         embed(b, page: .ai, note: "Endpoint, model and API key. The key stays in the Keychain.")
+    }
+
+    // MARK: Planner
+
+    private var plannerProject: String?
+
+    private func planner(_ b: NSStackView) {
+        if !hasCloud {
+            b.addFull(NSStackView(h: [PlannerCard.cloudMark(), NSTextField.text(
+                "The Planner needs OverSire Cloud. It orders each queue lane, so that two items do not change the same code area at the same time.",
+                size: 12, color: Palette.dim, lines: 2), Spacer()], spacing: 8))
+        }
+        let projects = data.projectStore.tracked
+        guard let first = projects.first else { b.addFull(EmptyNote("Track a project first.", symbol: "folder")); return }
+        let pk = projects.first { $0.ref.storeKey == plannerProject }?.ref.storeKey ?? first.ref.storeKey
+        let book = data.planner
+        let s = book.settings(pk)
+        let name = projects.first { $0.ref.storeKey == pk }?.title ?? pk
+        let pick = MenuChip(name, symbol: "folder") { [weak self] in
+            projects.map { p in MenuAction(p.title) { self?.plannerProject = p.ref.storeKey; self?.reload() } }
+        }
+        let modes: [PlannerSettings.Mode] = [.off, .hourly, .live]
+        let modeNote: String
+        switch s.mode {
+        case .off: modeNote = "Off: no plan changes. The queue still holds items whose area is busy."
+        case .live: modeNote = "Live: a check about 2 minutes after a change."
+        default: modeNote = "Hourly: at most one check each hour. A held item gets a check at once."
+        }
+        let shared: [PlannerSettings.SharedFeature] = [.serial, .parallel]
+        b.addFull(card("Planner", [
+            FieldRow("Project", pick),
+            FieldRow("Planner", note: modeNote,
+                     segmented(["Off", "Hourly", "Live"], selected: modes.firstIndex(of: s.mode) ?? 1, label: "Planner") { i in
+                book.update(pk) { $0.mode = modes[i] }
+            }),
+            FieldRow("Feature areas", note: "Core areas are always one at a time.",
+                     segmented(["One at a time", "Allow two at once"], selected: shared.firstIndex(of: s.sharedFeature) ?? 0, label: "Feature areas") { i in
+                book.update(pk) { $0.sharedFeature = shared[i] }
+            }),
+        ]))
+        b.addFull(areasCard(pk))
+        b.addFull(NSTextField.text("Without a cloud account, the changed paths and the import graph stay on this Mac. With one, the paths sync. File text never leaves the Mac.",
+                                   size: 11.5, color: Palette.dim, lines: 3))
+    }
+
+    private func areasCard(_ pk: String) -> NSView {
+        let book = data.planner
+        let catalog = book.catalog(pk)
+        let add = ActionButton("Add area…", symbol: "plus") { [weak self] in self?.addArea(pk) }
+        let scan = ActionButton("Scan imports", symbol: "arrow.triangle.branch") { [weak self] in self?.app?.scanImportGraphs(force: true) }
+        scan.toolTip = "Read the imports of the repo and propose areas. Only paths go to the cloud."
+        scan.isEnabled = hasCloud
+        let rows: [NSView] = catalog.areas.map { a in
+            let rules = a.rules.map { $0.source == .user ? $0.glob : "\($0.glob) (\($0.source.rawValue))" }.joined(separator: ", ")
+            let kind = MenuChip(a.kind.isCore ? "◆ Core" : "◇ Feature") {
+                [(AreaKind.core, "◆ Core"), (.feature, "◇ Feature")].map { k, t in
+                    MenuAction(t) { book.update(catalog: pk) { c in if let i = c.areas.firstIndex(where: { $0.name == a.name }) { c.areas[i].kind = k } } }
+                }
+            }
+            kind.setAccessibilityLabel("Kind of \(a.name)")
+            var views: [NSView] = [TwoLine(a.name, rules.isEmpty ? "No path rules" : rules, weight: .medium), Spacer()]
+            if a.proposed {
+                views += [NSTextField.text("From the import graph", size: 11.5, color: Palette.dim), kind,
+                          ActionButton("Accept") { book.update(catalog: pk) { c in if let i = c.areas.firstIndex(where: { $0.name == a.name }) { c.areas[i].proposed = false } } },
+                          ActionButton("Dismiss") { book.update(catalog: pk) { c in c.areas.removeAll { $0.name == a.name } } }]
+            } else {
+                views += [kind, ActionButton("Rules…") { [weak self] in self?.editRules(pk, a) }]
+            }
+            return Row(views, height: 52, label: "\(a.name), \(a.kind.isCore ? "core" : "feature")\(a.proposed ? ", proposed" : ""). \(rules)")
+        }
+        let v = NSStackView(v: [SectionTitle("Areas", count: catalog.areas.count, action: NSStackView(h: [scan, add], spacing: 6))], spacing: 6)
+        let c = ListCard()
+        rows.forEach { c.add($0) }
+        if rows.isEmpty { c.add(EmptyNote("No areas yet. The Planner proposes areas from the import graph of the repos.", symbol: "square.dashed")) }
+        v.addFull(c)
+        v.addFull(NSTextField.text("A path rule is a glob: * is one part of a path, ** is any number of parts. Your rules win over learned and graph rules.",
+                                   size: 11.5, color: Palette.dim, lines: 2))
+        return v
+    }
+
+    private func addArea(_ pk: String) {
+        let a = NSAlert()
+        a.messageText = "New area"
+        a.informativeText = "An area has lower-case letters, digits and hyphens. Use commas between the path rules."
+        let name = NSTextField(frame: NSRect(x: 0, y: 30, width: 300, height: 24))
+        name.placeholderString = "status-page"
+        let globs = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        globs.placeholderString = "Sources/OverSireApp/status_*.swift"
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 54))
+        box.addSubview(name)
+        box.addSubview(globs)
+        a.accessoryView = box
+        a.addButton(withTitle: "Add")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = name
+        guard a.runModal() == .alertFirstButtonReturn, let n = ItemAreas.clean([name.stringValue]).first else { return }
+        let rules = globs.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            .map { AreaRule(glob: $0, source: .user) }
+        data.planner.update(catalog: pk) { c in
+            c.areas.removeAll { $0.name == n }
+            c.areas.append(AreaDef(name: n, kind: .core, rules: rules))
+        }
+        reload()
+    }
+
+    private func editRules(_ pk: String, _ area: AreaDef) {
+        let a = NSAlert()
+        a.messageText = "Path rules of \(area.name)"
+        a.informativeText = "Use commas between the rules. Learned and graph rules stay."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        f.stringValue = area.rules.filter { $0.source == .user }.map(\.glob).joined(separator: ", ")
+        a.accessoryView = f
+        a.addButton(withTitle: "Save")
+        a.addButton(withTitle: "Cancel")
+        a.window.initialFirstResponder = f
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let user = f.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            .map { AreaRule(glob: $0, source: .user) }
+        data.planner.update(catalog: pk) { c in
+            guard let i = c.areas.firstIndex(where: { $0.name == area.name }) else { return }
+            c.areas[i].rules = user + c.areas[i].rules.filter { $0.source != .user }
+        }
+        reload()
     }
 
     private func notifications(_ b: NSStackView) {

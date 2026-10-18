@@ -46,12 +46,18 @@ final class ContractTests: XCTestCase {
         "item-relation": roundTrip(ItemRelation.self),
         "relation-patch": roundTrip(RelationPatch.self),
         "item-areas": roundTrip(ItemAreas.self),
+        "planner-settings": roundTrip(PlannerSettings.self),
+        "area-catalog": roundTrip(AreaCatalog.self),
+        "area-claim": roundTrip(AreaClaim.self),
+        "area-candidates": roundTrip(AreaCandidates.self),
+        "changed-paths": roundTrip(ChangedPaths.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
+    // jobs.json and suggestion.json are 2: the job kind and the proposal type sequence became plan.
     static let versions: [String: Int] = [
         "refs.json": 1, "provider-event.json": 1, "actions.json": 1, "ai-task.json": 1, "account.json": 1,
-        "store.json": storeSchemaVersion, "jobs.json": 1, "suggestion.json": 1, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
+        "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1,
     ]
 
@@ -118,6 +124,28 @@ final class ContractTests: XCTestCase {
             guard s.kind != .memoryUpkeep, s.kind != .digest else { continue }   // these keys name a topic, not a version
             XCTAssertEqual(s.dedupeKey, Suggestion.dedupeKey(subject: s.subject, kind: s.kind, version: s.subjectVersion), name)
         }
+    }
+
+    func testV1SequenceIsUnknown() throws {
+        let url = Self.root.appendingPathComponent("fixtures/suggestion/v1-sequence.json")
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        let s = try dec.decode(Suggestion.self, from: Data(contentsOf: url))
+        guard case .unknown(let type, _)? = s.proposal else { return XCTFail("v1 sequence must decode as unknown") }
+        XCTAssertEqual(type, "sequence")
+    }
+
+    func testPlanFixtureLines() throws {
+        let url = Self.root.appendingPathComponent("fixtures/suggestion/plan.json")
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        guard case .plan(let d)? = try dec.decode(Suggestion.self, from: Data(contentsOf: url)).proposal else { return XCTFail("no plan") }
+        XCTAssertEqual(d.lines.count, 4)
+        XCTAssertNil(d.order[0].after)
+        let kept = d.dropping([1, 3])
+        XCTAssertEqual(kept.order.count, 1)
+        XCTAssertEqual(kept.relations.count, 1)
+        XCTAssertTrue(kept.areas.isEmpty)
     }
 
     func testPromptFilesAreInTheApp() throws {

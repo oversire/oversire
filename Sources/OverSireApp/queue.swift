@@ -26,6 +26,7 @@ struct QueueWorld {
     var blockers: (String) -> [String]? = { _ in [] }   // open blockers of a key; nil while the relations load
     var areas: (String) -> [String] = { _ in [] }       // code areas of a key (cloud)
     var busyAreas: (QueueLane) -> [String: String] = { _ in [:] }   // area → the key that runs in it (cloud)
+    var sharable: (QueueLane, String) -> Bool = { _, _ in false }   // a feature area that two items can hold (cloud)
 }
 
 // Why the queue skips an entry.
@@ -58,7 +59,7 @@ extension QueueLane {
         var p = Pick(holds: [:])
         let busyAreas = world.busyAreas(self)
         for e in entries {
-            if let hold = Self.hold(e.key, world: world, busyAreas: busyAreas) { p.holds[e.key] = hold; continue }
+            if let hold = Self.hold(e.key, world: world, busyAreas: busyAreas.filter { !world.sharable(self, $0.key) }) { p.holds[e.key] = hold; continue }
             if p.next == nil { p.next = e.key }
         }
         guard let first = entries.first(where: { $0.key == p.next }), world.busy(self) < world.slots(self) else { return p }
@@ -100,6 +101,7 @@ final class WorkQueue {
     private var observer: NSObjectProtocol?
     /// The area book with a cloud account, else nil.
     var areaBook: () -> ItemAreaBook? = { nil }
+    var planner: () -> PlannerBook? = { nil }
 
     init(writes: StoreWrites, store: ProjectStore, agents: AgentIndex) {
         self.writes = writes
@@ -196,7 +198,8 @@ final class WorkQueue {
                 return rel.relations(k) == nil ? nil : self.store.blockers(of: k)
             },
             areas: { [unowned self] k in self.areaBook()?.areas(key: k) ?? [] },
-            busyAreas: { [unowned self] lane in self.areaBook()?.busy(running: self.running(lane)) ?? [:] })
+            busyAreas: { [unowned self] lane in self.areaBook()?.busy(running: self.running(lane)) ?? [:] },
+            sharable: { [unowned self] lane, a in self.planner()?.sharable(a, project: lane.project) ?? false })
     }
 
     // Adds items from Plane triggers, then starts what is due. Call it after each data change.

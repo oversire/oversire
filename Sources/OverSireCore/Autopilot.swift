@@ -6,6 +6,10 @@ import Foundation
 // The app reads these records from the store. The JSON form is in Contract/schema/
 // (jobs.json, suggestion.json, work-order.json, memory.json).
 
+/// The x-oversire-schema numbers of Contract/schema/jobs.json and suggestion.json. 2: sequence became plan.
+public let jobsSchemaVersion = 2
+public let suggestionSchemaVersion = 2
+
 /// Open set. Each kind has a prompt in Contract/prompts.
 public struct AIJobKind: RawRepresentable, Hashable, Sendable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
     public let rawValue: String
@@ -24,7 +28,8 @@ public struct AIJobKind: RawRepresentable, Hashable, Sendable, Codable, Expressi
     public static let changeSummary: AIJobKind = "changeSummary"
     public static let tidy: AIJobKind = "tidy"
     public static let memoryUpkeep: AIJobKind = "memoryUpkeep"
-    public static let sequence: AIJobKind = "sequence"
+    /// The Planner (paid). Schema 1 named it sequence.
+    public static let plan: AIJobKind = "plan"
 }
 
 // MARK: Jobs
@@ -453,13 +458,13 @@ public enum Proposal: Hashable, Sendable {
     case runAction(RunAction)
     case workOrder(WorkOrderDraft)
     case memory(MemoryDraft)
-    case sequence(SequenceDraft)
-    /// A type that this app does not know. It keeps the JSON as it is.
+    case plan(PlanDraft)
+    /// A type that this app does not know, for example sequence of schema 1. It keeps the JSON as it is.
     case unknown(type: String, json: JSONValue)
 }
 
 extension Proposal: Codable {
-    private enum CodingKeys: String, CodingKey { case type, patch, action, order, memory, sequence }
+    private enum CodingKeys: String, CodingKey { case type, patch, action, order, memory, plan }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -469,7 +474,7 @@ extension Proposal: Codable {
         case "runAction": self = .runAction(try c.decode(RunAction.self, forKey: .action))
         case "workOrder": self = .workOrder(try c.decode(WorkOrderDraft.self, forKey: .order))
         case "memory": self = .memory(try c.decode(MemoryDraft.self, forKey: .memory))
-        case "sequence": self = .sequence(try c.decode(SequenceDraft.self, forKey: .sequence))
+        case "plan": self = .plan(try c.decode(PlanDraft.self, forKey: .plan))
         case let t: self = .unknown(type: t, json: try JSONValue(from: decoder))
         }
     }
@@ -494,45 +499,10 @@ extension Proposal: Codable {
         case .memory(let m):
             try c.encode("memory", forKey: .type)
             try c.encode(m, forKey: .memory)
-        case .sequence(let q):
-            try c.encode("sequence", forKey: .type)
-            try c.encode(q, forKey: .sequence)
+        case .plan(let d):
+            try c.encode("plan", forKey: .type)
+            try c.encode(d, forKey: .plan)
         }
-    }
-}
-
-/// The proposal of a sequence job: relations of the subject item and its code areas.
-public struct SequenceDraft: Hashable, Sendable, Codable {
-    public static let maxAreas = 6
-
-    public var relations: RelationPatch
-    /// Empty: no change to the areas.
-    public var areas: [String]
-
-    public init(relations: RelationPatch = RelationPatch(), areas: [String] = []) {
-        self.relations = relations
-        self.areas = areas
-    }
-
-    public enum Line: Hashable, Sendable {
-        case add(ItemRelation), remove(ItemRelation), areas([String])
-    }
-
-    /// The lines that SuggestionEdit.drop counts: each add, each remove, then one line for all areas.
-    public var lines: [Line] {
-        relations.add.map(Line.add) + relations.remove.map(Line.remove) + (areas.isEmpty ? [] : [.areas(areas)])
-    }
-
-    public func dropping(_ indexes: Set<Int>) -> SequenceDraft {
-        var out = SequenceDraft()
-        for (i, line) in lines.enumerated() where !indexes.contains(i) {
-            switch line {
-            case .add(let r): out.relations.add.append(r)
-            case .remove(let r): out.relations.remove.append(r)
-            case .areas(let a): out.areas = a
-            }
-        }
-        return out
     }
 }
 

@@ -242,8 +242,8 @@ final class InboxPage: Page {
         }
         let tabs = Route.InboxTab.visible(data.has, cloud: hasCloud)
         let kept = all.filter(filter.pass)
-        let sequences = hasCloud ? data.suggestions.openSequences() : []
-        let counts = tabs.map { t in t == .suggestions ? sequences.count : kept.filter { t == .all ? true : $0.source.tab == t }.count }
+        let plans = hasCloud ? data.suggestions.openPlans() : []
+        let counts = tabs.map { t in t == .suggestions ? plans.count : kept.filter { t == .all ? true : $0.source.tab == t }.count }
         col.addFull(PageHeader("Inbox", caption: "Plane, GitHub, Orca and AI checks in one list. Intake waits for triage.",
                                actions: [ActionButton("Mark all read", symbol: "checkmark") { [weak self] in
             guard let self else { return }
@@ -253,7 +253,7 @@ final class InboxPage: Page {
         strip.onSelect = { [weak self] i in self?.go(.inbox(tabs[i])) }
         col.addArrangedSubview(strip)
         if tab == .suggestions {
-            suggestions(col, sequences)
+            suggestions(col, plans)
             return
         }
         col.addArrangedSubview(filterBar(all.filter { tab == .all || $0.source.tab == tab }))
@@ -274,10 +274,10 @@ final class InboxPage: Page {
     }
 
     private func suggestions(_ col: NSStackView, _ list: [Suggestion]) {
-        col.addFull(NSStackView(h: [NSTextField.text("The cloud proposes blockers, related items and code areas. Nothing changes before you accept.",
-                                                     size: 12, color: Palette.dim, lines: 2), Spacer(), SequenceCard.cloudMark()], spacing: 8))
-        if list.isEmpty { col.addFull(EmptyNote("No open suggestions.", symbol: "lightbulb")) }
-        for s in list { if let d = s.sequence { col.addFull(suggestionCard(s, draft: d)) } }
+        col.addFull(NSStackView(h: [NSTextField.text("The Planner proposes the order, blockers and code areas. Nothing changes before you accept.",
+                                                     size: 12, color: Palette.dim, lines: 2), Spacer(), PlannerCard.cloudMark()], spacing: 8))
+        if list.isEmpty { col.addFull(EmptyNote("No open plan changes.", symbol: "lightbulb")) }
+        for s in list { if let d = s.plan { col.addFull(planCard(s, draft: d)) } }
     }
 
     // The Project and Priority chips. A menu value shows its count in this tab, with the other filter on.

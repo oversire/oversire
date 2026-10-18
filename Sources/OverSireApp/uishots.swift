@@ -18,6 +18,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var memory = ProjectMemory(writes: writes)
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
+    lazy var planner = PlannerBook(writes: writes)
     lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json",
                                                                                        store: projectStore, trackers: ENV), memory: memory)
     lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
@@ -72,6 +73,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         projectStore.hold = UIShots.loading
         projectStore.busy = busy
         queue.areaBook = { [unowned self] in UIShots.cloud == true ? self.areas : nil }
+        queue.planner = { [unowned self] in UIShots.cloud == true ? self.planner : nil }
         if UIShots.loading { RunPage.source = NeverAnswers() }
     }
 
@@ -84,11 +86,11 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
     // OVERSIRE_UISHOTS_CLOUD=0 or 1: the Cloud AI sections show without or with a cloud account.
     static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
-    // OVERSIRE_UISHOTS_SEQUENCE=1: a vision, relations, areas, a queue lane and a sequence suggestion in the OVERSIRE project.
-    static let sequence = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SEQUENCE"] == "1"
+    // OVERSIRE_UISHOTS_PLANNER=1: a vision, relations, areas, a queue lane and a plan change in the OVERSIRE project.
+    static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
 
     static var heldOrders: [WorkOrder] {
-        guard cloud == true, sequence else { return [] }
+        guard cloud == true, planner else { return [] }
         let item = { (key: String) in
             ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"),
                     id: key, key: key, url: URL(string: "https://app.plane.so/ocral/browse/\(key)/")!)
@@ -103,8 +105,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 order("o-h2", "OVERSIRE-90", WorkOrderHold(areas: ["contract"], since: Date().addingTimeInterval(-600)))]
     }
 
-    private func seedSequencing() {
-        guard UIShots.sequence else { return }
+    private func seedPlanner() {
+        guard UIShots.planner else { return }
         AI_CFG.queueOrder = false
         func ref(_ k: String) -> ItemRef? { projectStore.item(key: k).flatMap { $0.item.ref(in: $0.snap.summary.ref) } }
         func rel(_ kind: RelationKind, _ k: String) -> ItemRelation? { ref(k).map { ItemRelation(kind: kind, item: $0) } }
@@ -114,8 +116,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         rc.seed("OVERSIRE-84", [rel(.blockedBy, "OVERSIRE-83")].compactMap { $0 })
         for k in ["OVERSIRE-83", "OVERSIRE-86", "OVERSIRE-87", "OVERSIRE-88", "OVERSIRE-89"] { rc.seed(k, []) }
         let now = Date()
-        for (k, a) in [("OVERSIRE-82", ["queue", "app-ui"]), ("OVERSIRE-83", ["contract"]), ("OVERSIRE-86", ["contract", "cloud"]),
-                       ("OVERSIRE-87", ["cloud"]), ("OVERSIRE-89", ["runner"])] {
+        for (k, a) in [("OVERSIRE-82", ["queue", "app-ui"]), ("OVERSIRE-83", ["contract"]), ("OVERSIRE-84", ["queue"]),
+                       ("OVERSIRE-86", ["contract", "cloud"]), ("OVERSIRE-87", ["app-ui"]), ("OVERSIRE-89", ["runner"])] {
             if let r = ref(k) { areas.seed(ItemAreas(item: r, areas: a, updatedAt: now)) }
         }
         agentIndex.seed("OVERSIRE-83", AgentSession(phase: .working, since: now.addingTimeInterval(-900), repo: "oversire"))
@@ -128,14 +130,30 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         try? memory.saveVision("A small, native macOS menu bar app that shows the state of developer work in one place. "
                                + "Minimal by default, accessible, no telemetry. Paid features need the server; each provider works without it.",
                                of: snap.summary.ref)
-        if let subject = ref("OVERSIRE-88") {
-            let draft = SequenceDraft(relations: RelationPatch(add: [rel(.blockedBy, "OVERSIRE-83"), rel(.relatesTo, "OVERSIRE-81")].compactMap { $0 }),
-                                      areas: ["app-ui", "queue"])
-            suggestions.seed(Suggestion(id: "s-uishots-seq", subject: .item(subject), kind: .sequence, title: "Order OVERSIRE-88 after OVERSIRE-83",
-                                        body: "OVERSIRE-88 reads the ItemAreas records that OVERSIRE-83 adds to the contract. OVERSIRE-81 changes the same Sequence card.",
-                                        proposal: .sequence(draft), subjectVersion: "v1", createdAt: now.addingTimeInterval(-3600),
-                                        expiresAt: now.addingTimeInterval(3 * 86400 + 600)))
-        }
+        let lane = pk
+        planner.seed(PlannerSettings(project: lane, mode: .hourly, slots: 5, updatedAt: now))
+        planner.seed(AreaCatalog(project: lane, areas: [
+            AreaDef(name: "contract", kind: .core, rules: [AreaRule(glob: "Contract/**", source: .user)]),
+            AreaDef(name: "cloud", kind: .core, rules: [AreaRule(glob: "src/**", source: .learned)]),
+            AreaDef(name: "queue", kind: .feature, rules: [AreaRule(glob: "Sources/OverSireApp/queue*.swift", source: .user)]),
+            AreaDef(name: "app-ui", kind: .feature, rules: [AreaRule(glob: "Sources/OverSireApp/*_page.swift", source: .graph)]),
+            AreaDef(name: "runner", kind: .feature, rules: [AreaRule(glob: "runtime/**", source: .graph)]),
+            AreaDef(name: "store", kind: .core, rules: [AreaRule(glob: "Sources/OverSireCore/Store*.swift", source: .graph)], proposed: true),
+        ], updatedAt: now))
+        guard let project = ref("OVERSIRE-84")?.project, let i84 = ref("OVERSIRE-84"), let i86 = ref("OVERSIRE-86"),
+              let i83 = ref("OVERSIRE-83"), let i89 = ref("OVERSIRE-89") else { return }
+        let draft = PlanDraft(
+            order: [PlanDraft.OrderLine(item: i86, lane: lane, after: i89,
+                                        reason: "OVERSIRE-86 and OVERSIRE-83 both change the core area contract. OVERSIRE-89 can run now.")],
+            relations: [PlanDraft.RelationLine(item: i86, add: [ItemRelation(kind: .blockedBy, item: i83)],
+                                               reason: "OVERSIRE-86 reads the contract records that OVERSIRE-83 adds.")],
+            areas: [PlanDraft.AreaLine(item: i84, add: ["queue-page"], reason: "The diff of OVERSIRE-84 changes Sources/OverSireApp/queue_page.swift.")],
+            triggers: [PlannerTrigger(kind: .queued, subject: .item(i89), at: now.addingTimeInterval(-1200))],
+            overlaps: PlanDraft.Overlaps(before: 3, after: 0), kinds: ["queue-page": .feature])
+        suggestions.seed(Suggestion(id: "s-uishots-plan", subject: .project(project), kind: .plan, title: "Plan change for OVERSIRE",
+                                    body: "Start OVERSIRE-89 before OVERSIRE-86, so that two items do not change the core area contract.",
+                                    proposal: .plan(draft), subjectVersion: "v1", createdAt: now.addingTimeInterval(-3600),
+                                    expiresAt: now.addingTimeInterval(3 * 86400 + 600)))
     }
 
     static var billing: BillingState? {
@@ -264,7 +282,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     }
 
     private func shoot() {
-        seedSequencing()
+        seedPlanner()
         let w = AppWindow(data: self)
         window = w
         w.window?.setFrameAutosaveName("")
@@ -287,11 +305,21 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     if !p.hasPrefix("press:") { self.glance?.orderOut(nil); self.glance = nil }
                     if p.hasPrefix("press:") {
                         let spec = p.dropFirst(6).split(separator: "@", maxSplits: 1).map(String.init)
-                        if let root = (self.glance ?? w.window)?.contentView, !UIShots.press(spec[0], scope: spec.count > 1 ? spec[1] : nil, in: root) {
+                        if let root = (self.glance ?? PlanPage.openSheet ?? w.window)?.contentView, !UIShots.press(spec[0], scope: spec.count > 1 ? spec[1] : nil, in: root) {
                             print("UISHOTS no button \(p)")
                         }
                     } else if p.hasPrefix("sidebar:") {
                         if !w.sidebar.reopen(title: String(p.dropFirst(8))) { print("UISHOTS no sidebar entry \(p)") }
+                    } else if p.hasPrefix("segment:") {
+                        // segment:<label>: picks the segment with that label in the first segmented control that has it.
+                        let label = String(p.dropFirst(8))
+                        if let root = w.window?.contentView, let seg = UIShots.find(root, { s in
+                            guard let s = s as? NSSegmentedControl else { return false }
+                            return (0..<s.segmentCount).contains { s.label(forSegment: $0) == label }
+                        }) as? NSSegmentedControl, let i = (0..<seg.segmentCount).first(where: { seg.label(forSegment: $0) == label }) {
+                            seg.selectedSegment = i
+                            _ = seg.sendAction(seg.action, to: seg.target)
+                        } else { print("UISHOTS no segment \(p)") }
                     } else if p.hasPrefix("toggle:") {
                         let name = String(p.dropFirst(7))
                         if let root = w.window?.contentView, let sw = UIShots.find(root, { ($0 as? NSSwitch)?.accessibilityLabel() == name }) as? NSSwitch {
@@ -369,7 +397,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(glance?.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(glance?.windowNumber ?? PlanPage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")

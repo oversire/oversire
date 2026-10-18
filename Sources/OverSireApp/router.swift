@@ -14,7 +14,7 @@ enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
-        case general, providers, projects, repos, linking, writeback, live, orca, queue, ai, notifications, menubar, shortcuts
+        case general, providers, projects, repos, linking, writeback, live, orca, queue, planner, ai, notifications, menubar, shortcuts
 
         var title: String {
             switch self {
@@ -27,6 +27,7 @@ enum Route: Equatable {
             case .live: return "Cloud (beta)"
             case .orca: return "Orca"
             case .queue: return "Sessions and queue"
+            case .planner: return "Planner"
             case .ai: return "AI"
             case .notifications: return "Notifications"
             case .menubar: return "Menu bar"
@@ -40,6 +41,7 @@ enum Route: Equatable {
     case mine
     case agents
     case queue
+    case plan
     case runs(RunFilter)
     case run(repo: String, id: String)
     case prs
@@ -56,6 +58,7 @@ enum Route: Equatable {
         case .mine: return "mine"
         case .agents: return "sessions"
         case .queue: return "queue"
+        case .plan: return "plan"
         case .runs(let f): return f == .all ? "runs" : "runs/\(f.rawValue)"
         case .run(let repo, let id): return "run/\(repo)/\(id)"
         case .prs: return "prs"
@@ -93,6 +96,7 @@ enum Route: Equatable {
         case "mine": self = .mine
         case "sessions", "agents": self = .agents
         case "queue": self = .queue
+        case "plan": self = .plan
         case "runs": self = .runs(rest.first.flatMap { RunFilter(rawValue: $0.lowercased()) } ?? .all)
         case "run":
             guard rest.count == 3, Int(rest[2]) != nil else { return nil }
@@ -148,6 +152,7 @@ enum Route: Equatable {
         case .mine: return "My items"
         case .agents: return "Sessions"
         case .queue: return "Queue"
+        case .plan: return "Plan"
         case .runs: return "Runs"
         case .run(let repo, let id): return "Run \(id) · \(repo)"
         case .prs: return "Pull requests"
@@ -161,7 +166,7 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .runs(.all), .runs(.unlinked),
+        .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .plan, .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.providers),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
     ]

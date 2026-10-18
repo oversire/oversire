@@ -45,9 +45,9 @@ final class RelationCacheTests: XCTestCase {
     }
 
     func testStateLine() {
-        XCTAssertEqual(SequenceCard.state(open: ["OVERSIRE-80"], total: 2),
+        XCTAssertEqual(PlannerCard.state(open: ["OVERSIRE-80"], total: 2),
                        "Waits on 1 open blocker. The queue holds this item until OVERSIRE-80 is done.")
-        XCTAssertEqual(SequenceCard.state(open: [], total: 2), "All 2 blockers are done. The queue can start this item.")
-        XCTAssertEqual(SequenceCard.state(open: [], total: 0), "No blockers. The queue can start this item.")
+        XCTAssertEqual(PlannerCard.state(open: [], total: 2), "All 2 blockers are done. The queue can start this item.")
+        XCTAssertEqual(PlannerCard.state(open: [], total: 0), "No blockers. The queue can start this item.")
     }
 }

@@ -151,6 +151,13 @@ final class GlanceVC: NSViewController {
             Row([Glyph("list.number", color: Palette.mut), TwoLine("\(e.key) \(e.title)", "\(l.identifier) · \(e.condition.label)" + (data.queue.state(l.project)?.error.map { " · \($0)" } ?? ""))],
                 height: 40, label: "Next in \(l.identifier): \(e.key) \(e.title), \(e.condition.label)") { [weak self] in self?.open(.queue) }
         }, empty: "The queue is empty.")
+        // One line only when a plan change waits. No status light change, no notification.
+        let plans = UIShots.cloud ?? data.relay.canRun ? data.suggestions.openPlans().reduce(0) { $0 + ($1.plan?.lines.count ?? 0) } : 0
+        if plans > 0 {
+            let text = "Plan: \(plans) suggestion\(plans == 1 ? "" : "s")"
+            body.addFull(Row([Glyph("rectangle.split.3x1", color: Palette.intake), NSTextField.text(text, size: 12.5), Spacer(),
+                              Glyph("chevron.right", color: Palette.dim, size: 11)], height: 32, label: text) { [weak self] in self?.open(.plan) })
+        }
 
         guard data.has(.intake) else { return }
         let intake = data.projectStore.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }

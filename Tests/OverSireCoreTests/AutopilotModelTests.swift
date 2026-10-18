@@ -66,17 +66,6 @@ final class AutopilotModelTests: XCTestCase {
         XCTAssertEqual(try decode(WorkOrder.State.self, #""held""#), .held)
     }
 
-    func testSequenceLinesDrop() {
-        let a = ItemRelation(kind: .blockedBy, item: item(1)), b = ItemRelation(kind: .relatesTo, item: item(2))
-        let c = ItemRelation(kind: .blocks, item: item(3))
-        let q = SequenceDraft(relations: RelationPatch(add: [a, b], remove: [c]), areas: ["queue", "queue-ui"])
-        XCTAssertEqual(q.lines, [.add(a), .add(b), .remove(c), .areas(["queue", "queue-ui"])])
-        XCTAssertEqual(q.dropping([]), q)
-        XCTAssertEqual(q.dropping([1, 3]), SequenceDraft(relations: RelationPatch(add: [a], remove: [c])))
-        XCTAssertEqual(q.dropping([0, 1, 2, 3]), SequenceDraft())
-        XCTAssertEqual(q.dropping([9]), q, "an index out of range drops nothing")
-    }
-
     func testAreaClean() {
         XCTAssertEqual(ItemAreas.clean(["Queue UI", "queue-ui", "a_b", "", String(repeating: "x", count: 33), "api"]), ["queue-ui", "api"])
         XCTAssertEqual(ItemAreas.clean((1...9).map { "a\($0)" }).count, 6)

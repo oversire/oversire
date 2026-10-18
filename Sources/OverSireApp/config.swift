@@ -78,7 +78,7 @@ struct AgentsConfig: Codable, Equatable {
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()
     }
 
-    func slots(_ projectKey: String) -> Int { max(1, slots[projectKey] ?? 1) }
+    func slots(_ projectKey: String) -> Int { max(1, slots[projectKey] ?? PlannerSettings.defaultSlots) }
 }
 
 // What OverSire may add to Plane. It never changes text of other people.

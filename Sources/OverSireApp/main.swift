@@ -82,6 +82,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
+    lazy var planner = PlannerBook(writes: STORE_WRITES)
+    lazy var plannerSignals = PlannerSignals(commands: ProcessRunner(), writes: STORE_WRITES)
+    var signalTimer: Timer?
     lazy var aiChecks = AgentJudge(path: CHECKS_PATH, agents: agentIndex, queue: queue)
     lazy var writeBack: PlaneWriteBack = {
         let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, trackers: ENV)
@@ -197,7 +200,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         catalogTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             self?.catalog.refreshIfStale()
             self?.projectCatalog.refreshIfStale()
+            self?.scanImportGraphs()
         }
+        signalTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in self?.sendChangedPaths() }
         cloudSetup.planeClient = { ENV.tracker($0) as? any WebhookManaging }
         ENV.onRemove = { [weak self] id in
             if id.provider == .plane { self?.cloudSetup.removePlaneHook(id.id) }
@@ -227,12 +232,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         agentIndex.startTimer()
-        for n in [WorkQueue.changed, AgentJudge.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed] {
+        for n in [WorkQueue.changed, AgentJudge.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
             }
         }
         queue.areaBook = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.areas : nil }
+        queue.planner = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.planner : nil }
         // A loaded blocker can free or hold a queue entry.
         NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -692,6 +698,23 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     // MARK: - Run actions
+
+    // The Planner signals sync only with a cloud account. Without one, the paths stay on this Mac.
+    func sendChangedPaths() {
+        guard relay.canRun else { return }
+        var items: [String: (ItemRef, String)] = [:]
+        for (k, a) in agentIndex.agents where [.starting, .working, .waiting].contains(a.phase) {
+            guard let path = workstreams.stream(k)?.checkouts.first?.path, let found = projectStore.item(key: k),
+                  let ref = found.item.ref(in: found.snap.summary.ref) else { continue }
+            items[k] = (ref, path)
+        }
+        plannerSignals.tick(items)
+    }
+
+    func scanImportGraphs(force: Bool = false) {
+        guard relay.canRun else { return }
+        plannerSignals.scan(PROJECTS_CFG.orca.roots.filter { !$0.value.isEmpty }, force: force)
+    }
 
     func has(_ c: Capability) -> Bool { ENV.has(c) }
 

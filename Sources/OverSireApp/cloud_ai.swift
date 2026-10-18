@@ -98,13 +98,25 @@ extension Page {
 
     var hasCloud: Bool { UIShots.cloud ?? data.relay.canRun }
 
-    /// The sequence suggestion card. Accept and Dismiss write the decision through the store.
-    func suggestionCard(_ s: Suggestion, draft: SequenceDraft) -> NSView {
+    /// The review of a plan change. Accept and Dismiss write the decision through the store.
+    func planReview(_ s: Suggestion, draft: PlanDraft, done: (() -> Void)? = nil) -> PlanReviewView {
         let book = data.suggestions
         let device = RELAY.deviceID.isEmpty ? nil : RELAY.deviceID
-        return SequenceSuggestionCard(s, draft: draft, store: data.projectStore,
-                                      accept: { [weak self] drop in book.accept(s.id, drop: drop, by: device); self?.reload() },
-                                      dismiss: { [weak self] in book.dismiss(s.id, by: device); self?.reload() },
-                                      open: { [weak self] k in self?.go(.item(k, .overview)) })
+        let project = s.lane ?? ""
+        let planner = data.planner
+        return PlanReviewView(s, draft: draft, store: data.projectStore, kind: { planner.kind($0, project: project) },
+                              accept: { [weak self] drop in book.accept(s.id, drop: drop, by: device); done?(); self?.reload() },
+                              dismiss: { [weak self] in book.dismiss(s.id, by: device); done?(); self?.reload() })
+    }
+
+    /// The plan change as a card, for the Inbox.
+    func planCard(_ s: Suggestion, draft: PlanDraft) -> NSView {
+        let c = Card(fill: Palette.intake.withAlphaComponent(0.06), border: Palette.intake.withAlphaComponent(0.55))
+        let lane = data.queue.lanes.first { $0.project == s.lane }
+        c.add(NSStackView(h: [Chiplet("Planner", symbol: "arrow.triangle.branch", color: Palette.intake),
+                              NSTextField.text("Plan change for \(lane?.identifier ?? "a lane")", size: 13, weight: .semibold), Spacer(),
+                              ActionButton("Show the plan", style: .link) { [weak self] in self?.go(.plan) }, PlannerCard.cloudMark()], spacing: 7))
+        c.add(planReview(s, draft: draft))
+        return c
     }
 }

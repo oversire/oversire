@@ -192,6 +192,8 @@ public struct ItemAreas: StoreRecord {
 
     public enum Source: String, Codable, Sendable { case user, suggestion }
 
+    public static let maxAreas = 6
+
     public let id: String               // ItemAreas.id(of:)
     public let item: ItemRef
     public var areas: [String]
@@ -218,7 +220,7 @@ public struct ItemAreas: StoreRecord {
             guard !tag.isEmpty, tag.count <= 32, tag.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }),
                   !out.contains(tag) else { continue }
             out.append(tag)
-            if out.count == SequenceDraft.maxAreas { break }
+            if out.count == maxAreas { break }
         }
         return out
     }
