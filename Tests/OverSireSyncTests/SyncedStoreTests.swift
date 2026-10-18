@@ -209,6 +209,30 @@ final class SyncedStoreTests: XCTestCase {
         XCTAssertEqual(ops.first { $0.id == "n1" }?.device, "b")
     }
 
+    func testANewCollectionSyncsTheRecordsOfAnOlderVersion() async throws {
+        let hub = FakeStoreHub()
+        let settings = PlannerSettings(project: "ocral/p", mode: .live, slots: 2, updatedAt: Date(timeIntervalSince1970: 0))
+        _ = try await hub.replication().push([StoreOp(collection: PlannerSettings.collection, id: settings.id, op: .put, record: try JSONValue(settings),
+                                                      hlc: "1790000000000-0000-b", device: "b")])
+        let dir = root.appendingPathComponent("a")
+        await client("a", hub).sync()
+
+        // An older app skipped the record and had a local catalog. Its sync state has no list of collections.
+        let local = LocalStore(dir: dir.appendingPathComponent("store"))
+        try await local.delete(PlannerSettings.self, id: settings.id)
+        try await local.put(AreaCatalog(project: "ocral/p", updatedAt: Date(timeIntervalSince1970: 0)))
+        try Data(#"{"seeded":true,"clocks":{}}"#.utf8).write(to: dir.appendingPathComponent("sync/clocks.json"))
+
+        let a = client("a", hub)
+        await a.sync()
+        let slots = try await a.get(PlannerSettings.self, id: settings.id)?.slots
+        XCTAssertEqual(slots, 2, "the pull reads the old ops again")
+        let ops = await hub.ops()
+        XCTAssertEqual(ops.map(\.collection).sorted(), [AreaCatalog.collection, PlannerSettings.collection])
+        let pending = await a.pending
+        XCTAssertEqual(pending, 0)
+    }
+
     func testResetDropsRecordsThatAreGone() async throws {
         let hub = FakeStoreHub()
         let a = client("a", hub), b = client("b", hub, wall: Wall(1_790_000_001_000))

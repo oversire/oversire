@@ -10,12 +10,14 @@ public actor SyncedStore: Store {
     /// The collections that sync. Derived state and caches do not.
     public static let collections: [any StoreRecord.Type] = [
         QueueLane.self, QueueTrigger.self, IgnoredFailure.self, Pin.self, Snooze.self, Note.self, AgentLink.self,
-        MemoryEntry.self, AIJob.self, Suggestion.self, ItemAreas.self,
+        MemoryEntry.self, AIJob.self, Suggestion.self, ItemAreas.self, PlannerSettings.self, AreaCatalog.self, AreaCandidates.self,
+        ChangedPaths.self,
     ]
     /// The collections that only the hub writes. They come down and never go up.
-    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self, WorkOrder.self, RunnerState.self, RunnerSession.self]
+    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self, WorkOrder.self, RunnerState.self, RunnerSession.self, AreaClaim.self]
     private static let byName = Dictionary(uniqueKeysWithValues: collections.map { ($0.collection, $0) })
     private static let pulled = Dictionary(uniqueKeysWithValues: (collections + hubOnly).map { ($0.collection, $0) })
+    private static let names = pulled.keys.sorted()
 
     public nonisolated let local: LocalStore
     private let replication: any StoreReplication
@@ -115,9 +117,11 @@ public actor SyncedStore: Store {
         repeat {
             syncAgain = false
             do {
+                // A new app version can sync more collections. It reads all ops again and sends the local records once.
+                let grew = state.known != Self.names
                 try await push()
-                try await pull()
-                if !state.seeded { try await seed() }
+                try await pull(all: grew)
+                if !state.seeded || grew { try await seed() }
                 lastSync = now()
                 lastError = nil
                 backoff.reset()
@@ -161,8 +165,8 @@ public actor SyncedStore: Store {
         }
     }
 
-    private func pull() async throws {
-        var cursor = cursors[Self.cursorKey]
+    private func pull(all: Bool) async throws {
+        var cursor = all ? nil : cursors[Self.cursorKey]
         var reset = false
         var seen = Set<String>()
         while true {
@@ -176,7 +180,7 @@ public actor SyncedStore: Store {
             if !page.more { break }
         }
         // Before the seed, the local records did not go to the server yet: keep them.
-        if reset && state.seeded { try await drop(keeping: seen) }
+        if reset && state.seeded && !all { try await drop(keeping: seen) }
         pruneTombstones()
         saveState()
         cursors[Self.cursorKey] = cursor
@@ -224,6 +228,7 @@ public actor SyncedStore: Store {
     private func seed() async throws {
         for type in Self.collections { try await seed(type) }
         state.seeded = true
+        state.known = Self.names
         saveState()
         if !outbox.pending.isEmpty { syncAgain = true }
     }
@@ -259,6 +264,8 @@ struct RecordClock: Codable, Hashable, Sendable {
 struct SyncState: Codable, Sendable {
     var seeded = false
     var clocks: [String: RecordClock] = [:]
+    /// The pulled collections at the last seed. Nil before this field.
+    var known: [String]?
 }
 
 extension JSONValue {
