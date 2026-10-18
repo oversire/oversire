@@ -153,6 +153,27 @@ final class SyncedStoreTests: XCTestCase {
         XCTAssertNotNil(kept)
     }
 
+    func testHubOnlyCollectionsComeDownAndNeverGoUp() async throws {
+        let hub = FakeStoreHub()
+        let state = BillingState(plan: "cloud", periodStart: Date(timeIntervalSince1970: 1_790_000_000), periodEnd: Date(timeIntervalSince1970: 1_792_600_000),
+                                 grantMicroUSD: 2_000_000, balanceMicroUSD: 5_000_000, dailyCapMicroUSD: 500_000)
+        _ = try await hub.replication().push([StoreOp(collection: BillingState.collection, id: "state", op: .put, record: try JSONValue(state),
+                                                      hlc: "1790000000000-0000-hub", device: "hub")])
+        // A Mac with a billing record from before the pairing.
+        let dir = root.appendingPathComponent("a")
+        try await LocalStore(dir: dir.appendingPathComponent("store")).put(BillingState(plan: "free", periodStart: .distantPast,
+                                                                                        periodEnd: .distantPast, grantMicroUSD: 0, dailyCapMicroUSD: 0))
+        let a = client("a", hub)
+        await a.sync()
+        let got = try await a.get(BillingState.self, id: "state")
+        XCTAssertEqual(got?.balanceMicroUSD, 5_000_000)
+        let ops = await hub.ops()
+        XCTAssertEqual(ops.map(\.device), ["hub"], "the seed does not send a hub-only record")
+        try await a.put(BillingState(plan: "free", periodStart: .distantPast, periodEnd: .distantPast, grantMicroUSD: 0, dailyCapMicroUSD: 0))
+        let pending = await a.pending
+        XCTAssertEqual(pending, 0, "a local write stays local")
+    }
+
     func testSeedSendsOldRecordsAndKeepsTheServerCopy() async throws {
         let hub = FakeStoreHub()
         let b = client("b", hub, wall: Wall(1_790_000_000_000))

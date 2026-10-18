@@ -9,9 +9,12 @@ struct CloudAIRecords {
     var jobs: [AIJob] = []
     var suggestions: [Suggestion] = []
     var orders: [WorkOrder] = []
+    /// The hub writes it. Nil until the first sync.
+    var billing: BillingState?
 
     static func load(_ w: StoreWrites) -> CloudAIRecords {
-        CloudAIRecords(jobs: w.load(AIJob.self), suggestions: w.load(Suggestion.self), orders: w.load(WorkOrder.self))
+        CloudAIRecords(jobs: w.load(AIJob.self), suggestions: w.load(Suggestion.self), orders: w.load(WorkOrder.self),
+                       billing: w.load(BillingState.self).first ?? UIShots.billing)
     }
 
     var jobsStatus: String {
@@ -25,6 +28,14 @@ struct CloudAIRecords {
         let waiting = orders.filter { [.queued, .sent, .acked].contains($0.state) }.count
         return waiting == 0 ? "No work orders" : "\(waiting) waiting"
     }
+    var creditsStatus: String? {
+        guard let b = billing else { return nil }
+        let balance = "\(Self.usd(b.balanceMicroUSD)) balance"
+        guard b.grantMicroUSD > 0 else { return balance }
+        return "\(Self.usd(b.grantLeftMicroUSD)) grant left · \(balance)" + (b.notice80Sent ? " · 80% used" : "")
+    }
+
+    static func usd(_ micro: Int) -> String { String(format: "%@$%.2f", micro < 0 ? "−" : "", Double(abs(micro)) / 1_000_000) }
 }
 
 final class CloudAICard: NSStackView {
@@ -50,6 +61,13 @@ final class CloudAICard: NSStackView {
             if let status { views.append(NSTextField.text(status, size: 12, color: Palette.dim)) }
             card.add(Row(views, height: 52, label: [title, note, status].compactMap { $0 }.joined(separator: ". ")))
         }
+        if let credits = records?.creditsStatus {
+            let warn = records?.billing?.notice80Sent == true
+            let glyph = Glyph(warn ? "exclamationmark.triangle" : "creditcard", color: warn ? Palette.warn : Palette.dim, size: 13)
+            glyph.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            let usage = ActionButton("Usage") { CloudAICard.openConsole() }
+            card.add(Row([glyph, TwoLine("Credits", credits), Spacer(), usage], height: 52, label: "Credits. \(credits)"))
+        }
         if records == nil {
             let about = ActionButton("About OverSire Cloud") { NSWorkspace.shared.open(CloudAICard.aboutURL) }
             card.add(Row([NSTextField.text("These need OverSire Cloud.", size: 12, color: Palette.dim), Spacer(), about],
@@ -59,6 +77,12 @@ final class CloudAICard: NSStackView {
         addFull(card)
     }
     required init(coder: NSCoder) { fatalError() }
+
+    /// The Usage tab of the console. Top-ups and the plan are there.
+    static func openConsole() {
+        guard !RELAY.workerURL.isEmpty, let url = URL(string: RELAY.workerURL + "/console") else { return }
+        NSWorkspace.shared.open(url)
+    }
 }
 
 extension Page {

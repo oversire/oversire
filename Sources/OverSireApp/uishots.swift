@@ -80,6 +80,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
     // OVERSIRE_UISHOTS_CLOUD=0 or 1: the Cloud AI sections show without or with a cloud account.
     static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
+    static var billing: BillingState? {
+        guard cloud == true else { return nil }
+        return BillingState(plan: "cloud", periodStart: Date().addingTimeInterval(-20 * 86400), periodEnd: Date().addingTimeInterval(11 * 86400),
+                            grantMicroUSD: 2_000_000, grantUsedMicroUSD: 1_684_000, balanceMicroUSD: 8_420_000, dailyCapMicroUSD: 500_000,
+                            notice80Sent: true)
+    }
 
     // A source that never answers.
     struct NeverAnswers: RunSource {

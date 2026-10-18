@@ -12,7 +12,10 @@ public actor SyncedStore: Store {
         QueueLane.self, QueueTrigger.self, IgnoredFailure.self, Pin.self, Snooze.self, Note.self, AgentLink.self,
         MemoryEntry.self, AIJob.self, Suggestion.self, WorkOrder.self,
     ]
+    /// The collections that only the hub writes. They come down and never go up.
+    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self]
     private static let byName = Dictionary(uniqueKeysWithValues: collections.map { ($0.collection, $0) })
+    private static let pulled = Dictionary(uniqueKeysWithValues: (collections + hubOnly).map { ($0.collection, $0) })
 
     public nonisolated let local: LocalStore
     private let replication: any StoreReplication
@@ -184,7 +187,7 @@ public actor SyncedStore: Store {
         let key = Self.key(op.collection, op.id)
         if let c = state.clocks[key], c.hlc >= op.hlc { return }
         // A collection of a newer app version stays on the server.
-        guard let type = Self.byName[op.collection] else { return }
+        guard let type = Self.pulled[op.collection] else { return }
         try await write(type, op, key: key)
     }
 
@@ -205,7 +208,7 @@ public actor SyncedStore: Store {
     // After a reset, a record that the server does not have is gone, unless its op still waits.
     private func drop(keeping seen: Set<String>) async throws {
         let waiting = Set(outbox.pending.map { Self.key($0.collection, $0.id) })
-        for type in Self.collections { try await drop(type, keeping: seen.union(waiting)) }
+        for type in Self.collections + Self.hubOnly { try await drop(type, keeping: seen.union(waiting)) }
     }
 
     private func drop<R: StoreRecord>(_ type: R.Type, keeping: Set<String>) async throws {
