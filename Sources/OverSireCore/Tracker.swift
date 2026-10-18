@@ -580,6 +580,29 @@ public protocol IntakeTriaging: Tracker {
     func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws
 }
 
+/// Makes items in the intake of a project.
+public protocol IntakeCreating: IntakeTriaging {
+    /// The item ref has the work item key. The intake item is for triage, for example a delete.
+    func createIntake(_ d: ItemDraft, in p: ProjectRef) async throws -> (item: ItemRef, intake: IntakeItem)
+}
+
+public struct AttachmentUpload: Hashable, Sendable {
+    public var name: String        // "snap-1.png"
+    public var mimeType: String    // "image/png"
+    public var data: Data
+
+    public init(name: String, mimeType: String, data: Data) {
+        self.name = name
+        self.mimeType = mimeType
+        self.data = data
+    }
+}
+
+public protocol AttachmentUploading: Tracker {
+    /// Uploads the file and links it to the item. Returns the attachment id.
+    func attach(_ f: AttachmentUpload, to i: ItemRef) async throws -> String
+}
+
 public protocol TimelineReading: Tracker {
     func timeline(_ i: ItemRef) async throws -> [ActivityEntry]
 }

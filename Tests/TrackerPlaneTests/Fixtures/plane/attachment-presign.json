@@ -1,0 +1,36 @@
+{
+  "asset_id": "02117ec0-db93-479b-a6c8-02d8cc4a27c6",
+  "asset_url": "/api/assets/v2/workspaces/ocral/projects/9ba476d7-ad30-44cf-b9ef-3fa1e42ed926/issues/553b085e-f612-47c9-8432-d754e14b9b1c/attachments/02117ec0-db93-479b-a6c8-02d8cc4a27c6/",
+  "attachment": {
+    "asset_url": "/api/assets/v2/workspaces/ocral/projects/9ba476d7-ad30-44cf-b9ef-3fa1e42ed926/issues/553b085e-f612-47c9-8432-d754e14b9b1c/attachments/02117ec0-db93-479b-a6c8-02d8cc4a27c6/",
+    "attributes": {
+      "name": "snap-1.png",
+      "size": 73,
+      "type": "image/png"
+    },
+    "content_type": "image/png",
+    "created_at": "2026-10-18T22:14:08.233200Z",
+    "created_by_id": "6008c025-3b03-4263-89fc-62f1153bfa27",
+    "external_id": null,
+    "external_source": null,
+    "id": "02117ec0-db93-479b-a6c8-02d8cc4a27c6",
+    "is_uploaded": false,
+    "name": "snap-1.png",
+    "size": 73,
+    "updated_at": "2026-10-18T22:14:08.233213Z",
+    "updated_by_id": null,
+    "work_item_id": "553b085e-f612-47c9-8432-d754e14b9b1c"
+  },
+  "upload_data": {
+    "fields": {
+      "Content-Type": "image/png",
+      "key": "ee00d43c-cdc2-418d-95d6-3784689ec393/a4e427f4b74242928019658f2265c45d-snap-1.png",
+      "policy": "REDACTED",
+      "x-amz-algorithm": "AWS4-HMAC-SHA256",
+      "x-amz-credential": "REDACTED",
+      "x-amz-date": "20261018T221408Z",
+      "x-amz-signature": "REDACTED"
+    },
+    "url": "https://planefs-uploads.s3.amazonaws.com/"
+  }
+}

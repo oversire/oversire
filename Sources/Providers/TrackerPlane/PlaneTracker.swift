@@ -2,12 +2,12 @@ import Foundation
 import OverSireCore
 
 /// The Plane adapter. One instance for each workspace, because a token works only in its own workspace.
-public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, LabelManaging, LinkManaging, ItemIndexing,
+public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, TimelineReading, LabelManaging, LinkManaging, ItemIndexing,
     RelationManaging, AssetResolving, WebhookManaging, @unchecked Sendable {
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit] }
+    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
@@ -308,6 +308,20 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
                             labels: (d["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
     }
 
+    /// Only v1 gives the new work item with its sequence number.
+    public func createIntake(_ d: ItemDraft, in p: ProjectRef) async throws -> (item: ItemRef, intake: IntakeItem) {
+        let o = try await api.send("POST", "\(ws)/projects/\(p.id)/intake-issues/", body: ["issue": d.planeFields]) as? [String: Any]
+        let issue = o?["issue_detail"] as? [String: Any] ?? [:]
+        guard let o, let id = PlaneAPI.id(o["id"]), let work = PlaneAPI.id(o["issue"]) ?? PlaneAPI.id(issue["id"]) else {
+            throw ProviderError.decoding("no id for the new intake item")
+        }
+        let key = "\(try await identifier(of: p))-\(PlaneAPI.int(issue["sequence_id"]) ?? 0)"
+        let ref = ItemRef(project: p, id: work, key: key, url: URL(string: workspace.itemURL(key))!)
+        let intake = IntakeItem(id: id, workItemId: work, name: issue["name"] as? String ?? d.title, priority: nil,
+                                createdAt: parseISO(o["created_at"] as? String) ?? Date(), author: nil, source: o["source"] as? String)
+        return (ref, intake)
+    }
+
     // The plain update endpoint refuses a status change, so status changes use /status/.
     public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
         let path = "\(ws)/projects/\(p.id)/intake-issues/\(i.workItemId)/"
@@ -475,6 +489,22 @@ public final class PlaneTracker: Tracker, IntakeTriaging, TimelineReading, Label
     public func addLink(_ i: ItemRef, url: URL, title: String) async throws {
         _ = try await api.send("POST", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/links/",
                                body: ["url": url.absoluteString, "title": title])
+    }
+
+    /// Three steps: Plane gives a presigned storage form, the file goes to storage, then Plane marks it as uploaded.
+    /// A description asset does not link to the item, so this uses the attachment endpoints.
+    public func attach(_ f: AttachmentUpload, to i: ItemRef) async throws -> String {
+        let path = "/api/v2/workspaces/\(workspace.slug)/projects/\(i.project.id)/work-items/\(i.id)/attachments/"
+        let o = try await api.send("POST", path, body: ["name": f.name, "size": f.data.count, "type": f.mimeType]) as? [String: Any]
+        let form = o?["upload_data"] as? [String: Any]
+        guard let id = PlaneAPI.id(o?["asset_id"]) ?? PlaneAPI.id((o?["attachment"] as? [String: Any])?["id"]),
+              let url = (form?["url"] as? String).flatMap(URL.init(string:)) else {
+            throw ProviderError.decoding("no upload form for \(f.name)")
+        }
+        let fields = (form?["fields"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
+        try await api.upload(f, to: url, fields: fields)
+        _ = try await api.send("PATCH", path + "\(id)/", body: ["is_uploaded": true])
+        return id
     }
 
     /// A signed download link for an uploaded file. It is good for one hour.

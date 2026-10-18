@@ -40,6 +40,26 @@ public enum TrackerConformance {
         }
         r.merge(await settings(t, project: p))
         r.merge(await relations(t, item: ref, project: p))
+        r.merge(await intakeAndAttachments(t, project: p))
+        return r
+    }
+
+    /// Makes one intake item, attaches one small file, then deletes the intake item.
+    public static func intakeAndAttachments(_ t: any Tracker, project p: ProjectRef) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let maker = t as? any IntakeCreating, t.capabilities.contains(.intakeCreate) else { return r }
+        guard let made = await r.step("createIntake", { try await maker.createIntake(ItemDraft(title: "Conformance intake"), in: p) })
+        else { return r }
+        r.expect(!made.item.key.isEmpty && t.keyFormat.keys(in: made.item.key) == [made.item.key.uppercased()],
+                 "createIntake gave the key \(made.item.key)")
+        r.expect(made.intake.workItemId == made.item.id, "the intake item names another work item")
+        if let up = t as? any AttachmentUploading, t.capabilities.contains(.attachments) {
+            let file = AttachmentUpload(name: "conformance.txt", mimeType: "text/plain", data: Data("conformance".utf8))
+            if let id = await r.step("attach", { try await up.attach(file, to: made.item) }) {
+                r.expect(!id.isEmpty, "attach gave no id")
+            }
+        }
+        _ = await r.step("delete the intake item", { try await maker.triage(made.intake, in: p, .delete) })
         return r
     }
 

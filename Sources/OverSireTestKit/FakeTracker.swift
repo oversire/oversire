@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory tracker with one project "FAKE" and four statuses.
-public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, @unchecked Sendable {
+public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -17,9 +17,13 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var settingsList: [String: ProjectSettings] = [:]
     private var patchList: [ProjectSettingsPatch] = []
     private var relationList: [String: [ItemRelation]] = [:]   // item id → relations
+    private var intakeList: [String: [IntakeItem]] = [:]       // project id → pending intake items
+    private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
+    private var uploadFailures: [String: Int] = [:]              // file name → failures left
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
-    public init(account: String = "fake", capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations]) {
+    public init(account: String = "fake",
+                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]
@@ -133,6 +137,51 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
             base.emit(.item, "updated", .item(item))
         }
     }
+
+    // MARK: Intake and attachments
+
+    public func intake(_ p: ProjectRef) async throws -> [IntakeItem] { try base.locked { intakeList[p.id] ?? [] } }
+
+    public func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail {
+        try base.locked {
+            guard let item = itemList[p.id]?.first(where: { $0.id == i.workItemId }) else { throw ProviderError.notFound }
+            return IntakeDetail(sequence: Int(item.key.split(separator: "-").last ?? ""), body: item.body ?? "", labels: item.labels)
+        }
+    }
+
+    public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
+        try base.locked {
+            intakeList[p.id]?.removeAll { $0.id == i.id }
+            if a == .delete || a == .decline { itemList[p.id]?.removeAll { $0.id == i.workItemId } }
+        }
+    }
+
+    public func createIntake(_ d: ItemDraft, in p: ProjectRef) async throws -> (item: ItemRef, intake: IntakeItem) {
+        guard capabilities.contains(.intakeCreate) else { throw ProviderError.unsupported(.intakeCreate) }
+        let ref = try await create(d, in: p)
+        let intake = IntakeItem(id: "n-" + ref.id, workItemId: ref.id, name: d.title, priority: d.priority,
+                                createdAt: base.now(), author: "me", source: "fake")
+        base.lockedValue { intakeList[p.id, default: []].append(intake) }
+        return (ref, intake)
+    }
+
+    public func attach(_ f: AttachmentUpload, to i: ItemRef) async throws -> String {
+        guard capabilities.contains(.attachments) else { throw ProviderError.unsupported(.attachments) }
+        return try base.locked {
+            if let n = uploadFailures[f.name], n > 0 {
+                uploadFailures[f.name] = n - 1
+                throw ProviderError.transport("upload of \(f.name) failed")
+            }
+            uploadList.append((i, f))
+            return "a\(uploadList.count)"
+        }
+    }
+
+    /// The uploads, oldest first.
+    public var uploads: [(item: ItemRef, file: AttachmentUpload)] { base.lockedValue { uploadList } }
+
+    /// The next `times` uploads of a file with this name fail.
+    public func failUploads(of name: String, times: Int) { base.lockedValue { uploadFailures[name] = times } }
 
     // MARK: Project settings
 

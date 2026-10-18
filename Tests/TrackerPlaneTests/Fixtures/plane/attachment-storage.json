@@ -1,0 +1,13 @@
+{
+  "body": "",
+  "headers": {
+    "ETag": "\"80a8e3697c43672dfb3136265b350f61\"",
+    "Location": "https://planefs-uploads.s3.amazonaws.com/ee00d43c-cdc2-418d-95d6-3784689ec393%2Fa4e427f4b74242928019658f2265c45d-snap-1.png",
+    "Server": "AmazonS3",
+    "x-amz-checksum-crc64nvme": "AtfZUHfRpk4=",
+    "x-amz-checksum-type": "FULL_OBJECT",
+    "x-amz-server-side-encryption": "AES256",
+    "x-amz-version-id": "E5NRX1uYCAoLCAycoxUTYT.LbKCW2MNV"
+  },
+  "status": 204
+}

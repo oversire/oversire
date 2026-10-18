@@ -67,6 +67,34 @@ struct PlaneAPI: Sendable {
         return out
     }
 
+    /// A multipart POST to presigned storage, with no API key. The form fields come before the file, as S3 needs.
+    func upload(_ f: AttachmentUpload, to url: URL, fields: [String: String]) async throws {
+        let boundary = "oversire-" + UUID().uuidString
+        var body = Data()
+        func part(_ name: String, file: String? = nil, type: String? = nil, _ value: Data) {
+            var head = "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\""
+            if let file { head += "; filename=\"\(file)\"" }
+            if let type { head += "\r\nContent-Type: \(type)" }
+            body.append(Data((head + "\r\n\r\n").utf8))
+            body.append(value)
+            body.append(Data("\r\n".utf8))
+        }
+        for (k, v) in fields.sorted(by: { $0.key < $1.key }) { part(k, Data(v.utf8)) }
+        part("file", file: f.name, type: f.mimeType, f.data)
+        body.append(Data("--\(boundary)--\r\n".utf8))
+        var req = URLRequest(url: url, timeoutInterval: 120)
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
+        let resp: HTTPURLResponse
+        do { (_, resp) = try await http.send(req) }
+        catch let e as ProviderError { throw e }
+        catch { throw ProviderError.transport(error.localizedDescription) }
+        guard (200..<300).contains(resp.statusCode) else {
+            throw ProviderError.vendor(code: String(resp.statusCode), message: "Storage gave HTTP \(resp.statusCode) for \(f.name)")
+        }
+    }
+
     /// On 429 waits for Retry-After (at most 10 s) and tries again, two times.
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil) async throws -> Any? {
         guard var comps = URLComponents(string: workspace.host.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else {

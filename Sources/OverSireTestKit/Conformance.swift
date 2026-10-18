@@ -47,6 +47,8 @@ public enum ProviderConformance {
     /// A capability that has a protocol and the protocol must go together.
     static let protocols: [(Capability, String, @Sendable (any Provider) -> Bool)] = [
         (.intake, "IntakeTriaging", { $0 is any IntakeTriaging }),
+        (.intakeCreate, "IntakeCreating", { $0 is any IntakeCreating }),
+        (.attachments, "AttachmentUploading", { $0 is any AttachmentUploading }),
         (.timeline, "TimelineReading", { $0 is any TimelineReading }),
         (.labels, "LabelManaging", { $0 is any LabelManaging }),
         (.links, "LinkManaging", { $0 is any LinkManaging }),
