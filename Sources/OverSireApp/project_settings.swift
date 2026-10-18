@@ -439,7 +439,7 @@ final class ProjectSettingsVC: NSViewController {
     @objc func doSave() {
         cfg.workspaces = PROJECTS_CFG.workspaces
         if let f = doc?.subviews.first(where: { $0.identifier?.rawValue == "orca-prompt" }) as? NSTextField {
-            cfg.orca.prompt = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            cfg.runtime.prompt = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         PROJECTS_CFG = cfg
         saveConfig()

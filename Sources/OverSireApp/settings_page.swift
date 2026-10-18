@@ -204,7 +204,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let ready = data.agentIndex.ready != nil
         b.addFull(Banner(o.enabled ? (ready ? .ok : .warning) : .idle,
                          title: o.enabled ? (ready ? "Orca is on." : "Orca is on, but OverSire could not read it.") : "Orca is off.",
-                         body: "CLI \(o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac") · agent \(o.agent)",
+                         body: "CLI \(o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac") · agent \(PROJECTS_CFG.runtime.agent)",
                          actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.projects)) }]))
         var rows: [NSView] = []
         for p in data.projectStore.tracked.sorted(by: { $0.identifier < $1.identifier }) {

@@ -37,5 +37,6 @@ public final class TemplateRuntime: AgentRuntime {
     public func repos(in env: RuntimeEnvironment?) async throws -> [RuntimeRepo] { throw ProviderError.unsupported("repos") }
     public func workspaces() async throws -> [Workspace] { throw ProviderError.unsupported("workspaces") }
     public func sessions(_ w: WorkspaceRef) async throws -> [RuntimeSession] { throw ProviderError.unsupported("sessions") }
+    /// A runtime that starts the agent in a terminal types `r.command` when it is set, else its default.
     public func launch(_ r: LaunchRequest) async throws -> Launch { throw ProviderError.unsupported("launch") }
 }

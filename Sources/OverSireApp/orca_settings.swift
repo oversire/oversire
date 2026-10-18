@@ -49,16 +49,16 @@ extension ProjectSettingsVC {
         doc.addSubview(st)
         y += 24
 
-        let agents = ProjectSettingsVC.orcaAgents + (ProjectSettingsVC.orcaAgents.contains(cfg.orca.agent) ? [] : [cfg.orca.agent])
-        y = popupRow("Agent", agents, agents.firstIndex(of: cfg.orca.agent) ?? 0, #selector(orcaAgentChanged(_:)), y: y, in: doc)
+        let agents = ProjectSettingsVC.orcaAgents + (ProjectSettingsVC.orcaAgents.contains(cfg.runtime.agent) ? [] : [cfg.runtime.agent])
+        y = popupRow("Agent", agents, agents.firstIndex(of: cfg.runtime.agent) ?? 0, #selector(orcaAgentChanged(_:)), y: y, in: doc)
 
         let pl = NSTextField(labelWithString: "Prompt")
         pl.font = .systemFont(ofSize: 12)
         pl.frame = NSRect(x: 16, y: y + 4, width: 80, height: 18)
         doc.addSubview(pl)
         let pf = NSTextField(frame: NSRect(x: 80, y: y, width: w - 96, height: 24))
-        pf.stringValue = cfg.orca.prompt
-        pf.placeholderString = OrcaConfig.defaultPrompt
+        pf.stringValue = cfg.runtime.prompt
+        pf.placeholderString = RuntimeConfig.defaultPrompt
         pf.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         pf.identifier = NSUserInterfaceItemIdentifier("orca-prompt")
         pf.target = self; pf.action = #selector(orcaPromptChanged(_:))
@@ -160,8 +160,8 @@ extension ProjectSettingsVC {
         probeOrca()
         rebuild()
     }
-    @objc func orcaPromptChanged(_ sender: NSTextField) { cfg.orca.prompt = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
-    @objc func orcaAgentChanged(_ sender: NSPopUpButton) { cfg.orca.agent = sender.titleOfSelectedItem ?? "claude" }
+    @objc func orcaPromptChanged(_ sender: NSTextField) { cfg.runtime.prompt = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) }
+    @objc func orcaAgentChanged(_ sender: NSPopUpButton) { cfg.runtime.agent = sender.titleOfSelectedItem ?? "claude" }
     @objc func orcaRootChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue else { return }
         cfg.orca.roots[key] = sender.selectedItem?.representedObject as? String ?? ""

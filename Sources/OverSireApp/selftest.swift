@@ -406,13 +406,39 @@ func runSelfTest() {
     let draftItem = Item(id: "u-1", key: "FRITZ-7", title: "Add quick capture", url: "https://app.plane.so/ocral/browse/FRITZ-7/",
                          statusOptionId: "s1", fields: [:], assignees: [], labels: [], author: nil, updatedBy: nil,
                          updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
-    var oc = OrcaConfig()
-    check(oc.prompt(for: draftItem) == "work on https://app.plane.so/ocral/browse/FRITZ-7/ in worktree group .wt/fritz-7", "orca prompt template")
-    oc.prompt = "{KEY}: {title}"
-    check(oc.prompt(for: draftItem) == "FRITZ-7: Add quick capture", "orca prompt fields")
+    var rc = RuntimeConfig()
+    check(rc.prompt(for: draftItem) == "work on https://app.plane.so/ocral/browse/FRITZ-7/ in worktree group .wt/fritz-7", "runtime prompt template")
+    rc.prompt = "{KEY}: {title}"
+    check(rc.prompt(for: draftItem) == "FRITZ-7: Add quick capture", "runtime prompt fields")
     if let d = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"orca":{"environment":"mbp","roots":{"a/b":"/w"}}}"#.utf8)) {
-        check(d.orca.environment == "mbp" && d.orca.agent == "claude" && d.orca.roots["a/b"] == "/w" && d.notifications.agentDone, "orca config decode")
+        check(d.orca.environment == "mbp" && d.runtime.agent == "claude" && d.orca.roots["a/b"] == "/w" && d.notifications.agentDone, "orca config decode")
     } else { check(false, "orca config decode") }
+
+    // Runtime config: an old config moves orca.agent and orca.prompt. A save writes runtime only.
+    if let old = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"orca":{"agent":"codex","prompt":"go {KEY}","cli":"/o"}}"#.utf8)) {
+        check(old.runtime.agent == "codex" && old.runtime.prompt == "go {KEY}" && old.orca.cli == "/o", "old orca agent migrates")
+        let json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(old))) as? [String: Any]
+        let orca = json?["orca"] as? [String: Any], runtime = json?["runtime"] as? [String: Any]
+        check(orca?["agent"] == nil && orca?["prompt"] == nil && runtime?["agent"] as? String == "codex", "save writes runtime")
+    } else { check(false, "old orca config decode") }
+    let fresh = #"{"orca":{"agent":"codex"},"runtime":{"agent":"opencode","commands":{"claude":"claude -n {name} --model opus","codex":"codex; rm"}}}"#
+    if var d = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(fresh.utf8)) {
+        check(d.runtime.agent == "opencode", "runtime wins over orca")
+        check(d.runtime.command(for: "claude").template == "claude -n {name} --model opus", "saved command")
+        check(d.runtime.command(for: "codex").template == "codex", "bad saved command uses the default")
+        check(d.runtime.intakeCommand == .intakeDefault, "intake default")
+        d.runtime.setCommand("claude", " claude -n {name} ")
+        d.runtime.setCommand("intake", "claude -n {name} --permission-mode plan --model opus")
+        check(d.runtime.commands["claude"] == nil && d.runtime.commands["intake"] != nil, "a default row is not saved")
+        if let back = try? JSONDecoder().decode(ProjectsConfig.self, from: JSONEncoder().encode(d)) {
+            check(back.runtime == d.runtime, "runtime config round trip")
+        } else { check(false, "runtime config round trip") }
+        d.runtime.agent = "claude"
+        d.runtime.commands["claude"] = "claude -n {name} --dangerously-skip-permissions"
+        let l = d.launch(for: Item(id: "u-2", key: "FRITZ-8", title: "x", url: "u", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
+                                   author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false))
+        check(l.agent == "claude" && l.command == "claude -n FRITZ-8 --dangerously-skip-permissions", "launch resolves the command")
+    } else { check(false, "runtime config decode") }
 
     // Routes: every route survives a round trip through its URL and its path.
     for r in Route.samples {

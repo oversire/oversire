@@ -207,6 +207,7 @@ struct ProjectsConfig: Codable {
     var order: [String] = []          // project keys, top to bottom
     var folded: [String] = []         // project keys that show only the header
     var capture = CaptureConfig()
+    var runtime = RuntimeConfig()
     var orca = OrcaConfig()
     var settings: [String: ProjectLocalSettings] = [:]   // by project key ("OVERSIRE")
 
@@ -234,6 +235,11 @@ struct ProjectsConfig: Codable {
         folded = try c.decodeIfPresent([String].self, forKey: .folded) ?? []
         capture = try c.decodeIfPresent(CaptureConfig.self, forKey: .capture) ?? CaptureConfig()
         orca = try c.decodeIfPresent(OrcaConfig.self, forKey: .orca) ?? OrcaConfig()
+        if let r = try c.decodeIfPresent(RuntimeConfig.self, forKey: .runtime) {
+            runtime = r
+        } else if let old = try? c.decodeIfPresent(RuntimeConfig.self, forKey: .orca) {
+            runtime = old   // before Settings › Runtime, orca held agent and prompt
+        }
         settings = try c.decodeIfPresent([String: ProjectLocalSettings].self, forKey: .settings) ?? [:]
     }
 
@@ -247,13 +253,14 @@ struct ProjectsConfig: Codable {
         return l.muted ? nil : (l.notifications ?? notifications)
     }
 
-    // The agent and the prompt for an item. The project settings come first, then the app defaults.
-    func launch(for item: Item) -> (agent: String, prompt: String) {
+    // The agent, the prompt and the resolved start command for an item. The project settings come first, then the app defaults.
+    func launch(for item: Item) -> (agent: String, prompt: String, command: String?) {
         let l = local(item.key.split(separator: "-").dropLast().joined(separator: "-"))
-        var o = orca
-        if let a = l.agent, !a.isEmpty { o.agent = a }
-        if let p = l.prompt, !p.isEmpty { o.prompt = p }
-        return (o.agent, o.prompt(for: item))
+        var r = runtime
+        if let a = l.agent, !a.isEmpty { r.agent = a }
+        if let p = l.prompt, !p.isEmpty { r.prompt = p }
+        let command = try? r.command(for: r.agent).resolve(name: item.key, key: item.key, title: item.title)
+        return (r.agent, r.prompt(for: item), command)
     }
 
     // The Orca root of a project. `orca.roots` (by "slug/uuid") stays a mirror, because older code reads it.
@@ -401,16 +408,66 @@ struct CaptureConfig: Codable, Equatable {
     }
 }
 
+// The agent settings of each runtime. `commands` holds only the changed start commands:
+// key "intake" for the intake agent, else an agent name.
+struct RuntimeConfig: Codable, Equatable {
+    static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
+    static let intakeKey = "intake"
+
+    var agent = "claude"
+    var prompt = RuntimeConfig.defaultPrompt
+    var commands: [String: String] = [:]
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? RuntimeConfig.defaultPrompt
+        commands = try c.decodeIfPresent([String: String].self, forKey: .commands) ?? [:]
+    }
+
+    func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: agent)) }
+
+    var intakeCommand: LaunchCommand { saved(Self.intakeKey) ?? .intakeDefault }
+
+    func defaultCommand(_ key: String) -> LaunchCommand {
+        key == Self.intakeKey ? .intakeDefault : .defaultFor(AgentName(rawValue: key))
+    }
+
+    // Saves a template. A template at its default removes the entry.
+    mutating func setCommand(_ key: String, _ template: String) {
+        let t = template.trimmingCharacters(in: .whitespacesAndNewlines)
+        commands[key] = t == defaultCommand(key).template ? nil : t
+    }
+
+    // A hand-edited bad template falls back to the default.
+    private func saved(_ key: String) -> LaunchCommand? {
+        guard let t = commands[key] else { return nil }
+        let c = LaunchCommand(t)
+        do { try c.validate() } catch {
+            log.error("runtime.commands.\(key, privacy: .public) is not valid (\(String(describing: error), privacy: .public)). OverSire uses the default.")
+            return nil
+        }
+        return c
+    }
+
+    // {url}, {key} (lowercase), {KEY} and {title}.
+    func prompt(for item: Item) -> String {
+        (prompt.isEmpty ? RuntimeConfig.defaultPrompt : prompt)
+            .replacingOccurrences(of: "{url}", with: item.url)
+            .replacingOccurrences(of: "{KEY}", with: item.key)
+            .replacingOccurrences(of: "{key}", with: item.key.lowercased())
+            .replacingOccurrences(of: "{title}", with: item.title)
+    }
+}
+
 // ▶ starts a Plane item in an Orca terminal. `roots` maps a project key ("slug/uuid")
 // to the Orca workspace folder. The environment is per Mac: nil runs on this Mac.
 struct OrcaConfig: Codable, Equatable {
-    static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
-
     var enabled = true
     var cli = ""   // the runtime account sets it
     var environment: String?
-    var agent = "claude"
-    var prompt = OrcaConfig.defaultPrompt
     var roots: [String: String] = [:]
 
     init() {}
@@ -420,18 +477,7 @@ struct OrcaConfig: Codable, Equatable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         cli = try c.decodeIfPresent(String.self, forKey: .cli) ?? ""
         environment = try c.decodeIfPresent(String.self, forKey: .environment)
-        agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
-        prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? OrcaConfig.defaultPrompt
         roots = try c.decodeIfPresent([String: String].self, forKey: .roots) ?? [:]
-    }
-
-    // {url}, {key} (lowercase), {KEY} and {title}.
-    func prompt(for item: Item) -> String {
-        (prompt.isEmpty ? OrcaConfig.defaultPrompt : prompt)
-            .replacingOccurrences(of: "{url}", with: item.url)
-            .replacingOccurrences(of: "{KEY}", with: item.key)
-            .replacingOccurrences(of: "{key}", with: item.key.lowercased())
-            .replacingOccurrences(of: "{title}", with: item.title)
     }
 
 

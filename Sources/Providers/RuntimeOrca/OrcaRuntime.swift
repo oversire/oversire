@@ -106,10 +106,10 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, @unchecked S
 
     /// Opens an agent session in the workspace with the request name, then sends the prompt.
     /// A workspace with that name in the repo is used again. A new workspace gets a fallback shell;
-    /// the agent command goes into it. The prompt goes only once.
+    /// the start command goes into it: `r.command`, else the default of the agent. The prompt goes only once.
     public func launch(_ r: LaunchRequest) async throws -> Launch {
         guard let name = r.workspaceName else { throw ProviderError.decoding("a launch needs a name or an item") }
-        let command = Self.agentCommand(r.agent, key: name)
+        let command = r.command.flatMap { $0.isEmpty ? nil : $0 } ?? Self.agentCommand(r.agent, key: name)
         var cardId: String
         var shell: RuntimeSession?
         if let c = try await workspaces().first(where: { $0.path == r.repo && $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
@@ -168,7 +168,7 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, @unchecked S
     }
 
     public static func agentCommand(_ agent: AgentName, key: String) -> String {
-        agent == .claude ? "claude -n '\(key)'" : agent.rawValue
+        (try? LaunchCommand.defaultFor(agent).resolve(name: key, key: key, title: key)) ?? agent.rawValue
     }
 
     // MARK: SessionIO

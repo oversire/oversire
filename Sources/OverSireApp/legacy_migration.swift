@@ -94,7 +94,7 @@ extension LegacyMigration {
         }
         let orca = c.projects?.orca ?? OrcaConfig()
         if orca.enabled {
-            var values = ["agent": orca.agent]
+            var values = ["agent": c.projects?.runtime.agent ?? "claude"]
             if !orca.cli.isEmpty { values["cli"] = orca.cli }
             if let e = orca.environment { values["environment"] = e }
             out.append(AccountConfig(account: AccountID(provider: .orca, id: orca.environment ?? "local"), values: values))

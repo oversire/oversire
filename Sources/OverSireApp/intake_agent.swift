@@ -110,10 +110,15 @@ final class IntakeAgent {
                 .replacingOccurrences(of: "\n", with: " ")
             let path = AGENTS.intakeScratch ? root + "/.wt/intake-" + key.lowercased() : root
             let title = "intake-" + key
+            let command: String
+            do { command = try PROJECTS_CFG.runtime.intakeCommand.resolve(name: title, key: key, title: item.name) } catch {
+                set(item.id, .failed("The intake command is not valid: \(error)"))
+                return
+            }
             Task {
                 if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
                 let r = await Result(awaiting: {
-                    try await rt.openTerminal(path: path, title: title, command: "claude -n '\(title)' --permission-mode plan", prompt: prompt)
+                    try await rt.openTerminal(path: path, title: title, command: command, prompt: prompt)
                 })
                 DispatchQueue.main.async {
                     switch r {

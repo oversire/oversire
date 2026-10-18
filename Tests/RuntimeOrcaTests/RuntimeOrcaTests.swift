@@ -57,7 +57,7 @@ final class RuntimeOrcaTests: XCTestCase {
         XCTAssertThrowsError(try OrcaRuntime.parse(Data("boom".utf8), stderr: "connect failed", command: "status")) {
             XCTAssertEqual(($0 as? ProviderError)?.message, "orca status: connect failed")
         }
-        XCTAssertEqual(OrcaRuntime.agentCommand(.claude, key: "FRITZ-7"), "claude -n 'FRITZ-7'")
+        XCTAssertEqual(OrcaRuntime.agentCommand(.claude, key: "FRITZ-7"), "claude -n FRITZ-7")
         XCTAssertEqual(OrcaRuntime.agentCommand(.codex, key: "X-1"), "codex")
     }
 
@@ -93,9 +93,23 @@ final class RuntimeOrcaTests: XCTestCase {
                        ["worktree", "create", "--repo", "path:/w", "--name", "ENG-4", "--comment", "https://x/ENG-4"])
         let sends = orca.args("terminal send")
         XCTAssertEqual(sends.count, 2, "the agent command, then the prompt once")
-        XCTAssertEqual(sends[0][5], "claude -n 'ENG-4'")
+        XCTAssertEqual(sends[0][5], "claude -n ENG-4")
         XCTAssertEqual(sends[1][5], "go")
         XCTAssertEqual(orca.args("terminal wait").count, 2, "a second wait for a cold start")
+    }
+
+    func testLaunchTypesTheCustomCommand() async throws {
+        orca.on("worktree ps", #"{"ok":true,"result":{"worktrees":[]}}"#)
+        orca.on("worktree create", #"{"ok":true,"result":{"worktree":{"id":"c1"}}}"#)
+        orca.on("terminal list", #"{"ok":true,"result":{"terminals":[{"handle":"h1","worktreeId":"c1","tabId":"t1","leafId":"l1"}]}}"#)
+        orca.on("terminal wait", #"{"ok":true,"result":{"wait":{"satisfied":true}}}"#)
+        orca.on("terminal send", #"{"ok":true,"result":{}}"#)
+        let custom = "claude -n ENG-4 --dangerously-skip-permissions"
+        _ = try await rt.launch(LaunchRequest(repo: "/w", name: "ENG-4", agent: .claude, prompt: "go", command: custom))
+        XCTAssertEqual(orca.args("terminal send").map { $0[5] }, [custom, "go"])
+
+        _ = try await rt.launch(LaunchRequest(repo: "/w", name: "ENG-4", agent: .claude, prompt: "go", command: ""))
+        XCTAssertEqual(orca.args("terminal send")[2][5], "claude -n ENG-4", "an empty command gives the default")
     }
 
     func testLaunchReusesTheCard() async throws {

@@ -267,12 +267,13 @@ final class AgentIndex: NSObject {
     func start(_ item: Item, root: String, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let key = item.key.uppercased()
         guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
-        let (agent, prompt) = PROJECTS_CFG.launch(for: item)
+        let (agent, prompt, command) = PROJECTS_CFG.launch(for: item)
         launches[key] = PendingLaunch(at: now())
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()
         Task { [weak self] in
-            let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: prompt)
+            let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: prompt,
+                                    command: command)
             let r = await Result(awaiting: { try await rt.launch(req) })
             DispatchQueue.main.async {
                 guard let self else { return }
