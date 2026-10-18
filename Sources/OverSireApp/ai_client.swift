@@ -12,9 +12,13 @@ final class AIClient {
     let cfg: AIConfig
     let router: AIRouter
 
-    init(cfg: AIConfig, key: String, store: (any Store)? = STORE_WRITES.store) {
+    init(cfg: AIConfig, router: AIRouter) {
         self.cfg = cfg
-        router = AIRouter(engines: [APIKeyEngine(config: cfg.apiKey, key: key, http: URLSessionTransport())], store: store)
+        self.router = router
+    }
+
+    convenience init(cfg: AIConfig, key: String, store: (any Store)? = STORE_WRITES.store) {
+        self.init(cfg: cfg, router: AIRouter(engines: [APIKeyEngine(config: cfg.apiKey, key: key, http: URLSessionTransport())], store: store))
     }
 
     // The saved config, when AI is on.

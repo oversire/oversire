@@ -15,6 +15,7 @@ enum RowCommand: Equatable {
     case run(repo: String, runId: String, RunAction)
     case ignoreFailure(repo: String, runId: String, Bool)
     case copyJobLog(repo: String, jobId: String)
+    case explain(repo: String, runId: String, jobId: String?)
     case rerunJob(repo: String, runId: String, jobId: String)
     case approve(repo: String, number: Int)
     case merge(repo: String, number: Int)
@@ -98,7 +99,7 @@ enum RowMenu {
         if done && r.isFailure && caps.contains(.rerun) { out.append(.action("Re-run failed jobs", .run(repo: repo, runId: r.id, .rerunFailed))) }
         if done && caps.contains(.rerun) { out.append(.action("Re-run all jobs", .run(repo: repo, runId: r.id, .rerun))) }
         if !done && caps.contains(.cancel) { out.append(.action("Cancel run", .run(repo: repo, runId: r.id, .cancel))) }
-        if r.isFailure && caps.contains(.logs) { out.append(.action("Explain failure…", .open(route))) }
+        if r.isFailure && caps.contains(.logs) { out.append(.action("Explain failure…", .explain(repo: repo, runId: r.id, jobId: nil))) }
         if r.isFailure {
             out += [.separator, .action(ignored ? "Count this failure again" : "Ignore this failure", .ignoreFailure(repo: repo, runId: r.id, !ignored))]
         }
@@ -111,6 +112,9 @@ enum RowMenu {
         if let u = j.url { out.append(.action("Open job on GitHub", .openURL(u))) }
         if caps.contains(.logs) { out.append(.action("Copy job log", .copyJobLog(repo: repo, jobId: j.id))) }
         if let u = j.url { out.append(.action("Copy job link", .copy(u))) }
+        if caps.contains(.logs) && j.status == RunStatus.completed.rawValue && JobChip.failed(j) {
+            out += [.separator, .action("Explain failure…", .explain(repo: repo, runId: r.id, jobId: j.id))]
+        }
         // GitHub re-runs a job only after the full run ends.
         if caps.contains(.rerunJob) && r.status == RunStatus.completed.rawValue {
             out += [.separator, .action("Re-run this job", .rerunJob(repo: repo, runId: r.id, jobId: j.id))]
@@ -245,11 +249,20 @@ final class RowCommander {
             if let u = URL(string: "https://github.com/\(repo)/pull/\(n)") { NSWorkspace.shared.open(u) }
         case .revealCard(let id): data.agentIndex.reveal(card: id)
         case .sendInput(let key): sendInput(key, anchor: anchor)
+        case .explain(let repo, let runId, let jobId): explain(repo: repo, runId: runId, jobId: jobId, anchor: anchor)
         case .refreshProject(let k): store.refresh([k], force: true) { _ in }
         case .useTrackerIcon(let k): editLocal(k) { $0.icon = .tracker }
         case .hideProject(let k): editLocal(k) { $0.hidden = true }
         case .markRead, .triage, .onlyProject: break
         }
+    }
+
+    // Without an AI engine the run page opens. Its cause card tells how to set one up.
+    private func explain(repo: String, runId: String, jobId: String?, anchor: NSView?) {
+        let route = Route.run(repo: repo, id: runId)
+        guard data.ciAssist.hasEngine, let anchor, anchor.window != nil else { go(route); return }
+        let known = data.grouped.first { $0.0 == repo }?.1.first { $0.id == runId }
+        ExplainPopover.show(at: anchor, repo: repo, run: known, runId: runId, jobId: jobId, cia: data.ciAssist) { [weak self] in self?.go(route) }
     }
 
     private func editLocal(_ key: String, _ change: (inout ProjectLocalSettings) -> Void) {

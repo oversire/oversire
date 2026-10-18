@@ -34,10 +34,14 @@ final class CIAssist {
     private(set) var errors: [String: String] = [:]
     private var seen: [String: (attempt: Int, failed: Bool)] = [:]   // run URL → last state
     private let path: String
+    private let ai: () -> AIClient?
+    private let changedFiles: (_ repo: String, _ sha: String) -> [String]
     private let q = DispatchQueue(label: "com.oversire.app.ci-assist", qos: .utility)
 
-    init(path: String) {
+    init(path: String, ai: @escaping () -> AIClient? = { AIClient.current }, changedFiles: @escaping (String, String) -> [String] = CIAssist.ghFiles) {
         self.path = path
+        self.ai = ai
+        self.changedFiles = changedFiles
         if let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode(State.self, from: d) { state = s }
     }
 
@@ -118,17 +122,25 @@ final class CIAssist {
         return RunExplanation(cause: String(cause.prefix(400)), fix: String((o["fix"] as? String ?? "").prefix(300)), confidence: conf)
     }
 
-    var canExplain: Bool { AI_CFG.ciExplain && AIClient.current != nil }
+    // An AI engine is set. A request from the user needs only this.
+    var hasEngine: Bool { ai() != nil }
+    // The run page explains a failure without a request.
+    var canExplain: Bool { AI_CFG.ciExplain && hasEngine }
 
-    func explain(repo: String, run r: Run, job: Job, log: [String]) {
+    static func ghFiles(repo: String, sha: String) -> [String] {
+        let res = try? ghRun(["api", "repos/\(repo)/commits/\(sha)", "--jq", ".files[].filename"], timeout: 20)
+        return res?.ok == true ? String(decoding: res!.stdout, as: UTF8.self).split(separator: "\n").map(String.init) : []
+    }
+
+    // A cached cause is kept for each run and attempt. `force` asks the engine again.
+    func explain(repo: String, run r: Run, job: Job, log: [String], force: Bool = false) {
         let k = CIAssist.runKey(r)
-        guard AI_CFG.ciExplain, let ai = AIClient.current, !busy.contains(k) else { return }
+        guard force || state.explanations[k] == nil, let ai = ai(), !busy.contains(k) else { return }
         busy.insert(k)
         errors[k] = nil
         publish()
-        q.async { [weak self] in
-            let res = try? ghRun(["api", "repos/\(repo)/commits/\(r.headSha)", "--jq", ".files[].filename"], timeout: 20)
-            let files = res?.ok == true ? String(decoding: res!.stdout, as: UTF8.self).split(separator: "\n").map(String.init) : []
+        q.async { [weak self, changedFiles] in
+            let files = changedFiles(repo, r.headSha)
             ai.run(.failureReason, CIAssist.explainInput(run: r, job: job.name, log: log, files: files), id: "failureReason:\(k)") { result in
                 guard let self else { return }
                 self.busy.remove(k)
@@ -191,7 +203,7 @@ final class CIAssist {
         let today = CIAssist.day()
         state.digest = Digest(day: today, facts: facts, summary: nil)
         save()
-        guard let ai = AIClient.current else { return }
+        guard let ai = ai() else { return }
         ai.run(.digest, CIPrompts.digestInput(facts: facts), id: "digest:\(today)") { [weak self] r in
             guard let self, case .success(let t) = r, self.state.digest?.day == today else { return }
             self.state.digest?.summary = t.trimmingCharacters(in: .whitespacesAndNewlines)

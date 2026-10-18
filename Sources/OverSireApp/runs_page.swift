@@ -438,10 +438,10 @@ final class RunPage: Page {
         let e = cia.explanation(r)
         var trailing: [NSView] = []
         if let e { trailing.append(Chiplet("AI · \(e.confidence) confidence", symbol: "sparkles")) }
-        if cia.canExplain {
+        if cia.hasEngine {
             let again = ActionButton(e == nil ? "Explain" : "Explain again", symbol: "sparkles") { [weak self] in
                 guard let self, let job = self.jobs?.first(where: { $0.id == self.jobId }), let log = self.log else { return }
-                cia.explain(repo: self.repo, run: r, job: job, log: log)
+                cia.explain(repo: self.repo, run: r, job: job, log: log, force: true)
             }
             again.isEnabled = log != nil
             if cia.busy.contains(k) { again.busy("Explaining…") }
@@ -456,9 +456,11 @@ final class RunPage: Page {
             c.add(LoadingNote("The AI writes the cause", compact: true))
         } else if let err = cia.errors[k] {
             c.add(NSTextField.text("Could not explain: \(err)", size: 12.5, color: Palette.bad, lines: 0))
-        } else if !cia.canExplain {
-            c.add(NSStackView(h: [NSTextField.text("No session works on this run. Turn on AI to get a short cause from the log.", size: 12.5, color: Palette.dim),
+        } else if !cia.hasEngine {
+            c.add(NSStackView(h: [NSTextField.text("No session works on this run. Set up an AI engine to get a short cause from the log.", size: 12.5, color: Palette.dim),
                                   Spacer(), ActionButton("AI settings") { [weak self] in self?.go(.settings(.ai)) }], spacing: 8))
+        } else if !cia.canExplain {
+            c.add(NSTextField.text("Press Explain for a short cause from the log of the failed job.", size: 12.5, color: Palette.dim))
         } else {
             c.add(NSTextField.text("Pick the failed job. OverSire explains it when the log loads.", size: 12.5, color: Palette.dim))
         }

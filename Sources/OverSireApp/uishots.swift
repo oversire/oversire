@@ -120,6 +120,16 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         ]
     }
 
+    static func explainPhase(_ name: String) -> ExplainPopover.Phase {
+        switch name {
+        case "loading": return .loading("The AI reads the log")
+        case "error": return .failed("Could not explain: the engine answered 429 (rate limit).")
+        default:
+            return .result(RunExplanation(cause: "StoreTests.testPut expects 3 rows, but the store keeps 2 after the new dedupe step in LocalStore.put.",
+                                          fix: "Update the expected count in StoreTests, or keep duplicates when the ids differ.", confidence: "medium"))
+        }
+    }
+
     // A source that never answers.
     struct NeverAnswers: RunSource {
         func run(_ repo: String, id: String) async -> Run? { await wait(); return nil }
@@ -236,6 +246,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         g.contentViewController = GlanceVC(data: self) { print("UISHOTS glance open \($0.path)"); w.router.go($0) }
                         g.orderFrontRegardless()
                         self.glance = g
+                    } else if p.hasPrefix("explain:"), let root = w.window?.contentView {
+                        // explain:loading, explain:result or explain:error, at the first run row, else at the window center.
+                        let row = UIShots.find(root) { ($0 as? Row)?.menuItems != nil && ($0.accessibilityLabel() ?? "").contains("#") } ?? root
+                        ExplainPopover.sample(at: row, phase: UIShots.explainPhase(String(p.dropFirst(8))))
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if let r = Route(path: p) {
@@ -245,7 +259,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { CommandPalette.dismiss() }
+                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss() }
             }
         }
         run(steps, 0)
@@ -286,7 +300,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(glance?.windowNumber ?? CommandPalette.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(glance?.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")

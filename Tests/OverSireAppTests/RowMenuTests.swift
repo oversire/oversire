@@ -61,6 +61,7 @@ final class RowMenuTests: XCTestCase {
         XCTAssertEqual(m.command("Ignore this failure"), .ignoreFailure(repo: "o/r", runId: "99", true))
         XCTAssertEqual(m.command("Re-run failed jobs"), .run(repo: "o/r", runId: "99", .rerunFailed))
         XCTAssertEqual(m.command("Copy commit SHA"), .copy("abc123"))
+        XCTAssertEqual(m.command("Explain failure…"), .explain(repo: "o/r", runId: "99", jobId: nil))
     }
 
     func testRunMenuFollowsCapabilities() {
@@ -79,8 +80,11 @@ final class RowMenuTests: XCTestCase {
                     completedAt: nil, runnerName: nil, steps: nil)
         let done = run(status: "completed", conclusion: "failure")
         let m = RowMenu.job(repo: "o/r", run: done, job: j, caps: all)
-        XCTAssertEqual(m.titles, ["Open job on GitHub", "Copy job log", "Copy job link", "Re-run this job"])
+        XCTAssertEqual(m.titles, ["Open job on GitHub", "Copy job log", "Copy job link", "Explain failure…", "Re-run this job"])
         XCTAssertEqual(m.command("Re-run this job"), .rerunJob(repo: "o/r", runId: "99", jobId: "5"))
+        XCTAssertEqual(m.command("Explain failure…"), .explain(repo: "o/r", runId: "99", jobId: "5"))
+        let ok = Job(id: "6", name: "lint", status: "completed", conclusion: "success", url: nil, startedAt: nil, completedAt: nil, runnerName: nil, steps: nil)
+        XCTAssertFalse(RowMenu.job(repo: "o/r", run: done, job: ok, caps: all).titles.contains("Explain failure…"), "only a failed job")
         XCTAssertEqual(RowMenu.job(repo: "o/r", run: done, job: j, caps: []).titles, ["Open job on GitHub", "Copy job link"])
         let live = RowMenu.job(repo: "o/r", run: run(status: "in_progress", conclusion: nil), job: j, caps: all)
         XCTAssertFalse(live.titles.contains("Re-run this job"), "GitHub re-runs a job only after the run ends")

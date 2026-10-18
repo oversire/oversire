@@ -33,7 +33,7 @@ let package = Package(
         ),
         .target(name: "OverSireTestKit", dependencies: ["OverSireCore", "OverSireSync", "OverSireAI"]),
 
-        .testTarget(name: "OverSireAppTests", dependencies: ["OverSireApp", "OverSireSync", "OverSireTestKit"], swiftSettings: [.swiftLanguageMode(.v5)]),
+        .testTarget(name: "OverSireAppTests", dependencies: ["OverSireApp", "OverSireSync", "OverSireTestKit"], exclude: ["Fixtures"], swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "OverSireCoreTests", dependencies: ["OverSireCore", "OverSireTestKit"]),
         .testTarget(name: "OverSireSyncTests", dependencies: ["OverSireSync", "OverSireTestKit"]),
         .testTarget(name: "OverSireAITests", dependencies: ["OverSireAI", "OverSireTestKit"]),

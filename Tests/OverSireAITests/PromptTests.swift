@@ -63,6 +63,18 @@ final class PromptTests: XCTestCase {
         XCTAssertTrue(fail.user.hasPrefix("Workflow: CI #9 on main (abcdef1)\nCommit: Fix\nJob: build\nChanged files: unknown\n\nLog:\nerror: x\n--- last lines ---\na\nb"))
     }
 
+    func testFailureLogFitsTheBudget() {
+        let tail = (1...60).map { "line \($0) " + String(repeating: "x", count: 300) }
+        let errors = (1...40).map { "error \($0) " + String(repeating: "e", count: 300) }
+        let text = CIPrompts.logText(errors: errors, tail: tail, budget: 4_000)
+        XCTAssertLessThanOrEqual(text.count, 4_000)
+        XCTAssertTrue(text.hasSuffix(tail.last!), "the last line stays")
+        XCTAssertTrue(text.contains(errors.last!), "the last error stays")
+        XCTAssertGreaterThanOrEqual(text.components(separatedBy: "--- last lines ---\n")[1].count, 1_700, "the tail keeps about half")
+        let long = CIPrompts.logText(errors: [], tail: [String(repeating: "y", count: 5_000)])
+        XCTAssertTrue(long.hasSuffix(String(repeating: "y", count: 400) + "…"), "a long line is cut")
+    }
+
     func testTriagePrompt() throws {
         let p = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: "{KEY} {key} {title} {url} {body}", key: "TREBI-9",
                                                                        title: "T", url: "u", body: ""))
