@@ -40,6 +40,7 @@ final class ContractTests: XCTestCase {
         "billing-state": roundTrip(BillingState.self),
         "runner-message": roundTrip(RunnerMessage.self),
         "runner-state": roundTrip(RunnerState.self),
+        "runner-session": roundTrip(RunnerSession.self),
         "ai-endpoint": roundTrip(AIEndpoint.self),
         "ai-route": roundTrip(AIRoute.self),
     ]

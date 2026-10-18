@@ -138,7 +138,8 @@ public enum SessionOrder: Hashable, Sendable {
     case start(LaunchRequest)
     case stop(SessionRef)
     case read(SessionRef, lines: Int)
-    case send(SessionRef, text: String)
+    /// `permission` answers the PermissionPrompt of a runner session. Then `text` is empty.
+    case send(SessionRef, text: String, permission: PermissionAnswer? = nil)
 
     public enum Op: String, Codable, Sendable, CaseIterable { case sessionStart, sessionStop, sessionRead, sessionSend }
 
@@ -154,7 +155,7 @@ public enum SessionOrder: Hashable, Sendable {
 
 extension SessionOrder: Codable {
     private enum CodingKeys: String, CodingKey { case op, payload }
-    private enum PayloadKeys: String, CodingKey { case session, lines, text }
+    private enum PayloadKeys: String, CodingKey { case session, lines, text, permission }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -167,7 +168,8 @@ extension SessionOrder: Codable {
             self = .read(try p.decode(SessionRef.self, forKey: .session), lines: try p.decode(Int.self, forKey: .lines))
         case .sessionSend:
             let p = try payload()
-            self = .send(try p.decode(SessionRef.self, forKey: .session), text: try p.decode(String.self, forKey: .text))
+            self = .send(try p.decode(SessionRef.self, forKey: .session), text: try p.decode(String.self, forKey: .text),
+                         permission: try p.decodeIfPresent(PermissionAnswer.self, forKey: .permission))
         }
     }
 
@@ -184,10 +186,11 @@ extension SessionOrder: Codable {
             var p = payload()
             try p.encode(s, forKey: .session)
             try p.encode(lines, forKey: .lines)
-        case .send(let s, let text):
+        case .send(let s, let text, let permission):
             var p = payload()
             try p.encode(s, forKey: .session)
             try p.encode(text, forKey: .text)
+            try p.encodeIfPresent(permission, forKey: .permission)
         }
     }
 }

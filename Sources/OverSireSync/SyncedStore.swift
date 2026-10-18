@@ -13,7 +13,7 @@ public actor SyncedStore: Store {
         MemoryEntry.self, AIJob.self, Suggestion.self,
     ]
     /// The collections that only the hub writes. They come down and never go up.
-    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self, WorkOrder.self, RunnerState.self]
+    public static let hubOnly: [any StoreRecord.Type] = [BillingState.self, WorkOrder.self, RunnerState.self, RunnerSession.self]
     private static let byName = Dictionary(uniqueKeysWithValues: collections.map { ($0.collection, $0) })
     private static let pulled = Dictionary(uniqueKeysWithValues: (collections + hubOnly).map { ($0.collection, $0) })
 
