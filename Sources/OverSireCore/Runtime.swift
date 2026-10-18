@@ -134,9 +134,10 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
     public var agent: AgentName
     public var prompt: String
     public var environment: String?
+    public var command: String?          // the resolved start command; nil: the runtime default
 
     public init(repo: String, item: ItemRef? = nil, name: String? = nil, note: String? = nil, branch: String? = nil,
-                agent: AgentName, prompt: String, environment: String? = nil) {
+                agent: AgentName, prompt: String, environment: String? = nil, command: String? = nil) {
         self.repo = repo
         self.item = item
         self.name = name
@@ -145,6 +146,7 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
         self.agent = agent
         self.prompt = prompt
         self.environment = environment
+        self.command = command
     }
 
     public var workspaceName: String? { name ?? item?.key }
