@@ -42,7 +42,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     private var page: Route.SettingsPage { if case .settings(let p, _, _) = route { return p }; return .general }
     private var tab: Route.SettingsTab { if case .settings(_, let t?, _) = route { return t }; return .projects }
-    private var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
+    var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
 
     override var isEditing: Bool { super.isEditing || promptDirty }
 
@@ -58,7 +58,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let body = NSStackView(v: [], spacing: 10)
         if page != .agents { AgentCommandsCard.drafts = [:] }
         switch page {
-        case .general: general(body); menuBar(body); shortcuts(body)
+        case .general: general(body)
         case .accounts: providers(body); live(body)
         case .projects:
             let strip = TabStrip(Route.SettingsTab.allCases.map(\.title), selected: Route.SettingsTab.allCases.firstIndex(of: tab) ?? 0)
@@ -87,38 +87,19 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         bw.isActive = true
     }
 
-    private func card(_ title: String, _ rows: [NSView]) -> NSView {
+    private func card(_ title: String, _ rows: [NSView]) -> NSView { section(title, anchor: nil, rows) }
+
+    // A titled card. The anchor is the id that a route anchor and the search scroll to.
+    func section(_ title: String, anchor: String?, _ rows: [NSView]) -> NSView {
         let c = ListCard()
         rows.forEach { c.add($0) }
         let v = NSStackView(v: [SectionTitle(title)], spacing: 6)
         v.addFull(c)
+        if let anchor { v.identifier = NSUserInterfaceItemIdentifier("anchor-\(anchor)") }
         return v
     }
 
     // MARK: Pages
-
-    private func general(_ b: NSStackView) {
-        let themes = Theme.allCases
-        b.addFull(card("Look", [
-            FieldRow("Theme", note: "System follows the macOS setting.", Segmented(themes.map(\.label), selected: themes.firstIndex(of: GENERAL.theme) ?? 1, label: "Theme") { [weak self] i in
-                GENERAL.theme = themes[i]
-                self?.app?.applySystemAppearance()
-                self?.view.window?.appearance = NSApp.appearance
-            }),
-            FieldRow("Show in", note: "The window opens from both. The menu bar keeps a short view.", showIn()),
-            SwitchRow("Open the window at launch", on: GENERAL.openWindowAtLaunch) { GENERAL.openWindowAtLaunch = $0 },
-        ]))
-        embed(b, vc: "general", note: "Accounts, tabs and updates.")
-    }
-
-    private func showIn() -> NSView {
-        let all = ShowIn.allCases
-        let names = ["Menu bar", "Dock", "Both"]
-        return Segmented(all.map { names[all.firstIndex(of: $0)!] }, selected: all.firstIndex(of: GENERAL.showIn) ?? 2, label: "Show in") { [weak self] i in
-            GENERAL.showIn = all[i]
-            self?.app?.applyShowIn()
-        }
-    }
 
     private func linking(_ b: NSStackView) {
         b.addFull(card("Rules", [
@@ -491,35 +472,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         ]))
         b.addFull(Banner(.info, title: "Plane notifications are set for each project.",
                          actions: [ActionButton("Open project settings") { [weak self] in self?.go(.settings(.projects, tab: .projects)) }]))
-    }
-
-    private func menuBar(_ b: NSStackView) {
-        b.addFull(card("Menu bar", [
-            FieldRow("Show in", showIn()),
-            SwitchRow("Small popover", note: "Now, Runs and Work. Off: the full popover of OverSire 1.", on: GENERAL.smallPopover) { GENERAL.smallPopover = $0 },
-            SwitchRow("Runs tab", on: TABS.actions) { TABS.actions = $0 },
-            SwitchRow("Pull requests tab", on: TABS.prs) { TABS.prs = $0 },
-            SwitchRow("Insights tab", on: TABS.insights) { TABS.insights = $0 },
-        ]))
-        b.addFull(NSTextField.text("The icon is blue while a run is in progress, red for a failed run that no one ignored, else green. A dot shows a session that waits for you, or unread Plane activity.", size: 12, color: Palette.dim, lines: 0))
-    }
-
-    private func shortcuts(_ b: NSStackView) {
-        let f = ShortcutField(GENERAL.windowKey)
-        f.onChange = { [weak self] code, mods in
-            GENERAL.windowKey = KeyShortcut(keyCode: code, modifiers: mods)
-            saveConfig()
-            _ = self?.app?.applyWindowHotKey()
-        }
-        f.setAccessibilityLabel("Window shortcut")
-        b.addFull(card("Global", [
-            FieldRow("Open the window", note: "From any app.", f),
-            FieldRow("New item", note: "Set in Projects › quick capture.", NSTextField.text(PROJECTS_CFG.capture.shortcutLabel, size: 12, color: Palette.mut, mono: true)),
-        ]))
-        let keys: [(String, String)] = [("⌘K", "Search or jump to a page"), ("⌘[  ⌘]", "Back and forward"), ("⌘R", "Refresh"),
-                                         ("⌃⌘S", "Show or hide the sidebar"), ("⌘0", "Bring the window to the front"),
-                                         ("1  2  3  H", "Intake: accept, duplicate, decline, snooze"), ("⌘,", "Settings")]
-        b.addFull(card("In the window", keys.map { FieldRow($0.1, NSTextField.text($0.0, size: 12, color: Palette.mut, mono: true)) }))
     }
 
     // MARK: Embedded settings

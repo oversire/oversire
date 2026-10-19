@@ -21,6 +21,7 @@ protocol AppData: AnyObject {
     var sessions: SessionNotes { get }
     var ciAssist: CIAssist { get }
     var busy: BusyTracker { get }
+    var updater: Updater { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func settingsVC(_ name: String) -> NSViewController?

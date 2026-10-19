@@ -16,6 +16,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: writes)
+    lazy var updater = Updater()
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
