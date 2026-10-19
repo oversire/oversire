@@ -210,6 +210,63 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         }
     }
 
+    // `kit`: each settings control once, in a window of its own.
+    static func kitSample() -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 760, height: 820), styleMask: [.titled], backing: .buffered, defer: false)
+        w.title = "Page kit"
+        let page = PageScroll(maxWidth: 760)
+        let root = Box(fill: Palette.bg, border: nil, radius: 0)
+        root.addSubview(page)
+        NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: root.leadingAnchor), page.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                                     page.topAnchor.constraint(equalTo: root.topAnchor), page.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
+        w.contentView = root
+        page.rebuild { col in
+            col.addArrangedSubview(TabStrip(["Projects", "Repos", "Linking and write-back"], selected: 1, counts: [6, 51, nil]))
+            let card = ListCard()
+            card.add(FieldRow("Theme", Segmented(["Light", "Dark", "System"], selected: 1, label: "Theme") { _ in }))
+            let chips = ChipGroup([.init("Runs", on: true) { _ in }, .init("Pull requests", on: true) { _ in }, .init("Insights", on: false) { _ in }],
+                                  label: "Tabs")
+            card.add(Row([NSTextField.text("Tabs", size: 13, weight: .medium), Spacer(), chips], height: 40))
+            let off = ChipGroup([.init("Links", on: true) { _ in }, .init("Session labels", on: false) { _ in }], label: "Write back", enabled: false,
+                                note: "Off: the chips do nothing.")
+            card.add(Padded(off))
+            col.addFull(card)
+            let health = HealthCounts([.init(count: 48, kind: .ok, word: "live"), .init(count: 2, kind: .warning, word: "missing"),
+                                       .init(count: 1, kind: .failure, word: "failed")])
+            let hc = Card()
+            hc.add(HealthBar(health, trailing: [ActionButton("Show in the repo list ›", style: .link)]))
+            col.addFull(hc)
+            let more = ListCard()
+            let d = Disclosure("Advanced: event retention, reconcile poll, devices, log", id: "kit")
+            if !d.isOpen { d.toggle() }
+            d.add(FieldRow("Keep events for", NSTextField.text("7 days", size: 12.5)))
+            d.add(FieldRow("Reconcile poll while live", NSTextField.text("10 min", size: 12.5)))
+            more.add(d)
+            col.addFull(more)
+            col.addFull(CardGrid([
+                ServiceCard(icon: ServiceCard.icon("P", color: .systemIndigo), name: "Plane", detail: "Tracker · ocral", status: Pill(.ok, text: "OK"),
+                            actions: [ActionButton("Edit"), ActionButton("Add account", style: .link)]),
+                ServiceCard(icon: ServiceCard.icon("GH", color: .darkGray), name: "GitHub", detail: "Code host and Actions · gh CLI",
+                            status: Pill(.warning, text: "Check"), actions: [ActionButton("Test")]),
+                ServiceCard(icon: ServiceCard.icon("+", color: nil), name: "Add a service", detail: "Linear, GitLab, Conductor …", status: nil,
+                            actions: [], dashed: true),
+            ]))
+            let list = StickyListCard(header: NSStackView(h: [NSTextField.text("Filter, or type owner/repo to add", size: 12.5, color: Palette.dim), Spacer(),
+                                                              ToggleChip("All 212", on: true) {}, ToggleChip("Problems 3", on: false) {}]), maxHeight: 220)
+            for owner in ["flarco", "slingdata-io", "oversire"] {
+                list.addGroup { Row([NSTextField.text(owner, size: 12, weight: .semibold), Spacer(), ActionButton("Track all", style: .link)], height: 32) }
+                for r in 1...4 { list.add(Row([NSTextField.text("\(owner)-repo-\(r)", size: 12.5), Spacer(), Pill(.ok, text: "Webhook")], height: 34)) }
+            }
+            col.addFull(list)
+        }
+        w.orderFrontRegardless()
+        page.layoutSubtreeIfNeeded()
+        list(in: page)?.scroll.contentView.scroll(to: NSPoint(x: 0, y: 200))
+        return w
+    }
+
+    private static func list(in v: NSView) -> StickyListCard? { find(v) { $0 is StickyListCard } as? StickyListCard }
+
     // A source that never answers.
     struct NeverAnswers: RunSource {
         func run(_ repo: String, id: String) async -> Run? { await wait(); return nil }
@@ -362,6 +419,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.basketPanel?.orderOut(nil)
                         self.basketPanel = UIShots.basketSample(String(p.dropFirst(7)), shooting: w)
                         if p == "basket:send", let panel = self.basketPanel { self.shootMenu(of: panel, name: "\(theme.rawValue)-basket-send-menu") }
+                    } else if p == "kit" {
+                        self.glance = UIShots.kitSample()
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if let r = Route(path: p) {

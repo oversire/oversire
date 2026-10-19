@@ -182,6 +182,30 @@ class Chiplet: Box {
     override func mouseUp(with event: NSEvent) { onClick?() }
     override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
     override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }
+
+    // A chip with a click handler takes keyboard focus. Space or Return presses it.
+    override var acceptsFirstResponder: Bool { onClick != nil }
+    override var canBecomeKeyView: Bool { onClick != nil }
+    override func keyDown(with event: NSEvent) {
+        if onClick != nil, [36, 49, 76].contains(event.keyCode) { onClick?(); return }
+        super.keyDown(with: event)
+    }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill() }
+    override var focusRingMaskBounds: NSRect { bounds }
+}
+
+// A chip that stays on or off. An "on" chip shows a check mark, so the state does not rely on color.
+final class ToggleChip: Chiplet {
+    init(_ text: String, on: Bool, enabled: Bool = true, _ flip: @escaping () -> Void) {
+        super.init(text, symbol: on ? "checkmark" : nil, color: !enabled ? Palette.dim : on ? Palette.fg : Palette.mut,
+                   fill: on ? Palette.acc.withAlphaComponent(enabled ? 0.18 : 0.08) : Palette.raise, onClick: enabled ? flip : nil)
+        if on { border = enabled ? Palette.acc : Palette.line }
+        setAccessibilityRole(.checkBox)
+        setAccessibilityValue(on ? 1 : 0)
+        setAccessibilityValueDescription(on ? "on" : "off")
+        setAccessibilityEnabled(enabled)
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 // A tone as a colored pill: symbol and word, so the state never relies on color alone.
@@ -427,8 +451,12 @@ final class Banner: Box {
 final class TabStrip: NSStackView {
     var onSelect: ((Int) -> Void)?
     private var buttons: [NSButton] = []
+    private let selected: Int
+    // An arrow key rebuilds the page. The new strip then takes the focus back.
+    private static var refocus = false
 
     init(_ titles: [String], selected: Int, counts: [Int?] = []) {
+        self.selected = selected
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 2
@@ -438,6 +466,7 @@ final class TabStrip: NSStackView {
             let b = NSButton(title: t, target: self, action: #selector(pick(_:)))
             b.isBordered = false
             b.tag = i
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
             let on = i == selected
             var s = t
             if let count { s += "  \(count)" }
@@ -462,6 +491,24 @@ final class TabStrip: NSStackView {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func pick(_ b: NSButton) { onSelect?(b.tag) }
+
+    override func keyDown(with event: NSEvent) {
+        guard event.keyCode == 123 || event.keyCode == 124 else { return super.keyDown(with: event) }
+        let next = selected + (event.keyCode == 124 ? 1 : -1)
+        guard buttons.indices.contains(next) else { return }
+        TabStrip.refocus = true
+        onSelect?(next)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard TabStrip.refocus, let w = window, buttons.indices.contains(selected) else { return }
+        TabStrip.refocus = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            w.makeFirstResponder(self.buttons[self.selected])
+        }
+    }
 }
 
 // Page title line: big title, a small caption, then actions on the right.
@@ -772,6 +819,407 @@ final class Grid: NSStackView {
         }
     }
     required init(coder: NSCoder) { fatalError() }
+}
+
+// ─── Settings controls ───────────────────────────────────────────────────────
+// Each control saves the config and posts AppWindow.changed after a change.
+
+func settingsChanged() {
+    saveConfig()
+    NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+}
+
+// A segmented control for one choice of a few.
+final class Segmented: NSSegmentedControl {
+    private let onPick: (Int) -> Void
+
+    init(_ labels: [String], selected: Int, label: String, enabled: Bool = true, onPick: @escaping (Int) -> Void) {
+        self.onPick = onPick
+        super.init(frame: .zero)
+        segmentCount = labels.count
+        for (i, l) in labels.enumerated() { setLabel(l, forSegment: i) }
+        trackingMode = .selectOne
+        selectedSegment = selected
+        controlSize = .small
+        font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        isEnabled = enabled
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setAccessibilityLabel(label)
+        target = self
+        action = #selector(picked)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func picked() {
+        onPick(selectedSegment)
+        settingsChanged()
+    }
+}
+
+// A wrapping row of on and off chips, for a short list of switches.
+final class ChipGroup: NSStackView {
+    struct Chip {
+        let title: String
+        let on: Bool
+        let flip: (Bool) -> Void
+        init(_ title: String, on: Bool, _ flip: @escaping (Bool) -> Void) { self.title = title; self.on = on; self.flip = flip }
+    }
+
+    init(_ chips: [Chip], label: String, enabled: Bool = true, note: String? = nil) {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = 8
+        translatesAutoresizingMaskIntoConstraints = false
+        let wrap = Wrap(chips.map { c in
+            ToggleChip(c.title, on: c.on, enabled: enabled) { c.flip(!c.on); settingsChanged() } as NSView
+        })
+        addFull(wrap)
+        if let note { addArrangedSubview(NSTextField.text(note, size: 11.5, color: Palette.dim, lines: 2)) }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(label)
+    }
+    required init(coder: NSCoder) { fatalError() }
+}
+
+// One view that fills the width of a card, with row padding. For chip groups and text boxes.
+final class Padded: NSStackView {
+    init(_ v: NSView, vertical: CGFloat = 12, side: CGFloat = 14) {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        translatesAutoresizingMaskIntoConstraints = false
+        edgeInsets = NSEdgeInsets(top: vertical, left: side, bottom: vertical, right: side)
+        addFull(v)
+    }
+    required init(coder: NSCoder) { fatalError() }
+}
+
+// A row with a chevron that shows or hides a group of rows. The window keeps the state until the app quits.
+final class Disclosure: NSStackView {
+    private static var open: Set<String> = []
+    private let id: String
+    private let content = NSStackView(v: [], spacing: 0)
+    private var head: Row!
+    private let chevron = Glyph("chevron.right", color: Palette.acc, size: 10)
+    private let title: String
+
+    var isOpen: Bool { Disclosure.open.contains(id) }
+
+    init(_ title: String, id: String) {
+        self.id = id
+        self.title = title
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = 0
+        translatesAutoresizingMaskIntoConstraints = false
+        head = Row([chevron, NSTextField.text(title, size: 12.5, weight: .medium, color: Palette.acc), Spacer()], height: 36, label: title) { [weak self] in
+            self?.toggle()
+        }
+        head.setAccessibilityRole(.disclosureTriangle)
+        addFull(head)
+        addFull(content)
+        apply()
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    // Adds a row to the hidden group, with a line above it.
+    func add(_ v: NSView) {
+        let sep = Box(fill: Palette.line, border: nil, radius: 0)
+        sep.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        content.addFull(sep)
+        content.addFull(v)
+    }
+
+    func toggle() {
+        if isOpen { Disclosure.open.remove(id) } else { Disclosure.open.insert(id) }
+        apply()
+    }
+
+    private func apply() {
+        content.isHidden = !isOpen
+        chevron.image = NSImage(systemSymbolName: isOpen ? "chevron.down" : "chevron.right", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+        head.setAccessibilityValue(isOpen ? 1 : 0)
+        head.setAccessibilityExpanded(isOpen)
+    }
+}
+
+// The counts of a health bar: for example 48 live, 2 missing, 1 failed.
+struct HealthCounts: Equatable {
+    enum Kind: Equatable { case ok, warning, failure }
+    struct Part: Equatable {
+        let count: Int
+        let kind: Kind
+        let word: String
+    }
+    let parts: [Part]
+
+    init(_ parts: [Part]) { self.parts = parts }
+
+    var total: Int { parts.reduce(0) { $0 + max(0, $1.count) } }
+    // The share of each part, 0 to 1. All parts are 0 when the total is 0.
+    var fractions: [Double] { parts.map { total == 0 ? 0 : Double(max(0, $0.count)) / Double(total) } }
+    var label: String {
+        let shown = parts.filter { $0.count > 0 }.map { "\($0.count) \($0.word)" }
+        return shown.isEmpty ? "None" : shown.joined(separator: ", ")
+    }
+}
+
+extension HealthCounts.Kind {
+    var symbol: String {
+        switch self {
+        case .ok: return "checkmark"
+        case .warning: return "exclamationmark.triangle"
+        case .failure: return "xmark"
+        }
+    }
+    var color: NSColor {
+        switch self {
+        case .ok: return Palette.ok
+        case .warning: return Palette.warn
+        case .failure: return Palette.bad
+        }
+    }
+}
+
+// A stacked bar and a legend with check, triangle and cross shapes.
+final class HealthBar: NSStackView {
+    private final class Bar: NSView {
+        let counts: HealthCounts
+        init(_ c: HealthCounts) { counts = c; super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func draw(_ dirtyRect: NSRect) {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                let clip = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+                Palette.raise.setFill()
+                clip.fill()
+                clip.addClip()
+                var x: CGFloat = 0
+                for (part, f) in zip(counts.parts, counts.fractions) where f > 0 {
+                    let w = bounds.width * f
+                    part.kind.color.setFill()
+                    NSRect(x: x, y: 0, width: w, height: bounds.height).fill()
+                    x += w
+                }
+            }
+        }
+    }
+
+    init(_ counts: HealthCounts, trailing: [NSView] = []) {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = 8
+        translatesAutoresizingMaskIntoConstraints = false
+        let bar = Bar(counts)
+        bar.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        addFull(bar)
+        let legend = NSStackView(h: counts.parts.map { p in
+            NSStackView(h: [Glyph(p.kind.symbol, color: p.kind.color, size: 10.5),
+                            NSTextField.text("\(p.count) \(p.word)", size: 12, color: Palette.mut)], spacing: 5) as NSView
+        } + [Spacer()] + trailing, spacing: 16)
+        addFull(legend)
+        bar.setAccessibilityElement(true)
+        bar.setAccessibilityRole(.image)
+        bar.setAccessibilityLabel(counts.label)
+    }
+    required init(coder: NSCoder) { fatalError() }
+}
+
+// A list card with a fixed header and a body that scrolls. The header of the group at the top stays in place.
+final class StickyListCard: Box {
+    let scroll = NSScrollView()
+    private let body = NSStackView(v: [], spacing: 0)
+    private var groups: [(head: NSView, pinned: NSView, top: NSLayoutConstraint)] = []
+    private var observer: Any?
+
+    init(header: NSView, maxHeight: CGFloat = 520) {
+        super.init(fill: Palette.panel, border: Palette.line, radius: 10)
+        layer?.masksToBounds = true
+        let head = Box(fill: Palette.raise, border: nil, radius: 0)
+        head.addSubview(header)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        let sep = Box(fill: Palette.line, border: nil, radius: 0)
+        let doc = Flipped()
+        doc.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(body)
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = doc
+        for v in [head, sep, scroll] as [NSView] { addSubview(v) }
+        let fit = scroll.heightAnchor.constraint(equalTo: doc.heightAnchor)
+        fit.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: 14),
+            header.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -14),
+            header.topAnchor.constraint(equalTo: head.topAnchor, constant: 10),
+            header.bottomAnchor.constraint(equalTo: head.bottomAnchor, constant: -10),
+            head.leadingAnchor.constraint(equalTo: leadingAnchor), head.trailingAnchor.constraint(equalTo: trailingAnchor),
+            head.topAnchor.constraint(equalTo: topAnchor),
+            sep.leadingAnchor.constraint(equalTo: leadingAnchor), sep.trailingAnchor.constraint(equalTo: trailingAnchor),
+            sep.topAnchor.constraint(equalTo: head.bottomAnchor), sep.heightAnchor.constraint(equalToConstant: 1),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: sep.bottomAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scroll.heightAnchor.constraint(lessThanOrEqualToConstant: maxHeight), fit,
+            doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            body.leadingAnchor.constraint(equalTo: doc.leadingAnchor), body.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            body.topAnchor.constraint(equalTo: doc.topAnchor), body.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
+        ])
+        scroll.contentView.postsBoundsChangedNotifications = true
+        observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) {
+            [weak self] _ in self?.pin()
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { observer.map(NotificationCenter.default.removeObserver) }
+
+    // A row with no group, or a row of the last group.
+    func add(_ v: NSView) {
+        if !body.arrangedSubviews.isEmpty {
+            let sep = Box(fill: Palette.line, border: nil, radius: 0)
+            sep.heightAnchor.constraint(equalToConstant: 1).isActive = true
+            body.addFull(sep)
+        }
+        body.addFull(v)
+    }
+
+    // A group header. `make` runs twice: once for the list, once for the pinned copy.
+    func addGroup(_ make: () -> NSView) {
+        let head = make()
+        add(head)
+        let pinned = Box(fill: Palette.side, border: nil, radius: 0)
+        let content = make()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        pinned.addSubview(content)
+        pinned.isHidden = true
+        addSubview(pinned)
+        let top = pinned.topAnchor.constraint(equalTo: scroll.topAnchor)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: pinned.leadingAnchor), content.trailingAnchor.constraint(equalTo: pinned.trailingAnchor),
+            content.topAnchor.constraint(equalTo: pinned.topAnchor), content.bottomAnchor.constraint(equalTo: pinned.bottomAnchor),
+            pinned.leadingAnchor.constraint(equalTo: scroll.leadingAnchor), pinned.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            top,
+        ])
+        groups.append((head, pinned, top))
+    }
+
+    // Shows the pinned header of the group at the top. The next header pushes it up.
+    private func pin() {
+        guard let doc = scroll.documentView else { return }
+        let y = scroll.contentView.bounds.minY
+        let tops = groups.map { $0.head.convert($0.head.bounds, to: doc).minY }
+        let active = tops.lastIndex { $0 < y }
+        for (i, g) in groups.enumerated() {
+            g.pinned.isHidden = i != active
+            guard i == active else { continue }
+            let h = g.head.bounds.height
+            let next = i + 1 < tops.count ? tops[i + 1] - y : .greatestFiniteMagnitude
+            g.top.constant = min(0, next - h)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        pin()
+    }
+}
+
+// A provider card: icon, name, a detail line, a status pill and actions.
+final class ServiceCard: Box {
+    init(icon: NSView, name: String, detail: String, status: NSView?, actions: [NSView], dashed: Bool = false, onClick: (() -> Void)? = nil) {
+        super.init(fill: dashed ? nil : Palette.panel, border: Palette.line, radius: 10)
+        let text = TwoLine(name, detail, weight: .semibold)
+        if let status { status.widthAnchor.constraint(equalToConstant: ceil(status.fittingSize.width)).isActive = true }
+        let top = NSStackView(h: [icon, text] + (status.map { [$0] } ?? []), spacing: 10)
+        let col = NSStackView(v: [top], spacing: 10)
+        top.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true
+        if !actions.isEmpty { col.addArrangedSubview(NSStackView(h: actions, spacing: 6)) }
+        addSubview(col)
+        NSLayoutConstraint.activate([
+            col.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            col.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            col.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            col.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+        ])
+        if dashed { wantsLayer = true; borderWidth = 1 }
+        self.onClick = onClick
+        setAccessibilityElement(onClick != nil)
+        setAccessibilityRole(onClick == nil ? .group : .button)
+        setAccessibilityLabel(name)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var onClick: (() -> Void)?
+    override func mouseUp(with event: NSEvent) { onClick?() }
+    override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }
+    override var acceptsFirstResponder: Bool { onClick != nil }
+    override var canBecomeKeyView: Bool { onClick != nil }
+    override func keyDown(with event: NSEvent) {
+        if onClick != nil, [36, 49, 76].contains(event.keyCode) { onClick?(); return }
+        super.keyDown(with: event)
+    }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill() }
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    // A square with a letter, or a symbol for a dashed card.
+    static func icon(_ text: String, color: NSColor?) -> NSView {
+        let b = Box(fill: color, border: color == nil ? Palette.line : nil, radius: 7)
+        let l = NSTextField.text(text, size: 12, weight: .bold, color: color == nil ? Palette.dim : .white)
+        l.alignment = .center
+        b.addSubview(l)
+        NSLayoutConstraint.activate([
+            b.widthAnchor.constraint(equalToConstant: 28), b.heightAnchor.constraint(equalToConstant: 28),
+            l.centerXAnchor.constraint(equalTo: b.centerXAnchor), l.centerYAnchor.constraint(equalTo: b.centerYAnchor),
+        ])
+        return b
+    }
+}
+
+// Cards in equal columns. The column count follows the width: each column is at least `minWidth` wide.
+final class CardGrid: NSStackView {
+    private let items: [NSView]
+    private let minWidth: CGFloat
+    private var columns = 0
+
+    init(_ items: [NSView], minWidth: CGFloat = 220, gap: CGFloat = 12) {
+        self.items = items
+        self.minWidth = minWidth
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = gap
+        translatesAutoresizingMaskIntoConstraints = false
+        regroup(2)
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    override func setFrameSize(_ size: NSSize) {
+        super.setFrameSize(size)
+        let n = max(1, min(items.count, Int((size.width + spacing) / (minWidth + spacing))))
+        if n != columns { regroup(n) }
+    }
+
+    private func regroup(_ n: Int) {
+        columns = n
+        clear()
+        for start in stride(from: 0, to: items.count, by: n) {
+            let slice = Array(items[start..<min(start + n, items.count)])
+            let fillers = (0..<(n - slice.count)).map { _ in Spacer() as NSView }
+            let row = NSStackView(h: slice + fillers, spacing: spacing, align: .top)
+            row.distribution = .fillEqually
+            addFull(row)
+        }
+    }
 }
 
 // ─── Tables with resizable columns ───────────────────────────────────────────

@@ -63,7 +63,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .projects:
             let strip = TabStrip(Route.SettingsTab.allCases.map(\.title), selected: Route.SettingsTab.allCases.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in self?.go(.settings(.projects, tab: Route.SettingsTab.allCases[i])) }
-            body.addFull(strip)
+            body.addArrangedSubview(strip)
             switch tab {
             case .projects: embed(body, vc: "projects", note: "Projects to track, notifications, quick capture and the Orca workspace of each project.")
             case .repos: embed(body, vc: "repos", note: "The GitHub repos and organizations that OverSire polls.")
@@ -95,24 +95,12 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         return v
     }
 
-    private func segmented(_ labels: [String], selected: Int, label: String, _ pick: @escaping (Int) -> Void) -> NSView {
-        let s = NSSegmentedControl(labels: labels, trackingMode: .selectOne, target: nil, action: nil)
-        s.selectedSegment = selected
-        s.controlSize = .small
-        s.setAccessibilityLabel(label)
-        let box = ClosureTarget { pick(s.selectedSegment); saveConfig(); NotificationCenter.default.post(name: AppWindow.changed, object: nil) }
-        s.target = box
-        s.action = #selector(ClosureTarget.fire)
-        objc_setAssociatedObject(s, "target", box, .OBJC_ASSOCIATION_RETAIN)
-        return s
-    }
-
     // MARK: Pages
 
     private func general(_ b: NSStackView) {
         let themes = Theme.allCases
         b.addFull(card("Look", [
-            FieldRow("Theme", note: "System follows the macOS setting.", segmented(themes.map(\.label), selected: themes.firstIndex(of: GENERAL.theme) ?? 1, label: "Theme") { [weak self] i in
+            FieldRow("Theme", note: "System follows the macOS setting.", Segmented(themes.map(\.label), selected: themes.firstIndex(of: GENERAL.theme) ?? 1, label: "Theme") { [weak self] i in
                 GENERAL.theme = themes[i]
                 self?.app?.applySystemAppearance()
                 self?.view.window?.appearance = NSApp.appearance
@@ -126,7 +114,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private func showIn() -> NSView {
         let all = ShowIn.allCases
         let names = ["Menu bar", "Dock", "Both"]
-        return segmented(all.map { names[all.firstIndex(of: $0)!] }, selected: all.firstIndex(of: GENERAL.showIn) ?? 2, label: "Show in") { [weak self] i in
+        return Segmented(all.map { names[all.firstIndex(of: $0)!] }, selected: all.firstIndex(of: GENERAL.showIn) ?? 2, label: "Show in") { [weak self] i in
             GENERAL.showIn = all[i]
             self?.app?.applyShowIn()
         }
@@ -275,7 +263,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         b.addFull(card("Queue", [
             SwitchRow("Auto start", note: "Start the next item when a slot is free and its condition holds.", on: AGENTS.autoStart) { AGENTS.autoStart = $0 },
             FieldRow("AI checks", note: "Ask me shows a card. Auto acts at once.",
-                     segmented(modes.map(\.label), selected: modes.firstIndex(of: AGENTS.aiMode) ?? 1, label: "AI checks") { AGENTS.aiMode = modes[$0] }),
+                     Segmented(modes.map(\.label), selected: modes.firstIndex(of: AGENTS.aiMode) ?? 1, label: "AI checks") { AGENTS.aiMode = modes[$0] }),
             FieldRow("Quiet time", note: "A session with no output this long gets a check.", quiet),
             FieldRow("Start label", note: "A Plane label that adds the item to the queue.", textField(AGENTS.startLabel, id: "startLabel")),
             FieldRow("Bot assignee", note: "A Plane user that adds the item to the queue when assigned.", textField(AGENTS.botUser, id: "botUser")),
@@ -400,11 +388,11 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         b.addFull(card("Planner", [
             FieldRow("Project", pick),
             FieldRow("Planner", note: modeNote,
-                     segmented(["Off", "Hourly", "Live"], selected: modes.firstIndex(of: s.mode) ?? 1, label: "Planner") { i in
+                     Segmented(["Off", "Hourly", "Live"], selected: modes.firstIndex(of: s.mode) ?? 1, label: "Planner") { i in
                 book.update(pk) { $0.mode = modes[i] }
             }),
             FieldRow("Feature areas", note: "Core areas are always one at a time.",
-                     segmented(["One at a time", "Allow two at once"], selected: shared.firstIndex(of: s.sharedFeature) ?? 0, label: "Feature areas") { i in
+                     Segmented(["One at a time", "Allow two at once"], selected: shared.firstIndex(of: s.sharedFeature) ?? 0, label: "Feature areas") { i in
                 book.update(pk) { $0.sharedFeature = shared[i] }
             }),
         ]))

@@ -60,18 +60,6 @@ final class Avatar: Box {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-// A filter chip that stays on or off.
-final class ToggleChip: Chiplet {
-    init(_ text: String, on: Bool, _ flip: @escaping () -> Void) {
-        super.init(text, symbol: on ? "checkmark" : nil, color: on ? Palette.fg : Palette.mut,
-                   fill: on ? Palette.acc.withAlphaComponent(0.18) : Palette.raise, onClick: flip)
-        if on { border = Palette.acc }
-        setAccessibilityRole(.checkBox)
-        setAccessibilityValue(on ? 1 : 0)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-}
-
 // A card on the board: key, title and chips.
 final class BoardCard: Row {
     init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
