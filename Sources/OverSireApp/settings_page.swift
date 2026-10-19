@@ -35,7 +35,6 @@ final class FieldRow: Row {
 
 // Settings in the window: a list of pages at the left, the page at the right.
 final class SettingsPage: Page, NSTextFieldDelegate {
-    private static var embedded: [String: NSViewController] = [:]
     private static var query = ""
     private static var hit = 0
     private static var flash: String?
@@ -240,42 +239,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
                note: "Links and labels go in once. The OverSire block sits between markers at the end of the body.")),
         ]))
     }
-
-    // MARK: Embedded settings
-
-    private func embed(_ b: NSStackView, vc name: String, note: String) {
-        b.addFull(NSTextField.text(note, size: 12, color: Palette.dim, lines: 0))
-        let key = "\(name)-\(NSApp.appearance?.name.rawValue ?? "system")"
-        var vc = SettingsPage.embedded[key]
-        if vc == nil {
-            NSApp.withPinnedAppearance {
-                vc = data.settingsVC(name)
-                _ = vc?.view
-            }
-        }
-        guard let vc else {
-            b.addFull(EmptyNote("Open these settings from the menu bar.", symbol: "menubar.rectangle"))
-            return
-        }
-        SettingsPage.embedded[key] = vc
-        let v = vc.view
-        v.removeFromSuperview()
-        v.appearance = NSApp.appearance
-        // The menu bar nav (Back and tabs) is the top 44 pt. The sidebar does that job here.
-        let nav: CGFloat = 44
-        let size = vc.preferredContentSize == .zero ? v.frame.size : vc.preferredContentSize
-        let box = Box(fill: Palette.panel, border: Palette.line, radius: 10)
-        box.wantsLayer = true
-        box.layer?.masksToBounds = true
-        v.translatesAutoresizingMaskIntoConstraints = true
-        v.frame = NSRect(origin: .zero, size: size)
-        box.addSubview(v)
-        box.widthAnchor.constraint(equalToConstant: size.width).isActive = true
-        box.heightAnchor.constraint(equalToConstant: size.height - nav).isActive = true
-        b.addArrangedSubview(box)
-    }
-
-    static func dropEmbedded() { embedded = [:] }
 }
 
 extension SettingsPage: NSTextViewDelegate {

@@ -27,7 +27,6 @@ protocol AppData: AnyObject {
     var projectCatalog: ProjectCatalog { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
-    func settingsVC(_ name: String) -> NSViewController?
     func refresh(force: Bool, completion: (() -> Void)?)
     /// True when an account has the feature. Pages hide what no account has.
     func has(_ c: Capability) -> Bool

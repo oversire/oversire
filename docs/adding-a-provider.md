@@ -136,7 +136,7 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 
 - `environments`, `repos(in:)`, `workspaces`, `sessions`, `launch`.
 - A runtime is often a CLI. Call it through the `CommandRunner`.
-- A runtime that starts the agent in a terminal uses `LaunchRequest.command` when it is set. The app resolves it from Settings › Runtime › Agent commands and quotes each value. When the field is empty or missing, use the default of the agent: `LaunchCommand.defaultFor(agent)`. A runtime that starts the agent over a protocol (no command line) ignores the field.
+- A runtime that starts the agent in a terminal uses `LaunchRequest.command` when it is set. The app resolves it from Settings › Agents and queue › Agent commands and quotes each value. When the field is empty or missing, use the default of the agent: `LaunchCommand.defaultFor(agent)`. A runtime that starts the agent over a protocol (no command line) ignores the field.
 
 ## 5. Add the capabilities that you support
 

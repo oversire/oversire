@@ -198,7 +198,7 @@ final class RepoListView: NSStackView, NSSearchFieldDelegate {
         applyQueued = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.applyQueued = false
-            (NSApp.delegate as? GHActionsBar)?.applyRepoSelection(reopen: false)
+            (NSApp.delegate as? GHActionsBar)?.applyRepoSelection()
         }
     }
 }

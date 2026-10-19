@@ -185,7 +185,7 @@ final class RunsPage: Page {
         strip.onSelect = { [weak self] i in self?.go(.runs(filters[i])) }
         col.addArrangedSubview(strip)
         if filter == .unlinked {
-            col.addFull(NSTextField.text("A run links to an item by its branch, commit or title. See Settings › Linking for the rules.", size: 12, color: Palette.dim, lines: 2))
+            col.addFull(NSTextField.text("A run links to an item by its branch, commit or title. See Settings › Projects and repos › Linking and write-back for the rules.", size: 12, color: Palette.dim, lines: 2))
         }
         let shown = all.filter { RunsPage.matches(filter, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }
         let list = ListCard()

@@ -55,7 +55,7 @@ The app sends two signals when it has a cloud account. Only paths leave the Mac,
 
 ## Settings
 
-Settings → Planner, for each project:
+Settings › Agents and queue › Intake and planner, for each project:
 
 - Planner: Off, Hourly or Live.
 - Feature areas: One at a time, or Allow two at once.

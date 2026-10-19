@@ -23,7 +23,7 @@ The project comes from the window title, else from the last project. A shot for 
 
 ## Keys
 
-Global (change them in Settings › Projects › Snap basket):
+Global (change them in Settings › General › Quick capture and snap):
 
 | Key | Action |
 |---|---|
@@ -72,7 +72,7 @@ The title is `Snap basket · N shots · <first note>`. The description has one s
 
 ## The snap prompt
 
-Change the prompt in Settings › Runtime › Agent commands › Snap basket prompt. **Reset** sets the default. The placeholders:
+Change the prompt in Settings › Agents and queue › Agent commands › Snap basket prompt. **Reset** sets the default. The placeholders:
 
 | Placeholder | Value |
 |---|---|
@@ -84,11 +84,11 @@ Change the prompt in Settings › Runtime › Agent commands › Snap basket pro
 | `{project}` | the project key |
 | `{dir}` | the download folder for the images |
 
-The agent mode uses the command of the project agent (Settings › Runtime › Agent commands). The project needs an Orca workspace: start any item of the project once.
+The agent mode uses the command of the project agent (Settings › Agents and queue › Agent commands). The project needs an Orca workspace: start any item of the project once.
 
 ## Failures
 
-- A failed upload gets 3 more tries. If files still fail, the basket shows as partial. Click **Retry** in Settings › Projects › Snap basket › Sent baskets.
+- A failed upload gets 3 more tries. If files still fail, the basket shows as partial. Click **Retry** in Settings › General › Quick capture and snap › Sent baskets.
 - A tracker without attachments gives an error line with **Copy as Markdown**.
 - The agent mode checks the Orca root, the runtime and the command before it makes the item. An error then makes no item.
 
@@ -100,7 +100,7 @@ The agent mode uses the command of the project agent (Settings › Runtime › A
 
 ## Permissions
 
-1. Settings › Projects › Snap basket shows "Screen Recording is off". Click **Turn on…**.
+1. Settings › General › Quick capture and snap shows "Screen Recording is off". Click **Turn on…**.
 2. macOS opens System Settings › Privacy & Security › Screen & System Audio Recording. Turn on OverSire.
 3. Quit and open OverSire again. macOS applies the permission only after a restart.
 4. For voice notes, allow the Microphone and Speech Recognition when macOS asks.

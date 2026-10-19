@@ -34,17 +34,6 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private let dir: String
     struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: ChangeRequest }
 
-    func settingsVC(_ name: String) -> NSViewController? {
-        switch name {
-        case "general": return GeneralSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), updater: Updater())
-        case "repos": return ActionsSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-        case "projects":
-            return ProjectSettingsVC(catalog: ProjectCatalog(trackers: ENV, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, cfg: PROJECTS_CFG)
-        case "ai": return AISettingsVC()
-        case "live": return CloudSettingsVC(setup: cloudSetup, client: relay)
-        default: return nil
-        }
-    }
     private let paths: [String]
     private var window: AppWindow?
     private var glance: NSWindow?
@@ -92,7 +81,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
     // OVERSIRE_UISHOTS_CLOUD=0 or 1: the Cloud AI sections show without or with a cloud account.
     static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
-    // OVERSIRE_UISHOTS_COMMANDS=1: Settings › Runtime shows one custom start command and one bad draft.
+    // OVERSIRE_UISHOTS_COMMANDS=1: Settings › Agents and queue shows one custom start command and one bad draft.
     static let commands = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_COMMANDS"] == "1"
     // OVERSIRE_UISHOTS_PLANNER=1: a vision, relations, areas, a queue lane and a plan change in the OVERSIRE project.
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"

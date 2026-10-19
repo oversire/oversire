@@ -204,20 +204,6 @@ class Footer: NSView {
     }
 }
 
-// ─── Settings View ───────────────────────────────────────────────────────────
-
-class SettingsHeader: NSView {
-    init(_ title: String, y: CGFloat, w: CGFloat) {
-        super.init(frame: NSRect(x: 0, y: y, width: w, height: 28))
-        wantsLayer = true; layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.7).cgColor
-        let l = NSTextField(labelWithString: title)
-        l.font = .systemFont(ofSize: 10, weight: .bold); l.textColor = .secondaryLabelColor
-        l.frame = NSRect(x: 16, y: 6, width: w - 100, height: 16)
-        addSubview(l)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-}
-
 class SeparatorLine: NSView {
     init(y: CGFloat, w: CGFloat) {
         super.init(frame: NSRect(x: 0, y: y, width: w, height: 0.5))
@@ -226,38 +212,20 @@ class SeparatorLine: NSView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
-enum SettingsTab: Int, CaseIterable {
-    case general, actions, projects, ai, live
-}
-
-// Back button plus General / Actions / Projects / AI / Cloud.
-class SettingsNav: NSView {
-    init(w: CGFloat, selected: SettingsTab) {
-        super.init(frame: NSRect(x: 0, y: 0, width: w, height: 44))
-        wantsLayer = true; layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.9).cgColor
-        let back = NSButton(title: "Back", target: NSApp.delegate, action: #selector(GHActionsBar.showList))
-        back.bezelStyle = .inline; back.font = .systemFont(ofSize: 12)
-        back.frame = NSRect(x: 8, y: 10, width: 56, height: 24)
-        addSubview(back)
-        let seg = NSSegmentedControl(labels: ["General", "Actions", "Projects", "AI", "Cloud"], trackingMode: .selectOne,
-                                     target: self, action: #selector(tabChanged(_:)))
-        seg.selectedSegment = selected.rawValue
-        seg.font = .systemFont(ofSize: 11, weight: .medium)
-        seg.frame = NSRect(x: 70, y: 10, width: w - 82, height: 24)
-        addSubview(seg)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    @objc func tabChanged(_ sender: NSSegmentedControl) {
-        let tab = SettingsTab(rawValue: sender.selectedSegment) ?? .general
-        (NSApp.delegate as? GHActionsBar)?.showSettings(tab)
-    }
-}
-
 func textHeight(_ s: String, font: NSFont, width: CGFloat) -> CGFloat {
     let r = (s as NSString).boundingRect(
         with: NSSize(width: width, height: .greatestFiniteMagnitude),
         options: [.usesLineFragmentOrigin, .usesFontLeading],
         attributes: [.font: font])
     return ceil(r.height)
+}
+
+class Dot: NSView {
+    init(color: NSColor, frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = frame.width / 2
+        layer?.backgroundColor = color.cgColor
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }

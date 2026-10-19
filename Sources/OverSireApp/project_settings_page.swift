@@ -395,7 +395,8 @@ final class ProjectSettingsPage: Page {
             saveConfig()
         }
         let choose = ActionButton("Choose…") { [weak self] in self?.chooseRoot() }
-        c2.add(field("Orca workspace", NSStackView(h: [root, choose], spacing: 6), help: "The folder that Orca opens for new sessions of this project."))
+        let md = Self.claudeMDState(PROJECTS_CFG.orcaRoot(p), remote: PROJECTS_CFG.orca.environment != nil)
+        c2.add(field("Orca workspace", NSStackView(h: [root, choose], spacing: 6), help: "The folder that Orca opens for new sessions of this project." + (md.map { " Root CLAUDE.md: \($0)." } ?? "")))
         let sample = data.projectStore.snapshots.values.first { $0.summary.identifier.uppercased() == key }?.items.first
         let branch = TextInput(l.branchTemplate ?? "", placeholder: ProjectLocalSettings.defaultBranch, label: "Branch name", mono: true) { [weak self] v in
             guard let self, v != (self.local.branchTemplate ?? "") else { return }
@@ -422,6 +423,15 @@ final class ProjectSettingsPage: Page {
         f.stringValue = ""
         guard !local.github.contains(where: { $0.caseInsensitiveCompare(g) == .orderedSame }) else { return }
         editLocal { $0.github.append(g) }
+    }
+
+    // "worktree groups" when the root CLAUDE.md tells the agent about worktree groups.
+    static func claudeMDState(_ root: String?, remote: Bool) -> String? {
+        guard let root, !root.isEmpty else { return nil }
+        if remote { return "on the server" }
+        let path = ((root as NSString).expandingTildeInPath as NSString).appendingPathComponent("CLAUDE.md")
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return "missing" }
+        return text.range(of: "worktree group", options: .caseInsensitive) != nil ? "worktree groups" : "no worktree groups"
     }
 
     private func chooseRoot() {

@@ -161,7 +161,7 @@ extension PlaneTracker: HTMLBodies {
     func html(fromMarkdown md: String) -> String { PlaneMarkup.html(fromMarkdown: md) }
 }
 
-extension OrcaRuntime: TerminalOpening, SnapTerminal, ProjectSettingsVC.VersionReporting {}
+extension OrcaRuntime: TerminalOpening, SnapTerminal {}
 
 extension GitHubCodeHost: RepoAddressing {}
 extension ActionsCI: RepoAddressing, KnownJobFailures, RawLogReading {}

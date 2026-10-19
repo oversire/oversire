@@ -46,7 +46,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var projectStatusFilter: [String: String] = [:]
     var projectShowAll: Set<String> = []
     var projectQuery = ""
-    var lastSettingsTab: SettingsTab = .general
     var lastSyncedWorkspaces: [String] = []
     var appearanceObs: NSKeyValueObservation?
     let cloudSetup = CloudSetup()
@@ -172,10 +171,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             DispatchQueue.main.async { self.appWindow.show() }
         }
         if REPOS.isEmpty {
-            // First run: open popover with settings
+            // First run: open Settings in the window
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.closeTime = .distantPast
-                self.showSettings()   // opens + shows the popover itself
+                self.showSettings()
             }
         } else {
             // Polling gives events for changes only, so the first load reads the PRs too.
@@ -196,7 +195,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // New repos of a whole-owner pick start to track after a catalog refresh.
         NotificationCenter.default.addObserver(forName: RepoCatalog.changed, object: catalog, queue: .main) { [weak self] _ in
             guard let self = self, !self.catalog.refreshing else { return }
-            self.applyRepoSelection(reopen: false)
+            self.applyRepoSelection()
         }
         catalog.refreshIfStale()
         catalogTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -212,7 +211,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: AppEnvironment.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             WorkstreamIndex.formats = ENV.keyFormats
-            self.applyRepoSelection(reopen: false)
+            self.applyRepoSelection()
             self.relay.update()
             for w in ENV.trackerIds where self.projectCatalog.projects(of: w).isEmpty { self.projectCatalog.refresh(w, force: true) }
             self.applyProjectSelection()
@@ -577,11 +576,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     // Resolves REPOS from the picks. `reopen` is for an explicit save from the settings.
-    func applyRepoSelection(reopen: Bool) {
+    func applyRepoSelection() {
         let previous = REPOS
         REPOS = catalog.resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
         assignRepoColors(REPOS)
-        if reopen { onConfigSaved(previous: previous); return }
         guard REPOS != previous else { return }
         log.info("Repo catalog changed the tracked repos: \(previous.count) -> \(REPOS.count)")
         syncRelayRepos(previous: previous)
@@ -629,9 +627,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         projectStore.restartTimer()
         syncPlaneWorkspaces()
         updateIcon()
-        if popover.isShown, popover.contentViewController is ProjectSettingsVC {
-            showList()
-        }
     }
 
     // Registers the workspaces with the relay and adds a Plane webhook to new ones.
@@ -648,20 +643,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         d.perform("Install Plane webhooks", { await d.installPlaneHooks(added) }) { [weak self] _ in
             d.checkPlaneHooks(added)
             self?.projectStore.track(self?.projectCatalog.resolve(PROJECTS_CFG) ?? [], live: self?.liveProjectKeys() ?? [])
-        }
-    }
-
-    func onConfigSaved(previous: [String]) {
-        syncRelayRepos(previous: previous)
-        relay.update()
-        prevStatuses = [:]
-        firstLoad = true
-        grouped = []
-        popover.close()
-        refresh(force: true) { [weak self] in
-            guard let self = self else { return }
-            self.closeTime = .distantPast
-            self.toggle()
         }
     }
 
@@ -925,8 +906,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             popover.show(relativeTo: statusItem.button!.bounds, of: statusItem.button!, preferredEdge: .minY)
             // No refresh here. makeTabVC() snapshots `grouped` at build time and
             // never re-reads it, so a fetch started now lands in a view nobody is
-            // looking at — and doRefresh()/onConfigSaved() already refresh before
-            // they call toggle(), so it would double their cost.
+            // looking at — and doRefresh() already refreshes before
+            // it calls toggle(), so it would double the cost.
             updatePolling()
         }
     }
@@ -967,62 +948,25 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self.updateIcon()
             // Discard the stale view tree (its CGColors are baked in the OLD appearance).
             // Next show reconstructs under the new drawing context.
-            let wasSettings = self.popover.contentViewController is GeneralSettingsVC
-                || self.popover.contentViewController is ActionsSettingsVC
-                || self.popover.contentViewController is ProjectSettingsVC
-                || self.popover.contentViewController is CloudSettingsVC
-                || self.popover.contentViewController is AISettingsVC
-            let settingsTab = self.lastSettingsTab
             let wasShown = self.popover.isShown
             self.popover.close()
             self.popover.contentViewController = nil
             if wasShown {
                 self.closeTime = .distantPast
-                if wasSettings { self.showSettings(settingsTab) }
-                else { self.toggle() }
+                self.toggle()
             }
         }
     }
 
-    @objc func showSettings() { showSettings(lastSettingsTab) }
+    // The menu bar gear and the first run open Settings in the window.
+    @objc func showSettings() { showSettings(.settings(.general)) }
 
-    func showSettings(_ tab: SettingsTab) {
-        lastSettingsTab = tab
-        popover.behavior = tab == .live ? .semitransient : .transient
-        applySystemAppearance()
-        buildWithAppearance {
-            switch tab {
-            case .general:
-                self.popover.contentViewController = GeneralSettingsVC(catalog: self.catalog, updater: self.updater)
-            case .actions:
-                self.popover.contentViewController = ActionsSettingsVC(catalog: self.catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-            case .projects:
-                self.popover.contentViewController = ProjectSettingsVC(catalog: self.projectCatalog, store: self.projectStore, cfg: PROJECTS_CFG)
-            case .ai:
-                self.popover.contentViewController = AISettingsVC()
-            case .live:
-                self.popover.contentViewController = CloudSettingsVC(setup: self.cloudSetup, client: self.relay)
-            }
-        }
-        if !popover.isShown {
-            closeTime = .distantPast
-            toggle()
-        }
+    func showSettings(_ route: Route) {
+        if popover.isShown { popover.performClose(nil) }
+        open(route)
     }
 
-    @objc func showRelaySettings() { showSettings(.live) }
-
-    // The settings views of the menu bar, for the Settings page of the window.
-    func settingsVC(_ name: String) -> NSViewController? {
-        switch name {
-        case "general": return GeneralSettingsVC(catalog: catalog, updater: updater)
-        case "repos": return ActionsSettingsVC(catalog: catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-        case "projects": return ProjectSettingsVC(catalog: projectCatalog, store: projectStore, cfg: PROJECTS_CFG)
-        case "ai": return AISettingsVC()
-        case "live": return CloudSettingsVC(setup: cloudSetup, client: relay)
-        default: return nil
-        }
-    }
+    @objc func showRelaySettings() { showSettings(.settings(.accounts, anchor: SettingsAnchor.live.rawValue)) }
 
     @objc func showList() {
         popover.behavior = .transient
@@ -1071,7 +1015,6 @@ extension GHActionsBar: RelaySink {
     func relayStateChanged() {
         updatePolling()
         if relay.state == .live { cloudSetup.refreshHookedRepos { [weak self] in self?.relay.update() } }
-        (popover?.contentViewController as? CloudSettingsVC)?.rebuild()
     }
 }
 

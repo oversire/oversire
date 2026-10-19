@@ -121,7 +121,7 @@ final class SnapController {
         let state: SnapBasket.State = r.missing.isEmpty ? .sent(key: r.key, session: r.session?.id) : .partial(key: r.key, missing: r.missing)
         attempt { try store.set(b.id, state, item: r.item) }
         if !r.missing.isEmpty {
-            panel.show(.init(text: "\(r.key) has \(r.missing.count) missing image\(r.missing.count == 1 ? "" : "s"). Retry in Settings › Projects › Snap basket.",
+            panel.show(.init(text: "\(r.key) has \(r.missing.count) missing image\(r.missing.count == 1 ? "" : "s"). Retry in Settings › General › Quick capture and snap.",
                              link: r.item.url, bad: true))
         } else if agent {
             panel.show(.init(text: "\(r.key) is open in an agent terminal.", link: r.item.url))

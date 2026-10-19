@@ -23,7 +23,7 @@ enum SnapSendError: LocalizedError, Equatable {
         case .noProject(let k): return "OverSire does not track the project \(k)."
         case .noAttachments: return "This tracker cannot take attachments."
         case .noRoot(let k): return "Choose an Orca workspace for \(k) first: start any item of the project once."
-        case .noRuntime: return "Add an agent runtime account in Settings › Providers."
+        case .noRuntime: return "Add an agent runtime account in Settings › Accounts and sync."
         case .badCommand(let e): return "The agent command is not valid: \(e)"
         }
     }
