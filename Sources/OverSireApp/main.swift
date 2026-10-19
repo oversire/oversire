@@ -148,7 +148,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             btn.image = tintedIcon(ghIcon, .secondaryLabelColor)
             btn.imagePosition = .imageOnly
             btn.target = self
-            btn.action = #selector(toggle)
+            btn.action = #selector(statusItemClicked)
             // Re-render the cached tinted icon when the system flips light/dark.
             appearanceObs = btn.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
                 DispatchQueue.main.async { self?.updateIcon() }
@@ -890,6 +890,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         vc.showAllProjects = projectShowAll
         vc.projectQuery = projectQuery
         return vc
+    }
+
+    // An open window comes to the front in place of the popover.
+    @objc func statusItemClicked() {
+        if appWindow.isVisible { showWindow() } else { toggle() }
     }
 
     @objc func toggle() {
