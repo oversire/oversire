@@ -245,6 +245,16 @@ final class WorkQueue {
         }.map(\.key)
     }
 
+    /// The agents of the lane that left their slot, the newest first. A free slot names them.
+    func left(_ lane: QueueLane) -> [(key: String, state: SessionState, at: Date)] {
+        let prefix = lane.identifier.uppercased() + "-"
+        let run = Set(running(lane))
+        return agents.agents.compactMap { k, a -> (key: String, state: SessionState, at: Date)? in
+            guard k.hasPrefix(prefix), !run.contains(k), let st = agents.state(k) else { return nil }
+            return (k, st, a.since)
+        }.sorted { $0.at > $1.at }
+    }
+
     func world(workstreams: WorkstreamIndex?) -> QueueWorld {
         QueueWorld(
             busy: { [unowned self] in self.busy($0) },

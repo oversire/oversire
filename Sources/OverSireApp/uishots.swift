@@ -93,6 +93,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let commands = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_COMMANDS"] == "1"
     // OVERSIRE_UISHOTS_PLANNER=1: a vision, relations, areas, a queue lane and a plan change in the OVERSIRE project.
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
+    // OVERSIRE_UISHOTS_SESSIONS=1: one OVERSIRE session in each state, a blocked checklist and a quiet check.
+    static let sessions = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SESSIONS"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
     // OVERSIRE_UISHOTS_AI=on: Settings › AI shows a sample key that passed Test. No AI job runs.
@@ -152,6 +154,74 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                                 at: Date().addingTimeInterval(stale ? -3 * 86_400 : -7200)))
         }
     }
+
+    private func seedSessions() {
+        guard UIShots.sessions else { return }
+        AGENTS.aiMode = .ask
+        AI_CFG.agentChecks = true
+        agentIndex.hold = true
+        let now = Date()
+        let ago = { (m: Double) in now.addingTimeInterval(-m * 60) }
+        let blocked = """
+        OVERSIRE-109 is released in v1.3.9. I need you for the manual check on a real Mac:
+        - Turn on the Screen Recording permission.
+        - Take a capture on the second display.
+        - Send a capture to Plane.
+        - Send a capture to Orca.
+        Tell me when you have done it.
+        """
+        // key, phase, minutes since, live terminals, screen same for, counter moves, shells, message
+        let rows: [(String, AgentSession.Phase, Double, Int, Double, Bool, Int, String?)] = [
+            ("OVERSIRE-143", .waiting, 3, 1, 3, false, 0, "Do you want the Inbox to show the blocked rows too, or only Sessions?"),
+            ("OVERSIRE-109", .done, 26, 1, 26, false, 0, blocked),
+            ("OVERSIRE-142", .done, 27, 1, 2, false, 1, "The tests run in the background. I check the result when they end."),
+            ("OVERSIRE-91", .done, 44, 1, 44, false, 0, "The Planner page is merged into main. All tests pass."),
+            ("OVERSIRE-137", .working, 6, 2, 0.5, false, 0, nil),
+            ("OVERSIRE-141", .working, 52, 1, 41, true, 0, nil),
+            ("OVERSIRE-140", .working, 30, 1, 12, false, 0, nil),
+            ("OVERSIRE-144", .done, 90, 0, 90, false, 0, "Done."),
+        ]
+        var cards: [Workspace] = []
+        for (i, r) in rows.enumerated() {
+            let (key, phase, since, live, same, ticking, shells, message) = r
+            let card = "uishots-card-\(i)"
+            let a = AgentSession(phase: phase, since: ago(since), card: card, paneKey: "p\(i)", repo: "oversire", message: message)
+            var w = SessionWatch(at: ago(same))
+            w.fingerprint = "fp-\(key)"
+            w.counter = ticking ? "41m 12s · ↓ 88.1k tokens" : nil
+            w.ticking = ticking
+            w.shells = shells
+            w.readAt = ago(0.3)
+            agentIndex.seed(key, a, watch: w)
+            cards.append(Workspace(id: card, repo: "oversire", path: "/Users/ada/src/oversire/.wt/\(key.lowercased())", name: key.lowercased(),
+                                   comment: nil, liveTerminals: live, lastActivity: ago(since), agents: [a]))
+            guard phase == .done, live > 0 else { continue }
+            if key == "OVERSIRE-109" {
+                guard let r = SessionEnd.read(message: blocked, turn: "", recap: nil, status: .progress, now: now) else { print("UISHOTS no steps"); continue }
+                var e = SessionEnd(id: "end-\(key)", key: key, message: a.messageHash, verdict: .blocked, steps: r.steps,
+                                   followUpAt: now.addingTimeInterval(86400 * 2), blockedBy: ["OVERSIRE-117"], at: ago(25))
+                for j in 0..<min(2, e.steps.count) { e.steps[j].ticked = true }
+                aiChecks.seed(e)
+                UIShots.expandBlocked = e.id
+            } else {
+                aiChecks.seed(SessionEnd(id: "end-\(key)", key: key, message: a.messageHash, verdict: .done, steps: [], followUpAt: nil, blockedBy: [], at: ago(since)))
+            }
+        }
+        agentIndex.seed(cards: cards)
+        aiChecks.seed(Judgement(id: "uishots-quiet", key: "OVERSIRE-140", verdict: .stuck,
+                                evidence: ["The screen did not change for 12 min", "The last command failed: swift test (exit 1)"],
+                                action: "Sends the nudge to the session.", nudge: "The tests fail in AgentJudgeTests. Fix them, or tell me what blocks you.",
+                                at: ago(1), byAI: true, phase: .quiet, since: ago(13), pane: "p6", screen: "fp-OVERSIRE-140", ticking: false))
+        guard let found = projectStore.item(key: "OVERSIRE-137") else { print("UISHOTS no OVERSIRE project"); return }
+        let snap = found.snap, pk = snap.summary.ref.storeKey
+        AGENTS.slots[pk] = 7
+        for k in ["OVERSIRE-145", "OVERSIRE-139"] {
+            if let f = projectStore.item(key: k), queue.lane(pk)?.entries.contains(where: { $0.key == k }) != true { queue.add(f.item, snap: snap) }
+        }
+    }
+
+    /// The id of the blocked row that the Sessions shot opens.
+    static var expandBlocked: String?
 
     private func seedPlanner() {
         guard UIShots.planner else { return }
@@ -407,6 +477,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         UIShots.shooting = true
         seedPlanner()
         seedSummaries()
+        seedSessions()
         let w = AppWindow(data: self)
         window = w
         w.window?.setFrameAutosaveName("")

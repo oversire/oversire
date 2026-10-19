@@ -453,7 +453,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(router.current.url.absoluteString, forType: .string)
     }
-    @objc func refreshNow() { data.refresh(force: true, completion: nil) }
+    @objc func refreshNow() {
+        data.refresh(force: true, completion: nil)
+        (page as? AgentsPage)?.checkAgain()
+    }
     @objc func toggleSidebarNow(_ sender: Any?) { split.toggleSidebar(sender) }
     func setSidebarWidth(_ w: CGFloat) { split.splitView.setPosition(w, ofDividerAt: 0) }
     @objc func openPalette() { CommandPalette.show(over: self) }

@@ -111,8 +111,9 @@ final class InboxFeed {
         }
         for (key, a) in data.agentIndex.agents where a.phase != .working && a.phase != .starting {
             let id = "agent|\(key)|\(a.phase)|\(Int(a.since.timeIntervalSince1970))"
-            let what = a.phase == .waiting ? "asks a question" : a.phase == .done ? "is done" : "did not start"
-            out.append(InboxEntry(id: id, source: .agent, title: "\(key) session \(what)", body: a.message ?? "",
+            let st = data.agentIndex.state(key)
+            let title = a.phase == .waiting ? "\(key) session asks a question" : a.phase == .done ? "\(key) · \((st ?? .done).label)" : "\(key) session did not start"
+            out.append(InboxEntry(id: id, source: .agent, title: title, body: a.message ?? "",
                                   at: a.since, unread: !read.contains(id), route: .item(key, .session),
                                   itemKey: key, itemURL: store.item(key: key)?.2.url))
         }
@@ -120,7 +121,7 @@ final class InboxFeed {
             let id = "ai|" + c.id
             out.append(InboxEntry(id: id, source: .ai, title: "AI check: \(c.key) · \(c.verdict.word)",
                                   body: c.evidence.joined(separator: " · "), at: c.at,
-                                  unread: c.state == .pending && !read.contains(id), route: .queue, itemKey: c.key))
+                                  unread: c.state == .pending && !read.contains(id), route: .agents, itemKey: c.key))
         }
         for (pk, snap) in store.snapshots {
             for i in snap.intake ?? [] {
@@ -241,6 +242,7 @@ final class InboxPage: Page {
     private weak var projectChip: MenuChip?
     private weak var priorityChip: MenuChip?
     private let more = MoreRows()
+    private lazy var needsYou = NeedsYouCard(page: self)
     override var buildsLater: Bool { true }
 
     private var tab: Route.InboxTab {
@@ -286,6 +288,7 @@ final class InboxPage: Page {
         }
         col.addArrangedSubview(filterBar(all.filter { tab == .all || $0.source.tab == tab }))
         if let note { col.addFull(Banner(.info, title: note)) }
+        if tab == .agents, let c = needsYou.card() { col.addFull(c) }
         if tab == .intake {
             col.addFull(NSTextField.text("Keys on a focused line: 1 accept · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
                                          size: 12, color: Palette.dim, lines: 2))

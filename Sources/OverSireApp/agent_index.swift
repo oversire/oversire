@@ -105,6 +105,11 @@ final class AgentIndex: NSObject {
     private var observer: NSObjectProtocol?
 
     /// For `--uishots`: a session without Orca. The next poll replaces it.
+    /// `--uishots`: the seeded sessions stay, no poll replaces them.
+    var hold = false
+
+    func seed(cards: [Workspace]) { self.cards = cards }
+
     func seed(_ key: String, _ a: AgentSession, watch: SessionWatch? = nil) {
         agents[key.uppercased()] = a
         watches[key.uppercased()] = watch
@@ -193,7 +198,7 @@ final class AgentIndex: NSObject {
     }
 
     func poll(done: (() -> Void)? = nil) {
-        guard ready != nil, !polling, let rt = runtime() else { done?(); return }
+        guard ready != nil, !polling, !hold, let rt = runtime() else { done?(); return }
         polling = true
         lastPoll = now()
         Task { [weak self] in

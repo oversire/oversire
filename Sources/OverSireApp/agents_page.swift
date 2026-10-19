@@ -1,7 +1,7 @@
 import AppKit
 import OverSireCore
 
-// The agents: runner sessions of the cloud, then the Orca agents that need input, all worktrees and the activity.
+// The agents: runner sessions of the cloud, then the sessions that need you, all worktrees and the activity.
 final class AgentsPage: Page {
     /// The prompt ids with an answer on the way.
     private var answering: Set<String> = []
@@ -11,10 +11,16 @@ final class AgentsPage: Page {
     private var sending: Set<String> = []
     private var note: (Tone, String)?
     private var allWorktrees = false
-    private let table = ColumnLayout(id: "worktrees-2", columns: [
-        TableColumn(id: "worktree", title: "Worktree", width: 260, min: 120),
-        TableColumn(id: "repo", title: "Repo and branch", width: 260, min: 80, optional: true),
-        TableColumn(id: "session", title: "Session", width: 130, min: 60),
+    private lazy var needsYou: NeedsYouCard = {
+        let c = NeedsYouCard(page: self)
+        c.inputDetail = { [weak self] key, a in self?.inputDetail(key, a) ?? NSView() }
+        return c
+    }()
+    private let table = ColumnLayout(id: "worktrees-3", columns: [
+        TableColumn(id: "worktree", title: "Worktree", width: 240, min: 120),
+        TableColumn(id: "repo", title: "Repo and branch", width: 150, min: 80, optional: true),
+        TableColumn(id: "state", title: "State", width: 180, min: 60),
+        TableColumn(id: "change", title: "Last screen change", width: 260, min: 80, optional: true),
         TableColumn(id: "terms", title: "Terms", width: 44, min: 36, optional: true),
         TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
     ])
@@ -27,7 +33,8 @@ final class AgentsPage: Page {
         var caption = cfg.environment.map { "Orca environment \($0)" } ?? "Orca on this Mac"
         caption += " · read every 15 s"
         if let e = idx.lastError { caption += " · last read failed: \(e)" }
-        col.addFull(PageHeader("Sessions and worktrees", caption: caption, actions: [
+        col.addFull(PageHeader("Sessions", caption: caption, actions: [
+            NeedsYouCard.recheckButton(data),
             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() },
         ]))
@@ -39,8 +46,7 @@ final class AgentsPage: Page {
             return
         }
 
-        let waiting = idx.agents.filter { $0.value.phase == .waiting }.sorted { $0.value.since < $1.value.since }
-        for (key, a) in waiting { col.addFull(waitingCard(key, a)) }
+        if let c = needsYou.card() { col.addFull(c) }
 
         let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
         let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
@@ -162,7 +168,18 @@ final class AgentsPage: Page {
         let key = cardKey(c)
         let co = data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }
         let agent: NSView
-        if let key, let a = data.agentIndex.agent(key), a.card == c.id {
+        var change: NSView = NSTextField.text("—", size: 12, color: Palette.dim)
+        if let key, let a = data.agentIndex.agent(key), a.card == c.id, let st = data.agentIndex.state(key) {
+            agent = Pill(Tone(st), text: data.agentIndex.pillText(key) ?? st.label)
+            agent.toolTip = st.facts
+            var t = data.agentIndex.screenText(key)
+            if let j = data.aiChecks.checks.filter({ $0.key == key.uppercased() }).max(by: { $0.at < $1.at }) {
+                t += j.state == .retired ? " · \(j.verdict == .stuck ? "stuck " : "")check retired" : " · checked: \(j.verdict.word.lowercased())"
+            }
+            let f = NSTextField.text(t, size: 12, color: Palette.mut)
+            f.lineBreakMode = .byTruncatingTail
+            change = f
+        } else if let key, let a = data.agentIndex.agent(key), a.card == c.id {
             agent = Pill(Tone(a.phase), text: a.label())
         } else if let g = c.agents.min(by: { $0.rank < $1.rank }) {
             agent = Pill(tone(g.phase))
@@ -182,7 +199,7 @@ final class AgentsPage: Page {
         place.lineBreakMode = .byTruncatingMiddle
         let cells: [String: NSView] = [
             "worktree": NSStackView(h: worktree, spacing: 6), "repo": place,
-            "session": agent, "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
+            "state": agent, "change": change, "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
         ]
         let open = ActionButton("Open", style: .plain) { [weak self] in
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
@@ -197,20 +214,22 @@ final class AgentsPage: Page {
         return row
     }
 
-    private func tone(_ s: AgentSession.Phase) -> Tone { s == .waiting ? .waiting : s == .working ? .working : .done }
+    private func tone(_ s: AgentSession.Phase) -> Tone {
+        Tone(s == .waiting ? SessionState.needsInput : s == .working ? .working : .done)
+    }
 
-    private func waitingCard(_ key: String, _ a: AgentSession) -> NSView {
-        let title = data.projectStore.item(key: key)?.2.title ?? ""
-        let c = Card(border: Palette.warn.withAlphaComponent(0.55))
-        let link = ActionButton("\(key) · \(title)", style: .link) { [weak self] in self?.go(.item(key, .session)) }
-        link.truncates()
-        c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), link, Chiplet(a.repo.isEmpty ? a.agent.rawValue : a.repo, symbol: "folder", mono: true),
-                              NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 8))
+    /// ⌘R: read the screens again and check each session again.
+    func checkAgain() {
+        data.aiChecks.recheck(keys: data.aiChecks.recheckable)
+    }
+
+    // The screen and a reply field under a Needs input row.
+    private func inputDetail(_ key: String, _ a: AgentSession) -> NSView {
         loadTail(key)
         let lines = tails[key].map { Array($0.suffix(10)) } ?? [a.message ?? "Reading the terminal…"]
-        c.add(TermView(lines: lines, height: 130))
-        c.add(replyRow(key))
-        return c
+        let v = NSStackView(v: [TermView(lines: lines, height: 130), replyRow(key)], spacing: 6)
+        v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
+        return v
     }
 
     private func loadTail(_ key: String) {

@@ -1,7 +1,7 @@
 import AppKit
 import OverSireCore
 
-// The queue: the AI checks that need you, then one card per lane. The Board view shows Running, Up next, Waits and Held.
+// The queue: a link to the sessions that need you, then one card per lane. The Board view shows Running, Up next, Waits and Held.
 // A card that shares an area with a card that runs at the same time gets a red border and a ▲ line.
 final class QueuePage: Page {
     /// The open review sheet, for `--uishots`.
@@ -13,8 +13,6 @@ final class QueuePage: Page {
     private var orders: [String: (order: [String], reason: String)] = [:]   // lane project → AI order
     private var ordering: Set<String> = []   // lane projects that wait for the AI order
     private var asked: Set<String> = []      // lane project + keys, asked once
-    private var expanded: Set<String> = []   // open check lines
-    private var allChecks = false
     private var after: Set<String> = []      // lanes that show the board with the Planner order
     private var updated: Set<String> = []    // lanes with an accepted plan change in this page
     private var sheet: NSWindow?
@@ -66,7 +64,7 @@ final class QueuePage: Page {
             col.addFull(Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
                                actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.agents)) }]))
         }
-        checks(col)
+        needsYou(col)
 
         let q = data.queue
         var held = hasCloud || UIShots.cloud == true ? (cloudAIRecords?.orders.filter { $0.state == .held } ?? []) : []
@@ -84,79 +82,13 @@ final class QueuePage: Page {
         col.addFull(planeNote())
     }
 
-    // MARK: AI checks
-
-    private func checks(_ col: NSStackView) {
-        let judge = data.aiChecks
-        let pending = judge.pending
-        guard !pending.isEmpty else { return }
-        let freeing = AgentJudge.freeing(pending)
-        var trailing: [NSView] = []
-        if freeing.count >= 2 {
-            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") { judge.approve(all: freeing.map(\.id)) })
-        }
-        trailing.append(ActionButton("Open in Inbox", style: .link) { [weak self] in self?.go(.inbox(.agents)) })
-        let c = Card(title: "AI checks need you · \(pending.count)", trailing: trailing, padding: 10, spacing: 2,
-                     fill: Palette.panel, border: Palette.intake.withAlphaComponent(0.55))
-        for j in allChecks ? pending : Array(pending.prefix(3)) { c.add(checkLine(j)) }
-        if pending.count > 3 {
-            let more = allChecks ? "Show less" : "\(pending.count - 3) more · Show all"
-            c.add(NSStackView(h: [ActionButton(more, style: .link) { [weak self] in self?.allChecks.toggle(); self?.reload() }, Spacer()], spacing: 0))
-        }
-        col.addFull(c)
-    }
-
-    private func checkLine(_ j: Judgement) -> NSView {
-        let judge = data.aiChecks
-        let open = expanded.contains(j.id)
-        let tone: Tone = j.verdict == .done ? .done : .warning
-        let title = NSTextField.text(data.projectStore.item(key: j.key)?.item.title ?? "", size: 12.5, color: Palette.mut)
-        title.lineBreakMode = .byTruncatingTail
-        title.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        title.setContentHuggingPriority(.init(1), for: .horizontal)
-        let key = NSTextField.text(j.key, size: 12, weight: .semibold, mono: true)
-        let word = NSTextField.text(j.verdict.word, size: 12.5, weight: .medium, color: tone.color)
-        for f in [key, word] { f.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal) }
-        let pill = Chiplet(j.verdict == .done ? "Free slot" : "Nudge", symbol: j.verdict == .done ? "square.dashed" : "text.bubble")
-        let more = ActionButton("", symbol: "ellipsis")
-        more.setAccessibilityLabel("More actions for \(j.key)")
-        let menu: () -> [MenuAction] = { [weak self] in
-            [MenuAction("Open session") { self?.go(.item(j.key, .session)) }, MenuAction("Free the slot") { judge.release(j.id) }]
-        }
-        more.onClick = { [weak more] in
-            guard let more else { return }
-            let m = NSMenu()
-            let items = menu()
-            items.forEach { m.addItem($0.item) }
-            withExtendedLifetime(items) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 3), in: more) }
-        }
-        let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), key, word, title, pill,
-                       ActionButton("Approve", style: .primary) { judge.approve(j.id) }, ActionButton("Hold") { judge.hold(j.id) }, more],
-                      height: 34, inset: 6, label: "\(j.key): \(j.verdict.word). \(j.action)") { [weak self] in
-            guard let self else { return }
-            if open { self.expanded.remove(j.id) } else { self.expanded.insert(j.id) }
-            self.reload()
-        }
-        row.menuItems = { menu().map(\.item) }
-        guard open else { return row }
-        let detail = NSStackView(v: j.evidence.map { e in
-            NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(e, size: 12, color: Palette.mut, lines: 3)], spacing: 6, align: .top)
-        }, spacing: 3)
-        detail.addFull(NSTextField.text(j.action, size: 12, color: Palette.dim, lines: 2))
-        if let n = j.nudge {
-            let box = Box(fill: Palette.raise, border: Palette.line, radius: 6)
-            let t = NSTextField.text(n, size: 12, lines: 4, mono: true)
-            box.addSubview(t)
-            t.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                t.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10), t.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
-                t.topAnchor.constraint(equalTo: box.topAnchor, constant: 7), t.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7),
-            ])
-            detail.addFull(box)
-        }
-        let v = NSStackView(v: [row, Padded(detail, vertical: 4, side: 28)], spacing: 0)
-        v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
-        return v
+    // The checks moved to the Sessions page. One line links there.
+    private func needsYou(_ col: NSStackView) {
+        let n = NeedsYouCard(page: self).count(data)
+        guard n > 0 else { return }
+        let tone = Tone(SessionState.needsInput)
+        let link = ActionButton("\(n) \(n == 1 ? "session needs" : "sessions need") you · Sessions", style: .link) { [weak self] in self?.go(.agents) }
+        col.addFull(NSStackView(h: [Glyph(tone.symbol, color: tone.color, size: 12), link, Spacer()], spacing: 6))
     }
 
     // MARK: Lanes
@@ -244,7 +176,7 @@ final class QueuePage: Page {
 
     private func columns(_ b: QueueBoard, lane: QueueLane, pick: QueueLane.Pick, kind: @escaping (String) -> AreaKind) -> NSView {
         let parts: [(String, [NSView], String)] = [
-            ("Running", b.running.map { runningCard($0, kind: kind) } + (0..<b.free).map { _ in FreeSlot() }, "No slot"),
+            ("Running", b.running.map { runningCard($0, kind: kind) } + freeSlots(b.free, lane: lane), "No slot"),
             ("Up next", b.next.enumerated().map { i, card in entryCard(card, number: i + 1, lane: lane, kind: kind) }, "Empty"),
             ("Waits", b.waits.map { entryCard($0, number: nil, lane: lane, kind: kind) }, "Empty"),
             ("Held", b.held.map { heldCard($0, kind: kind) }, hasCloud ? "Empty" : "Needs OverSire Cloud"),
@@ -306,9 +238,28 @@ final class QueuePage: Page {
     }
 
     private func runningCard(_ c: QueueBoard.Card, kind: (String) -> AreaKind) -> NSView {
-        let a = data.agentIndex.agent(c.key)
-        return card(c, lead: Glyph("play.fill", color: Palette.run, size: 10), badge: a.map { Pill(Tone($0.phase), text: $0.label()) }, kind: kind,
+        let idx = data.agentIndex
+        var badge: NSView? = idx.agent(c.key).map { Pill(Tone($0.phase), text: $0.label()) }
+        if let st = idx.state(c.key) {
+            var views: [NSView] = [Pill(Tone(st), text: idx.pillText(c.key) ?? st.label)]
+            if let j = data.aiChecks.pending.first(where: { $0.key == c.key.uppercased() }) {
+                views.append(NSTextField.text(j.verdict.word, size: 11.5, weight: .medium, color: Tone(j.verdict).color))
+            }
+            badge = NSStackView(h: views, spacing: 6)
+        }
+        return card(c, lead: Glyph("play.fill", color: Palette.run, size: 10), badge: badge, kind: kind,
                     note: claimText(c.key), label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) }
+    }
+
+    private func freeSlots(_ n: Int, lane: QueueLane) -> [NSView] {
+        let left = data.queue.left(lane)
+        let clock = DateFormatter()
+        clock.dateFormat = "HH:mm"
+        return (0..<n).map { i in
+            guard i < left.count else { return FreeSlot() }
+            let l = left[i]
+            return FreeSlot("\(l.key) left: \(l.state.label) \(clock.string(from: l.at))")
+        }
     }
 
     private func entryCard(_ c: QueueBoard.Card, number: Int?, lane: QueueLane, kind: (String) -> AreaKind) -> NSView {
@@ -534,17 +485,21 @@ final class SlotMeter: NSStackView {
 }
 
 // An empty slot in the Running column.
+// `left` names the session that freed it.
 final class FreeSlot: Box {
-    init() {
+    init(_ left: String? = nil) {
         super.init(fill: nil, border: Palette.line, radius: 8)
-        let t = NSTextField.text("Free slot", size: 12, color: Palette.dim)
+        let text = "Free slot" + (left.map { "\n" + $0 } ?? "")
+        let t = NSTextField.text(text, size: 12, color: Palette.dim, lines: 3)
+        t.alignment = .center
         addSubview(t)
         t.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([t.centerXAnchor.constraint(equalTo: centerXAnchor), t.centerYAnchor.constraint(equalTo: centerYAnchor),
-                                     heightAnchor.constraint(equalToConstant: 44)])
+                                     t.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
+                                     heightAnchor.constraint(equalTo: t.heightAnchor, constant: left == nil ? 28 : 16)])
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel("Free slot")
+        setAccessibilityLabel(text.replacingOccurrences(of: "\n", with: ", "))
     }
     required init?(coder: NSCoder) { fatalError() }
 }

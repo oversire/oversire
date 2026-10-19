@@ -722,7 +722,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
             out.append(Event(source: .orca, text: "Session: \(a.label())" + (a.message.map { " · \($0)" } ?? ""), at: a.since))
         }
         for j in data.aiChecks.checks where j.key == key {
-            out.append(Event(source: .oversire, text: "AI check: \(j.verdict.word) · \(j.state)", at: j.at, body: j.evidence.joined(separator: "\n")))
+            let state = j.state == .retired ? "retired: " + (j.retired ?? "out of date") : j.state.rawValue
+            out.append(Event(source: .oversire, text: "AI check: \(j.verdict.word) · \(state)", at: j.at, body: j.evidence.joined(separator: "\n")))
         }
         return out.sorted { $0.at > $1.at }
     }

@@ -39,12 +39,12 @@ struct NeedsYou: Equatable {
             let at = list.map(\.at).max() ?? .distantPast
             if list.count > 1 {
                 return [NeedsYou(kind: .aiCheck, title: "AI: \(list.count) sessions \(v == .done ? "look done" : "look stuck")",
-                                 body: list.map(\.key).joined(separator: " · "), at: at, route: .queue, keys: list.map(\.key))]
+                                 body: list.map(\.key).joined(separator: " · "), at: at, route: .agents, keys: list.map(\.key))]
             }
             return list.map { c in
                 NeedsYou(kind: .aiCheck, title: "AI: the \(c.key) session \(c.verdict.word.lowercased())",
                          body: c.verdict == .done ? "Approve to start the next item in the queue." : "Approve a nudge, or stop it.",
-                         at: c.at, route: .queue)
+                         at: c.at, route: .agents)
             }
         }
     }
@@ -57,6 +57,10 @@ struct NeedsYou: Equatable {
                                 body: a.message ?? "The session waits for your answer.", at: a.since, route: .item(key, .overview)))
         }
         out += checks(data.aiChecks.pending)
+        for e in data.aiChecks.blocking {
+            out.append(NeedsYou(kind: .agentWaiting, title: "\(e.key) is blocked on you",
+                                body: "\(e.steps.count) step\(e.steps.count == 1 ? "" : "s") for you · \(e.passed) pass", at: e.at, route: .agents))
+        }
         for (repo, r) in failingRuns(data.grouped) {
             let link = ws.link(runId: r.id)
             let watched = link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false
@@ -198,14 +202,15 @@ final class HomePage: Page {
         col.addFull(PageHeader("Home", caption: "\(df.string(from: Date())) · \(streams.count) workstream\(streams.count == 1 ? "" : "s") · \(running.count) run\(running.count == 1 ? "" : "s") in progress"))
 
         let checks = data.aiChecks.pending.count
+        let attention = NeedsYouCard(page: self).count(data)
         let linked = running.filter { data.workstreams.link(runId: $0.run.id) != nil }.count
         var tiles: [NSView] = [
             Tile("\(running.count)", "Running now · \(linked) linked", tone: .running) { [weak self] in self?.go(.runs(.running)) },
             Tile("\(failing.count)", failing.isEmpty ? "Failing runs · all green" : "Failing runs", tone: failing.isEmpty ? .ok : .bad) { [weak self] in self?.go(.runs(.failed)) },
-            Tile("\(agents.count)", "Sessions · \(agents.filter { $0.phase == .waiting }.count) need input", tone: .working) { [weak self] in self?.go(.agents) },
-            Tile("\(data.queue.count)", "Queue · \(checks) AI check\(checks == 1 ? "" : "s")", tone: .queued, ring: checks > 0 ? Palette.intake : nil) { [weak self] in
-                self?.go(.queue)
+            Tile("\(agents.count)", "Sessions · \(attention) need\(attention == 1 ? "s" : "") you", tone: .working, ring: attention > 0 ? Palette.intake : nil) { [weak self] in
+                self?.go(.agents)
             },
+            Tile("\(data.queue.count)", "Queue · \(checks) AI check\(checks == 1 ? "" : "s")", tone: .queued) { [weak self] in self?.go(.queue) },
         ]
         if data.has(.intake) {
             tiles.append(Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),

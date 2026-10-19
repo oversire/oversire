@@ -219,7 +219,8 @@ final class AgentJudge {
     /// The checks to act on: Looks done and Looks stuck.
     var pending: [Judgement] {
         guard on else { return [] }
-        return checks.filter(\.open)
+        let at = now()
+        return checks.filter { $0.open && AgentJudge.stale($0, state: agents.state($0.key), watch: agents.watch($0.key), at: at) == nil }
     }
 
     /// The end check of the agent's current message.
@@ -540,6 +541,8 @@ final class AgentJudge {
 
     /// For `--uishots`.
     func seed(_ e: SessionEnd) { ends.insert(e, at: 0) }
+
+    func seed(_ j: Judgement) { checks.insert(j, at: 0) }
 
     // MARK: Queue order
 
