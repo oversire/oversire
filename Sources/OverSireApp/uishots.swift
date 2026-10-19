@@ -80,6 +80,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     // OVERSIRE_UISHOTS_LOADING=1: no fetch ever ends, so each page shows its loading state.
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
     // OVERSIRE_UISHOTS_CLOUD=0 or 1: the Cloud AI sections show without or with a cloud account.
+    /// True in a `--uishots` run. Pages then keep view choices in memory, not in the user defaults.
+    static var shooting = false
     static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
     // OVERSIRE_UISHOTS_COMMANDS=1: Settings › Agents and queue shows one custom start command and one bad draft.
     static let commands = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_COMMANDS"] == "1"
@@ -381,6 +383,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     }
 
     private func shoot() {
+        UIShots.shooting = true
         seedPlanner()
         let w = AppWindow(data: self)
         window = w
@@ -404,7 +407,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     if !p.hasPrefix("press:") { self.glance?.orderOut(nil); self.glance = nil }
                     if p.hasPrefix("press:") {
                         let spec = p.dropFirst(6).split(separator: "@", maxSplits: 1).map(String.init)
-                        if let root = (self.glance ?? PlanPage.openSheet ?? w.window)?.contentView, !UIShots.press(spec[0], scope: spec.count > 1 ? spec[1] : nil, in: root) {
+                        if let root = (self.glance ?? QueuePage.openSheet ?? w.window)?.contentView, !UIShots.press(spec[0], scope: spec.count > 1 ? spec[1] : nil, in: root) {
                             print("UISHOTS no button \(p)")
                         }
                     } else if p.hasPrefix("sidebar:") {
@@ -509,7 +512,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? glance?.windowNumber ?? PlanPage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? glance?.windowNumber ?? QueuePage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")

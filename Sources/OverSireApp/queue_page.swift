@@ -1,201 +1,406 @@
 import AppKit
 import OverSireCore
 
-// The queue: one lane per project, and the AI checks of quiet agents.
+// The queue: the AI checks that need you, then one card per lane. The Board view shows Running, Up next, Waits and Held.
+// A card that shares an area with a card that runs at the same time gets a red border and a ▲ line.
 final class QueuePage: Page {
+    /// The open review sheet, for `--uishots`.
+    static weak var openSheet: NSWindow?
+    static var windowNumber: Int? { openSheet?.windowNumber }
+    private static let viewKey = "queue.view"
+    private static var shotView: String?
+
     private var orders: [String: (order: [String], reason: String)] = [:]   // lane project → AI order
     private var ordering: Set<String> = []   // lane projects that wait for the AI order
-    private var asked: Set<String> = []                                      // lane project + keys, asked once
+    private var asked: Set<String> = []      // lane project + keys, asked once
+    private var expanded: Set<String> = []   // open check lines
+    private var allChecks = false
+    private var after: Set<String> = []      // lanes that show the board with the Planner order
+    private var updated: Set<String> = []    // lanes with an accepted plan change in this page
+    private var sheet: NSWindow?
+    private var narrow = false
+
+    private var board: Bool {
+        get { (UIShots.shooting ? Self.shotView : UserDefaults.standard.string(forKey: Self.viewKey)) != "list" }
+        set {
+            if UIShots.shooting { Self.shotView = newValue ? "board" : "list" } else { UserDefaults.standard.set(newValue ? "board" : "list", forKey: Self.viewKey) }
+        }
+    }
+
+    override var pageWidth: CGFloat { 1240 }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let n = view.bounds.width < 760
+        guard n != narrow else { return }
+        narrow = n
+        DispatchQueue.main.async { [weak self] in self?.reload() }
+    }
 
     override func build(_ col: NSStackView) {
-        let seg = NSSegmentedControl(labels: AIMode.allCases.map(\.label), trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
-        seg.selectedSegment = AIMode.allCases.firstIndex(of: AGENTS.aiMode) ?? 0
-        seg.setAccessibilityLabel("AI mode")
-        col.addFull(PageHeader("Queue", caption: "Items start in Orca, in order, when a slot frees. AI checks sessions that go quiet.",
-                               actions: [NSTextField.text("AI acts", size: 12, color: Palette.dim), seg]))
-        let mode: String
-        switch AGENTS.aiMode {
-        case .auto: mode = "Auto: a \"looks done\" check frees the slot and the next item starts. A \"looks stuck\" check always asks you."
-        case .ask: mode = "Ask me: AI checks quiet sessions and waits for your approval."
-        case .off: mode = "Off: the queue moves only when a session ends by itself."
+        let mode = Segmented(AIMode.allCases.map(\.label), selected: AIMode.allCases.firstIndex(of: AGENTS.aiMode) ?? 0, label: "AI checks") { [weak self] i in
+            AGENTS.aiMode = AIMode.allCases[i]
+            saveConfig()
+            self?.reload()
         }
-        col.addFull(NSStackView(h: [
+        let view = Segmented(["Board", "List"], selected: board ? 0 : 1, label: "Queue view") { [weak self] i in
+            self?.board = i == 0
+            self?.reload()
+        }
+        let add = ActionButton("Add", symbol: "plus")
+        add.onClick = { [weak self, weak add] in if let add { self?.addMenu(add) } }
+        add.setAccessibilityLabel("Add to the queue")
+        col.addFull(PageHeader("Queue", caption: "Items start in Orca, in order, when a slot frees.", actions: [
             ToggleChip("Auto start", on: AGENTS.autoStart) { [weak self] in AGENTS.autoStart.toggle(); saveConfig(); self?.reload() },
-            NSTextField.text(mode, size: 12, color: Palette.dim, lines: 2),
-            Spacer(),
-            ActionButton("AI features", style: .link) { [weak self] in self?.go(.settings(.ai)) },
-        ], spacing: 8))
+            NSTextField.text("AI checks", size: 12, color: Palette.dim), mode, view, add,
+        ]))
+        let text: String
+        switch AGENTS.aiMode {
+        case .auto: text = "AI checks quiet sessions. A \"looks done\" check frees the slot. A \"looks stuck\" check asks you."
+        case .ask: text = "AI checks quiet sessions and asks you before it acts."
+        case .off: text = "AI checks are off. The queue moves when a session ends."
+        }
+        col.addFull(NSStackView(h: [NSTextField.text(text, size: 12, color: Palette.dim, lines: 2), Spacer(),
+                                    ActionButton("AI features", style: .link) { [weak self] in self?.go(.settings(.ai)) }], spacing: 8))
         if data.agentIndex.ready == nil {
             col.addFull(Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
                                actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.agents)) }]))
         }
+        checks(col)
 
-        let left = NSStackView(v: [SectionTitle("AI checks", count: data.aiChecks.pending.count)], spacing: 10)
-        checks(left)
-        let right = NSStackView(v: [], spacing: 10)
-        lanes(right)
-        for s in [left, right] {
-            let fill = NSView()
-            fill.setContentHuggingPriority(.init(1), for: .vertical)
-            s.addArrangedSubview(fill)
+        let q = data.queue
+        var held = hasCloud || UIShots.cloud == true ? (cloudAIRecords?.orders.filter { $0.state == .held } ?? []) : []
+        held.sort { $0.createdAt < $1.createdAt }
+        if q.lanes.isEmpty {
+            col.addFull(EmptyNote("The queue is empty. Add items here, or from an item page.", symbol: "list.bullet"))
         }
-        left.setHuggingPriority(.init(1), for: .horizontal)
-        let two = NSStackView(h: [left, right], spacing: 18, align: .top)
-        col.addFull(two)
-        right.widthAnchor.constraint(equalToConstant: 470).isActive = true
-    }
-
-    @objc private func modeChanged(_ s: NSSegmentedControl) {
-        AGENTS.aiMode = AIMode.allCases[s.selectedSegment]
-        saveConfig()
-        reload()
+        for lane in q.lanes {
+            let prefix = lane.identifier.uppercased() + "-"
+            let mine = held.filter { Self.key($0)?.uppercased().hasPrefix(prefix) == true }
+            held.removeAll { o in mine.contains { $0.id == o.id } }
+            col.addFull(laneCard(lane, held: mine))
+        }
+        if !held.isEmpty { col.addFull(heldCard(held)) }
+        col.addFull(planeNote())
     }
 
     // MARK: AI checks
 
     private func checks(_ col: NSStackView) {
         let judge = data.aiChecks
-        guard AGENTS.aiMode != .off, AI_CFG.agentChecks else {
-            col.addFull(EmptyNote(AGENTS.aiMode == .off ? "AI checks are off." : "Session checks are off in Settings › AI.", symbol: "sparkles"))
-            return
+        let pending = judge.pending
+        guard !pending.isEmpty else { return }
+        let freeing = AgentJudge.freeing(pending)
+        var trailing: [NSView] = []
+        if freeing.count >= 2 {
+            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") { judge.approve(all: freeing.map(\.id)) })
         }
-        let shown = judge.checks.filter { $0.state == .pending } + judge.checks.filter { $0.state != .pending }.prefix(6)
-        if shown.isEmpty {
-            col.addFull(EmptyNote("No checks yet. A session gets a check after \(Int(AGENTS.quietMinutes)) quiet minutes.", symbol: "sparkles"))
+        trailing.append(ActionButton("Open in Inbox", style: .link) { [weak self] in self?.go(.inbox(.agents)) })
+        let c = Card(title: "AI checks need you · \(pending.count)", trailing: trailing, padding: 10, spacing: 2,
+                     fill: Palette.panel, border: Palette.intake.withAlphaComponent(0.55))
+        for j in allChecks ? pending : Array(pending.prefix(3)) { c.add(checkLine(j)) }
+        if pending.count > 3 {
+            let more = allChecks ? "Show less" : "\(pending.count - 3) more · Show all"
+            c.add(NSStackView(h: [ActionButton(more, style: .link) { [weak self] in self?.allChecks.toggle(); self?.reload() }, Spacer()], spacing: 0))
         }
-        for j in shown { col.addFull(checkCard(j)) }
+        col.addFull(c)
     }
 
-    private func checkCard(_ j: Judgement) -> NSView {
-        let pending = j.state == .pending
+    private func checkLine(_ j: Judgement) -> NSView {
+        let judge = data.aiChecks
+        let open = expanded.contains(j.id)
         let tone: Tone = j.verdict == .done ? .done : .warning
-        let c = Card(border: pending ? tone.color.withAlphaComponent(0.55) : Palette.line)
-        let title = data.projectStore.item(key: j.key)?.item.title ?? ""
-        let sub = NSTextField.text(title, size: 12, color: Palette.dim)
-        sub.lineBreakMode = .byTruncatingTail
-        sub.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        var head: [NSView] = [Glyph("sparkles", color: Palette.acc),
-                              NSTextField.text("\(j.key) · \(j.verdict.word)", size: 13, weight: .semibold), sub]
-        if let a = data.agentIndex.agent(j.key) { head.append(Pill(Tone(a.phase), text: a.label())) }
-        head.append(Spacer())
-        if !pending { head.append(Chiplet(j.state == .approved ? "Approved" : "Held", symbol: j.state == .approved ? "checkmark" : "pause")) }
-        head.append(NSTextField.text(relativeTime(j.at) + (j.byAI ? " · AI" : " · rule"), size: 11.5, color: Palette.dim))
-        c.add(NSStackView(h: head, spacing: 7))
-        for e in j.evidence {
-            c.add(NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(e, size: 12.5, color: Palette.mut, lines: 2)], spacing: 6, align: .top))
+        let title = NSTextField.text(data.projectStore.item(key: j.key)?.item.title ?? "", size: 12.5, color: Palette.mut)
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        title.setContentHuggingPriority(.init(1), for: .horizontal)
+        let key = NSTextField.text(j.key, size: 12, weight: .semibold, mono: true)
+        let word = NSTextField.text(j.verdict.word, size: 12.5, weight: .medium, color: tone.color)
+        for f in [key, word] { f.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal) }
+        let pill = Chiplet(j.verdict == .done ? "Free slot" : "Nudge", symbol: j.verdict == .done ? "square.dashed" : "text.bubble")
+        let more = ActionButton("", symbol: "ellipsis")
+        more.setAccessibilityLabel("More actions for \(j.key)")
+        let menu: () -> [MenuAction] = { [weak self] in
+            [MenuAction("Open session") { self?.go(.item(j.key, .session)) }, MenuAction("Free the slot") { judge.release(j.id) }]
         }
-        let act = Box(fill: Palette.raise, border: Palette.line, radius: 6)
-        let actText = NSTextField.text(j.action, size: 12, color: Palette.fg, lines: 3, mono: true)
-        act.addSubview(actText)
-        actText.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            actText.leadingAnchor.constraint(equalTo: act.leadingAnchor, constant: 10),
-            actText.trailingAnchor.constraint(equalTo: act.trailingAnchor, constant: -10),
-            actText.topAnchor.constraint(equalTo: act.topAnchor, constant: 8),
-            actText.bottomAnchor.constraint(equalTo: act.bottomAnchor, constant: -8),
-        ])
-        c.add(act)
-        if pending {
-            let judge = data.aiChecks
-            var acts: [NSView] = [ActionButton("Approve", style: .primary) { judge.approve(j.id) }]
-            if j.verdict == .stuck { acts.append(ActionButton("Free the slot") { judge.release(j.id) }) }
-            acts += [ActionButton("Hold") { judge.hold(j.id) },
-                     ActionButton("Open session") { [weak self] in self?.go(.item(j.key, .session)) }, Spacer()]
-            c.add(NSStackView(h: acts, spacing: 6))
+        more.onClick = { [weak more] in
+            guard let more else { return }
+            let m = NSMenu()
+            let items = menu()
+            items.forEach { m.addItem($0.item) }
+            withExtendedLifetime(items) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 3), in: more) }
         }
-        c.alphaValue = pending ? 1 : 0.8
-        return c
+        let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), key, word, title, pill,
+                       ActionButton("Approve", style: .primary) { judge.approve(j.id) }, ActionButton("Hold") { judge.hold(j.id) }, more],
+                      height: 34, inset: 6, label: "\(j.key): \(j.verdict.word). \(j.action)") { [weak self] in
+            guard let self else { return }
+            if open { self.expanded.remove(j.id) } else { self.expanded.insert(j.id) }
+            self.reload()
+        }
+        row.menuItems = { menu().map(\.item) }
+        guard open else { return row }
+        let detail = NSStackView(v: j.evidence.map { e in
+            NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(e, size: 12, color: Palette.mut, lines: 3)], spacing: 6, align: .top)
+        }, spacing: 3)
+        detail.addFull(NSTextField.text(j.action, size: 12, color: Palette.dim, lines: 2))
+        if let n = j.nudge {
+            let box = Box(fill: Palette.raise, border: Palette.line, radius: 6)
+            let t = NSTextField.text(n, size: 12, lines: 4, mono: true)
+            box.addSubview(t)
+            t.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                t.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10), t.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
+                t.topAnchor.constraint(equalTo: box.topAnchor, constant: 7), t.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7),
+            ])
+            detail.addFull(box)
+        }
+        let v = NSStackView(v: [row, Padded(detail, vertical: 4, side: 28)], spacing: 0)
+        v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
+        return v
     }
 
     // MARK: Lanes
 
-    private func lanes(_ col: NSStackView) {
-        let add = ActionButton("Add to queue", symbol: "plus")
-        add.onClick = { [weak self, weak add] in if let add { self?.addMenu(add) } }
-        col.addFull(NSStackView(h: [SectionTitle("Lanes", count: data.queue.lanes.count), Spacer(), add], spacing: 6))
-        let q = data.queue
-        if q.lanes.isEmpty { col.addFull(EmptyNote("The queue is empty. Add items here, or from an item page.", symbol: "list.bullet")) }
-        for lane in q.lanes { col.addFull(laneCard(lane)) }
-        if let held = cloudAIRecords?.orders.filter({ $0.state == .held }), !held.isEmpty { col.addFull(heldCard(held)) }
-        let plane = Card(title: "Start from Plane")
-        var how: [String] = []
-        if !AGENTS.startLabel.isEmpty { how.append("add the label \"\(AGENTS.startLabel)\" to an item") }
-        if !AGENTS.botUser.isEmpty { how.append("assign it to \(AGENTS.botUser)") }
-        plane.add(NSTextField.text(how.isEmpty ? "Plane triggers are off." : how.joined(separator: ", or ").prefix(1).uppercased() + how.joined(separator: ", or ").dropFirst()
-                                   + ". OverSire adds it to the lane of its project.", size: 12.5, color: Palette.mut, lines: 3))
-        plane.add(ActionButton("Sessions and queue settings", style: .link) { [weak self] in self?.go(.settings(.agents, anchor: "queue")) })
-        col.addFull(plane)
-    }
-
-    private func laneCard(_ lane: QueueLane) -> NSView {
+    private func laneCard(_ lane: QueueLane, held: [WorkOrder]) -> NSView {
         let q = data.queue
         let slots = AGENTS.slots(lane.project)
         let busy = q.busy(lane)
         let root = PROJECTS_CFG.orca.roots[lane.project].map { ($0 as NSString).lastPathComponent } ?? "no Orca workspace"
-        let slotChip = MenuChip("\(busy)/\(slots) slots", symbol: "square.stack") { [weak self] in
+        let slotChip = MenuChip("\(busy) of \(slots) slot\(slots == 1 ? "" : "s")") { [weak self] in
             (1...4).map { n in MenuAction("\(n) session\(n == 1 ? "" : "s") at a time") { AGENTS.slots[lane.project] = n; saveConfig(); self?.syncSlots(lane.project, n); self?.reload() } }
         }
-        let c = Card(padding: 10, spacing: 4)
-        c.add(NSStackView(h: [Glyph("folder", color: Palette.acc), NSTextField.text(lane.identifier, size: 13, weight: .semibold),
-                              NSTextField.text(root, size: 11.5, color: Palette.dim, mono: true), Spacer(), slotChip], spacing: 7))
+        let ws = NSTextField.text(root, size: 11.5, color: Palette.dim, mono: true)
+        ws.lineBreakMode = .byTruncatingMiddle
+        ws.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        let c = Card(padding: 12, spacing: 8)
+        c.add(NSStackView(h: [NSTextField.text(lane.identifier, size: 14, weight: .semibold), SlotMeter(busy: busy, slots: slots), slotChip,
+                              Glyph("folder", color: Palette.dim, size: 11), ws, Spacer()], spacing: 8))
         if let e = q.state(lane.project)?.error { c.add(Banner(.warning, title: e)) }
+        let plan = hasCloud ? data.suggestions.openPlan(lane: lane.project) : nil
+        if let plan, let draft = plan.plan { c.add(plannerLine(plan, draft: draft, lane: lane)) }
+        else if updated.contains(lane.project) { c.add(Banner(.ok, title: "✓ Plan updated.")) }
         let suggestion = orderSuggestion(lane)
         if suggestion == nil, ordering.contains(lane.project) { c.add(InlineSpinner("The AI reads the lane and proposes an order…")) }
         if let s = suggestion {
             c.add(Banner(.info, title: "AI order: " + s.order.joined(separator: ", "), body: s.reason,
                          actions: [ActionButton("Apply") { [weak self] in q.reorder(lane.project, keys: s.order); self?.orders[lane.project] = nil }]))
         }
-        let prefix = lane.identifier.uppercased() + "-"
-        for (k, a) in data.agentIndex.agents.sorted(by: { $0.key < $1.key }) where k.hasPrefix(prefix) && [.starting, .working, .waiting].contains(a.phase) {
-            let title = data.projectStore.item(key: k)?.item.title ?? ""
-            let areas: [NSView] = (q.areaBook()?.areas(key: k) ?? []).map { AreaChip($0, kind: data.planner.kind($0, project: lane.project)) }
-            c.add(Row([Glyph("play.fill", color: Palette.run, size: 11).fixedWidth(22), Chiplet(k, color: Palette.fg, mono: true),
-                       TwoLine(title, nil, titleSize: 12.5, weight: .regular)] + areas + [Pill(Tone(a.phase), text: a.label())],
-                      height: 34, inset: 6, label: "\(k) runs: \(a.label())") { [weak self] in self?.go(.item(k, .session)) })
-        }
+        let draft = after.contains(lane.project) ? plan?.plan : nil
         let pick = lane.pick(state: q.state(lane.project), world: q.world(workstreams: nil))
-        for (n, e) in lane.entries.enumerated() { c.add(entryRow(e, n: n, lane: lane, pick: pick)) }
-        if lane.entries.isEmpty { c.add(NSTextField.text("The lane is empty.", size: 12.5, color: Palette.dim)) }
+        let book = q.areaBook()
+        let planner = data.planner
+        let kind: (String) -> AreaKind = { draft?.kinds?[$0] ?? planner.kind($0, project: lane.project) }
+        let b = QueueBoard(lane: lane, running: q.running(lane), slots: slots, holds: pick.holds,
+                           held: held.compactMap { o in Self.key(o).map { ($0, o.hold) } },
+                           areas: { book?.areas(key: $0) ?? [] }, kind: kind, draft: draft)
+        if board { c.add(columns(b, lane: lane, pick: pick, kind: kind)) } else { list(c, b, lane: lane, pick: pick, kind: kind) }
         return c
     }
 
-    private func entryRow(_ e: QueueEntry, n: Int, lane: QueueLane, pick: QueueLane.Pick) -> NSView {
-        let q = data.queue
-        let num = NSTextField.text("\(n + 1)", size: 12, weight: .semibold, color: Palette.dim)
-        num.alignment = .center
-        let cond = MenuChip(e.condition.label, symbol: "clock") { [weak self] in
-            QueueEntry.Condition.allCases.map { c in MenuAction(c.label) { q.set(c, for: e.key); self?.reload() } }
+    // A slim line for an open plan change of the Planner.
+    private func plannerLine(_ s: Suggestion, draft: PlanDraft, lane: QueueLane) -> NSView {
+        let n = draft.lines.count
+        var text = "\(n) suggestion\(n == 1 ? "" : "s")"
+        if let o = draft.overlaps { text += ". They \(o.phrase)." }
+        let t = NSTextField.text(text, size: 12.5, color: Palette.mut)
+        t.lineBreakMode = .byTruncatingTail
+        t.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        let device = RELAY.deviceID.isEmpty ? nil : RELAY.deviceID
+        let book = data.suggestions
+        let chip = Chiplet("Planner order", symbol: "arrow.triangle.branch", color: Palette.intake)
+        let buttons: [NSView] = [
+            ToggleChip("With suggestions", on: after.contains(lane.project)) { [weak self] in
+                guard let self else { return }
+                if self.after.contains(lane.project) { self.after.remove(lane.project) } else { self.after.insert(lane.project) }
+                self.reload()
+            },
+            ActionButton("Apply", style: .primary) { [weak self] in
+                book.accept(s.id, drop: [], by: device)
+                self?.updated.insert(lane.project)
+                self?.after.remove(lane.project)
+                self?.reload()
+            },
+            ActionButton("Review") { [weak self] in self?.review(s, draft) },
+            ActionButton("Dismiss") { [weak self] in book.dismiss(s.id, by: device); self?.after.remove(lane.project); self?.reload() },
+        ]
+        // A narrow lane puts the text on its own line.
+        let content: NSView = narrow
+            ? NSStackView(v: [NSStackView(h: [chip, Spacer(), PlannerCard.cloudMark()], spacing: 8),
+                              NSTextField.text(text, size: 12.5, color: Palette.mut, lines: 2), NSStackView(h: buttons + [Spacer()], spacing: 6)], spacing: 6)
+            : NSStackView(h: [chip, t, Spacer()] + buttons + [PlannerCard.cloudMark()], spacing: 8)
+        if let v = content as? NSStackView, v.orientation == .vertical { v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true } }
+        content.setAccessibilityElement(true)
+        content.setAccessibilityRole(.group)
+        content.setAccessibilityLabel("Planner order: \(text)")
+        let box = Box(fill: Palette.intake.withAlphaComponent(0.06), border: Palette.intake.withAlphaComponent(0.4), radius: 8)
+        let pad = Padded(content, vertical: 7, side: 10)
+        box.addSubview(pad)
+        NSLayoutConstraint.activate([
+            pad.leadingAnchor.constraint(equalTo: box.leadingAnchor), pad.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            pad.topAnchor.constraint(equalTo: box.topAnchor), pad.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ])
+        return box
+    }
+
+    private func columns(_ b: QueueBoard, lane: QueueLane, pick: QueueLane.Pick, kind: @escaping (String) -> AreaKind) -> NSView {
+        let parts: [(String, [NSView], String)] = [
+            ("Running", b.running.map { runningCard($0, kind: kind) } + (0..<b.free).map { _ in FreeSlot() }, "No slot"),
+            ("Up next", b.next.enumerated().map { i, card in entryCard(card, number: i + 1, lane: lane, kind: kind) }, "Empty"),
+            ("Waits", b.waits.map { entryCard($0, number: nil, lane: lane, kind: kind) }, "Empty"),
+            ("Held", b.held.map { heldCard($0, kind: kind) }, hasCloud ? "Empty" : "Needs OverSire Cloud"),
+        ]
+        let counts = [b.running.count, b.next.count, b.waits.count, b.held.count]
+        let views: [NSView] = parts.enumerated().map { i, part in
+            let (title, cards, empty) = part
+            let v = NSStackView(v: [NSStackView(h: [NSTextField.text(title.uppercased(), size: 11, weight: .semibold, color: Palette.dim),
+                                                     NSTextField.text("\(counts[i])", size: 11, color: Palette.dim), Spacer()], spacing: 6)], spacing: 6)
+            v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
+            for card in cards { v.addFull(card) }
+            if cards.isEmpty { v.addFull(NSTextField.text(empty, size: 12, color: Palette.dim)) }
+            // The filler takes the height that a taller column adds, so the cards keep the top.
+            let fill = NSView()
+            fill.setContentHuggingPriority(.init(1), for: .vertical)
+            v.addArrangedSubview(fill)
+            return v
         }
-        let up = ActionButton("", symbol: "chevron.up") { q.move(e.key, by: -1) }
-        up.isEnabled = n > 0
-        up.setAccessibilityLabel("Move up")
-        let down = ActionButton("", symbol: "chevron.down") { q.move(e.key, by: 1) }
-        down.isEnabled = n < lane.entries.count - 1
-        down.setAccessibilityLabel("Move down")
-        let start = ActionButton("Start now")
-        start.onClick = { [weak start] in q.start(e.key, project: lane.project, anchor: start) }
-        let remove = ActionButton("", symbol: "xmark") { q.remove(e.key) }
-        remove.setAccessibilityLabel("Remove \(e.key) from the queue")
-        let source = e.source == .you ? nil : Chiplet(e.source == .label ? "label" : "assignee", symbol: "arrow.down.circle")
-        let top = Row([num.fixedWidth(22), Chiplet(e.key, color: Palette.fg, mono: true), TwoLine(e.title, nil, titleSize: 12.5, weight: .regular)]
-                      + (source.map { [$0] } ?? []), height: 30, inset: 6, label: "Number \(n + 1): \(e.key) \(e.title)") { [weak self] in
-            self?.go(.item(e.key, .overview))
+        func row(_ vs: [NSView]) -> NSStackView {
+            let r = NSStackView(h: vs, spacing: 12, align: .top)
+            r.distribution = .fillEqually
+            return r
         }
-        let gate: Chiplet
-        switch pick.holds[e.key] {
-        case let h? where h == .unknown: gate = Chiplet(h.reason, color: Palette.dim)
-        case let h? where h.isArea: gate = Chiplet(h.reason, color: Palette.bad)
-        case let h?: gate = Chiplet(h.reason, color: Palette.warn)
-        case nil: gate = Chiplet(pick.next == e.key ? "✓ Ready · starts next" : "✓ Ready", color: Palette.ok)
+        guard narrow else { return row(views) }
+        let two = NSStackView(v: [row(Array(views[0..<2])), row(Array(views[2..<4]))], spacing: 14)
+        two.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: two.widthAnchor).isActive = true }
+        return two
+    }
+
+    // A board card: the key, the title, the areas, the shared area and the hold. `actions` show on hover or focus.
+    private func card(_ c: QueueBoard.Card, lead: NSView?, badge: NSView?, kind: (String) -> AreaKind, note: String?, noteColor: NSColor = Palette.warn,
+                      actions: [NSView] = [], label: String, open: @escaping () -> Void) -> NSView {
+        let title = data.projectStore.item(key: c.key)?.item.title ?? ""
+        let head = NSStackView(h: (lead.map { [$0] } ?? []) + [NSTextField.text(c.key, size: 12, weight: .semibold, mono: true), Spacer()], spacing: 6)
+        let body = NSStackView(v: [head, NSTextField.text(title, size: 12.5, color: Palette.mut, lines: 2)], spacing: 4)
+        if let badge { body.addFull(NSStackView(h: [badge, Spacer()], spacing: 0)) }
+        if !c.areas.isEmpty { body.addFull(Wrap(c.areas.map { AreaChip($0, kind: kind($0)) })) }
+        if let clash = c.clash { body.addFull(NSTextField.text("▲ Same area as \(clash)", size: 11.5, weight: .medium, color: Palette.bad, lines: 2)) }
+        if let note { body.addFull(NSTextField.text(note, size: 11.5, color: noteColor, lines: 2)) }
+        var reveal: NSView?
+        if !actions.isEmpty {
+            let line = NSStackView(h: [Spacer()] + actions, spacing: 4)
+            body.addFull(line)
+            reveal = line
         }
-        let areas: [NSView] = (q.areaBook()?.areas(key: e.key) ?? []).map { AreaChip($0, kind: data.planner.kind($0, project: lane.project)) }
-        let gates = NSStackView(h: [Spacer(34), gate] + areas + [Spacer()], spacing: 4)
-        let actions = NSStackView(h: [Spacer(34), cond, Spacer(), up, down, start, remove], spacing: 4)
-        let v = NSStackView(v: [top, gates, actions], spacing: 2)
-        top.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
-        actions.widthAnchor.constraint(equalTo: v.widthAnchor, constant: -6).isActive = true
-        gates.widthAnchor.constraint(equalTo: v.widthAnchor, constant: -6).isActive = true
+        body.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true }
+        let row = Row([body], height: 40, inset: 8, label: [label, title, c.areas.isEmpty ? nil : "areas " + c.areas.joined(separator: ", "),
+                                                         c.clash.map { "same area as " + $0 }, note].compactMap { $0 }.joined(separator: ", "), onClick: open)
+        row.revealViews = reveal.map { [$0] } ?? []
+        let box = Box(fill: Palette.raise, border: c.clash == nil ? Palette.line : Palette.bad, radius: 8)
+        if c.clash != nil { box.borderWidth = 2 }
+        box.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 2), row.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -2),
+            row.topAnchor.constraint(equalTo: box.topAnchor, constant: 2), row.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -2),
+        ])
+        return box
+    }
+
+    private func runningCard(_ c: QueueBoard.Card, kind: (String) -> AreaKind) -> NSView {
+        let a = data.agentIndex.agent(c.key)
+        return card(c, lead: Glyph("play.fill", color: Palette.run, size: 10), badge: a.map { Pill(Tone($0.phase), text: $0.label()) }, kind: kind,
+                    note: claimText(c.key), label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) }
+    }
+
+    private func entryCard(_ c: QueueBoard.Card, number: Int?, lane: QueueLane, kind: (String) -> AreaKind) -> NSView {
+        let lead = number.map { NSTextField.text("\($0)", size: 12, weight: .semibold, color: Palette.dim, mono: true) }
+        let e = lane.entries.first { $0.key == c.key }
+        let cond = e.flatMap { $0.condition == .slot ? nil : $0.condition.label }
+        let note = [c.note, cond.map { "🕑 " + $0 }].compactMap { $0 }.joined(separator: "\n")
+        let source = e.flatMap { $0.source == .you ? nil : Chiplet($0.source == .label ? "label" : "assignee", symbol: "arrow.down.circle") }
+        let v = card(c, lead: lead, badge: source, kind: kind, note: note.isEmpty ? nil : note, noteColor: c.note == nil ? Palette.dim : Palette.warn,
+                     actions: entryActions(c.key, lane: lane), label: number.map { "Number \($0): \(c.key)" } ?? "\(c.key) waits") { [weak self] in
+            self?.go(.item(c.key, .overview))
+        }
+        (v.subviews.first as? Row)?.menuItems = { [weak self] in self?.conditionMenu(c.key).map(\.item) ?? [] }
         return v
+    }
+
+    private func heldCard(_ c: QueueBoard.Card, kind: (String) -> AreaKind) -> NSView {
+        card(c, lead: Glyph("pause.circle", color: Palette.warn, size: 11), badge: nil, kind: kind, note: c.note ?? "Held by the cloud",
+             label: "\(c.key) held") { [weak self] in self?.go(.item(c.key, .overview)) }
+    }
+
+    // ↑ ↓ Start now ✕ for one queue entry.
+    private func entryActions(_ key: String, lane: QueueLane) -> [NSView] {
+        let q = data.queue
+        let n = lane.entries.firstIndex { $0.key == key } ?? 0
+        let up = ActionButton("", symbol: "chevron.up") { q.move(key, by: -1) }
+        up.isEnabled = n > 0
+        up.setAccessibilityLabel("Move \(key) up")
+        let down = ActionButton("", symbol: "chevron.down") { q.move(key, by: 1) }
+        down.isEnabled = n < lane.entries.count - 1
+        down.setAccessibilityLabel("Move \(key) down")
+        let start = ActionButton("Start now")
+        start.onClick = { [weak start] in q.start(key, project: lane.project, anchor: start) }
+        let remove = ActionButton("", symbol: "xmark") { q.remove(key) }
+        remove.setAccessibilityLabel("Remove \(key) from the queue")
+        return [up, down, start, remove]
+    }
+
+    private func conditionMenu(_ key: String) -> [MenuAction] {
+        QueueEntry.Condition.allCases.map { c in MenuAction("Start: " + c.label) { [weak self] in self?.data.queue.set(c, for: key); self?.reload() } }
+    }
+
+    // The dense list: one line per item.
+    private func list(_ card: Card, _ b: QueueBoard, lane: QueueLane, pick: QueueLane.Pick, kind: @escaping (String) -> AreaKind) {
+        for c in b.running {
+            let a = data.agentIndex.agent(c.key)
+            card.add(line(c, lead: Glyph("play.fill", color: Palette.run, size: 11), kind: kind, status: a.map { Pill(Tone($0.phase), text: $0.label()) },
+                          label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) })
+        }
+        let entries = lane.entries
+        for e in entries {
+            let c = b.next.first { $0.key == e.key } ?? b.waits.first { $0.key == e.key } ?? QueueBoard.Card(key: e.key)
+            let n = (b.next.firstIndex { $0.key == e.key }).map { $0 + 1 }
+            let lead = NSTextField.text(n.map(String.init) ?? "–", size: 12, weight: .semibold, color: Palette.dim, mono: true)
+            let status: NSView = c.note.map { Chiplet($0, color: pick.holds[e.key]?.isArea == true ? Palette.bad : Palette.warn) }
+                ?? Chiplet(pick.next == e.key ? "✓ Starts next" : "✓ Ready", color: Palette.ok)
+            let cond = MenuChip(e.condition.label, symbol: "clock") { [weak self] in self?.conditionMenu(e.key) ?? [] }
+            card.add(line(c, lead: lead, kind: kind, status: status, actions: [cond] + entryActions(e.key, lane: lane),
+                          label: n.map { "Number \($0): \(e.key)" } ?? "\(e.key) waits") { [weak self] in self?.go(.item(e.key, .overview)) })
+        }
+        for c in b.held {
+            card.add(line(c, lead: Glyph("pause.circle", color: Palette.warn, size: 11), kind: kind, status: Chiplet(c.note ?? "Held", color: Palette.warn),
+                          label: "\(c.key) held") { [weak self] in self?.go(.item(c.key, .overview)) })
+        }
+        if b.isEmpty { card.add(NSTextField.text("The lane is empty.", size: 12.5, color: Palette.dim)) }
+    }
+
+    private func line(_ c: QueueBoard.Card, lead: NSView, kind: (String) -> AreaKind, status: NSView?, actions: [NSView] = [], label: String,
+                      open: @escaping () -> Void) -> NSView {
+        let title = NSTextField.text(data.projectStore.item(key: c.key)?.item.title ?? "", size: 12.5)
+        title.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        title.setContentHuggingPriority(.init(1), for: .horizontal)
+        let key = NSTextField.text(c.key, size: 12, mono: true)
+        key.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let areas = c.areas.map { AreaChip($0, kind: kind($0)) }
+        var views: [NSView] = [lead.fixedWidth(22), key, title] + areas
+        if let clash = c.clash { views.append(Chiplet("▲ " + clash, color: Palette.bad)) }
+        if let status { views.append(status) }
+        let row = Row(views, height: 32, inset: 6, label: [label, c.note, c.clash.map { "same area as " + $0 }].compactMap { $0 }.joined(separator: ", "), onClick: open)
+        // In a narrow list the areas drop out before the title cuts to nothing.
+        for a in areas { row.stack.setVisibilityPriority(.init(rawValue: 800), for: a) }
+        row.stack.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        // The actions take no width: they show over the trailing edge on hover or focus.
+        row.hoverViews = actions
+        return row
+    }
+
+    // A running item whose claim could not grow.
+    private func claimText(_ key: String) -> String? {
+        guard let b = data.planner.claim(key: key)?.blocked?.first, let by = b.by else { return nil }
+        return "⊘ Area used by \(by.key) (\(b.area))"
     }
 
     // The hub gate reads the slots from the Planner settings.
@@ -204,22 +409,59 @@ final class QueuePage: Page {
         data.planner.update(project) { $0.slots = n }
     }
 
-    // Work orders that the hub holds before a runner gets them.
+    private static func key(_ o: WorkOrder) -> String? {
+        guard case .start(let req) = o.order else { return nil }
+        return req.item?.key ?? URL(fileURLWithPath: req.repo).lastPathComponent
+    }
+
+    // Held work orders that match no lane.
     private func heldCard(_ orders: [WorkOrder]) -> NSView {
-        let c = Card(title: "Held work orders", trailing: [PlannerCard.cloudMark()])
-        for o in orders.sorted(by: { $0.createdAt < $1.createdAt }) {
-            guard case .start(let req) = o.order else { continue }
-            let key = req.item?.key ?? URL(fileURLWithPath: req.repo).lastPathComponent
-            let text = o.hold?.text ?? "Held"
-            let title = data.projectStore.item(key: key)?.item.title ?? ""
-            c.add(Row([Glyph("pause.circle", color: Palette.warn, size: 12).fixedWidth(22), Chiplet(key, color: Palette.fg, mono: true),
-                       TwoLine(title, nil, titleSize: 12.5, weight: .regular), Chiplet(text, color: Palette.warn)],
-                      height: 32, inset: 6, label: "\(key): \(text)") { [weak self] in self?.go(.item(key, .overview)) })
+        let c = Card(title: "Held work orders", trailing: [PlannerCard.cloudMark()], padding: 12, spacing: 2)
+        for o in orders {
+            guard let key = Self.key(o) else { continue }
+            let note = o.hold.flatMap(QueueBoard.note) ?? "Held"
+            c.add(line(QueueBoard.Card(key: key, note: note), lead: Glyph("pause.circle", color: Palette.warn, size: 11), kind: { _ in .core },
+                       status: Chiplet(note, color: Palette.warn), label: "\(key) held") { [weak self] in self?.go(.item(key, .overview)) })
         }
-        c.add(NSTextField.text("The cloud sends each order to the runner when its blockers are done and its areas are free.",
-                               size: 11.5, color: Palette.dim, lines: 2))
         return c
     }
+
+    private func planeNote() -> NSView {
+        var how: [String] = []
+        if !AGENTS.startLabel.isEmpty { how.append("add the label \"\(AGENTS.startLabel)\"") }
+        if !AGENTS.botUser.isEmpty { how.append("assign the item to \(AGENTS.botUser)") }
+        let text = how.isEmpty ? "Plane triggers are off." : "To start from Plane, " + how.joined(separator: " or ") + "."
+        return NSStackView(h: [Glyph("arrow.down.circle", color: Palette.dim, size: 11), NSTextField.text(text, size: 12, color: Palette.dim, lines: 2), Spacer(),
+                               ActionButton("Queue settings", style: .link) { [weak self] in self?.go(.settings(.agents, anchor: "queue")) }], spacing: 6)
+    }
+
+    // MARK: Review
+
+    private func review(_ s: Suggestion, _ d: PlanDraft) {
+        guard let win = view.window, sheet == nil else { return }
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 200), styleMask: [.titled, .docModalWindow], backing: .buffered, defer: false)
+        let lane = s.lane ?? ""
+        let close = { [weak self, weak win, weak w] in
+            guard let self, let w else { return }
+            win?.endSheet(w)
+            self.sheet = nil
+        }
+        let cancel = ActionButton("Close", key: "\u{1b}") { close() }
+        let card = Card(title: "Review the plan change", trailing: [cancel], padding: 18, border: .clear)
+        card.add(NSTextField.text("Clear a line to keep it out. Nothing changes before you accept.", size: 12, color: Palette.dim, lines: 2))
+        card.add(planReview(s, draft: d) { [weak self] in
+            close()
+            if self?.data.suggestions.all.first(where: { $0.id == s.id })?.state == .accepted { self?.updated.insert(lane) }
+            self?.after.remove(lane)
+        })
+        w.contentView = card
+        card.widthAnchor.constraint(equalToConstant: 540).isActive = true
+        sheet = w
+        win.beginSheet(w)
+        Self.openSheet = w
+    }
+
+    // MARK: AI order and Add
 
     // Asks AI once per lane order. A reply that keeps the order is no suggestion.
     private func orderSuggestion(_ lane: QueueLane) -> (order: [String], reason: String)? {
@@ -271,4 +513,38 @@ final class QueuePage: Page {
             m.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 3), in: anchor)
         }
     }
+}
+
+// One block for each slot: filled while a session runs in it. The text next to it gives the count.
+final class SlotMeter: NSStackView {
+    init(busy: Int, slots: Int) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 3
+        translatesAutoresizingMaskIntoConstraints = false
+        for i in 0..<max(busy, slots) {
+            let b = Box(fill: i < busy ? (i < slots ? Palette.run : Palette.bad) : nil, border: i < busy ? nil : Palette.line, radius: 2)
+            b.widthAnchor.constraint(equalToConstant: 12).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 8).isActive = true
+            addArrangedSubview(b)
+        }
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// An empty slot in the Running column.
+final class FreeSlot: Box {
+    init() {
+        super.init(fill: nil, border: Palette.line, radius: 8)
+        let t = NSTextField.text("Free slot", size: 12, color: Palette.dim)
+        addSubview(t)
+        t.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([t.centerXAnchor.constraint(equalTo: centerXAnchor), t.centerYAnchor.constraint(equalTo: centerYAnchor),
+                                     heightAnchor.constraint(equalToConstant: 44)])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel("Free slot")
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }

@@ -376,7 +376,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func suggestion(_ item: Item) -> NSView? {
         guard hasCloud, data.suggestions.openPlan(naming: item.key) != nil else { return nil }
         return Banner(.info, title: "The Planner has a plan change for \(item.key).",
-                      actions: [ActionButton("Review") { [weak self] in self?.go(.plan) }])
+                      actions: [ActionButton("Review") { [weak self] in self?.go(.queue) }])
     }
 
     private func workstream(_ s: Workstream, snap: ProjectSnapshot, item: Item) -> NSView {

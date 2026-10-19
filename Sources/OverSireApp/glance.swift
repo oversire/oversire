@@ -156,7 +156,7 @@ final class GlanceVC: NSViewController {
         if plans > 0 {
             let text = "Plan: \(plans) suggestion\(plans == 1 ? "" : "s")"
             body.addFull(Row([Glyph("rectangle.split.3x1", color: Palette.intake), NSTextField.text(text, size: 12.5), Spacer(),
-                              Glyph("chevron.right", color: Palette.dim, size: 11)], height: 32, label: text) { [weak self] in self?.open(.plan) })
+                              Glyph("chevron.right", color: Palette.dim, size: 11)], height: 32, label: text) { [weak self] in self?.open(.queue) })
         }
 
         guard data.has(.intake) else { return }

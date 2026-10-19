@@ -24,6 +24,11 @@ final class SettingsRouteTests: XCTestCase {
         }
     }
 
+    func testPlanOpensTheQueue() {
+        XCTAssertEqual(open("oversire://plan"), .queue, "the Plan page is the Board view of the Queue now")
+        XCTAssertEqual(Route.queue.path, "queue")
+    }
+
     func testNewPagesKeepTheirSlug() {
         for p in Route.SettingsPage.allCases {
             XCTAssertEqual(open("oversire://settings/\(p.rawValue)"), .settings(p), p.rawValue)

@@ -64,13 +64,58 @@ final class PlannerTests: XCTestCase {
         let lane = QueueLane(project: project.storeKey, identifier: "OVERSIRE",
                              entries: [1, 2, 3].map { QueueEntry(key: "OVERSIRE-\($0)", title: "", added: Date()) })
         let areas = ["OVERSIRE-1": ["api"], "OVERSIRE-2": ["api"], "OVERSIRE-3": ["ui"], "OVERSIRE-9": ["db"]]
-        let now = PlanPage.model(lane: lane, running: ["OVERSIRE-9"], areas: { areas[$0] ?? [] }, slots: 2, draft: nil)
+        let now = QueueBoard.plan(lane: lane, running: ["OVERSIRE-9"], areas: { areas[$0] ?? [] }, slots: 2, draft: nil)
         XCTAssertEqual(now.cards(.now).map(\.key), ["OVERSIRE-9", "OVERSIRE-1"])
         XCTAssertEqual(now.cards(.next).map(\.key), ["OVERSIRE-2", "OVERSIRE-3"])
-        let after = PlanPage.model(lane: lane, running: ["OVERSIRE-9"], areas: { areas[$0] ?? [] }, slots: 2, draft: draft)
+        let after = QueueBoard.plan(lane: lane, running: ["OVERSIRE-9"], areas: { areas[$0] ?? [] }, slots: 2, draft: draft)
         XCTAssertEqual(after.cards(.now).map(\.key), ["OVERSIRE-9", "OVERSIRE-3"])
         XCTAssertEqual(after.cards(.now)[1].areas, [], "the areas line removes ui")
         XCTAssertEqual(after.cards(.next).first { $0.key == "OVERSIRE-2" }?.areas, ["api"])
+    }
+
+    func testBoardColumns() {
+        let lane = QueueLane(project: project.storeKey, identifier: "OVERSIRE",
+                             entries: [1, 2, 3, 4, 5].map { QueueEntry(key: "OVERSIRE-\($0)", title: "", added: Date()) })
+        let areas = ["OVERSIRE-1": ["api"], "OVERSIRE-9": ["api"], "OVERSIRE-4": ["ui"]]
+        let holds: [String: QueueHold] = ["OVERSIRE-2": .waits(on: ["OVERSIRE-1"]), "OVERSIRE-3": .area("api", runs: "OVERSIRE-9"), "OVERSIRE-5": .unknown]
+        let hold = WorkOrderHold(blockers: [ref(84)], since: Date())
+        let b = QueueBoard(lane: lane, running: ["OVERSIRE-9"], slots: 3, holds: holds,
+                           held: [("OVERSIRE-85", hold), ("OVERSIRE-90", WorkOrderHold(areas: ["contract"], since: Date())), ("OVERSIRE-91", nil)],
+                           areas: { areas[$0] ?? [] }, kind: { _ in .core })
+        XCTAssertEqual(b.running.map(\.key), ["OVERSIRE-9"])
+        XCTAssertEqual(b.free, 2)
+        XCTAssertEqual(b.next.map(\.key), ["OVERSIRE-1", "OVERSIRE-4"], "an entry with no hold is up next, in lane order")
+        XCTAssertEqual(b.waits.map(\.key), ["OVERSIRE-2", "OVERSIRE-3", "OVERSIRE-5"])
+        XCTAssertEqual(b.waits.map(\.note), ["⏸ Waits for OVERSIRE-1", "⊘ Area used by OVERSIRE-9", "Reads the relations…"])
+        XCTAssertEqual(b.held.map(\.note), ["⏸ Waits for OVERSIRE-84", "⊘ Area busy: contract", nil])
+        XCTAssertEqual(b.held[1].areas, ["contract"])
+        XCTAssertEqual(b.running[0].clash, "OVERSIRE-1 (api)", "a card that runs at the same time and shares an area clashes")
+        XCTAssertEqual(b.next[0].clash, "OVERSIRE-9 (api)")
+        XCTAssertNil(b.next[1].clash)
+        XCTAssertFalse(b.isEmpty)
+        let full = QueueBoard(lane: lane, running: ["OVERSIRE-7", "OVERSIRE-8"], slots: 1, holds: [:], areas: { _ in [] }, kind: { _ in .core })
+        XCTAssertEqual(full.free, 0, "more sessions than slots give no free slot")
+        let empty = QueueBoard(lane: QueueLane(project: "p", identifier: "X", entries: []), running: [], slots: 2, holds: [:],
+                               areas: { _ in [] }, kind: { _ in .core })
+        XCTAssertTrue(empty.isEmpty)
+        XCTAssertEqual(empty.free, 2)
+    }
+
+    func testBoardFollowsTheDraft() {
+        let lane = QueueLane(project: project.storeKey, identifier: "OVERSIRE",
+                             entries: [1, 2, 3].map { QueueEntry(key: "OVERSIRE-\($0)", title: "", added: Date()) })
+        let b = QueueBoard(lane: lane, running: [], slots: 2, holds: [:], areas: { $0 == "OVERSIRE-3" ? ["ui"] : [] }, kind: { _ in .core }, draft: draft)
+        XCTAssertEqual(b.next.map(\.key), ["OVERSIRE-3", "OVERSIRE-1", "OVERSIRE-2"])
+        XCTAssertEqual(b.next[0].areas, [])
+        XCTAssertEqual(b.next[2].areas, ["api"])
+    }
+
+    func testApproveAllTakesThePendingDoneChecks() {
+        func j(_ id: String, _ v: Judgement.Verdict, _ s: Judgement.State = .pending) -> Judgement {
+            Judgement(id: id, key: "K-\(id)", verdict: v, evidence: [], action: "", nudge: nil, at: Date(), state: s)
+        }
+        let checks = [j("1", .done), j("2", .stuck), j("3", .done, .approved), j("4", .done), j("5", .done, .held)]
+        XCTAssertEqual(AgentJudge.freeing(checks).map(\.id), ["1", "4"])
     }
 
     func testReviewSentences() {

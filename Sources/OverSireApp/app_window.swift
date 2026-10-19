@@ -488,8 +488,7 @@ struct SidebarModel {
             e(.inbox(.all), "Inbox", "tray", badge: unread + intake, alert: intake, tone: Palette.intake, what: "intake"),
             e(.mine, "My items", "person.crop.circle", badge: mine),
             e(.agents, "Sessions", "cpu", badge: agents.count, alert: waiting, tone: Palette.warn, what: "need input"),
-            e(.queue, "Queue", "list.number"),
-            e(.plan, "Plan", "rectangle.split.3x1", badge: plans),
+            e(.queue, "Queue", "list.number", badge: plans),
             e(.runs(.all), "Runs", "play.circle", badge: running, alert: failing, tone: Palette.bad, what: "failing"),
             e(.prs, "Pull requests", "arrow.triangle.pull", badge: prs),
             e(.insights, "Insights", "chart.bar"),
@@ -527,7 +526,6 @@ enum PageFactory {
         case .run: return RunPage(r, data: data, router: router)
         case .agents: return AgentsPage(r, data: data, router: router)
         case .queue: return QueuePage(r, data: data, router: router)
-        case .plan: return PlanPage(r, data: data, router: router)
         case .settings: return SettingsPage(r, data: data, router: router)
         case .prs: return PRsPage(r, data: data, router: router)
         case .insights: return InsightsPage(r, data: data, router: router)

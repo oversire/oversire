@@ -66,7 +66,6 @@ enum Route: Equatable {
     case mine
     case agents
     case queue
-    case plan
     case runs(RunFilter)
     case run(repo: String, id: String)
     case prs
@@ -83,7 +82,6 @@ enum Route: Equatable {
         case .mine: return "mine"
         case .agents: return "sessions"
         case .queue: return "queue"
-        case .plan: return "plan"
         case .runs(let f): return f == .all ? "runs" : "runs/\(f.rawValue)"
         case .run(let repo, let id): return "run/\(repo)/\(id)"
         case .prs: return "prs"
@@ -123,8 +121,8 @@ enum Route: Equatable {
         case "inbox": self = .inbox(rest.first.flatMap { InboxTab(rawValue: $0.lowercased()) } ?? .all)
         case "mine": self = .mine
         case "sessions", "agents": self = .agents
-        case "queue": self = .queue
-        case "plan": self = .plan
+        // The Plan page is now the Board view of the Queue.
+        case "queue", "plan": self = .queue
         case "runs": self = .runs(rest.first.flatMap { RunFilter(rawValue: $0.lowercased()) } ?? .all)
         case "run":
             guard rest.count == 3, Int(rest[2]) != nil else { return nil }
@@ -189,7 +187,6 @@ enum Route: Equatable {
         case .mine: return "My items"
         case .agents: return "Sessions"
         case .queue: return "Queue"
-        case .plan: return "Plan"
         case .runs: return "Runs"
         case .run(let repo, let id): return "Run \(id) · \(repo)"
         case .prs: return "Pull requests"
@@ -203,7 +200,7 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .plan, .runs(.all), .runs(.unlinked),
+        .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),

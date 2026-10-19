@@ -137,6 +137,13 @@ public struct PlanDraft: Hashable, Sendable, Codable {
             self.before = before
             self.after = after
         }
+
+        /// "lower the overlaps from 3 to 0", "raise …" or "keep the overlaps at 2".
+        public var phrase: String {
+            if after < before { return "lower the overlaps from \(before) to \(after)" }
+            if after > before { return "raise the overlaps from \(before) to \(after)" }
+            return "keep the overlaps at \(after)"
+        }
     }
 
     public var order: [OrderLine]

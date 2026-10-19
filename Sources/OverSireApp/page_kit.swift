@@ -315,11 +315,15 @@ class Row: Box {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    // Views in the row that show only on hover or focus. They keep their space.
+    var revealViews: [NSView] = [] { didSet { updateFill() } }
+
     private func updateFill() {
         fill = selected || (hover && onClick != nil) ? Palette.sel : nil
         let focused = window?.firstResponder === self
         border = focused ? Palette.acc : nil
         overlay?.isHidden = !(hover || focused || hoverViews.contains { $0 is NSProgressIndicator })
+        revealViews.forEach { $0.alphaValue = hover || focused ? 1 : 0 }
     }
 
     override func updateTrackingAreas() {

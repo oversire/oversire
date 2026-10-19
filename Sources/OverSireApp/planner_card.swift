@@ -153,7 +153,7 @@ final class PlanReviewView: NSStackView {
         spacing = 8
         translatesAutoresizingMaskIntoConstraints = false
         if let o = draft.overlaps {
-            addFull(NSTextField.text("These changes lower the overlaps from \(o.before) to \(o.after).", size: 12.5, color: Palette.mut, lines: 2))
+            addFull(NSTextField.text("These changes \(o.phrase).", size: 12.5, color: Palette.mut, lines: 2))
         }
         for (i, line) in draft.lines.enumerated() {
             let box = NSButton(checkboxWithTitle: Self.sentence(line, store: store, kind: { draft.kinds?[$0] ?? kind($0) }),

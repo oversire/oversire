@@ -61,6 +61,12 @@ final class PlannerModelTests: XCTestCase {
         XCTAssertEqual(later.overlaps(kind: kind), 6, "Later does not count")
     }
 
+    func testOverlapsPhrase() {
+        XCTAssertEqual(PlanDraft.Overlaps(before: 3, after: 0).phrase, "lower the overlaps from 3 to 0")
+        XCTAssertEqual(PlanDraft.Overlaps(before: 1, after: 2).phrase, "raise the overlaps from 1 to 2")
+        XCTAssertEqual(PlanDraft.Overlaps(before: 2, after: 2).phrase, "keep the overlaps at 2")
+    }
+
     func testRunningCardsFillNow() {
         let b = PlanBoard(cards: [.init(key: "Q", areas: []), .init(key: "R1", areas: [], running: true), .init(key: "R2", areas: [], running: true)], slots: 1)
         XCTAssertEqual(b.cards(.now).map(\.key), ["R1", "R2"])

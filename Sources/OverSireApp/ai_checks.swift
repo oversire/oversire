@@ -180,6 +180,13 @@ final class AgentJudge {
         save()
     }
 
+    /// The pending "looks done" checks: Approve frees their slots.
+    static func freeing(_ checks: [Judgement]) -> [Judgement] { checks.filter { $0.state == .pending && $0.verdict == .done } }
+
+    func approve(all ids: [String]) {
+        for id in ids { approve(id) }
+    }
+
     func hold(_ id: String) {
         guard let i = checks.firstIndex(where: { $0.id == id }) else { return }
         checks[i].state = .held

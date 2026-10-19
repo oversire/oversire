@@ -46,6 +46,66 @@ enum QueueHold: Equatable {
     }
 }
 
+// One lane on the Queue board: Running, Up next, Waits and Held. Pure.
+struct QueueBoard: Equatable {
+    struct Card: Equatable {
+        var key: String
+        var areas: [String] = []
+        var note: String? = nil
+        var clash: String? = nil   // the other card and the area that they share
+    }
+
+    var running: [Card] = []
+    var free = 0                   // free slots
+    var next: [Card] = []          // in start order
+    var waits: [Card] = []
+    var held: [Card] = []
+
+    /// `held`: the keys and holds of the cloud work orders of this lane. A draft orders the lane and changes the areas.
+    init(lane: QueueLane, running: [String], slots: Int, holds: [String: QueueHold], held: [(key: String, hold: WorkOrderHold?)] = [],
+         areas: (String) -> [String], kind: (String) -> AreaKind, draft: PlanDraft? = nil) {
+        func a(_ k: String) -> [String] { draft.map { $0.areas(of: k, base: areas(k)) } ?? areas(k) }
+        let keys = draft.map { $0.order(lane.entries.map(\.key)) } ?? lane.entries.map(\.key)
+        self.running = running.sorted().map { Card(key: $0, areas: a($0)) }
+        free = max(0, slots - running.count)
+        for k in keys {
+            guard let h = holds[k] else { next.append(Card(key: k, areas: a(k))); continue }
+            waits.append(Card(key: k, areas: a(k), note: Self.note(h)))
+        }
+        self.held = held.map { Card(key: $0.key, areas: $0.hold?.areas ?? [], note: $0.hold.flatMap(Self.note)) }
+        // Cards that run at the same time and share an area.
+        let plan = PlanBoard(cards: self.running.map { .init(key: $0.key, areas: $0.areas, running: true) } + next.map { .init(key: $0.key, areas: $0.areas) },
+                             slots: slots)
+        let clashes = plan.clashes(kind: kind)
+        for i in self.running.indices { self.running[i].clash = clashes[self.running[i].key].map { "\($0.other) (\($0.area))" } }
+        for i in next.indices { next[i].clash = clashes[next[i].key].map { "\($0.other) (\($0.area))" } }
+    }
+
+    var isEmpty: Bool { running.isEmpty && next.isEmpty && waits.isEmpty && held.isEmpty }
+
+    static func note(_ h: QueueHold) -> String {
+        switch h {
+        case .waits(let keys): return "⏸ Waits for " + keys.joined(separator: ", ")
+        case .area(_, let k): return "⊘ Area used by \(k)"
+        case .unknown: return "Reads the relations…"
+        }
+    }
+
+    static func note(_ h: WorkOrderHold) -> String? {
+        if !h.blockers.isEmpty { return "⏸ Waits for " + h.blockers.map(\.key).joined(separator: ", ") }
+        if !h.areas.isEmpty { return "⊘ Area busy: " + h.areas.joined(separator: ", ") }
+        return nil
+    }
+
+    /// The Now, Next and Later board of the Planner, with the draft applied.
+    static func plan(lane: QueueLane, running: [String], areas: (String) -> [String], slots: Int, draft: PlanDraft?) -> PlanBoard {
+        let keys = draft.map { $0.order(lane.entries.map(\.key)) } ?? lane.entries.map(\.key)
+        func a(_ k: String) -> [String] { draft.map { $0.areas(of: k, base: areas(k)) } ?? areas(k) }
+        let cards = running.sorted().map { PlanBoard.Card(key: $0, areas: a($0), running: true) } + keys.map { PlanBoard.Card(key: $0, areas: a($0)) }
+        return PlanBoard(cards: cards, slots: slots)
+    }
+}
+
 extension QueueLane {
     struct Pick {
         var entry: QueueEntry?            // the entry to start now
