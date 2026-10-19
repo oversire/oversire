@@ -115,7 +115,8 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
             rows += extra
             kept += reused
         }
-        let items = kept + rows.compactMap { parseItem($0, identifier: identifier, names: names) }
+        // A write during the refresh can give one id in a list page and in a tree row.
+        let items = ProjectSnapshot.unique(kept + rows.compactMap { parseItem($0, identifier: identifier, names: names) })
         lock.withLock { itemCache[p.id] = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
         return items
     }

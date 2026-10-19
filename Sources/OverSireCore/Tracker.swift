@@ -237,13 +237,29 @@ public struct ProjectSnapshot: Codable, Sendable {
                 index: [ItemStub]? = nil, intake: [IntakeItem]? = nil) {
         self.summary = summary
         self.statusOptions = statusOptions
-        self.items = items
+        self.items = ProjectSnapshot.unique(items)
         self.fetchedAt = fetchedAt
         self.fields = fields
         self.me = me
         self.meId = meId
         self.index = index
         self.intake = intake
+    }
+
+    private enum CodingKeys: String, CodingKey { case summary, statusOptions, items, fetchedAt, fields, me, meId, index, intake }
+
+    // A saved snapshot from an older version can hold one id two times.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(summary: try c.decode(ProjectSummary.self, forKey: .summary),
+                  statusOptions: try c.decode([StatusOption].self, forKey: .statusOptions),
+                  items: try c.decode([Item].self, forKey: .items),
+                  fetchedAt: try c.decode(Date.self, forKey: .fetchedAt),
+                  fields: try c.decodeIfPresent([ProjectField].self, forKey: .fields) ?? [],
+                  me: try c.decodeIfPresent(String.self, forKey: .me),
+                  meId: try c.decodeIfPresent(String.self, forKey: .meId),
+                  index: try c.decodeIfPresent([ItemStub].self, forKey: .index),
+                  intake: try c.decodeIfPresent([IntakeItem].self, forKey: .intake))
     }
 
     public var statusFieldId: String? { statusOptions.isEmpty ? nil : ProjectSnapshot.statusFieldId }
@@ -292,6 +308,33 @@ public struct ProjectSnapshot: Codable, Sendable {
     }
 
     public var sortedItems: [Item] { sorted(items) }
+
+    /// One item for each id, the one with the newest activity. On a tie the later copy wins. The first position stays.
+    public static func unique(_ list: [Item]) -> [Item] {
+        var at: [String: Int] = [:]
+        var out: [Item] = []
+        for i in list {
+            if let n = at[i.id] {
+                if i.activityAt >= out[n].activityAt { out[n] = i }
+            } else {
+                at[i.id] = out.count
+                out.append(i)
+            }
+        }
+        return out
+    }
+
+    /// The order in a status group: Done items by the last change, newest first. Other items as `sorted`.
+    public func groupSorted(_ list: [Item]) -> [Item] {
+        let done = list.filter { option($0.statusOptionId)?.category == .done }.sorted { $0.updatedAt > $1.updatedAt }
+        return sorted(list.filter { option($0.statusOptionId)?.category != .done }) + done
+    }
+
+    /// A Done item hides when it did not change for `afterDays` days. 0 never hides, -1 always hides.
+    public func isHiddenDone(_ item: Item, afterDays days: Int, now: Date = Date()) -> Bool {
+        guard days != 0, option(item.statusOptionId)?.category == .done else { return false }
+        return days < 0 || now.timeIntervalSince(item.updatedAt) > Double(days) * 86400
+    }
 
     // Status rank, then priority (Urgent first, none last), then title A to Z.
     public func sorted(_ list: [Item]) -> [Item] {

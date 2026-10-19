@@ -130,6 +130,15 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(child.url, "https://app.plane.so/acme/browse/ENG-2/")
     }
 
+    func testItemsKeepOneCopyOfEachId() async throws {
+        // A write during a refresh moves a row, so two offset pages give it two times. The newest copy wins.
+        http.on("GET", "\(ws)/projects/P1/issues/", #"{"results":[{"id":"i1","name":"New","sequence_id":1,"state":"s2","parent":"i2","last_activity_at":"2026-10-16T12:00:00Z"},{"id":"i2","name":"Parent","sequence_id":2,"state":"s1","last_activity_at":"2026-10-16T11:00:00Z"},{"id":"i1","name":"Old","sequence_id":1,"state":"s1","last_activity_at":"2026-10-16T10:00:00Z"}],"next_page_results":false}"#)
+        let items = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(items.map(\.id), ["i1", "i2"])
+        XCTAssertEqual(items.first?.title, "New")
+        XCTAssertEqual(items.first?.parentId, "i2")
+    }
+
     func testItemsLoadOnlyTheDelta() async throws {
         let list = "\(ws)/projects/P1/issues/"
         func row(_ id: String, _ n: Int, _ at: String) -> String {

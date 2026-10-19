@@ -23,6 +23,7 @@ public enum TrackerConformance {
         if let list = await r.step("items", { try await t.items(p, since: nil, limit: 50) }) {
             r.expect(list.contains { $0.id == ref.id }, "items does not list the new item")
             r.expect(list.map(\.activityAt) == list.map(\.activityAt).sorted(by: >), "items are not newest first")
+            r.expect(Set(list.map(\.id)).count == list.count, "items gives one id more than one time")
         }
         if let one = await r.step("items limit 1", { try await t.items(p, since: nil, limit: 1) }) {
             r.expect(one.count <= 1, "items gave \(one.count) items for limit 1")

@@ -151,13 +151,14 @@ class Chiplet: Box {
     var onClick: (() -> Void)?
     private let label: NSTextField
 
-    init(_ text: String, symbol: String? = nil, color: NSColor = Palette.mut, fill: NSColor = Palette.raise,
+    // `icon` takes the place of `symbol`, for a drawn glyph such as StatusGlyph.
+    init(_ text: String, symbol: String? = nil, icon: NSView? = nil, color: NSColor = Palette.mut, fill: NSColor = Palette.raise,
          mono: Bool = false, onClick: (() -> Void)? = nil) {
         label = .text(text, size: 11.5, weight: .medium, color: color, mono: mono)
         self.onClick = onClick
         super.init(fill: fill, border: Palette.line, radius: 5)
         var views: [NSView] = []
-        if let symbol { views.append(Glyph(symbol, color: color, size: 10.5)) }
+        if let icon { views.append(icon) } else if let symbol { views.append(Glyph(symbol, color: color, size: 10.5)) }
         views.append(label)
         let s = NSStackView(h: views, spacing: 4)
         addSubview(s)
@@ -417,7 +418,7 @@ final class Tile: Row {
     init(_ value: String, _ caption: String, tone: Tone, onClick: (() -> Void)?) {
         let v = NSTextField.text(value, size: 22, weight: .semibold)
         v.font = .monospacedDigitSystemFont(ofSize: 22, weight: .semibold)
-        let c = NSStackView(h: [Glyph(tone, size: 12), NSTextField.text(caption, size: 12, color: Palette.mut)], spacing: 5)
+        let c = NSStackView(h: [Glyph(tone, size: 12), NSTextField.text(caption, size: 12, color: Palette.mut, lines: 2)], spacing: 5, align: .top)
         let col = NSStackView(v: [v, c], spacing: 2)
         super.init([col], height: 64, inset: 14, label: "\(value) \(caption)", onClick: onClick)
         fill = Palette.panel; border = Palette.line; radius = 10
@@ -771,7 +772,9 @@ final class Wrap: NSView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         for v in items { v.translatesAutoresizingMaskIntoConstraints = true; addSubview(v) }
-        setContentHuggingPriority(.init(1), for: .horizontal)
+        // One line of items is the wanted width. A spacer gives way first, then the items wrap, then labels cut.
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.init(200), for: .horizontal)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -789,7 +792,11 @@ final class Wrap: NSView {
         return y + line
     }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: place(width: bounds.width > 0 ? bounds.width : 400, apply: false)) }
+    private var lineWidth: CGFloat { items.reduce(0) { $0 + $1.fittingSize.width } + gap * CGFloat(max(0, items.count - 1)) }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: lineWidth, height: place(width: bounds.width > 0 ? bounds.width : lineWidth, apply: false))
+    }
 
     private var lastHeight: CGFloat = -1
 

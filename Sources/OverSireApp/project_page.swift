@@ -136,7 +136,7 @@ final class ProjectPage: Page {
             ToggleChip("Sub-items", on: showSubItems) { [weak self] in self?.flip(\.showSubItems) },
             ToggleChip("Show done", on: showDone) { [weak self] in self?.flip(\.showDone) },
             Spacer(),
-            NSTextField.text("Grouped by status · sorted by priority", size: 12, color: Palette.dim),
+            NSTextField.text("Grouped by status · sorted by priority, Done by last change", size: 12, color: Palette.dim),
         ], spacing: 6)
         col.addFull(filters)
 
@@ -158,11 +158,12 @@ final class ProjectPage: Page {
         col.addFull(list)
     }
 
-    // Plane states in their category order. Done and cancelled show only with Show done.
+    // Plane states in their category order. Without Show done, Done items follow the "Hide Done items" setting.
     private func statusGroups(_ snap: ProjectSnapshot, _ items: [Item]) -> [(StatusOption, [Item])] {
         let opts = snap.statusOptions.enumerated().sorted { ($0.element.category.rank, $0.offset) < ($1.element.category.rank, $1.offset) }.map(\.element)
-        let sorted = snap.sorted(items)
-        var out = opts.filter { showDone || $0.category != .done }.map { o in (o, sorted.filter { $0.statusOptionId == o.id }) }
+        let days = PROJECTS_CFG.hideDoneAfterDays
+        let sorted = snap.groupSorted(showDone ? items : items.filter { !snap.isHiddenDone($0, afterDays: days) })
+        var out = opts.map { o in (o, sorted.filter { $0.statusOptionId == o.id }) }
         let known = Set(opts.map(\.id))
         let rest = sorted.filter { !known.contains($0.statusOptionId ?? "") }
         if !rest.isEmpty { out.append((StatusOption(id: "", name: "No status", color: "GRAY"), rest)) }

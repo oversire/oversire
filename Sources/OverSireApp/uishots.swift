@@ -495,6 +495,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             guard let s = find(root, { ($0.accessibilityLabel() ?? "").contains(scope) }) else { return false }
             base = s
         }
+        if let c = find(base, { ($0 as? Chiplet)?.onClick != nil && $0.accessibilityLabel()?.hasPrefix(title) == true }) as? Chiplet {
+            c.onClick?()
+            return true
+        }
         guard let b = find(base, { ($0 as? NSButton)?.title.hasPrefix(title) == true }) as? NSButton else { return false }
         if let a = b as? ActionButton, let run = a.onClick { run() } else { b.performClick(nil) }
         return true

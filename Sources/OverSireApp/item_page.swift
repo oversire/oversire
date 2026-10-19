@@ -5,8 +5,8 @@ import OverSireCore
 final class MenuChip: Chiplet {
     private var actions: [MenuAction] = []
 
-    init(_ text: String, symbol: String? = nil, color: NSColor = Palette.fg, choices: @escaping () -> [MenuAction]) {
-        super.init(text, symbol: symbol, color: color)
+    init(_ text: String, symbol: String? = nil, icon: NSView? = nil, color: NSColor = Palette.fg, choices: @escaping () -> [MenuAction]) {
+        super.init(text, symbol: symbol, icon: icon, color: color)
         onClick = { [weak self] in
             guard let self else { return }
             self.actions = choices()
@@ -151,7 +151,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func statusChip(snap: ProjectSnapshot, item: Item) -> NSView {
         let opt = snap.option(item.statusOptionId)
-        return MenuChip(opt?.name ?? "No status", symbol: "circle.dotted") { [weak self] in
+        let name = opt?.name ?? "No status"
+        let glyph = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: name).sized(12)
+        return MenuChip(name, icon: glyph) { [weak self] in
             snap.statusOptions.map { o in
                 let a = MenuAction(o.name) { self?.save("status", ItemPatch(status: o.id)) }
                 a.item.state = o.id == item.statusOptionId ? .on : .off

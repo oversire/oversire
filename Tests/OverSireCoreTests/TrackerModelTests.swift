@@ -9,10 +9,10 @@ final class TrackerModelTests: XCTestCase {
     let done = StatusOption(id: "s5", name: "Done", color: "GREEN")
 
     func item(_ id: String, status: String?, fields: [String: String] = [:], assignees: [String] = [],
-              author: String? = "bea", parent: String? = nil) -> Item {
+              author: String? = "bea", parent: String? = nil, at: Date = Date(timeIntervalSince1970: 1_700_000_000)) -> Item {
         Item(id: id, key: "ENG-\(id)", title: "Item \(id)", url: "https://app.plane.so/acme/browse/ENG-\(id)/",
              statusOptionId: status, fields: fields, assignees: assignees, labels: [], author: author, updatedBy: author,
-             updatedAt: Date(timeIntervalSince1970: 1_700_000_000), activityAt: Date(timeIntervalSince1970: 1_700_000_000),
+             updatedAt: at, activityAt: at,
              commentCount: 0, lastComment: nil, mentionsMe: false, parentId: parent)
     }
 
@@ -50,6 +50,42 @@ final class TrackerModelTests: XCTestCase {
         let s = snap([pri("a", "s1", "Low"), pri("b", "s1", nil), pri("c", "s1", "Urgent"),
                       pri("d", "s5", "Urgent"), pri("e", "s2", "Low"), pri("f", "s2", "High")], [todo, doing, done])
         XCTAssertEqual(s.sortedItems.map(\.id), ["f", "e", "c", "a", "b", "d"])
+    }
+
+    func testDoneGroupSortsByLastChange() {
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let s = snap([item("old", status: "s5", fields: ["Priority": "Urgent"], at: t0),
+                      item("new", status: "s5", fields: ["Priority": "Low"], at: t0 + 3600),
+                      item("a", status: "s1", fields: ["Priority": "Low"], at: t0 + 7200),
+                      item("b", status: "s1", fields: ["Priority": "High"], at: t0)], [todo, done])
+        XCTAssertEqual(s.groupSorted(s.items).map(\.id), ["b", "a", "new", "old"])
+    }
+
+    func testHiddenDone() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let s = snap([], [todo, done])
+        let fresh = item("1", status: "s5", at: now - 3600)
+        let edge = item("2", status: "s5", at: now - 86400)
+        let old = item("3", status: "s5", at: now - 86401)
+        let open = item("4", status: "s1", at: now - 86400 * 9)
+        XCTAssertTrue([fresh, edge, old].allSatisfy { s.isHiddenDone($0, afterDays: -1, now: now) }, "-1 always hides")
+        XCTAssertFalse([fresh, edge, old].contains { s.isHiddenDone($0, afterDays: 0, now: now) }, "0 never hides")
+        XCTAssertFalse(s.isHiddenDone(fresh, afterDays: 1, now: now))
+        XCTAssertFalse(s.isHiddenDone(edge, afterDays: 1, now: now), "one day exactly still shows")
+        XCTAssertTrue(s.isHiddenDone(old, afterDays: 1, now: now))
+        XCTAssertFalse(s.isHiddenDone(open, afterDays: -1, now: now), "only Done items hide")
+    }
+
+    func testSnapshotKeepsOneItemPerId() {
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let s = snap([item("1", status: "s1", at: t0), item("2", status: "s1"), item("1", status: "s5", parent: "2", at: t0 + 60),
+                      item("1", status: "s1", at: t0 + 30)], [todo, done])
+        XCTAssertEqual(s.items.map(\.id), ["1", "2"])
+        XCTAssertEqual(s.items[0].parentId, "2", "the newest copy wins")
+        var json = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as! [String: Any]
+        json["items"] = (json["items"] as! [Any]) + (json["items"] as! [Any])
+        let back = try! JSONDecoder().decode(ProjectSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(back.items.map(\.id), ["1", "2"], "a saved snapshot with one id two times decodes to one")
     }
 
     func testSubItemTree() {

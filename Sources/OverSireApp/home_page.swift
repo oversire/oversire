@@ -83,6 +83,27 @@ final class NeedsYouRow: Row {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+// A running run on Home. The name gets the full width; the times go on their own line.
+final class HomeRunRow: Row {
+    init(repo: String, run r: Run, data: AppData, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
+        let tone = Tone(r)
+        let name = repo.split(separator: "/").last.map(String.init) ?? repo
+        let title = NSTextField.text("\(r.workflowName ?? r.name) #\(r.number)", size: 13, weight: .medium)
+        let link = data.workstreams.link(runId: r.id)?.key
+        let sub = NSTextField.text([name, link ?? r.headBranch].joined(separator: " · "), size: 11.5, color: Palette.dim)
+        for t in [title, sub] { t.setContentCompressionResistancePriority(.init(1), for: .horizontal) }
+        let total = r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? [])
+        let v = NSStackView(v: [title, sub, RunClock(r, total: total, inline: true)], spacing: 3)
+        v.setHuggingPriority(.init(1), for: .horizontal)
+        super.init([Glyph(tone), v], height: 46,
+                   label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name)") { go(.run(repo: repo, id: r.id)) }
+        stack.alignment = .top
+        itemActions(url: r.url, key: r.id, tracker: "GitHub")
+        commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: link, ignored: IGNORED.contains(r), caps: $0) }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 // A workstream on Home: item, checkout, agent, CI and PR in one card.
 final class WorkstreamCard: Row {
     init(_ s: Workstream, go: @escaping (Route) -> Void) {
@@ -101,6 +122,10 @@ final class WorkstreamCard: Row {
         }
         if let p = s.prs.first { chips.append(Chiplet("PR #\(p.pr.number) \(p.pr.isDraft ? "draft" : p.pr.state.lowercased())", symbol: "arrow.triangle.pull")) }
         let chipRow = NSStackView(h: chips, spacing: 6)
+        // In a narrow card the last chips drop out first. The state pill stays.
+        for (i, c) in chips.enumerated() where i > 0 { chipRow.setVisibilityPriority(.init(rawValue: 900 - Float(i) * 10), for: c) }
+        chipRow.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        chips.first?.setContentCompressionResistancePriority(.required, for: .horizontal)
         title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         let head = NSStackView(h: [Chiplet(s.key, color: Palette.fg, mono: true), title, Spacer()], spacing: 8)
         var col: [NSView] = [head, chipRow]
@@ -161,7 +186,7 @@ final class HomePage: Page {
         var tiles: [NSView] = [
             Tile("\(running.count)", "Running now · \(linked) linked", tone: .running) { [weak self] in self?.go(.runs(.running)) },
             Tile("\(failing.count)", failing.isEmpty ? "Failing runs · all green" : "Failing runs", tone: failing.isEmpty ? .ok : .bad) { [weak self] in self?.go(.runs(.failed)) },
-            Tile("\(agents.count)", "Orca sessions · \(agents.filter { $0.phase == .waiting }.count) need input", tone: .working) { [weak self] in self?.go(.agents) },
+            Tile("\(agents.count)", "Sessions · \(agents.filter { $0.phase == .waiting }.count) need input", tone: .working) { [weak self] in self?.go(.agents) },
             Tile("\(data.queue.count)", "Queue · \(data.aiChecks.pending.count) AI checks", tone: .queued) { [weak self] in self?.go(.queue) },
         ]
         if data.has(.intake) {
@@ -186,11 +211,16 @@ final class HomePage: Page {
         for s in streams.prefix(10) { main.addFull(WorkstreamCard(s) { [weak self] in self?.go($0) }) }
         let next = data.queue.upNext(store: data.projectStore)
         if !next.isEmpty {
-            let chips: [NSView] = next.prefix(4).map { e in
-                Chiplet("\(e.key) \(e.title)", symbol: "arrow.right.circle", color: Palette.fg) { [weak self] in self?.go(.item(e.key, .overview)) }
-            }
             let c = Card(title: "Up next", trailing: [ActionButton("Open queue") { [weak self] in self?.go(.queue) }])
-            c.add(NSStackView(h: chips, spacing: 6))
+            for (i, e) in next.prefix(3).enumerated() {
+                let num = NSTextField.text("\(i + 1)", size: 12, color: Palette.dim, mono: true)
+                let key = NSTextField.text(e.key, size: 12, mono: true)
+                for f in [num, key] { f.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal) }
+                let title = NSTextField.text(e.title, size: 12.5)
+                title.setContentHuggingPriority(.init(1), for: .horizontal)
+                c.add(Row([num, key, title],
+                          height: 28, inset: 4, label: "\(i + 1). \(e.key) \(e.title)") { [weak self] in self?.go(.item(e.key, .overview)) })
+            }
             main.addFull(c)
         }
 
@@ -205,10 +235,16 @@ final class HomePage: Page {
         aside.addFull(ny)
         aside.addFull(SectionTitle("Running now", count: running.count))
         let rn = ListCard()
-        for r in running.prefix(8) { rn.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
+        for r in running.prefix(8) { rn.add(HomeRunRow(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
         if rn.isEmpty { rn.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
         aside.addFull(rn)
 
+        // A filler at the end keeps each card at its own height when the other column is taller.
+        for s in [main, aside] {
+            let fill = NSView()
+            fill.setContentHuggingPriority(.init(1), for: .vertical)
+            s.addArrangedSubview(fill)
+        }
         let two = NSStackView(h: [main, aside], spacing: 16, align: .top)
         col.addFull(two)
         aside.widthAnchor.constraint(equalTo: two.widthAnchor, multiplier: 0.4).isActive = true

@@ -41,9 +41,16 @@ final class StatusGlyph: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    // The shapes use a 16 pt box. Other sizes scale it.
     override func draw(_ dirtyRect: NSRect) {
         let c = color
-        let r = bounds.insetBy(dx: 1.5, dy: 1.5)
+        let box = NSRect(x: 0, y: 0, width: 16, height: 16)
+        if bounds.width != 16 {
+            let t = NSAffineTransform()
+            t.scale(by: min(bounds.width, bounds.height) / 16)
+            t.concat()
+        }
+        let r = box.insetBy(dx: 1.5, dy: 1.5)
         switch category {
         case .todo:
             let p = NSBezierPath(ovalIn: r)
@@ -60,10 +67,10 @@ final class StatusGlyph: NSView {
             let p = NSBezierPath(ovalIn: r)
             p.lineWidth = 1.4; c.setStroke(); p.stroke()
             c.setFill()
-            NSBezierPath(ovalIn: NSRect(x: bounds.midX - 1.6, y: bounds.midY - 1.6, width: 3.2, height: 3.2)).fill()
+            NSBezierPath(ovalIn: NSRect(x: box.midX - 1.6, y: box.midY - 1.6, width: 3.2, height: 3.2)).fill()
         case .blocked:
             c.setFill()
-            NSBezierPath(roundedRect: NSRect(x: 2, y: 6, width: bounds.width - 4, height: 4), xRadius: 1, yRadius: 1).fill()
+            NSBezierPath(roundedRect: NSRect(x: 2, y: 6, width: box.width - 4, height: 4), xRadius: 1, yRadius: 1).fill()
         case .done:
             let p = NSBezierPath()
             p.move(to: NSPoint(x: 3, y: 8))
@@ -755,7 +762,7 @@ extension TabVC {
                 continue
             }
             var items = snap.sorted(snap.listed(subItems: PROJECTS_CFG.showSubItems))
-            items = items.filter { !isHiddenDone($0, snap: snap) && $0.matches(query) }
+            items = items.filter { !snap.isHiddenDone($0, afterDays: PROJECTS_CFG.hideDoneAfterDays) && $0.matches(query) }
             if assignedOnly { items = items.filter { $0.isMine(snap.me) } }
             if unreadOnly { items = items.filter { store.isUnread(itemId: $0.id) } }
             if let fid = statusFilter[key] { items = items.filter { $0.statusOptionId == fid } }
@@ -889,14 +896,6 @@ extension TabVC {
             saveConfig()
             rebuildContent()
         }
-    }
-
-    func isHiddenDone(_ item: Item, snap: ProjectSnapshot) -> Bool {
-        let days = PROJECTS_CFG.hideDoneAfterDays
-        guard days != 0 else { return false }
-        let done = snap.option(item.statusOptionId)?.category == .done
-        guard done else { return false }
-        return days < 0 || Date().timeIntervalSince(item.updatedAt) > Double(days) * 86400
     }
 
     @objc func showAll(_ sender: NSButton) {

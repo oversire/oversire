@@ -54,16 +54,17 @@ final class RunClock: NSStackView {
     private let spinner: NSProgressIndicator?
     private var timer: Timer?
 
-    init(_ r: Run, total: TimeInterval?, parts: Parts = .all) {
+    // `inline` puts the times on one line, for a line of its own under the run name.
+    init(_ r: Run, total: TimeInterval?, parts: Parts = .all, inline: Bool = false) {
         run = r
         self.total = total
         bar = parts.contains(.bar) && total != nil ? MiniBar() : nil
         spinner = parts.contains(.bar) && total == nil ? NSProgressIndicator() : nil
         super.init(frame: .zero)
-        orientation = .vertical
+        orientation = inline ? .horizontal : .vertical
         // In a table column the times align left, like the other cells. Alone at the end of a row they align right.
-        alignment = parts == .times ? .leading : .trailing
-        spacing = 2
+        alignment = inline ? .centerY : parts == .times ? .leading : .trailing
+        spacing = inline ? 6 : 2
         translatesAutoresizingMaskIntoConstraints = false
         if parts.contains(.times) {
             elapsed.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)

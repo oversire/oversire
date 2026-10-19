@@ -84,6 +84,10 @@ final class PlanPage: Page {
                 v.addFull(cardView(card, kind: kind, clash: clashes[card.key], hold: hold))
             }
             if b.cards(c).isEmpty { v.addFull(NSTextField.text("Empty", size: 12, color: Palette.dim)) }
+            // The filler takes the height that a taller column adds, so the cards keep the top.
+            let fill = NSView()
+            fill.setContentHuggingPriority(.init(1), for: .vertical)
+            v.addArrangedSubview(fill)
             return v
         }
         let row = NSStackView(h: columns, spacing: 12, align: .top)
