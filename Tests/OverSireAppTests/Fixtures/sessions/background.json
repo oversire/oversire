@@ -1,0 +1,16 @@
+{
+ "state": "done",
+ "expect": "background",
+ "shells": 2,
+ "message": "The demo video is rendered. The backend and the preview server are still running.",
+ "screen": [
+  "⏺ The demo video is rendered. The backend and the preview server are still running.",
+  "✻ Cooked for 6m 30s · done 7:08 PM · 2 shells still running",
+  "※ recap: The demo video is rendered. Next, watch it on the preview page. (disable recaps in /config)",
+  "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+  "❯",
+  "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+  "  Opus 5.5 (1M context) | 1967.8 min | 90K (9%) | ~/Projects/site",
+  "  ⏵⏵ bypass permissions on · PR #8 · 2 shells · ← for agents"
+ ]
+}

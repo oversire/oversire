@@ -23,7 +23,7 @@ enum IconSource: Hashable {
     /// The name of the cached PNG. Only remote sources have one.
     var cacheKey: String? {
         switch self {
-        case .image(let u): return "image-" + String(fnv1a(u), radix: 16)
+        case .image(let u): return "image-" + String(u.fnv1a, radix: 16)
         case .repo(let r): return "repo-" + r.replacingOccurrences(of: "/", with: "~")
         case .org(let o): return "org-" + o
         default: return nil
@@ -314,10 +314,4 @@ struct ProjectResolver {
         return keys.first { links[$0]!.contains { $0.lowercased() == r } }
             ?? keys.first { links[$0]!.contains { !$0.contains("/") && $0.lowercased() == owner } }
     }
-}
-
-private func fnv1a(_ s: String) -> UInt64 {
-    var h: UInt64 = 0xcbf29ce484222325
-    for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
-    return h
 }

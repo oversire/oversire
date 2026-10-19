@@ -53,10 +53,13 @@ final class PromptTests: XCTestCase {
     }
 
     func testCheckAndFailurePrompts() throws {
-        let check = try AITaskKind.check.prompt(AgentPrompts.checkInput(key: "A-1", title: "T", quietMinutes: 12, phase: "working", ci: "none",
-                                                                        prOpen: true, status: "unknown", tail: (1...80).map { "l\($0)" }))
-        XCTAssertTrue(check.user.hasPrefix("Item A-1: T\nQuiet for 12 min. Agent state: working.\nCI: none. PR open: yes. Plane status: unknown.\n"))
-        XCTAssertTrue(check.user.hasSuffix("l21\n" + (22...80).map { "l\($0)" }.joined(separator: "\n")), "the last 60 lines")
+        let turn = String(repeating: "x", count: 7000) + "END"
+        let check = try AITaskKind.check.prompt(AgentPrompts.checkInput(key: "A-1", title: "T", quietMinutes: 12, phase: "working", ticking: false,
+                                                                        ci: "none", prOpen: true, status: "unknown", message: "", turn: turn))
+        XCTAssertTrue(check.user.hasPrefix("Item A-1: T\nScreen did not change for 12 min. Agent state: working. Spinner counter moves: no.\n"
+                                           + "CI: none. PR open: yes. Plane status: unknown.\n\nLast turn on the screen:\n"), check.user)
+        XCTAssertTrue(check.user.hasSuffix("xEND"))
+        XCTAssertEqual(check.user.count(where: { $0 == "x" }), 5997, "the end of the turn, 6000 characters")
         let fail = try AITaskKind.failureReason.prompt(CIPrompts.failureInput(
             workflow: "CI", number: 9, branch: "main", sha: "abcdef12345", commit: "Fix", job: "build", files: [],
             errors: ["error: x"], tail: ["a", "b"]))

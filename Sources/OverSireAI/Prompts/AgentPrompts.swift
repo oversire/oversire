@@ -6,11 +6,19 @@ public enum AgentPrompts {
     // MARK: Check
 
     /// The facts of a quiet agent. `tail`: the last terminal lines.
-    public static func checkInput(key: String, title: String, quietMinutes: Int, phase: String, ci: String, prOpen: Bool,
-                                  status: String, tail: [String]) -> AIInput {
-        AIInput(text: tail.suffix(60).joined(separator: "\n"),
-                context: ["key": key, "title": title, "quiet": "\(quietMinutes)", "phase": phase, "ci": ci,
-                          "prOpen": prOpen ? "yes" : "no", "status": status])
+    /// `turn`: the last turn on the screen, without the harness UI. `message`: the last agent message of the runtime.
+    public static func checkInput(key: String, title: String, quietMinutes: Int, phase: String, ticking: Bool, ci: String,
+                                  prOpen: Bool, status: String, message: String, turn: String) -> AIInput {
+        AIInput(text: String(turn.suffix(6000)),
+                context: ["key": key, "title": title, "quiet": "\(quietMinutes)", "phase": phase, "ticking": ticking ? "yes" : "no",
+                          "ci": ci, "prOpen": prOpen ? "yes" : "no", "status": status, "message": String(message.prefix(4000))])
+    }
+
+    // MARK: Session end
+
+    public static func sessionEndInput(key: String, title: String, status: String, message: String, turn: String) -> AIInput {
+        AIInput(text: String(turn.suffix(6000)),
+                context: ["key": key, "title": title, "status": status, "message": String(message.prefix(4000))])
     }
 
     // MARK: Queue order

@@ -77,6 +77,9 @@ final class AgentIndex: NSObject {
     private(set) var cards: [Workspace] = []                // the last `worktree ps`
     private(set) var lastError: String?
     private(set) var feed = OrcaFeed()
+    private(set) var watches: [String: SessionWatch] = [:]   // item key → what the screen showed
+    private var reading: Set<String> = []
+    private var seen: [String: String] = [:]                 // item key → phase and message hash of the last read
     private var launches: [String: PendingLaunch] = [:]
     // The panes that OverSire started. They keep the item key when the card name has none.
     private var links: [String: AgentLink] = [:]
@@ -91,6 +94,9 @@ final class AgentIndex: NSObject {
     var visible: () -> Bool = { false }
     // Called once for each agent that holds a new waiting or done state for 10 seconds.
     var onAlert: ((_ key: String, _ agent: AgentSession) -> Void)?
+    // True when the end check of this agent message found steps for the user.
+    var blocked: (_ key: String, _ agent: AgentSession) -> Bool = { _, _ in false }
+    var quietAfter: () -> TimeInterval = { AGENTS.quietMinutes * 60 }
 
     private var cfg: OrcaConfig { PROJECTS_CFG.orca }
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
@@ -99,7 +105,10 @@ final class AgentIndex: NSObject {
     private var observer: NSObjectProtocol?
 
     /// For `--uishots`: a session without Orca. The next poll replaces it.
-    func seed(_ key: String, _ a: AgentSession) { agents[key.uppercased()] = a }
+    func seed(_ key: String, _ a: AgentSession, watch: SessionWatch? = nil) {
+        agents[key.uppercased()] = a
+        watches[key.uppercased()] = watch
+    }
 
     init(writes: StoreWrites? = nil) {
         self.writes = writes
@@ -116,6 +125,55 @@ final class AgentIndex: NSObject {
     }
 
     func agent(_ key: String) -> AgentSession? { agents[key.uppercased()] }
+
+    // MARK: Session state
+
+    func facts(_ key: String) -> SessionFacts? {
+        let k = key.uppercased()
+        guard let a = agents[k] else { return nil }
+        let w = watches[k]
+        let live = a.card.flatMap { c in cards.first { $0.id == c } }?.liveTerminals ?? 1
+        return SessionFacts(phase: a.phase, liveTerminals: live, blocked: a.phase == .done && blocked(k, a), shells: w?.shells ?? 0,
+                            sameFor: w.map { now().timeIntervalSince($0.changedAt) } ?? 0, ticking: w?.ticking ?? false)
+    }
+
+    func state(_ key: String) -> SessionState? { facts(key)?.state(quietAfter: quietAfter()) }
+
+    func watch(_ key: String) -> SessionWatch? { watches[key.uppercased()] }
+
+    // Reads the screens that are due: a live session each minute, an ended one each 5 minutes,
+    // and at once after a state or message change.
+    private func readScreens(at: Date) {
+        watches = watches.filter { agents[$0.key] != nil }
+        for (key, a) in agents where a.phase != .failed && a.phase != .starting && !reading.contains(key) {
+            let tag = "\(a.phase)|\(a.messageHash)"
+            let age = watches[key].map { at.timeIntervalSince($0.readAt) } ?? .infinity
+            guard seen[key] != tag || age >= (a.phase == .done ? 300 : 60) else { continue }
+            seen[key] = tag
+            read(key) { _ in }
+        }
+    }
+
+    /// Reads the screen of one session now. `done` gets false when no terminal answered.
+    func read(_ key: String, done: @escaping (Bool) -> Void) {
+        let k = key.uppercased()
+        guard let a = agents[k], runtime() != nil else { done(false); return }
+        reading.insert(k)
+        terminal(k) { rt, s -> [String]? in
+            guard let s, case .success(let lines) = await Result(awaiting: { try await rt.output(s, lines: 300) }) else { return nil }
+            return lines
+        } done: { [weak self] lines in
+            guard let self else { return }
+            self.reading.remove(k)
+            guard let lines, !lines.isEmpty else { done(false); return }
+            let before = self.state(k)
+            var w = self.watches[k] ?? SessionWatch(at: self.now())
+            w.observe(HarnessScreen(lines, harness: a.agent), at: self.now())
+            self.watches[k] = w
+            if self.state(k) != before { self.publish() }
+            done(true)
+        }
+    }
 
     // Self when a runtime account exists and its tool is installed, else nil. The UI shows no agent controls then.
     var ready: AgentIndex? {
@@ -134,8 +192,8 @@ final class AgentIndex: NSObject {
         poll()
     }
 
-    func poll() {
-        guard ready != nil, !polling, let rt = runtime() else { return }
+    func poll(done: (() -> Void)? = nil) {
+        guard ready != nil, !polling, let rt = runtime() else { done?(); return }
         polling = true
         lastPoll = now()
         Task { [weak self] in
@@ -149,6 +207,7 @@ final class AgentIndex: NSObject {
                     self.lastError = nil
                     self.absorb(cards)
                 }
+                done?()
             }
         }
     }
@@ -370,6 +429,7 @@ final class AgentIndex: NSObject {
         self.cards = cards
         agents = AgentIndex.index(cards, launches: launches, links: links, now: at)
         feed.record(before: before, after: agents)
+        readScreens(at: at)
         for (key, a) in agents where a.phase == .waiting || a.phase == .done {
             let tag = "\(a.phase)|\(a.paneKey ?? "")|\(Int(a.since.timeIntervalSince1970))"
             guard notified[key] != tag else { continue }

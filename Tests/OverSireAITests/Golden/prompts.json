@@ -1,13 +1,13 @@
 {
   "check" : {
     "maxTokens" : 600,
-    "system" : "You check a coding agent that went quiet. Decide if its task looks done or if it looks stuck.\nReply with one JSON object only: {\"verdict\":\"done|stuck\",\"evidence\":[\"short fact\", \"...\"],\"nudge\":\"one message to send to a stuck agent, or empty\"}\nUse at most 4 facts. Use simple English.",
-    "user" : "Item A-1: T\nQuiet for 12 min. Agent state: working.\nCI: none. PR open: yes. Plane status: unknown.\nLast terminal lines:\nl21\nl22\nl23\nl24\nl25\nl26\nl27\nl28\nl29\nl30\nl31\nl32\nl33\nl34\nl35\nl36\nl37\nl38\nl39\nl40\nl41\nl42\nl43\nl44\nl45\nl46\nl47\nl48\nl49\nl50\nl51\nl52\nl53\nl54\nl55\nl56\nl57\nl58\nl59\nl60\nl61\nl62\nl63\nl64\nl65\nl66\nl67\nl68\nl69\nl70\nl71\nl72\nl73\nl74\nl75\nl76\nl77\nl78\nl79\nl80"
+    "system" : "You check a coding agent session whose screen did not change for some time. Decide if its task looks done, looks stuck, or is still working.\n\"working\" means a long command runs and the agent waits for it correctly, for example a build, a test run or a watch on CI.\nReply with one JSON object only: {\"verdict\":\"done|stuck|working\",\"evidence\":[\"short fact\", \"...\"],\"nudge\":\"one message to send to a stuck agent, or empty\"}\nUse at most 4 facts. Use simple English.",
+    "user" : "Item A-1: T\nScreen did not change for 12 min. Agent state: working. Spinner counter moves: yes.\nCI: none. PR open: yes. Plane status: unknown.\n\nLast agent message:\nBuilt the app.\n\nLast turn on the screen:\nl1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\nl15\nl16\nl17\nl18\nl19\nl20\nl21\nl22\nl23\nl24\nl25\nl26\nl27\nl28\nl29\nl30\nl31\nl32\nl33\nl34\nl35\nl36\nl37\nl38\nl39\nl40\nl41\nl42\nl43\nl44\nl45\nl46\nl47\nl48\nl49\nl50\nl51\nl52\nl53\nl54\nl55\nl56\nl57\nl58\nl59\nl60\nl61\nl62\nl63\nl64\nl65\nl66\nl67\nl68\nl69\nl70\nl71\nl72\nl73\nl74\nl75\nl76\nl77\nl78\nl79\nl80"
   },
   "check-no-pr" : {
     "maxTokens" : 600,
-    "system" : "You check a coding agent that went quiet. Decide if its task looks done or if it looks stuck.\nReply with one JSON object only: {\"verdict\":\"done|stuck\",\"evidence\":[\"short fact\", \"...\"],\"nudge\":\"one message to send to a stuck agent, or empty\"}\nUse at most 4 facts. Use simple English.",
-    "user" : "Item B-2: Fix {it}\nQuiet for 3 min. Agent state: waiting.\nCI: failed. PR open: no. Plane status: In Progress.\nLast terminal lines:\n"
+    "system" : "You check a coding agent session whose screen did not change for some time. Decide if its task looks done, looks stuck, or is still working.\n\"working\" means a long command runs and the agent waits for it correctly, for example a build, a test run or a watch on CI.\nReply with one JSON object only: {\"verdict\":\"done|stuck|working\",\"evidence\":[\"short fact\", \"...\"],\"nudge\":\"one message to send to a stuck agent, or empty\"}\nUse at most 4 facts. Use simple English.",
+    "user" : "Item B-2: Fix {it}\nScreen did not change for 3 min. Agent state: waiting. Spinner counter moves: no.\nCI: failed. PR open: no. Plane status: In Progress.\n\nLast turn on the screen:\n"
   },
   "digest" : {
     "maxTokens" : 200,
@@ -69,6 +69,16 @@
     "maxTokens" : 500,
     "system" : "You answer a question about a coding agent session. Use only the transcript. Say so when the transcript does not tell. Be short.",
     "user" : "Transcript:\nt\n\nQuestion: Why?"
+  },
+  "session-end" : {
+    "maxTokens" : 700,
+    "system" : "A coding agent session ended its turn. Decide if the work is done, or if the agent waits for steps that only the user can do.\nA step for the user is, for example, a manual check on a device, a secret to set, an approval, a login or a deploy.\nAn offer such as \"If you want, I can...\" is not a step. A question about a next task is not a step.\nReply with one JSON object only:\n{\"state\":\"done|blocked\",\"steps\":[{\"text\":\"one step\",\"kind\":\"manual-check|secret|approval|login|deploy|other\"}],\"followUpAt\":\"ISO date or empty\",\"blockedBy\":[\"ITEM-KEY\"]}\nUse at most 8 steps, in the words of the agent. Use simple English.",
+    "user" : "Item C-3: Ship\nPlane status: In Progress.\n\nLast agent message:\nI can't do the check. Tell me the result.\n\nLast turn on the screen:\n⏺ Done.\nTell me."
+  },
+  "session-end-no-message" : {
+    "maxTokens" : 700,
+    "system" : "A coding agent session ended its turn. Decide if the work is done, or if the agent waits for steps that only the user can do.\nA step for the user is, for example, a manual check on a device, a secret to set, an approval, a login or a deploy.\nAn offer such as \"If you want, I can...\" is not a step. A question about a next task is not a step.\nReply with one JSON object only:\n{\"state\":\"done|blocked\",\"steps\":[{\"text\":\"one step\",\"kind\":\"manual-check|secret|approval|login|deploy|other\"}],\"followUpAt\":\"ISO date or empty\",\"blockedBy\":[\"ITEM-KEY\"]}\nUse at most 8 steps, in the words of the agent. Use simple English.",
+    "user" : "Item C-4: T\nPlane status: Done.\n\nLast turn on the screen:\nok"
   },
   "session-summary" : {
     "maxTokens" : 900,

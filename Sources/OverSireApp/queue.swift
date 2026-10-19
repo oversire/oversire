@@ -234,13 +234,14 @@ final class WorkQueue {
 
     // MARK: Ticks
 
-    // Agents of the lane that hold a slot: starting, working or waiting, and not released.
+    // Agents of the lane that hold a slot and are not released. A background command holds its slot,
+    // "Blocked on you" and "Session done" free it.
     func busy(_ lane: QueueLane) -> Int { running(lane).count }
 
     func running(_ lane: QueueLane) -> [String] {
         let prefix = lane.identifier.uppercased() + "-"
         return agents.agents.filter { k, a in
-            k.hasPrefix(prefix) && !released.contains(k) && [.starting, .working, .waiting].contains(a.phase)
+            k.hasPrefix(prefix) && !released.contains(k) && (a.phase == .starting || agents.state(k)?.holdsSlot == true)
         }.map(\.key)
     }
 

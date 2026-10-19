@@ -42,6 +42,7 @@ public struct AITaskKind: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let check: AITaskKind = "check"
     public static let order: AITaskKind = "order"
     public static let sessionSummary: AITaskKind = "sessionSummary"
+    public static let sessionEnd: AITaskKind = "sessionEnd"
     public static let question: AITaskKind = "question"
     public static let itemSummary: AITaskKind = "itemSummary"
 }
