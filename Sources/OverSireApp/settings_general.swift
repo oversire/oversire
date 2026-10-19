@@ -9,8 +9,8 @@ extension SettingsPage {
     static var snapError: String?
 
     func general(_ b: NSStackView) {
-        b.addFull(section("Appearance", anchor: "appearance", [appearanceTheme(), FieldRow("Show OverSire in", note: "The window opens from both.", showIn())]))
-        b.addFull(section("Menu bar popover", anchor: "menubar", [
+        b.addFull(section(.appearance, [appearanceTheme(), FieldRow("Show OverSire in", note: "The window opens from both.", showIn())]))
+        b.addFull(section(.menubar, [
             SwitchRow("Small popover", note: "Now, Runs and Work only.", on: GENERAL.smallPopover) { GENERAL.smallPopover = $0 },
             FieldRow("Tabs", note: "At least one tab stays on.", popoverTabs()),
             SwitchRow("Blue dot on the menu bar icon", note: "Unread Plane activity, or a session that waits for you.", on: PROJECTS_CFG.menuDot) { [weak self] in
@@ -18,10 +18,10 @@ extension SettingsPage {
                 self?.app?.applyProjectSelection()
             },
         ]))
-        b.addFull(section("Runs and items", anchor: "runs", runsAndItems()))
-        b.addFull(section("Quick capture and snap", anchor: "capture", capture()))
-        b.addFull(section("Startup and updates", anchor: "startup", startup()))
-        b.addFull(section("Keyboard shortcuts", anchor: "shortcuts", shortcutRows()))
+        b.addFull(section(.runs, runsAndItems()))
+        b.addFull(section(.capture, capture()))
+        b.addFull(section(.startup, startup()))
+        b.addFull(section(.shortcuts, shortcutRows()))
     }
 
     private func appearanceTheme() -> NSView {

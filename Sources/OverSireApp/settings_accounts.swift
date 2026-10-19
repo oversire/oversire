@@ -103,7 +103,7 @@ extension SettingsPage {
         v.addFull(card)
         v.addFull(NSTextField.text("OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds. With the cloud live, a poll only checks the state at the reconcile time.",
                                    size: 11.5, color: Palette.dim, lines: 0))
-        v.identifier = NSUserInterfaceItemIdentifier("anchor-live")
+        v.identifier = SettingsAnchor.live.id
         b.addFull(v)
     }
 

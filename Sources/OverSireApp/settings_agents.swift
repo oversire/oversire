@@ -49,7 +49,7 @@ extension SettingsPage {
             self?.reload()
         }
         edit.setAccessibilityLabel(open ? "Close the agent commands" : "Edit the agent commands")
-        b.addFull(section("New sessions", anchor: "sessions", [
+        b.addFull(section(.sessions, [
             FieldRow("Default agent", note: "A project can choose another.", agent),
             promptRow,
             Row([TwoLine("Agent commands", "\(n == 0 ? "Default commands" : n == 1 ? "1 custom command" : "\(n) custom commands") · used by the queue and intake"),
@@ -96,7 +96,7 @@ extension SettingsPage {
         bot.widthAnchor.constraint(equalToConstant: 150).isActive = true
         label.toolTip = "A Plane label that adds the item to the queue."
         bot.toolTip = "A Plane user that adds the item to the queue when assigned."
-        b.addFull(section("Queue", anchor: "queue", [
+        b.addFull(section(.queue, [
             SwitchRow("Auto start", note: "Start the next item when a slot is free and its condition holds.", on: AGENTS.autoStart) { AGENTS.autoStart = $0 },
             FieldRow("AI checks on quiet sessions", note: "Ask me shows a card. Auto acts at once.",
                      Segmented(modes.map(\.label), selected: modes.firstIndex(of: AGENTS.aiMode) ?? 1, label: "AI checks") { AGENTS.aiMode = modes[$0]; settingsChanged() }),
@@ -121,7 +121,7 @@ extension SettingsPage {
         ]
         if promptOpen { rows.append(intakePrompt()) }
         rows += plannerRows()
-        b.addFull(section("Intake and planner", anchor: "planner", rows))
+        b.addFull(section(.planner, rows))
         if Self.areasOpen, let pk = plannerKey { b.addFull(areasCard(pk)) }
         if !hasCloud {
             b.addFull(NSStackView(h: [PlannerCard.cloudMark(), NSTextField.text(

@@ -78,7 +78,7 @@ extension SettingsPage {
                                  status: nil, actions: [], dashed: true) { [weak self] in self?.openForm(.tracker) })
         let v = NSStackView(v: [SectionTitle("Services")], spacing: 6)
         v.addFull(CardGrid(cards, minWidth: 240))
-        v.identifier = NSUserInterfaceItemIdentifier("anchor-services")
+        v.identifier = SettingsAnchor.services.id
         if form.layer != nil { v.addFull(formCard()) }
         v.addFull(ghLogin())
         let off = Self.features.filter { !ENV.capabilities().contains($0.1) }.map(\.0)

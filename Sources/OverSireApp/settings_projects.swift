@@ -140,14 +140,16 @@ extension SettingsPage {
     static let trackerPoll = [2, 5, 10, 15, 30]
 
     func projects(_ b: NSStackView) {
-        b.addFull(ProjectListView(catalog: data.projectCatalog) { [weak self] key in self?.go(.projectSettings(key, .appearance)) })
+        let list = ProjectListView(catalog: data.projectCatalog) { [weak self] key in self?.go(.projectSettings(key, .appearance)) }
+        list.identifier = SettingsAnchor.projects.id
+        b.addFull(list)
         let poll = Segmented(Self.trackerPoll.map { "\($0) min" }, selected: Self.trackerPoll.firstIndex(of: PROJECTS_CFG.pollMinutes) ?? 1,
                              label: "Check trackers every") { [weak self] i in
             PROJECTS_CFG.pollMinutes = Self.trackerPoll[i]
             saveConfig()
             self?.app?.projectStore.restartTimer()
         }
-        b.addFull(section("Refresh", anchor: "refresh", [
+        b.addFull(section(.refresh, [
             FieldRow("Check trackers every", note: "For workspaces without a webhook, and when the cloud is off.", poll),
         ]))
     }

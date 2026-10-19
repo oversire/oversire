@@ -59,7 +59,9 @@ extension SettingsPage {
         }
         engine(b)
         useAIFor(b)
-        b.addFull(CloudAICard(cloudAIRecords))
+        let cloud = CloudAICard(cloudAIRecords)
+        cloud.identifier = SettingsAnchor.cloudAI.id
+        b.addFull(cloud)
     }
 
     private var aiKey: String { UIShots.aiKey ?? AIClient.keyStore.get(AIClient.keyName) ?? "" }
@@ -135,7 +137,7 @@ extension SettingsPage {
         extraRow.addFull(extra)
         extraRow.addArrangedSubview(NSTextField.text("Sent with each request. For example: the product names and how titles start.", size: 11.5, color: Palette.dim))
         rows.append(extraRow)
-        b.addFull(section("Engine", anchor: "engine", rows))
+        b.addFull(section(.engine, rows))
     }
 
     private func runAITest() {
@@ -180,7 +182,7 @@ extension SettingsPage {
         }
         hour.setAccessibilityLabel("Digest time")
         let v = NSStackView(v: [SectionTitle("Use AI for")], spacing: 6)
-        v.identifier = NSUserInterfaceItemIdentifier("anchor-use")
+        v.identifier = SettingsAnchor.use.id
         v.addFull(CardGrid([
             card("Sessions", [
                 sw("Done and stuck checks", "Check a session that goes quiet. The queue can start the next item.", AI_CFG.agentChecks) { AI_CFG.agentChecks = $0 },

@@ -45,7 +45,7 @@ final class ScopeRow: Row {
 // Settings › Notifications: all alerts in one place. A project can override them.
 extension SettingsPage {
     func notifications(_ b: NSStackView) {
-        b.addFull(section("CI runs", anchor: "ci", [Padded(ChipGroup([
+        b.addFull(section(.ci, [Padded(ChipGroup([
             .init("Started", on: NOTIFICATIONS.started) { NOTIFICATIONS.started = $0 },
             .init("Passed", on: NOTIFICATIONS.succeeded) { NOTIFICATIONS.succeeded = $0 },
             .init("Failed", on: NOTIFICATIONS.failed) { NOTIFICATIONS.failed = $0 },
@@ -57,7 +57,7 @@ extension SettingsPage {
                         ScopeRow.cell(NSTextField.text("Any item", size: 11.5, weight: .semibold, color: Palette.dim)),
                         ScopeRow.cell(NSTextField.text("My items", size: 11.5, weight: .semibold, color: Palette.dim))], height: 30)
         head.setAccessibilityElement(false)
-        b.addFull(section("Tracker items", anchor: "tracker", [
+        b.addFull(section(.tracker, [
             head,
             ScopeRow("New comment", \.comment),
             ScopeRow("Status changes", \.status),
@@ -66,7 +66,7 @@ extension SettingsPage {
             ScopeRow("Other fields change", \.otherFields),
         ]))
 
-        b.addFull(section("Agents and mentions", anchor: "agents", [Padded(ChipGroup([
+        b.addFull(section(.mentions, [Padded(ChipGroup([
             .init("Someone mentions me", on: PROJECTS_CFG.notifications.mention) { PROJECTS_CFG.notifications.mention = $0 },
             .init("Assigned to me", on: PROJECTS_CFG.notifications.assigned) { PROJECTS_CFG.notifications.assigned = $0 },
             .init("New intake item", on: PROJECTS_CFG.notifications.intake) { PROJECTS_CFG.notifications.intake = $0 },
@@ -74,7 +74,7 @@ extension SettingsPage {
             .init("Session is done", on: PROJECTS_CFG.notifications.agentDone) { PROJECTS_CFG.notifications.agentDone = $0 },
         ], label: "Agents and mentions"))]))
 
-        b.addFull(section("Project overrides", anchor: "overrides", overrideRows()))
+        b.addFull(section(.overrides, overrideRows()))
     }
 
     private func overrideRows() -> [NSView] {

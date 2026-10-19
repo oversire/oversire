@@ -36,6 +36,13 @@ final class FieldRow: Row {
 // Settings in the window: a list of pages at the left, the page at the right.
 final class SettingsPage: Page, NSTextFieldDelegate {
     private static var embedded: [String: NSViewController] = [:]
+    private static var query = ""
+    private static var hit = 0
+    private static var flash: String?
+    private let nav = ListCard()
+    private lazy var search = SettingsSearchField(Self.query)
+    private var hits: [SettingsIndex.Entry] = []
+    private var scrolled: Route?
     private var branchTest = ""
     let promptView = NSTextView()
     var promptDirty = false
@@ -50,13 +57,21 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     override func build(_ col: NSStackView) {
         col.addFull(PageHeader("Settings", caption: "OverSire saves each change at once to \((CONFIG_PATH as NSString).abbreviatingWithTildeInPath)."))
-        let nav = ListCard()
-        for p in Route.SettingsPage.allCases {
-            let r = Row([Glyph(p.symbol, size: 13), NSTextField.text(p.title, size: 12.5, weight: p == page ? .semibold : .regular), Spacer()],
-                        height: 32, label: p.title) { [weak self] in self?.go(.settings(p)) }
-            r.selected = p == page
-            nav.add(r)
+        search.onChange = { [weak self] q in
+            Self.query = q
+            Self.hit = 0
+            self?.renderNav()
         }
+        search.onMove = { [weak self] d in
+            guard let self else { return }
+            Self.hit = max(0, min(self.hits.count - 1, Self.hit + d))
+            self.renderNav()
+        }
+        search.onOpen = { [weak self] in
+            guard let self, self.hits.indices.contains(Self.hit) else { return }
+            self.open(self.hits[Self.hit])
+        }
+        renderNav()
         let body = NSStackView(v: [], spacing: 10)
         if page != .agents { AgentCommandsCard.drafts = [:] }
         switch page {
@@ -70,9 +85,11 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             case .projects: projects(body)
             case .repos:
                 let filters: [String: RepoListModel.Filter] = ["tracked": .tracked, "problems": .problems]
-                body.addFull(RepoListView(catalog: data.repoCatalog, setup: data.cloudSetup, filter: anchor.flatMap { filters[$0] } ?? .all) { [weak self] f in
+                let repos = RepoListView(catalog: data.repoCatalog, setup: data.cloudSetup, filter: anchor.flatMap { filters[$0] } ?? .all) { [weak self] f in
                     self?.go(.settings(.projects, tab: .repos, anchor: filters.first { $0.value == f }?.key))
-                })
+                }
+                repos.identifier = SettingsAnchor.repos.id
+                body.addFull(repos)
             case .linking: linking(body); writeBack(body)
             }
         case .agents: agents(body)
@@ -81,7 +98,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         }
         let filler = NSView()
         filler.setContentHuggingPriority(.init(1), for: .vertical)
-        let navCol = NSStackView(v: [], spacing: 0)
+        let navCol = NSStackView(v: [], spacing: 8)
+        navCol.addFull(search)
         navCol.addFull(nav)
         navCol.addArrangedSubview(filler)
         let two = NSStackView(h: [navCol, body], spacing: 16, align: .top)
@@ -91,15 +109,74 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let bw = body.widthAnchor.constraint(equalTo: two.widthAnchor, constant: -226)
         bw.priority = .defaultHigh
         bw.isActive = true
+        if let a = anchor, route != scrolled {
+            scrolled = route
+            let flash = Self.flash
+            Self.flash = nil
+            DispatchQueue.main.async { [weak self] in self?.reveal(a, flash: flash) }
+        }
     }
 
-    // A titled card. The anchor is the id that a route anchor and the search scroll to.
-    func section(_ title: String, anchor: String?, _ rows: [NSView]) -> NSView {
+    // MARK: Search
+
+    // The 6 pages, or the matches while the field has text.
+    private func renderNav() {
+        nav.list.clear()
+        hits = SettingsIndex.search(Self.query)
+        if Self.query.trimmingCharacters(in: .whitespaces).isEmpty {
+            for p in Route.SettingsPage.allCases {
+                let r = Row([Glyph(p.symbol, size: 13), NSTextField.text(p.title, size: 12.5, weight: p == page ? .semibold : .regular), Spacer()],
+                            height: 32, label: p.title) { [weak self] in self?.go(.settings(p)) }
+                r.selected = p == page
+                nav.add(r)
+            }
+        } else if hits.isEmpty {
+            nav.add(Padded(NSTextField.text("No setting matches.", size: 12, color: Palette.dim), vertical: 10, side: 12))
+        } else {
+            for (i, e) in hits.enumerated() {
+                let r = Row([TwoLine(e.title, e.anchor.path, titleSize: 12.5, lines: 1)], height: 44, label: "\(e.title), \(e.anchor.path)") { [weak self] in self?.open(e) }
+                r.selected = i == Self.hit
+                nav.add(r)
+            }
+        }
+    }
+
+    private func open(_ e: SettingsIndex.Entry) {
+        Self.query = ""
+        Self.hit = 0
+        search.stringValue = ""
+        Self.flash = e.title
+        scrolled = nil
+        if e.anchor.route == route { reload() } else { go(e.anchor.route) }
+    }
+
+    @objc func focusSearch(_ sender: Any?) {
+        view.window?.makeFirstResponder(search)
+    }
+
+    // Scrolls to the section, and flashes the row with the title.
+    private func reveal(_ anchor: String, flash: String?) {
+        guard let doc = scroll.documentView, let section = doc.find(NSUserInterfaceItemIdentifier("anchor-" + anchor)) else { return }
+        doc.layoutSubtreeIfNeeded()
+        let target = flash.flatMap { t in section.findBox { $0.accessibilityLabel() == t } }
+        let top = section.convert(section.bounds, to: doc).minY
+        var y = top - 8
+        if let target {
+            let r = target.convert(target.bounds, to: doc)
+            if r.maxY > y + scroll.contentView.bounds.height { y = r.minY - 80 }
+        }
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, min(y, doc.frame.height - scroll.contentView.bounds.height))))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        (target ?? (flash != nil ? section.findBox { $0 is ListCard } : nil))?.flash()
+    }
+
+    // A titled card. A route anchor and the search scroll to it.
+    func section(_ anchor: SettingsAnchor, _ rows: [NSView]) -> NSView {
         let c = ListCard()
         rows.forEach { c.add($0) }
-        let v = NSStackView(v: [SectionTitle(title)], spacing: 6)
+        let v = NSStackView(v: [SectionTitle(anchor.title)], spacing: 6)
         v.addFull(c)
-        if let anchor { v.identifier = NSUserInterfaceItemIdentifier("anchor-\(anchor)") }
+        v.identifier = anchor.id
         return v
     }
 
@@ -139,7 +216,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let body = NSStackView(v: [], spacing: 14)
         body.addFull(rules)
         body.addFull(test)
-        b.addFull(section("Link an item to code when", anchor: "linking", [Padded(body)]))
+        b.addFull(section(.linking, [Padded(body)]))
     }
 
     func controlTextDidChange(_ n: Notification) {
@@ -151,7 +228,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     private func writeBack(_ b: NSStackView) {
         let on = AGENTS.writeBack.enabled
-        b.addFull(section("Write back to Plane", anchor: "write-back", [
+        b.addFull(section(.writeback, [
             SwitchRow("Write back", note: "Off keeps Plane read only. OverSire never edits text that people wrote.", on: on) { AGENTS.writeBack.enabled = $0 },
             Padded(ChipGroup([
                 .init("Links", on: AGENTS.writeBack.links) { AGENTS.writeBack.links = $0 },
@@ -213,6 +290,18 @@ final class ClosureTarget: NSObject {
 }
 
 private extension NSView {
+    func find(_ id: NSUserInterfaceItemIdentifier) -> NSView? {
+        if identifier == id { return self }
+        for s in subviews { if let v = s.find(id) { return v } }
+        return nil
+    }
+
+    func findBox(_ match: (Box) -> Bool) -> Box? {
+        if let b = self as? Box, match(b) { return b }
+        for s in subviews { if let v = s.findBox(match) { return v } }
+        return nil
+    }
+
     func findField(_ id: String) -> NSTextField? {
         if let f = self as? NSTextField, f.identifier?.rawValue == id { return f }
         for s in subviews { if let f = s.findField(id) { return f } }

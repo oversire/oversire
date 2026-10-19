@@ -328,6 +328,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             mi("Copy", #selector(NSText.copy(_:)), "c"),
             mi("Paste", #selector(NSText.paste(_:)), "v"),
             mi("Select All", #selector(NSText.selectAll(_:)), "a"),
+            .separator(),
+            mi("Find in Settings", #selector(SettingsPage.focusSearch(_:)), "f"),
         ])
         sub("View", [
             mi("Toggle Sidebar", #selector(AppWindow.toggleSidebarNow(_:)), "s", [.command, .control]),
