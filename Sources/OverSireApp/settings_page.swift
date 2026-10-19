@@ -42,6 +42,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     private var page: Route.SettingsPage { if case .settings(let p, _, _) = route { return p }; return .general }
     private var tab: Route.SettingsTab { if case .settings(_, let t?, _) = route { return t }; return .projects }
+    private var anchor: String? { if case .settings(_, _, let a) = route { return a }; return nil }
     var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
 
     override var isEditing: Bool { super.isEditing || promptDirty }
@@ -66,7 +67,11 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             body.addArrangedSubview(strip)
             switch tab {
             case .projects: embed(body, vc: "projects", note: "Projects to track, notifications, quick capture and the Orca workspace of each project.")
-            case .repos: embed(body, vc: "repos", note: "The GitHub repos and organizations that OverSire polls.")
+            case .repos:
+                let filters: [String: RepoListModel.Filter] = ["tracked": .tracked, "problems": .problems]
+                body.addFull(RepoListView(catalog: data.repoCatalog, setup: data.cloudSetup, filter: anchor.flatMap { filters[$0] } ?? .all) { [weak self] f in
+                    self?.go(.settings(.projects, tab: .repos, anchor: filters.first { $0.value == f }?.key))
+                })
             case .linking: linking(body); writeBack(body)
             }
         case .agents: runtime(body); queue(body); planner(body)

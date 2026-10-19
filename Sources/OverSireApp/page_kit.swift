@@ -1113,6 +1113,13 @@ final class StickyListCard: Box {
         groups.append((head, pinned, top))
     }
 
+    // Removes the rows and the groups, and keeps the header.
+    func clear() {
+        body.clear()
+        groups.forEach { $0.pinned.removeFromSuperview() }
+        groups = []
+    }
+
     // Shows the pinned header of the group at the top. The next header pushes it up.
     private func pin() {
         guard let doc = scroll.documentView else { return }

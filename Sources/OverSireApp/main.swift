@@ -51,6 +51,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var appearanceObs: NSKeyValueObservation?
     let cloudSetup = CloudSetup()
     let catalog = RepoCatalog(path: REPO_CACHE_PATH)
+    var repoCatalog: RepoCatalog { catalog }
     lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
     lazy var projectNotifier: ProjectNotifier = {
         ProjectNotifier(post: { [weak self] title, subtitle, body, id in
