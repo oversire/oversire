@@ -27,7 +27,7 @@ extension SettingsPage {
 
     private func newSessions(_ b: NSStackView) {
         let r = PROJECTS_CFG.runtime
-        let agents = AgentCommandsCard.known + (AgentCommandsCard.known.contains(r.agent) ? [] : [r.agent])
+        let agents = r.agents
         let agent = PopUp(agents, selected: agents.firstIndex(of: r.agent) ?? 0, label: "Default agent") { i in
             PROJECTS_CFG.runtime.agent = agents[i]
             saveConfig()

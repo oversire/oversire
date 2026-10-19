@@ -482,6 +482,7 @@ struct SnapConfig: Codable, Equatable {
 struct RuntimeConfig: Codable, Equatable {
     static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
     static let intakeKey = "intake"
+    static let knownAgents = ["claude", "codex", "opencode"]
 
     var agent = "claude"
     var prompt = RuntimeConfig.defaultPrompt
@@ -506,10 +507,18 @@ struct RuntimeConfig: Codable, Equatable {
         key == Self.intakeKey ? .intakeDefault : .defaultFor(AgentName(rawValue: key))
     }
 
-    // Saves a template. A template at its default removes the entry.
+    // Saves a template. A template at its default removes the entry, except for an added agent: its entry is the agent.
     mutating func setCommand(_ key: String, _ template: String) {
         let t = template.trimmingCharacters(in: .whitespacesAndNewlines)
-        commands[key] = t == defaultCommand(key).template ? nil : t
+        let added = !Self.knownAgents.contains(key) && key != Self.intakeKey
+        commands[key] = t == defaultCommand(key).template && !added ? nil : t
+    }
+
+    // The known agents, then the added agents and the default agent.
+    var agents: [String] {
+        var out = Self.knownAgents
+        for k in (Array(commands.keys) + [agent]).sorted() where k != Self.intakeKey && !out.contains(k) { out.append(k) }
+        return out
     }
 
     // A hand-edited bad template falls back to the default.

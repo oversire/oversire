@@ -559,7 +559,7 @@ final class ProjectSettingsPage: Page {
     private func sessions(_ body: NSStackView) {
         let l = local
         let c = card("Agent sessions", local: true)
-        let agents = AgentCommandsCard.known
+        let agents = PROJECTS_CFG.runtime.agents + (l.agent.map { PROJECTS_CFG.runtime.agents.contains($0) ? [] : [$0] } ?? [])
         let titles = ["App default (\(PROJECTS_CFG.runtime.agent))"] + agents
         c.add(field("Agent", PopUp(titles, selected: l.agent.flatMap { agents.firstIndex(of: $0) }.map { $0 + 1 } ?? 0, label: "Agent") { [weak self] i in
             self?.editLocal { $0.agent = i == 0 ? nil : agents[i - 1] }

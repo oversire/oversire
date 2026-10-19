@@ -430,6 +430,9 @@ func runSelfTest() {
         d.runtime.setCommand("claude", " claude -n {name} ")
         d.runtime.setCommand("intake", "claude -n {name} --permission-mode plan --model opus")
         check(d.runtime.commands["claude"] == nil && d.runtime.commands["intake"] != nil, "a default row is not saved")
+        d.runtime.setCommand("gemini-work", "gemini-work")
+        check(d.runtime.commands["gemini-work"] == "gemini-work", "an added agent at its default is saved")
+        check(d.runtime.agents == ["claude", "codex", "opencode", "gemini-work"], "agents list the added agent once")
         if let back = try? JSONDecoder().decode(ProjectsConfig.self, from: JSONEncoder().encode(d)) {
             check(back.runtime == d.runtime, "runtime config round trip")
         } else { check(false, "runtime config round trip") }

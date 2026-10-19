@@ -4,7 +4,7 @@ import OverSireCore
 // Settings › Agents and queue › Agent commands: one start command for each agent and one for the intake agent.
 // Each runtime that starts the agent in a terminal uses them. A change saves at once. A bad template saves nothing.
 final class AgentCommandsCard: NSStackView {
-    static let known = ["claude", "codex", "opencode"]
+    static let known = RuntimeConfig.knownAgents
     // Flag toggles per row.
     static let flags: [String: [String]] = [
         "claude": ["--dangerously-skip-permissions", "--permission-mode acceptEdits", "--model opus", "--continue"],
@@ -13,8 +13,6 @@ final class AgentCommandsCard: NSStackView {
     ]
     /// Unsaved text of a row whose template is bad. The page keeps it until Settings shows another page.
     static var drafts: [String: String] = [:]
-    /// Agents that the user added in this run of the app. A row at its default is not saved.
-    static var added: [String] = []
     static var exampleIndex = 0
 
     struct Example { var key: String; var title: String }
@@ -33,7 +31,7 @@ final class AgentCommandsCard: NSStackView {
         spacing = 6
         translatesAutoresizingMaskIntoConstraints = false
         let resetAll = ActionButton("Reset all", style: .link) { [weak self] in self?.resetAll() }
-        resetAll.isEnabled = !PROJECTS_CFG.runtime.commands.isEmpty || !Self.drafts.isEmpty || !Self.added.isEmpty
+        resetAll.isEnabled = !PROJECTS_CFG.runtime.commands.isEmpty || !Self.drafts.isEmpty
         addFull(SectionTitle("Agent commands", action: resetAll))
         let card = Card(spacing: 12)
         addFull(card)
@@ -57,11 +55,7 @@ final class AgentCommandsCard: NSStackView {
         card.add(NSStackView(h: [NSTextField.text("Example item", size: 12, color: Palette.mut), pick, Spacer()], spacing: 8))
 
         let r = PROJECTS_CFG.runtime
-        let extra = (Array(r.commands.keys) + Self.added + [r.agent]).filter { !Self.known.contains($0) && $0 != RuntimeConfig.intakeKey }
-        var keys = Self.known
-        for k in extra.sorted() where !keys.contains(k) { keys.append(k) }
-        keys.append(RuntimeConfig.intakeKey)
-        for k in keys {
+        for k in r.agents + [RuntimeConfig.intakeKey] {
             let row = CommandRow(key: k, removable: !Self.known.contains(k) && k != r.agent && k != RuntimeConfig.intakeKey, card: self)
             rows.append(row)
             card.add(Self.line())
@@ -120,14 +114,16 @@ final class AgentCommandsCard: NSStackView {
             return
         }
         guard !rows.contains(where: { $0.key == n }) else { addError.stringValue = "✕ \(n) has a command already."; return }
-        Self.added.append(n)
+        PROJECTS_CFG.runtime.setCommand(n, PROJECTS_CFG.runtime.defaultCommand(n).template)
+        saveConfig()
+        // The window does not reload a page while a field is in focus.
+        window?.makeFirstResponder(nil)
         Self.changed()
     }
 
     private func resetAll() {
         PROJECTS_CFG.runtime.commands = [:]
         Self.drafts = [:]
-        Self.added = []
         saveConfig()
         Self.changed()
     }
@@ -135,7 +131,6 @@ final class AgentCommandsCard: NSStackView {
     func remove(_ key: String) {
         PROJECTS_CFG.runtime.commands[key] = nil
         Self.drafts[key] = nil
-        Self.added.removeAll { $0 == key }
         saveConfig()
         Self.changed()
     }
@@ -230,7 +225,7 @@ final class CommandRow: NSStackView, NSTextFieldDelegate {
 
     func refresh() {
         let c = LaunchCommand(text)
-        let custom = AgentCommandsCard.drafts[key] != nil || PROJECTS_CFG.runtime.commands[key] != nil
+        let custom = AgentCommandsCard.drafts[key] != nil || PROJECTS_CFG.runtime.commands[key].map { $0 != defaultTemplate } == true
         tags.clear()
         tags.addArrangedSubview(Chiplet(custom ? "● custom" : "default", color: custom ? Palette.acc : Palette.dim))
         if c.skipsPermissions { tags.addArrangedSubview(Chiplet("⚠ Skips permissions", color: Palette.bad)) }
