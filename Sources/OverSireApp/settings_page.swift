@@ -59,7 +59,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         if page != .agents { AgentCommandsCard.drafts = [:] }
         switch page {
         case .general: general(body)
-        case .accounts: providers(body); live(body)
+        case .accounts: accounts(body)
         case .projects:
             let strip = TabStrip(Route.SettingsTab.allCases.map(\.title), selected: Route.SettingsTab.allCases.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in self?.go(.settings(.projects, tab: Route.SettingsTab.allCases[i])) }
@@ -210,30 +210,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         }
         if rows.isEmpty { rows.append(EmptyNote("No tracked Plane projects.")) }
         b.addFull(card("Orca workspace of each project", rows))
-    }
-
-    private func live(_ b: NSStackView) {
-        let normal = MenuChip("\(Int(POLL_NORMAL)) s", symbol: "clock") {
-            [15, 30, 60, 120, 300].map { s in MenuAction("\(s) s") { [weak self] in POLL_NORMAL = TimeInterval(s); self?.pollChanged() } }
-        }
-        let active = MenuChip("\(Int(POLL_ACTIVE)) s", symbol: "clock") {
-            [5, 10, 20, 30].map { s in MenuAction("\(s) s") { [weak self] in POLL_ACTIVE = TimeInterval(s); self?.pollChanged() } }
-        }
-        b.addFull(card("Polling", [
-            FieldRow("Poll GitHub each", note: "When the cloud is off, and for repos without a webhook.", normal),
-            FieldRow("While you look at a run in progress", note: "The popover is open and a run is in progress.", active),
-        ]))
-        embed(b, vc: "live", note: "OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds, not at the next poll. With the cloud live, a poll only checks the state at the reconcile time. Get a pairing code in the OverSire Cloud console, then connect here with the cloud URL and the code.")
-        let records = cloudAIRecords
-        b.addFull(CloudAICard(records))
-        if let records, UIShots.cloud == nil { RunnerSetup.shared.offerOnce(records: records) }
-    }
-
-    private func pollChanged() {
-        saveConfig()
-        app?.relay.update()
-        app?.updatePolling()
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
     }
 
     private func queue(_ b: NSStackView) {

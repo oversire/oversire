@@ -67,91 +67,120 @@ extension SettingsPage {
     ]
 
     func providers(_ b: NSStackView) {
-        b.addFull(NSTextField.text("The accounts that OverSire reads, by layer. Each account polls on its own. The cloud adds live updates on top.",
-                                   size: 12, color: Palette.dim, lines: 0))
-        for (layer, title, why) in Self.layerInfo { b.addFull(layerCard(layer, title: title, why: why)) }
-        let have = ENV.capabilities()
-        let off = Self.features.filter { !have.contains($0.1) }
-        let c = Card(title: "Features off", trailing: [NSTextField.text("No account has the capability", size: 11.5, color: Palette.dim)])
-        if off.isEmpty { c.add(NSTextField.text("All features are on.", size: 12.5, color: Palette.dim)) }
-        for (name, cap) in off {
-            c.add(NSStackView(h: [NSTextField.text(name, size: 12.5), Spacer(), Chiplet(cap.rawValue, mono: true)], spacing: 8))
+        var cards: [NSView] = []
+        for (layer, _, _) in Self.layerInfo {
+            for d in ENV.registry.descriptors(layer) {
+                let list = ENV.accounts(layer).filter { $0.account.provider == d.id }
+                if !list.isEmpty { cards.append(serviceCard(d, list)) }
+            }
         }
-        b.addFull(c)
+        cards.append(ServiceCard(icon: ServiceCard.icon("+", color: nil), name: "Add a service", detail: "Tracker, code host, CI or agent runtime",
+                                 status: nil, actions: [], dashed: true) { [weak self] in self?.openForm(.tracker) })
+        let v = NSStackView(v: [SectionTitle("Services")], spacing: 6)
+        v.addFull(CardGrid(cards, minWidth: 240))
+        v.identifier = NSUserInterfaceItemIdentifier("anchor-services")
+        if form.layer != nil { v.addFull(formCard()) }
+        v.addFull(ghLogin())
+        let off = Self.features.filter { !ENV.capabilities().contains($0.1) }.map(\.0)
+        if !off.isEmpty {
+            v.addFull(NSTextField.text("Features off, because no account has them: " + off.joined(separator: ", ") + ".", size: 11.5, color: Palette.dim, lines: 0))
+        }
+        b.addFull(v)
     }
 
-    private func layerCard(_ layer: Layer, title: String, why: String) -> NSView {
-        let open = form.layer == layer
-        let add = ActionButton(open ? "Close" : "Add account") { [weak self] in
-            guard let self else { return }
-            if open { self.form.close() } else {
-                self.form.close()
-                self.form.layer = layer
-                self.form.provider = ENV.registry.descriptors(layer).first?.id
-            }
-            self.reload()
+    private func openForm(_ layer: Layer, provider: ProviderID? = nil) {
+        form.close()
+        form.layer = layer
+        form.provider = provider ?? ENV.registry.descriptors(layer).first?.id
+        reload()
+    }
+
+    private func formCard() -> NSView {
+        let editing = form.editing != nil
+        let c = Card(title: editing ? "Edit the account" : "Add a service",
+                     trailing: [ActionButton("Close") { [weak self] in self?.form.close(); self?.reload() }])
+        guard let layer = form.layer else { return c }
+        if !editing {
+            let layers = Self.layerInfo.map(\.0)
+            c.add(FieldRow("Layer", note: Self.layerInfo.first { $0.0 == layer }?.2,
+                           Segmented(Self.layerInfo.map(\.1), selected: layers.firstIndex(of: layer) ?? 0, label: "Layer") { [weak self] i in
+                self?.openForm(layers[i])
+            }))
         }
-        let c = Card(title: title, trailing: [NSTextField.text(why, size: 11.5, color: Palette.dim), add])
-        let list = ENV.accounts(layer)
-        if list.isEmpty { c.add(NSTextField.text("No \(title.lowercased()) account. OverSire hides the features of this layer.", size: 12.5, color: Palette.dim)) }
-        for a in list { c.add(accountRow(a)) }
-        if layer == .codeHost || layer == .ci, !list.isEmpty {
-            c.add(NSTextField.text("GitHub and GitHub Actions follow the repos that you pick on the Repos page.", size: 11.5, color: Palette.dim, lines: 0))
-        }
-        if open { formViews(layer).forEach(c.add) }
+        formViews(layer).forEach(c.add)
         return c
     }
 
-    private func accountRow(_ a: AccountConfig) -> NSView {
-        guard let d = ENV.descriptor(a.account) else { return NSTextField.text(a.account.provider.rawValue, size: 12.5) }
-        var parts: [String] = []
-        for f in d.fields where f.kind != .secret {
-            guard let v = a.values[f.key], !v.isEmpty, v != a.account.id, v != f.help else { continue }
-            let n = v.split(separator: ",").count
-            parts.append(n > 1 ? "\(n) \(f.label.lowercased())" : v.hasPrefix("/") ? (v as NSString).abbreviatingWithTildeInPath : v)
-        }
-        let hasSecret = a.secretKeys.contains { !(ENV.secrets.secret($0) ?? "").isEmpty }
-        if hasSecret { parts.append("token in Keychain") }
-        else if case .cli(let name)? = d.auth.first(where: { if case .cli = $0 { return true }; return false }) { parts.append("\(name) login") }
-        else if d.fields.contains(where: { $0.kind == .secret && $0.required }) { parts.append("no token") }
+    // gh owns the GitHub login. OverSire keeps no GitHub token.
+    private func ghLogin() -> NSView {
+        let cat = app?.catalog
+        let user = cat?.user
+        let text = user.map { "Signed in as \($0)" } ?? (cat?.authChecked == true ? "Not signed in. GitHub pages stay empty." : "Checks the gh login…")
+        let act = user == nil ? ActionButton("Sign in…") { runInTerminal("gh auth login --web -p https") }
+                              : ActionButton("Sign out…") { runInTerminal("gh auth logout") }
+        let c = ListCard()
+        c.add(Row([Glyph(user == nil ? .warning : .ok, size: 14), TwoLine("GitHub CLI login", text, weight: .medium), Spacer(), act], height: 52,
+                  label: "GitHub CLI login"))
+        return c
+    }
 
-        let status: NSView
-        if form.probing.contains(a.account) { status = Pill(.running, text: "Testing") }
-        else {
-            switch form.probes[a.account] {
-            case .success(let who)?: status = Pill(.ok, text: "Connected as \(who)")
-            case .failure(let e)?: status = Pill(.bad, text: e.message)
-            case nil: status = Pill(.queued, text: ENV.error(a.account) ?? "Not tested")
+    // One card for each provider. Edit and Remove ask for the account when the provider has more than one.
+    private func serviceCard(_ d: ProviderDescriptor, _ list: [AccountConfig]) -> NSView {
+        var detail = [Self.layerInfo.first { $0.0 == d.layer }?.1 ?? "", list.map(\.account.id).joined(separator: ", ")]
+        if list.count == 1, let a = list.first {
+            for f in d.fields where f.kind != .secret {
+                guard let v = a.values[f.key], !v.isEmpty, v != a.account.id, v != f.help else { continue }
+                let n = v.split(separator: ",").count
+                detail.append(n > 1 ? "\(n) \(f.label.lowercased())" : v.hasPrefix("/") ? (v as NSString).abbreviatingWithTildeInPath : v)
             }
         }
-        let title = NSStackView(h: [NSTextField.text(d.displayName, size: 13, weight: .semibold),
-                                    NSTextField.text("· " + a.account.id, size: 13, color: Palette.mut)], spacing: 4)
-        let text = NSStackView(v: [title, NSTextField.text(parts.joined(separator: " · "), size: 11.5, color: Palette.dim)], spacing: 2)
-        let buttons: [NSView] = [
-            ActionButton("Test") { [weak self] in self?.probe(a.account) },
-            ActionButton("Edit") { [weak self] in
-                guard let self else { return }
-                self.form.close()
-                self.form.layer = d.layer
-                self.form.provider = d.id
-                self.form.editing = a.account
-                self.form.values = a.values
-                self.reload()
-            },
-            ActionButton("Remove") { [weak self] in self?.removeAccount(a, d) },
-        ]
-        let top = NSStackView(h: [Glyph(d.symbol, size: 15), text, Spacer(), status] + buttons, spacing: 8)
-        let caps = (ENV.provider(a.account)?.capabilities ?? []).map(\.rawValue).sorted()
-        let row = NSStackView(v: [top], spacing: 6)
-        top.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
-        if !caps.isEmpty {
-            let wrap = Wrap(caps.map { Chiplet($0, mono: true) })
-            let line = NSStackView(h: [Spacer(23), wrap], spacing: 0, align: .top)
-            row.addArrangedSubview(line)
-            line.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
+        if case .cli(let name)? = d.auth.first(where: { if case .cli = $0 { return true }; return false }) { detail.append("\(name) login") }
+        var errors: [String] = [], who: [String] = []
+        for a in list {
+            switch form.probes[a.account] {
+            case .success(let n)?: who.append("\(a.account.id): \(n)")
+            case .failure(let e)?: errors.append("\(a.account.id): \(e.message)")
+            case nil:
+                if let e = ENV.error(a.account) { errors.append("\(a.account.id): \(e)") }
+                else if !form.probing.contains(a.account) { probe(a.account) }
+            }
         }
-        if form.probes[a.account] == nil, !form.probing.contains(a.account), ENV.error(a.account) == nil { probe(a.account) }
-        return row
+        let status: Pill
+        if list.contains(where: { form.probing.contains($0.account) }) { status = Pill(.running, text: "Testing") }
+        else if !errors.isEmpty { status = Pill(.bad, text: list.count == 1 ? "Failed" : "\(errors.count) failed") }
+        else if who.count == list.count { status = Pill(.ok, text: "OK") }
+        else { status = Pill(.queued, text: "Not tested") }
+        status.toolTip = (errors + who.map { "Connected as \($0)" }).joined(separator: "\n")
+        if !errors.isEmpty { detail = [errors.joined(separator: " · ")] }
+
+        let edit: (AccountConfig) -> Void = { [weak self] a in
+            guard let self else { return }
+            self.form.close()
+            self.form.layer = d.layer
+            self.form.provider = d.id
+            self.form.editing = a.account
+            self.form.values = a.values
+            self.reload()
+        }
+        let remove: (AccountConfig) -> Void = { [weak self] a in self?.removeAccount(a, d) }
+        func pick(_ title: String, _ run: @escaping (AccountConfig) -> Void) -> NSView {
+            if list.count == 1 { return ActionButton(title) { run(list[0]) } }
+            return MenuChip(title + "…") { list.map { a in MenuAction(a.account.id) { run(a) } } }
+        }
+        let actions: [NSView] = [
+            ActionButton("Test") { [weak self] in list.forEach { self?.probe($0.account) } },
+            pick("Edit", edit), pick("Remove", remove),
+            ActionButton("Add account", style: .link) { [weak self] in
+                self?.openForm(d.layer, provider: d.id)
+            },
+        ]
+        let icon = Box(fill: Palette.raise, border: nil, radius: 7)
+        let g = Glyph(d.symbol, size: 15)
+        g.translatesAutoresizingMaskIntoConstraints = false
+        icon.addSubview(g)
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 30), icon.heightAnchor.constraint(equalToConstant: 30),
+                                     g.centerXAnchor.constraint(equalTo: icon.centerXAnchor), g.centerYAnchor.constraint(equalTo: icon.centerYAnchor)])
+        return ServiceCard(icon: icon, name: d.displayName, detail: detail.filter { !$0.isEmpty }.joined(separator: " · "), status: status, actions: actions)
     }
 
     private func probe(_ id: AccountID) {

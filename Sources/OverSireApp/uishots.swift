@@ -17,6 +17,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: writes)
     lazy var updater = Updater()
+    lazy var cloudSetup = UIShots.sampleSetup()
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
@@ -38,7 +39,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         case "projects":
             return ProjectSettingsVC(catalog: ProjectCatalog(trackers: ENV, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, cfg: PROJECTS_CFG)
         case "ai": return AISettingsVC()
-        case "live": return CloudSettingsVC(setup: CloudSetup(), client: relay)
+        case "live": return CloudSettingsVC(setup: cloudSetup, client: relay)
         default: return nil
         }
     }
@@ -93,6 +94,30 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let commands = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_COMMANDS"] == "1"
     // OVERSIRE_UISHOTS_PLANNER=1: a vision, relations, areas, a queue lane and a plan change in the OVERSIRE project.
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
+    // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
+    static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
+
+    static func sampleSetup() -> CloudSetup {
+        let s = CloudSetup()
+        s.trackedWorkspaces = { ["ocral"] }
+        guard let live else { return s }
+        let now = Date().timeIntervalSince1970 * 1000
+        let json = """
+        {"retentionHours": 168, "head": 9120, "events": 4210, "lastWebhookAt": \(now - 12_000), "rowsWrittenToday": \(live == "quota" ? 99_000 : 1_840),
+         "devices": [{"id": "d1", "name": "Studio", "lag": 0, "connected": true}, {"id": "d2", "name": "MacBook Air", "lag": 3, "lastSeen": \(now - 7_200_000), "connected": false}],
+         "hooks": [], "planeHooks": []}
+        """
+        var st = SetupState()
+        st.joined = true
+        st.version = CLOUD_MIN_VERSION
+        st.health = try? JSONDecoder().decode(RelayHealth.self, from: Data(json.utf8))
+        s.seed(st)
+        for (i, r) in REPOS.enumerated() {
+            s.hooks.setStatus(r, i == 1 ? .error("404 from GitHub") : i == 2 || i == 3 ? .unknown : .live("200 · 2m ago"))
+        }
+        s.hooks.setStatus(HookManager.planeKey("ocral"), .live("200 · 1m ago"))
+        return s
+    }
 
     static var heldOrders: [WorkOrder] {
         guard cloud == true, planner else { return [] }

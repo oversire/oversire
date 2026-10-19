@@ -282,12 +282,35 @@ enum HookStatus {
     }
 }
 
+// The webhook health of the tracked repos. Repair installs the missing and failed hooks. A polling-only
+// repo is missing, but Repair cannot fix it: it needs an admin.
+struct HookHealth {
+    private(set) var live: [String] = [], missing: [String] = [], failed: [String] = [], pollingOnly: [String] = []
+
+    init(repos: [String], statuses: [String: HookStatus]) {
+        for r in repos {
+            switch statuses[r] {
+            case .live?, .waiting?: live.append(r)
+            case .error?: failed.append(r)
+            case .pollingOnly?: pollingOnly.append(r)
+            default: missing.append(r)
+            }
+        }
+    }
+
+    var repair: [String] { missing + failed }
+    var counts: HealthCounts {
+        HealthCounts([.init(count: live.count, kind: .ok, word: "live"), .init(count: missing.count + pollingOnly.count, kind: .warning, word: "missing"),
+                      .init(count: failed.count, kind: .failure, word: "failed")])
+    }
+}
+
 final class HookManager {
     private let lock = NSLock()
     private var _statuses: [String: HookStatus] = [:]
     var statuses: [String: HookStatus] { lock.lock(); defer { lock.unlock() }; return _statuses }
 
-    private func setStatus(_ repo: String, _ s: HookStatus) { lock.lock(); _statuses[repo] = s; lock.unlock() }
+    func setStatus(_ repo: String, _ s: HookStatus) { lock.lock(); _statuses[repo] = s; lock.unlock() }
 
     struct GHHook: Decodable { let id: Int; let url: String? }
     struct Delivery: Decodable { let status_code: Int; let delivered_at: String }
@@ -524,6 +547,9 @@ final class CloudSetup {
         }
         return s
     }
+
+    // For --uishots: a state without the cloud.
+    func seed(_ s: SetupState) { state = s }
 
     func refreshState(then: (() -> Void)? = nil) {
         work.async {
