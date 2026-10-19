@@ -11,27 +11,27 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     var lastUpdate = Date()
     var firstLoad = true
     let projectStore: ProjectStore
-    let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: NSTemporaryDirectory() + "oversire-uishots/store")))
+    let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: UIShots.tmp + "/store")))
     lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: writes)
     lazy var updater = Updater()
     lazy var cloudSetup = UIShots.sampleSetup()
-    lazy var repoCatalog = RepoCatalog(path: REPO_CACHE_PATH)
-    lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
+    lazy var repoCatalog = RepoCatalog(path: UIShots.tmp + "/repo-cache.json")
+    lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: UIShots.tmp + "/plane-cache.json")
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
-    lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json",
+    lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json",
                                                                                        store: projectStore, trackers: ENV), memory: memory)
-    lazy var sessions = SessionNotes(path: NSTemporaryDirectory() + "oversire-uishots/sessions.json", agents: agentIndex, store: projectStore,
-                                     writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json", store: projectStore, trackers: ENV))
+    lazy var sessions = SessionNotes(path: UIShots.tmp + "/sessions.json", agents: agentIndex, store: projectStore,
+                                     writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
-    lazy var ciAssist = CIAssist(path: NSTemporaryDirectory() + "oversire-uishots/ci.json")
-    lazy var itemSummaries = ItemSummaries(path: NSTemporaryDirectory() + "oversire-uishots/summaries.json",
+    lazy var ciAssist = CIAssist(path: UIShots.tmp + "/ci.json")
+    lazy var itemSummaries = ItemSummaries(path: UIShots.tmp + "/summaries.json",
                                            ai: { UIShots.aiKey.map { AIClient(cfg: AI_CFG, key: $0) } })
-    lazy var aiChecks = AgentJudge(path: NSTemporaryDirectory() + "oversire-uishots/checks.json", agents: agentIndex, queue: queue)
+    lazy var aiChecks = AgentJudge(path: UIShots.tmp + "/checks.json", agents: agentIndex, queue: queue)
     let relay = LiveSync(secrets: SecretStore(service: "com.oversire.app.cloud"), cursors: CursorStore(url: nil))
     private let dir: String
     struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: ChangeRequest }
@@ -45,10 +45,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     init(dir: String, paths: [String]) {
         self.dir = dir
         self.paths = paths
-        let tmp = NSTemporaryDirectory() + "oversire-uishots"
+        let tmp = UIShots.tmp
         try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        // Copies of the real files. A run never writes to ~/.config/oversire.
         for (src, name) in [(PROJECT_STATE_PATH, "state.json"), (PROJECT_ACTIVITY_PATH, "activity.jsonl"),
-                            (QUEUE_PATH, "queue.json"), (CHECKS_PATH, "checks.json")] {
+                            (QUEUE_PATH, "queue.json"), (CHECKS_PATH, "checks.json"),
+                            (REPO_CACHE_PATH, "repo-cache.json"), (PROJECT_CACHE_PATH, "plane-cache.json")] {
             try? FileManager.default.removeItem(atPath: tmp + "/" + name)
             try? FileManager.default.copyItem(atPath: src, toPath: tmp + "/" + name)
         }
@@ -78,6 +80,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
 
     func rerun(repo: String, runs: [Run], failedOnly: Bool) { log.info("uishots: re-run skipped") }
     func setIgnored(_ runs: [Run], ignored: Bool) { IGNORED.set(runs, ignored: ignored) }
+
+    static let tmp = NSTemporaryDirectory() + "oversire-uishots"
 
     // OVERSIRE_UISHOTS_LOADING=1: no fetch ever ends, so each page shows its loading state.
     static let loading = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOADING"] == "1"
@@ -356,7 +360,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     print("UISHOTS unlinked \(self.workstreams.unlinked.count) checkouts \(self.workstreams.checkouts.count)")
                     // Live write-back test for the items named in OVERSIRE_UISHOTS_WRITEBACK, for example "FRITZ-28".
                     if let keys = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_WRITEBACK"]?.split(separator: ",").map(String.init) {
-                        let wb = PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb-live.json", store: self.projectStore, trackers: ENV)
+                        let wb = PlaneWriteBack(path: UIShots.tmp + "/wb-live.json", store: self.projectStore, trackers: ENV)
                         wb.onError = { print("UISHOTS writeback error \($0)") }
                         wb.sync(keys.compactMap { self.workstreams.streams[$0] })
                     }
@@ -373,7 +377,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         if let fx = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FIXTURES"], FileManager.default.fileExists(atPath: fx + "/ci.json") {
             AI_CFG.digest = true
         }
-        REPOS = RepoCatalog(path: REPO_CACHE_PATH).resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
+        REPOS = repoCatalog.resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
         assignRepoColors(REPOS)
         projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: [])
         if let key = UIShots.aiKey {
@@ -579,7 +583,7 @@ extension UIShots {
         guard let view = w.window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: rep)
         guard let img = rep.cgImage else { return nil }
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory() + "oversire-uishots/captures-\(UUID().uuidString)")
+        let dir = URL(fileURLWithPath: UIShots.tmp + "/captures-\(UUID().uuidString)")
         let store = SnapStore(dir: dir)
         let W = Double(img.width), H = Double(img.height)
         let notes = [("The runs page is out of date after a re-run.", SnapRect(x: 0, y: 0, w: W * 0.5, h: H * 0.5), 2),

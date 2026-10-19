@@ -209,7 +209,8 @@ final class AgentJudge {
 
     private func save() {
         checks = Array(checks.prefix(200))
-        if let d = try? JSONEncoder().encode(checks) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        do { try JSONEncoder().encode(checks).write(to: URL(fileURLWithPath: path), options: .atomic) }
+        catch { log.error("AI checks: save to \(self.path, privacy: .public) failed: \(error.localizedDescription, privacy: .public)") }
         NotificationCenter.default.post(name: AgentJudge.changed, object: self)
     }
 }
