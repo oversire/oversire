@@ -433,6 +433,10 @@ final class Banner: Box {
         let text = NSStackView(v: [NSTextField.text(title, size: 13, weight: .semibold, lines: 2)], spacing: 3)
         if let body { text.addArrangedSubview(NSTextField.text(body, size: 12, color: Palette.mut, lines: 4)) }
         text.setContentHuggingPriority(.init(1), for: .horizontal)
+        // Buttons do not push the title down to one letter on each line.
+        let least = text.widthAnchor.constraint(greaterThanOrEqualToConstant: 160)
+        least.priority = .init(800)
+        least.isActive = true
         let row = NSStackView(h: [Glyph(tone, size: 15), text] + actions, spacing: 10, align: .top)
         addSubview(row)
         NSLayoutConstraint.activate([

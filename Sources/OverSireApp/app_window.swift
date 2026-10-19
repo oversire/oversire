@@ -75,7 +75,9 @@ class Page: NSViewController {
     let data: AppData
     let router: Router
     private(set) var route: Route
-    let scroll = PageScroll()
+    private(set) lazy var scroll = PageScroll(maxWidth: pageWidth)
+    // The widest column of the page.
+    var pageWidth: CGFloat { 1100 }
     private let bar = PageBar()
     private var busyToken: BusyTracker.Token?
 

@@ -39,6 +39,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var sending = false
     private var pendingComment: String?
     private var relationObserver: Any?
+    private var narrow = false
+
+    override var pageWidth: CGFloat { 1240 }
 
     private var key: String { if case .item(let k, _) = route { return k }; return "" }
     private var tab: Route.ItemTab { if case .item(_, let t) = route { return t }; return .overview }
@@ -54,6 +57,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     deinit { relationObserver.map(NotificationCenter.default.removeObserver) }
+
+    // Below 760 pt the side rail moves under the header as a row of sections.
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let n = view.bounds.width < 760
+        guard n != narrow else { return }
+        narrow = n
+        DispatchQueue.main.async { [weak self] in self?.reload() }
+    }
 
     override func show(_ r: Route) {
         if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = [] }; tailAt = .distantPast }
@@ -84,6 +96,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
         let main = NSStackView(v: [], spacing: 14)
         main.addFull(head(snap: snap, item: item, stream: stream))
+        if narrow { main.addFull(rail(snap: snap, item: item, stream: stream)) }
         if let note { main.addFull(Banner(note.0, title: note.1)) }
         let prog = snap.progress(of: item.id)
         let tabs = Route.ItemTab.allCases
@@ -97,16 +110,19 @@ final class ItemPage: Page, NSTextFieldDelegate {
         case .subitems: subItems(main, snap: snap, item: item, progress: prog)
         case .activity: activity(main, item: item, stream: stream)
         }
+        if narrow { col.addFull(main); return }
         let side = NSStackView(v: [], spacing: 0)
-        side.addFull(properties(snap: snap, item: item, stream: stream))
+        side.addFull(rail(snap: snap, item: item, stream: stream))
         for s in [main, side] {
             let fill = NSView()
             fill.setContentHuggingPriority(.init(1), for: .vertical)
             s.addArrangedSubview(fill)
         }
+        main.setContentHuggingPriority(.init(1), for: .horizontal)
         let two = NSStackView(h: [main, side], spacing: 18, align: .top)
+        two.distribution = .fill
         col.addFull(two)
-        side.widthAnchor.constraint(equalToConstant: 270).isActive = true
+        side.widthAnchor.constraint(equalToConstant: 300).isActive = true
     }
 
     private func loadData(item: Item, stream: Workstream?) {
@@ -134,19 +150,27 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let keyLine = NSStackView(h: [NSTextField.text(item.key, size: 12, color: Palette.dim, mono: true), project, Spacer()], spacing: 8)
         var chips: [NSView] = [statusChip(snap: snap, item: item), priorityChip(item)]
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
+        if let saving { chips.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Saving \(saving)…", size: 12, color: Palette.dim)], spacing: 5)) }
+        let inQueue = data.queue.contains(key)
+        var actions: [NSView] = [ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
+            guard let self else { return }
+            if inQueue { self.go(.queue) } else { self.data.queue.add(item, snap: snap) }
+        }]
         if let a = stream?.agent {
-            chips.append(Pill(Tone(a.phase), text: a.label()))
+            actions.append(Pill(Tone(a.phase), text: a.label()))
         } else {
             let b = ActionButton("Start in Orca", symbol: "play.fill", style: .primary)
             b.onClick = { [weak self, weak b] in
                 guard let self, let b else { return }
                 self.data.agentIndex.start(item, snap: snap, anchor: b)
             }
-            chips.append(b)
+            actions.append(b)
         }
-        if let saving { chips.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Saving \(saving)…", size: 12, color: Palette.dim)], spacing: 5)) }
-        return NSStackView(v: [keyLine, NSTextField.text(item.title, size: 22, weight: .semibold, lines: 3),
-                               NSStackView(h: chips + [Spacer()], spacing: 6)], spacing: 7)
+        let v = NSStackView(v: [], spacing: 7)
+        v.addFull(keyLine)
+        v.addFull(NSTextField.text(item.title, size: 22, weight: .semibold, lines: 3))
+        v.addFull(NSStackView(h: [Wrap(chips), Spacer()] + actions, spacing: 6))
+        return v
     }
 
     private func statusChip(snap: ProjectSnapshot, item: Item) -> NSView {
@@ -186,40 +210,68 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
     }
 
-    private func properties(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> NSView {
-        let c = Card(padding: 14, spacing: 9)
-        func line(_ name: String, _ value: NSView) {
+    // One card: Properties, Code and Links. A column at the side, or a row of sections on a narrow page.
+    private func rail(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> NSView {
+        func section(_ title: String, _ rows: [NSView]) -> NSStackView {
+            let v = NSStackView(v: [], spacing: 7)
+            v.addFull(NSTextField.text(title.uppercased(), size: 11, weight: .semibold, color: Palette.dim))
+            rows.forEach { v.addFull($0) }
+            return v
+        }
+        func line(_ name: String, _ value: NSView) -> NSView {
             let n = NSTextField.text(name, size: 12, color: Palette.dim)
-            n.widthAnchor.constraint(equalToConstant: 76).isActive = true
+            n.widthAnchor.constraint(equalToConstant: 72).isActive = true
             value.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-            c.add(NSStackView(h: [n, value, Spacer()], spacing: 6, align: value is Chiplet ? .centerY : .firstBaseline))
+            return NSStackView(h: [n, value, Spacer()], spacing: 6, align: value is Chiplet ? .centerY : .firstBaseline)
         }
         func text(_ s: String, mono: Bool = false) -> NSView { NSTextField.text(s, size: 12.5, lines: 2, mono: mono) }
-        line("Status", text(snap.statusName(item.statusOptionId) ?? "None"))
-        line("Priority", text(item.fields["Priority"] ?? "None"))
-        line("Assignees", text(item.assignees.isEmpty ? "—" : item.assignees.joined(separator: ", ")))
-        line("Labels", text(item.labels.isEmpty ? "—" : item.labels.joined(separator: ", ")))
-        line("Project", Chiplet(snap.summary.title, color: Palette.acc) { [weak self] in self?.go(.project(snap.summary.identifier)) })
+        func link(_ title: String, _ symbol: String, _ action: @escaping () -> Void) -> NSView {
+            Row([Glyph(symbol, size: 13), NSTextField.text(title, size: 12.5), Spacer()], height: 28, inset: 4, label: title, onClick: action)
+        }
+
+        let props = section("Properties", [
+            line("Status", statusChip(snap: snap, item: item)), line("Priority", priorityChip(item)),
+            line("Assignees", text(item.assignees.isEmpty ? "—" : item.assignees.joined(separator: ", "))),
+            line("Labels", text(item.labels.isEmpty ? "—" : item.labels.joined(separator: ", "))),
+            line("Updated", text(relativeTime(item.activityAt))),
+        ])
         let co = stream?.checkouts.first { !$0.branch.isEmpty } ?? stream?.checkouts.first
-        line("Checkout", text(co.map { ($0.path as NSString).lastPathComponent } ?? "—", mono: true))
-        line("Branch", text(co?.branch.isEmpty == false ? co!.branch : "—", mono: true))
-        line("PR", text(stream?.prs.first.map { "#\($0.pr.number) \($0.pr.isDraft ? "draft" : $0.pr.state.lowercased())" } ?? "—"))
-        line("Updated", text(relativeTime(item.activityAt)))
-        let inQueue = data.queue.contains(key)
-        let buttons: [NSView] = [
-            ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
-                guard let self else { return }
-                if inQueue { self.go(.queue) } else { self.data.queue.add(item, snap: snap) }
-            },
-            ActionButton("Copy for agent", symbol: "doc.on.doc") { [weak self] in self?.data.projectStore.copyForAgent(item.id) },
-            ActionButton("Copy oversire link", symbol: "link") { [weak self] in
+        let pr = stream?.prs.first
+        var code: [NSView] = []
+        if co == nil && pr == nil {
+            code.append(NSTextField.text("No checkout, branch or PR yet.", size: 12.5, color: Palette.dim, lines: 2))
+        } else {
+            code.append(line("Checkout", text(co.map { ($0.path as NSString).lastPathComponent } ?? "—", mono: true)))
+            code.append(line("Branch", text(co?.branch.isEmpty == false ? co!.branch : "—", mono: true)))
+            code.append(line("PR", pr.map { p in
+                Chiplet("#\(p.pr.number) \(p.pr.isDraft ? "draft" : p.pr.state.lowercased())", symbol: "arrow.triangle.pull") {
+                    NSWorkspace.shared.open(URL(string: p.pr.url)!) } as NSView } ?? text("—")))
+        }
+        let links = section("Links", [
+            link("Copy for agent", "doc.on.doc") { [weak self] in self?.data.projectStore.copyForAgent(item.id) },
+            link("Copy OverSire link", "link") { [weak self] in
                 guard let self else { return }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(Route.item(self.key, .overview).url.absoluteString, forType: .string)
             },
-            ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: item.url)!) },
-        ]
-        for b in buttons { c.add(b) }
+            link("Open in Plane", "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: item.url)!) },
+        ])
+        let sections = [props, section("Code", code), links]
+        let c = Card(padding: 14, spacing: 12)
+        if narrow {
+            let row = NSStackView(h: sections, spacing: 18, align: .top)
+            row.distribution = .fillEqually
+            c.add(row)
+        } else {
+            for (i, v) in sections.enumerated() {
+                if i > 0 {
+                    let rule = Box(fill: Palette.line, border: nil, radius: 0)
+                    rule.heightAnchor.constraint(equalToConstant: 1).isActive = true
+                    c.add(rule)
+                }
+                c.add(v)
+            }
+        }
         return c
     }
 
@@ -229,14 +281,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let s = stream, s.agent != nil || !s.runs.isEmpty || !s.checkouts.isEmpty {
             main.addFull(workstream(s, snap: snap, item: item))
         } else {
-            let start = ActionButton("Start in Orca", symbol: "play.fill", style: .primary)
-            start.onClick = { [weak self, weak start] in
-                guard let self, let start else { return }
-                self.data.agentIndex.start(item, snap: snap, anchor: start)
-            }
-            main.addFull(Banner(.idle, title: "No session works on this item.",
-                                body: "Start it in Orca now, or add it to the queue of \(snap.summary.title).",
-                                actions: [start, ActionButton("Add to queue") { [weak self] in self?.data.queue.add(item, snap: snap) }]))
+            main.addFull(NSStackView(h: [Glyph("moon.zzz", color: Palette.dim, size: 13),
+                                         NSTextField.text("No session yet. Start it in Orca or add it to the queue of \(snap.summary.title).",
+                                                          size: 12.5, color: Palette.dim, lines: 2), Spacer()], spacing: 6))
         }
         if let card = suggestion(item) { main.addFull(card) }
         if let card = plannerCard(item) { main.addFull(card) }
@@ -355,7 +402,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
             if a.phase != .done && a.phase != .failed { left.addFull(replyRow()) }
         }
         let right = NSStackView(v: [], spacing: 8)
-        right.addFull(NSStackView(h: [NSTextField.text("CI on this work", size: 12.5, weight: .semibold),
+        let ciTitle = NSTextField.text("CI on this work", size: 12.5, weight: .semibold)
+        ciTitle.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        right.addFull(NSStackView(h: [ciTitle,
                                       NSTextField.text("matched by branch, commit or title", size: 11.5, color: Palette.dim), Spacer()], spacing: 6))
         let runs = ListCard()
         for r in s.runs.prefix(5) { runs.add(RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
