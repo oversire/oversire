@@ -107,32 +107,40 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     // MARK: Pages
 
     private func linking(_ b: NSStackView) {
-        b.addFull(card("Rules", [
-            SwitchRow("Orca card name", note: "The card is named after the item key, as FRITZ-28.", on: LINKING.card) { LINKING.card = $0 },
-            SwitchRow("Worktree folder", note: "A checkout in .wt/<key>/.", on: LINKING.folder) { LINKING.folder = $0 },
-            SwitchRow("Branch prefix", note: "A branch <key>/… or <key>-…, as fritz-28/desktop-app.", on: LINKING.prefix) { LINKING.prefix = $0 },
-            SwitchRow("Run branch", note: "The run branch is the branch of a linked checkout.", on: LINKING.branch) { LINKING.branch = $0 },
-            SwitchRow("Run commit", note: "The run head commit is the HEAD of a linked checkout.", on: LINKING.head) { LINKING.head = $0 },
-            SwitchRow("Pull request", note: "The PR of the branch names the key.", on: LINKING.pr) { LINKING.pr = $0 },
-            SwitchRow("Commit title", note: "The commit title names the key.", on: LINKING.trailer) { LINKING.trailer = $0 },
-        ]))
+        let rules = ChipGroup([
+            .init("Orca card is the key", on: LINKING.card) { LINKING.card = $0 },
+            .init("Worktree .wt/<key>", on: LINKING.folder) { LINKING.folder = $0 },
+            .init("Branch starts with the key", on: LINKING.prefix) { LINKING.prefix = $0 },
+            .init("PR names the key", on: LINKING.pr) { LINKING.pr = $0 },
+            .init("Commit title names the key", on: LINKING.trailer) { LINKING.trailer = $0 },
+            .init("Run branch = checkout", on: LINKING.branch) { LINKING.branch = $0 },
+            .init("Run commit = HEAD", on: LINKING.head) { LINKING.head = $0 },
+        ], label: "Link an item to code when")
         let f = NSTextField()
-        f.placeholderString = "Type a branch or card name, as fritz-28/desktop-app"
+        f.placeholderString = "fritz-28/desktop-app"
+        f.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         f.stringValue = branchTest
         f.delegate = self
         f.identifier = NSUserInterfaceItemIdentifier("branchTest")
-        f.setAccessibilityLabel("Branch to test")
+        f.setAccessibilityLabel("Test a name")
+        f.setContentHuggingPriority(.init(1), for: .horizontal)
+        f.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
         let known = Set(data.projectStore.tracked.map { $0.identifier.uppercased() })
         let t = branchTest.trimmingCharacters(in: .whitespaces)
-        let result: String
-        if t.isEmpty { result = "OverSire shows the item that the name links to." }
-        else if let k = WorkstreamIndex.key(inBranch: t, known: known) { result = "Links to \(k) by the branch prefix." }
-        else if let k = WorkstreamIndex.key(in: t, known: known, whole: true) { result = "Links to \(k) by the card or folder name." }
-        else { result = "No link. The name does not start with the key of a tracked project (\(known.sorted().prefix(6).joined(separator: ", ")))." }
-        let c = Card(title: "Test a name")
-        c.add(f)
-        c.add(NSTextField.text(result, size: 12.5, color: t.isEmpty ? Palette.dim : Palette.fg, lines: 0))
-        b.addFull(c)
+        let result: NSView
+        if t.isEmpty { result = NSTextField.text("Shows the item that a branch, card or folder name links to.", size: 11.5, color: Palette.dim) }
+        else if let k = WorkstreamIndex.key(inBranch: t, known: known) { result = Pill(.ok, text: "→ \(k) · branch prefix") }
+        else if let k = WorkstreamIndex.key(in: t, known: known, whole: true) { result = Pill(.ok, text: "→ \(k) · card or folder name") }
+        else {
+            let p = Pill(.idle, text: "No link")
+            p.toolTip = "The name does not start with the key of a tracked project (\(known.sorted().prefix(6).joined(separator: ", ")))."
+            result = p
+        }
+        let test = NSStackView(h: [NSTextField.text("Test a name", size: 12, color: Palette.dim), f, result], spacing: 8)
+        let body = NSStackView(v: [], spacing: 14)
+        body.addFull(rules)
+        body.addFull(test)
+        b.addFull(section("Link an item to code when", anchor: "linking", [Padded(body)]))
     }
 
     func controlTextDidChange(_ n: Notification) {
@@ -144,15 +152,16 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     private func writeBack(_ b: NSStackView) {
         let on = AGENTS.writeBack.enabled
-        b.addFull(Banner(.info, title: "OverSire does not overwrite text that people wrote.",
-                         body: "It adds links and labels, and keeps its own block between markers at the end of the body."))
-        b.addFull(card("Write back to Plane", [
-            SwitchRow("Write back", note: "Turn off to keep Plane read only.", on: on) { AGENTS.writeBack.enabled = $0 },
-            SwitchRow("Links", note: "Add the ChangeRequest, run and worktree links once.", on: AGENTS.writeBack.links, enabled: on) { AGENTS.writeBack.links = $0 },
-            SwitchRow("Session labels", note: "session:working, session:needs-input, session:done.", on: AGENTS.writeBack.labels, enabled: on) { AGENTS.writeBack.labels = $0 },
-            SwitchRow("OverSire block", note: "Status, worktree, CI and PR at the end of the body.", on: AGENTS.writeBack.block, enabled: on) { AGENTS.writeBack.block = $0 },
-            SwitchRow("Session comment", note: "One comment with the session summary when the session ends. Needs AI.", on: AGENTS.writeBack.sessionComment, enabled: on) { AGENTS.writeBack.sessionComment = $0 },
-            SwitchRow("Move to In review", note: "Set the status when the PR opens.", on: AGENTS.writeBack.moveToReview, enabled: on) { AGENTS.writeBack.moveToReview = $0 },
+        b.addFull(section("Write back to Plane", anchor: "write-back", [
+            SwitchRow("Write back", note: "Off keeps Plane read only. OverSire never edits text that people wrote.", on: on) { AGENTS.writeBack.enabled = $0 },
+            Padded(ChipGroup([
+                .init("Links", on: AGENTS.writeBack.links) { AGENTS.writeBack.links = $0 },
+                .init("Session labels", on: AGENTS.writeBack.labels) { AGENTS.writeBack.labels = $0 },
+                .init("OverSire block", on: AGENTS.writeBack.block) { AGENTS.writeBack.block = $0 },
+                .init("Session comment · AI", on: AGENTS.writeBack.sessionComment) { AGENTS.writeBack.sessionComment = $0 },
+                .init("Move to In review on PR", on: AGENTS.writeBack.moveToReview) { AGENTS.writeBack.moveToReview = $0 },
+            ], label: "What OverSire writes", enabled: on,
+               note: "Links and labels go in once. The OverSire block sits between markers at the end of the body.")),
         ]))
     }
 
