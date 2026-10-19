@@ -478,6 +478,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedPlanner()
         seedSummaries()
         seedSessions()
+        // The heuristics only: a shot never calls the AI.
+        aiChecks.ai = { nil }
+        aiChecks.tick(workstreams: workstreams, store: projectStore)
         let w = AppWindow(data: self)
         window = w
         w.window?.setFrameAutosaveName("")
