@@ -19,6 +19,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var updater = Updater()
     lazy var cloudSetup = UIShots.sampleSetup()
     lazy var repoCatalog = RepoCatalog(path: REPO_CACHE_PATH)
+    lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
@@ -362,8 +363,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         }
         REPOS = RepoCatalog(path: REPO_CACHE_PATH).resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
         assignRepoColors(REPOS)
-        let catalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
-        projectStore.track(catalog.resolve(PROJECTS_CFG), live: [])
+        projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: [])
         if UIShots.commands {
             PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]
             AgentCommandsCard.drafts = ["codex": "codex --full-auto; echo done"]

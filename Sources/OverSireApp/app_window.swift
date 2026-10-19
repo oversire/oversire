@@ -24,6 +24,7 @@ protocol AppData: AnyObject {
     var updater: Updater { get }
     var cloudSetup: CloudSetup { get }
     var repoCatalog: RepoCatalog { get }
+    var projectCatalog: ProjectCatalog { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func settingsVC(_ name: String) -> NSViewController?

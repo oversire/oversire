@@ -66,7 +66,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             strip.onSelect = { [weak self] i in self?.go(.settings(.projects, tab: Route.SettingsTab.allCases[i])) }
             body.addArrangedSubview(strip)
             switch tab {
-            case .projects: embed(body, vc: "projects", note: "Projects to track, notifications, quick capture and the Orca workspace of each project.")
+            case .projects: projects(body)
             case .repos:
                 let filters: [String: RepoListModel.Filter] = ["tracked": .tracked, "problems": .problems]
                 body.addFull(RepoListView(catalog: data.repoCatalog, setup: data.cloudSetup, filter: anchor.flatMap { filters[$0] } ?? .all) { [weak self] f in
