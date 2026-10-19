@@ -1010,13 +1010,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     @objc func showRelaySettings() { showSettings(.live) }
 
     // The settings views of the menu bar, for the Settings page of the window.
-    func settingsVC(_ p: Route.SettingsPage) -> NSViewController? {
-        switch p {
-        case .general: return GeneralSettingsVC(catalog: catalog, updater: updater)
-        case .repos: return ActionsSettingsVC(catalog: catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-        case .projects: return ProjectSettingsVC(catalog: projectCatalog, store: projectStore, cfg: PROJECTS_CFG)
-        case .ai: return AISettingsVC()
-        case .live: return CloudSettingsVC(setup: cloudSetup, client: relay)
+    func settingsVC(_ name: String) -> NSViewController? {
+        switch name {
+        case "general": return GeneralSettingsVC(catalog: catalog, updater: updater)
+        case "repos": return ActionsSettingsVC(catalog: catalog, picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
+        case "projects": return ProjectSettingsVC(catalog: projectCatalog, store: projectStore, cfg: PROJECTS_CFG)
+        case "ai": return AISettingsVC()
+        case "live": return CloudSettingsVC(setup: cloudSetup, client: relay)
         default: return nil
         }
     }

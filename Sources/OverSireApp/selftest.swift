@@ -452,7 +452,12 @@ func runSelfTest() {
     check(Route(url: URL(string: "https://item/FRITZ-17")!) == nil, "other schemes are not routes")
     check(Route(url: URL(string: "oversire://item/17")!) == nil, "an item needs a key")
     check(Route(url: URL(string: "oversire://settings/nope")!) == .settings(.general), "unknown settings page opens General")
-    check(Route(url: URL(string: "oversire://settings/orca")!) == .settings(.runtime), "the old Orca settings link opens Runtime")
+    check(Route(url: URL(string: "oversire://settings/orca")!) == .settings(.agents), "the old Orca settings link opens Agents and queue")
+    check(Route(url: URL(string: "oversire://settings/repos")!) == .settings(.projects, tab: .repos), "the old Repos link opens the Repos tab")
+    check(Route(url: URL(string: "oversire://settings/live")!) == .settings(.accounts, anchor: "live"), "the old Cloud link opens Live updates")
+    check(Route(url: URL(string: "oversire://settings/menubar")!) == .settings(.general, anchor: "menubar"), "the old Menu bar link opens General")
+    check(Route(url: URL(string: "oversire://settings/writeback")!) == .settings(.projects, tab: .linking, anchor: "writeback"), "the old Write back link opens Linking")
+    check(Route(url: URL(string: "oversire://settings/queue")!) == .settings(.agents, anchor: "queue"), "the old Queue link opens Agents and queue")
     check(Route(url: URL(string: "cateye://item/FRITZ-17")!) == .item("FRITZ-17", .overview), "old cateye links still open")
 
     // Accounts from the old settings. Only Keychain key names, never tokens.

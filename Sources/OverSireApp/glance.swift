@@ -82,7 +82,7 @@ final class GlanceVC: NSViewController {
         foot.addArrangedSubview(NSTextField.text(when, size: 11.5, color: Palette.dim))
         foot.addArrangedSubview(Spacer())
         foot.addArrangedSubview(ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) })
-        foot.addArrangedSubview(ActionButton("", symbol: "gearshape") { [weak self] in self?.open(.settings(.menubar)) }.labeled("Settings"))
+        foot.addArrangedSubview(ActionButton("", symbol: "gearshape") { [weak self] in self?.open(.settings(.general, anchor: "menubar")) }.labeled("Settings"))
     }
 
     private func header(_ needs: Int) {

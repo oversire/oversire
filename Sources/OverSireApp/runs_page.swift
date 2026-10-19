@@ -354,7 +354,7 @@ final class RunPage: Page {
         if let link {
             chips.append(Chiplet("\(link.key) · \(link.reason.rawValue)", symbol: "link", color: Palette.fg) { [weak self] in self?.go(.item(link.key, .overview)) })
         } else {
-            chips.append(Chiplet("unlinked", symbol: "link.badge.plus") { [weak self] in self?.go(.settings(.linking)) })
+            chips.append(Chiplet("unlinked", symbol: "link.badge.plus") { [weak self] in self?.go(.settings(.projects, tab: .linking)) })
         }
         let cia = data.ciAssist
         if cia.isFlaky(repo: repo, r) { chips.append(Chiplet("Flaky workflow", symbol: "arrow.triangle.2.circlepath", color: Palette.warn)) }

@@ -27,7 +27,7 @@ final class QueuePage: Page {
         ], spacing: 8))
         if data.agentIndex.ready == nil {
             col.addFull(Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
-                               actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.runtime)) }]))
+                               actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.agents)) }]))
         }
 
         let left = NSStackView(v: [SectionTitle("AI checks", count: data.aiChecks.pending.count)], spacing: 10)
@@ -123,7 +123,7 @@ final class QueuePage: Page {
         if !AGENTS.botUser.isEmpty { how.append("assign it to \(AGENTS.botUser)") }
         plane.add(NSTextField.text(how.isEmpty ? "Plane triggers are off." : how.joined(separator: ", or ").prefix(1).uppercased() + how.joined(separator: ", or ").dropFirst()
                                    + ". OverSire adds it to the lane of its project.", size: 12.5, color: Palette.mut, lines: 3))
-        plane.add(ActionButton("Sessions and queue settings", style: .link) { [weak self] in self?.go(.settings(.queue)) })
+        plane.add(ActionButton("Sessions and queue settings", style: .link) { [weak self] in self?.go(.settings(.agents, anchor: "queue")) })
         col.addFull(plane)
     }
 

@@ -97,7 +97,7 @@ final class IntakeAgent {
             set(item.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once."))
             return
         }
-        guard let rt = runtime else { set(item.id, .failed("Add an agent runtime account in Settings › Providers.")); return }
+        guard let rt = runtime else { set(item.id, .failed("Add an agent runtime account in Settings › Accounts and sync.")); return }
         let url = (ENV.tracker(snap.summary.ref.workspace) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
         set(item.id, .starting)
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in

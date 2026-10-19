@@ -59,7 +59,7 @@ final class ProjectStore {
     var busy: BusyTracker?
     var hold = false   // `--uishots` loading mode: fetches never end
 
-    static let noToken = "Add a token for this account in Settings › Providers."
+    static let noToken = "Add a token for this account in Settings › Accounts and sync."
 
     init(trackers: TrackerDirectory, notifier: ProjectNotifier, statePath: String, activityPath: String) {
         self.trackers = trackers

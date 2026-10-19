@@ -1,7 +1,7 @@
 import Cocoa
 import OverSireCore
 
-// Settings › Runtime › Agent commands: one start command for each agent and one for the intake agent.
+// Settings › Agents and queue › Agent commands: one start command for each agent and one for the intake agent.
 // Each runtime that starts the agent in a terminal uses them. A change saves at once. A bad template saves nothing.
 final class AgentCommandsCard: NSStackView {
     static let known = ["claude", "codex", "opencode"]
@@ -42,7 +42,7 @@ final class AgentCommandsCard: NSStackView {
                                     size: 12, color: Palette.dim, lines: 2)
         card.add(note)
         let used: [NSView] = [NSTextField.text("Used by", size: 12, color: Palette.mut)] + (usedBy.isEmpty
-            ? [NSTextField.text("No runtime account. Add one in Settings › Providers.", size: 12, color: Palette.dim)]
+            ? [NSTextField.text("No runtime account. Add one in Settings › Accounts and sync.", size: 12, color: Palette.dim)]
             : usedBy.map { u in
                 let c = Chiplet(u.terminal ? "✓ \(u.name)" : "– \(u.name) (no terminal)", color: u.terminal ? Palette.ok : Palette.dim)
                 c.toolTip = u.terminal ? "Types the command into a terminal." : "Starts the agent over its protocol, without a command line."

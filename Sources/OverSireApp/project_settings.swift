@@ -110,7 +110,7 @@ final class ProjectSettingsVC: NSViewController {
         let q = (filterField?.stringValue ?? "").lowercased()
         let workspaces = catalog.workspaces
         if workspaces.isEmpty {
-            let l = NSTextField(labelWithString: "Add a tracker account in Settings › Providers.")
+            let l = NSTextField(labelWithString: "Add a tracker account in Settings › Accounts and sync.")
             l.font = .systemFont(ofSize: 12); l.textColor = .secondaryLabelColor
             l.frame = NSRect(x: 16, y: y + 4, width: w - 32, height: 18)
             doc.addSubview(l)

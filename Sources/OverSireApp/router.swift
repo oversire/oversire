@@ -14,24 +14,49 @@ enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
-        case general, providers, projects, repos, linking, writeback, live, runtime, queue, planner, ai, notifications, menubar, shortcuts
+        case general, accounts, projects, agents, ai, notifications
 
         var title: String {
             switch self {
             case .general: return "General"
-            case .providers: return "Providers"
-            case .projects: return "Projects"
-            case .repos: return "Repos"
-            case .linking: return "Linking"
-            case .writeback: return "Write back to Plane"
-            case .live: return "Cloud (beta)"
-            case .runtime: return "Runtime"
-            case .queue: return "Sessions and queue"
-            case .planner: return "Planner"
+            case .accounts: return "Accounts and sync"
+            case .projects: return "Projects and repos"
+            case .agents: return "Agents and queue"
             case .ai: return "AI"
             case .notifications: return "Notifications"
-            case .menubar: return "Menu bar"
-            case .shortcuts: return "Shortcuts"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .general: return "gearshape"
+            case .accounts: return "square.stack.3d.up"
+            case .projects: return "folder"
+            case .agents: return "terminal"
+            case .ai: return "sparkles"
+            case .notifications: return "bell"
+            }
+        }
+
+        // The slugs of the old pages, mapped to their new home. "accounts" was once Projects. It now names its own page.
+        static let redirects: [String: (SettingsPage, SettingsTab?, String?)] = [
+            "providers": (.accounts, nil, nil), "live": (.accounts, nil, "live"),
+            "repos": (.projects, .repos, nil),
+            "linking": (.projects, .linking, nil), "writeback": (.projects, .linking, "writeback"),
+            "runtime": (.agents, nil, nil), "orca": (.agents, nil, nil),
+            "queue": (.agents, nil, "queue"), "planner": (.agents, nil, "planner"),
+            "menubar": (.general, nil, "menubar"), "shortcuts": (.general, nil, "shortcuts"),
+        ]
+    }
+    // The tabs of the Projects and repos page.
+    enum SettingsTab: String, CaseIterable {
+        case projects, repos, linking
+
+        var title: String {
+            switch self {
+            case .projects: return "Projects"
+            case .repos: return "Repos"
+            case .linking: return "Linking and write-back"
             }
         }
     }
@@ -46,7 +71,7 @@ enum Route: Equatable {
     case run(repo: String, id: String)
     case prs
     case insights
-    case settings(SettingsPage)
+    case settings(SettingsPage, tab: SettingsTab? = nil, anchor: String? = nil)
     case project(String)            // project identifier, for example FRITZ
     case projectSettings(String, ProjectSettingsSection)
     case item(String, ItemTab)      // item key, for example FRITZ-17
@@ -63,7 +88,8 @@ enum Route: Equatable {
         case .run(let repo, let id): return "run/\(repo)/\(id)"
         case .prs: return "prs"
         case .insights: return "insights"
-        case .settings(let p): return "settings/\(p.rawValue)"
+        case .settings(let p, let t, let a):
+            return (["settings", p.rawValue] + [t?.rawValue, a].compactMap { $0 }).joined(separator: "/")
         case .project(let k): return "project/\(k)"
         case .projectSettings(let k, let s): return "project/\(k)/settings/\(s.rawValue)"
         case .item(let k, let t): return t == .overview ? "item/\(k)" : "item/\(k)/\(t.rawValue)"
@@ -82,6 +108,8 @@ enum Route: Equatable {
         if parts.isEmpty, let rest = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path {
             parts = rest.split(separator: "/").map(String.init)
         }
+        // settings/agents#queue is the same as settings/agents/queue.
+        if let f = url.fragment, !f.isEmpty { parts.append(f) }
         self.init(parts: parts.compactMap { $0.removingPercentEncoding })
     }
 
@@ -103,9 +131,7 @@ enum Route: Equatable {
             self = .run(repo: rest[0] + "/" + rest[1], id: rest[2])
         case "prs": self = .prs
         case "insights": self = .insights
-        // "accounts" and "orca" are the old names of the Projects and Runtime pages.
-        case "settings": self = .settings(rest.first.map { ["accounts": "projects", "orca": "runtime"][$0.lowercased()] ?? $0.lowercased() }
-                                              .flatMap(SettingsPage.init(rawValue:)) ?? .general)
+        case "settings": self = Route.settings(Array(rest.map { $0.lowercased() }))
         case "project":
             guard let k = rest.first, !k.isEmpty else { return nil }
             if rest.count > 1, rest[1].lowercased() == "settings" {
@@ -118,6 +144,17 @@ enum Route: Equatable {
             self = .item(k.uppercased(), rest.count > 1 ? ItemTab(rawValue: rest[1].lowercased()) ?? .overview : .overview)
         default: return nil
         }
+    }
+
+    // settings/<page>[/<tab>][/<anchor>]. An old slug opens its new home. An unknown page opens General.
+    private static func settings(_ rest: [String]) -> Route {
+        guard let head = rest.first else { return .settings(.general) }
+        var more = rest.dropFirst()
+        if let (p, t, a) = SettingsPage.redirects[head] { return .settings(p, tab: t, anchor: more.first ?? a) }
+        guard let p = SettingsPage(rawValue: head) else { return .settings(.general) }
+        var tab: SettingsTab?
+        if p == .projects, let t = more.first.flatMap(SettingsTab.init(rawValue:)) { tab = t; more = more.dropFirst() }
+        return .settings(p, tab: tab, anchor: more.first)
     }
 
     // The sidebar entry that shows as selected for this route.
@@ -167,7 +204,8 @@ enum Route: Equatable {
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
         .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .plan, .runs(.all), .runs(.unlinked),
-        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.providers), .settings(.runtime),
+        .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
+        .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
     ]
 }

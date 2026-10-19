@@ -378,7 +378,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             if wb.labels { onPlane.append(Chiplet("session:* label", symbol: "tag")) }
             if wb.block { onPlane.append(Chiplet("OverSire block", symbol: "text.append")) }
         }
-        onPlane.append(Chiplet("Edit…", color: Palette.acc) { [weak self] in self?.go(.settings(.writeback)) })
+        onPlane.append(Chiplet("Edit…", color: Palette.acc) { [weak self] in self?.go(.settings(.projects, tab: .linking, anchor: "writeback")) })
         onPlane.append(Spacer())
         right.addFull(NSStackView(h: onPlane, spacing: 6))
 

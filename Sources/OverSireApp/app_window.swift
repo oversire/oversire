@@ -23,7 +23,7 @@ protocol AppData: AnyObject {
     var busy: BusyTracker { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
-    func settingsVC(_ p: Route.SettingsPage) -> NSViewController?
+    func settingsVC(_ name: String) -> NSViewController?
     func refresh(force: Bool, completion: (() -> Void)?)
     /// True when an account has the feature. Pages hide what no account has.
     func has(_ c: Capability) -> Bool

@@ -133,7 +133,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         for (r, t, s) in pages { out.append(Entry(title: t, detail: r.url.absoluteString, symbol: s, kind: "Page", run: go(r))) }
         for p in Route.SettingsPage.allCases {
             let r = Route.settings(p)
-            out.append(Entry(title: "Settings › " + p.title, detail: r.url.absoluteString, symbol: "gearshape", kind: "Page", run: go(r)))
+            out.append(Entry(title: "Settings › " + p.title, detail: r.url.absoluteString, symbol: p.symbol, kind: "Page", run: go(r)))
         }
         for p in data.projectStore.tracked {
             let r = Route.project(p.identifier.uppercased())

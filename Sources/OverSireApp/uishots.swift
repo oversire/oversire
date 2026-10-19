@@ -30,14 +30,14 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private let dir: String
     struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: ChangeRequest }
 
-    func settingsVC(_ p: Route.SettingsPage) -> NSViewController? {
-        switch p {
-        case .general: return GeneralSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), updater: Updater())
-        case .repos: return ActionsSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
-        case .projects:
+    func settingsVC(_ name: String) -> NSViewController? {
+        switch name {
+        case "general": return GeneralSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), updater: Updater())
+        case "repos": return ActionsSettingsVC(catalog: RepoCatalog(path: REPO_CACHE_PATH), picked: Set(PICKED_REPOS), orgs: Set(PICKED_ORGS))
+        case "projects":
             return ProjectSettingsVC(catalog: ProjectCatalog(trackers: ENV, path: NSTemporaryDirectory() + "oversire-uishots/catalog.json"), store: projectStore, cfg: PROJECTS_CFG)
-        case .ai: return AISettingsVC()
-        case .live: return CloudSettingsVC(setup: CloudSetup(), client: relay)
+        case "ai": return AISettingsVC()
+        case "live": return CloudSettingsVC(setup: CloudSetup(), client: relay)
         default: return nil
         }
     }

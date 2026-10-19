@@ -2,7 +2,7 @@ import Cocoa
 import OverSireCore
 
 // Settings → Projects → Orca: the Orca workspace of each Plane project. The agent, the prompt and the
-// start commands are on Settings › Runtime. The Orca account (CLI and environment) is on the Providers page.
+// start commands are on Settings › Agents and queue. The Orca account (CLI and environment) is on the Providers page.
 extension ProjectSettingsVC {
     /// A runtime that reports the version of its tool.
     protocol VersionReporting: AgentRuntime { func version() async throws -> String }
@@ -19,8 +19,8 @@ extension ProjectSettingsVC {
     func orcaSection(y: CGFloat, w: CGFloat, in doc: NSView) -> CGFloat {
         var y = y + 4
         let l = NSTextField(labelWithString: cfg.orca.enabled
-            ? "Orca account: \(cfg.orca.environment ?? "this Mac"). Change it in Settings › Providers."
-            : "Add an Orca account in Settings › Providers to start items with ▶.")
+            ? "Orca account: \(cfg.orca.environment ?? "this Mac"). Change it in Settings › Accounts and sync."
+            : "Add an Orca account in Settings › Accounts and sync to start items with ▶.")
         l.font = .systemFont(ofSize: 12)
         l.frame = NSRect(x: 16, y: y + 2, width: w - 100, height: 18)
         doc.addSubview(l)
@@ -48,7 +48,7 @@ extension ProjectSettingsVC {
         doc.addSubview(st)
         y += 24
 
-        let agent = NSTextField(labelWithString: "Agent \(cfg.runtime.agent). Change the agent, the prompt and the start commands in Settings › Runtime.")
+        let agent = NSTextField(labelWithString: "Agent \(cfg.runtime.agent). Change the agent, the prompt and the start commands in Settings › Agents and queue.")
         agent.font = .systemFont(ofSize: 11); agent.textColor = .secondaryLabelColor
         agent.frame = NSRect(x: 16, y: y, width: w - 32, height: 16)
         doc.addSubview(agent)

@@ -1,7 +1,7 @@
 import Cocoa
 import OverSireCore
 
-// Settings › Providers: the accounts of each layer. The form of a new account comes from the
+// Settings › Accounts and sync: the accounts of each layer. The form of a new account comes from the
 // ConfigField list of the provider descriptor.
 final class ProvidersForm {
     /// The layer whose "Add account" is open, the provider and the account that the form edits.

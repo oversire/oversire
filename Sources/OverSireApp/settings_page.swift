@@ -40,7 +40,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private let promptView = NSTextView()
     private var promptDirty = false
 
-    private var page: Route.SettingsPage { if case .settings(let p) = route { return p }; return .general }
+    private var page: Route.SettingsPage { if case .settings(let p, _, _) = route { return p }; return .general }
+    private var tab: Route.SettingsTab { if case .settings(_, let t?, _) = route { return t }; return .projects }
     private var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
 
     override var isEditing: Bool { super.isEditing || promptDirty }
@@ -49,28 +50,28 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         col.addFull(PageHeader("Settings", caption: "OverSire saves each change at once to \((CONFIG_PATH as NSString).abbreviatingWithTildeInPath)."))
         let nav = ListCard()
         for p in Route.SettingsPage.allCases {
-            let r = Row([Glyph(symbol(p), size: 13), NSTextField.text(p.title, size: 12.5, weight: p == page ? .semibold : .regular), Spacer()],
+            let r = Row([Glyph(p.symbol, size: 13), NSTextField.text(p.title, size: 12.5, weight: p == page ? .semibold : .regular), Spacer()],
                         height: 32, label: p.title) { [weak self] in self?.go(.settings(p)) }
             r.selected = p == page
             nav.add(r)
         }
         let body = NSStackView(v: [], spacing: 10)
-        if page != .runtime { AgentCommandsCard.drafts = [:] }
+        if page != .agents { AgentCommandsCard.drafts = [:] }
         switch page {
-        case .general: general(body)
-        case .providers: providers(body)
-        case .projects: embed(body, note: "Projects to track, notifications, quick capture and the Orca workspace of each project.")
-        case .repos: embed(body, note: "The GitHub repos and organizations that OverSire polls.")
-        case .linking: linking(body)
-        case .writeback: writeBack(body)
-        case .live: live(body)
-        case .runtime: runtime(body)
-        case .queue: queue(body)
-        case .planner: planner(body)
+        case .general: general(body); menuBar(body); shortcuts(body)
+        case .accounts: providers(body); live(body)
+        case .projects:
+            let strip = TabStrip(Route.SettingsTab.allCases.map(\.title), selected: Route.SettingsTab.allCases.firstIndex(of: tab) ?? 0)
+            strip.onSelect = { [weak self] i in self?.go(.settings(.projects, tab: Route.SettingsTab.allCases[i])) }
+            body.addFull(strip)
+            switch tab {
+            case .projects: embed(body, vc: "projects", note: "Projects to track, notifications, quick capture and the Orca workspace of each project.")
+            case .repos: embed(body, vc: "repos", note: "The GitHub repos and organizations that OverSire polls.")
+            case .linking: linking(body); writeBack(body)
+            }
+        case .agents: runtime(body); queue(body); planner(body)
         case .ai: ai(body)
         case .notifications: notifications(body)
-        case .menubar: menuBar(body)
-        case .shortcuts: shortcuts(body)
         }
         let filler = NSView()
         filler.setContentHuggingPriority(.init(1), for: .vertical)
@@ -84,25 +85,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         let bw = body.widthAnchor.constraint(equalTo: two.widthAnchor, constant: -226)
         bw.priority = .defaultHigh
         bw.isActive = true
-    }
-
-    private func symbol(_ p: Route.SettingsPage) -> String {
-        switch p {
-        case .general: return "gearshape"
-        case .providers: return "square.stack.3d.up"
-        case .projects: return "person.crop.circle"
-        case .repos: return "shippingbox"
-        case .linking: return "link"
-        case .writeback: return "square.and.pencil"
-        case .live: return "dot.radiowaves.left.and.right"
-        case .runtime: return "terminal"
-        case .queue: return "list.number"
-        case .planner: return "rectangle.split.3x1"
-        case .ai: return "sparkles"
-        case .notifications: return "bell"
-        case .menubar: return "menubar.rectangle"
-        case .shortcuts: return "keyboard"
-        }
     }
 
     private func card(_ title: String, _ rows: [NSView]) -> NSView {
@@ -138,7 +120,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             FieldRow("Show in", note: "The window opens from both. The menu bar keeps a short view.", showIn()),
             SwitchRow("Open the window at launch", on: GENERAL.openWindowAtLaunch) { GENERAL.openWindowAtLaunch = $0 },
         ]))
-        embed(b, page: .general, note: "Accounts, tabs and updates.")
+        embed(b, vc: "general", note: "Accounts, tabs and updates.")
     }
 
     private func showIn() -> NSView {
@@ -250,7 +232,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         b.addFull(Banner(o.enabled ? (ready ? .ok : .warning) : .idle,
                          title: o.enabled ? (ready ? "Orca is on." : "Orca is on, but OverSire could not read it.") : "Orca is off.",
                          body: "CLI \(o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac")",
-                         actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.projects)) }]))
+                         actions: [ActionButton("Edit Orca settings") { [weak self] in self?.go(.settings(.projects, tab: .projects)) }]))
         var rows: [NSView] = []
         for p in data.projectStore.tracked.sorted(by: { $0.identifier < $1.identifier }) {
             let root = o.roots[p.ref.storeKey].flatMap { $0.isEmpty ? nil : $0 }
@@ -272,7 +254,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             FieldRow("Poll GitHub each", note: "When the cloud is off, and for repos without a webhook.", normal),
             FieldRow("While you look at a run in progress", note: "The popover is open and a run is in progress.", active),
         ]))
-        embed(b, note: "OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds, not at the next poll. With the cloud live, a poll only checks the state at the reconcile time. Get a pairing code in the OverSire Cloud console, then connect here with the cloud URL and the code.")
+        embed(b, vc: "live", note: "OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds, not at the next poll. With the cloud live, a poll only checks the state at the reconcile time. Get a pairing code in the OverSire Cloud console, then connect here with the cloud URL and the code.")
         let records = cloudAIRecords
         b.addFull(CloudAICard(records))
         if let records, UIShots.cloud == nil { RunnerSetup.shared.offerOnce(records: records) }
@@ -385,7 +367,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             SwitchRow("Tidy the text", on: AI_CFG.tidy) { AI_CFG.tidy = $0 },
             SwitchRow("Pick the project", on: AI_CFG.pickProject) { AI_CFG.pickProject = $0 },
         ]))
-        embed(b, page: .ai, note: "Endpoint, model and API key. The key stays in the Keychain.")
+        embed(b, vc: "ai", note: "Endpoint, model and API key. The key stays in the Keychain.")
     }
 
     // MARK: Planner
@@ -520,7 +502,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             SwitchRow("Other endings", on: NOTIFICATIONS.other) { NOTIFICATIONS.other = $0 },
         ]))
         b.addFull(Banner(.info, title: "Plane notifications are set for each project.",
-                         actions: [ActionButton("Open project settings") { [weak self] in self?.go(.settings(.projects)) }]))
+                         actions: [ActionButton("Open project settings") { [weak self] in self?.go(.settings(.projects, tab: .projects)) }]))
     }
 
     private func menuBar(_ b: NSStackView) {
@@ -554,14 +536,13 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     // MARK: Embedded settings
 
-    private func embed(_ b: NSStackView, page p: Route.SettingsPage? = nil, note: String) {
-        let p = p ?? page
+    private func embed(_ b: NSStackView, vc name: String, note: String) {
         b.addFull(NSTextField.text(note, size: 12, color: Palette.dim, lines: 0))
-        let key = "\(p.rawValue)-\(NSApp.appearance?.name.rawValue ?? "system")"
+        let key = "\(name)-\(NSApp.appearance?.name.rawValue ?? "system")"
         var vc = SettingsPage.embedded[key]
         if vc == nil {
             NSApp.withPinnedAppearance {
-                vc = data.settingsVC(p)
+                vc = data.settingsVC(name)
                 _ = vc?.view
             }
         }
