@@ -67,4 +67,28 @@ final class ProjectLocalSettingsTests: XCTestCase {
         l.branchTemplate = "feat/{KEY}"
         XCTAssertEqual(l.branch(for: item), "feat/OVERSIRE-55")
     }
+
+    func testNotificationOverrides() {
+        var c = ProjectsConfig()
+        var muted = ProjectLocalSettings()
+        muted.muted = true
+        muted.notifications = ProjectNotificationSettings()
+        var custom = ProjectLocalSettings()
+        var n = ProjectNotificationSettings()
+        n.comment.any = true
+        n.agentDone = false
+        custom.notifications = n
+        var plain = ProjectLocalSettings()
+        plain.github = ["oversire"]
+        c.setLocal("trebi", muted)
+        c.setLocal("sling", custom)
+        c.setLocal("oversire", plain)
+        XCTAssertEqual(c.notificationOverrides, [
+            NotificationOverride(key: "SLING", kind: .custom(changes: 2)),
+            NotificationOverride(key: "TREBI", kind: .muted),
+        ])
+        c.setLocal("trebi", ProjectLocalSettings())
+        c.setLocal("sling", ProjectLocalSettings())
+        XCTAssertTrue(c.notificationOverrides.isEmpty)
+    }
 }

@@ -100,6 +100,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
     // OVERSIRE_UISHOTS_AI=on: Settings › AI shows a sample key that passed Test. No AI job runs.
     static let aiKey = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AI"] == "on" ? "sk-ant-uishots-3f9a" : nil
+    // OVERSIRE_UISHOTS_OVERRIDES=on: Settings › Notifications shows one muted project and one with custom notifications.
+    static let overrides = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_OVERRIDES"] == "on"
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()
@@ -372,6 +374,13 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             AI_CFG.model = "claude-haiku-5-5"
             AI_CFG.enabled = true
             AI_CFG.verified = AI_CFG.fingerprint(key: key)
+        }
+        if UIShots.overrides {
+            PROJECTS_CFG.settings["TREBI", default: ProjectLocalSettings()].muted = true
+            var n = PROJECTS_CFG.notifications
+            n.comment.any = true
+            n.agentDone = false
+            PROJECTS_CFG.settings["SLING", default: ProjectLocalSettings()].notifications = n
         }
         if UIShots.commands {
             PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]

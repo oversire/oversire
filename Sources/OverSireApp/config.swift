@@ -188,6 +188,21 @@ struct ProjectNotificationSettings: Codable, Equatable {
         agentWaiting = try c.decodeIfPresent(Bool.self, forKey: .agentWaiting) ?? true
         agentDone = try c.decodeIfPresent(Bool.self, forKey: .agentDone) ?? true
     }
+
+    // The number of switches that differ from other.
+    func changes(from other: Self) -> Int {
+        let scopes: [KeyPath<Self, NotifyScope>] = [\.comment, \.status, \.added, \.closed, \.otherFields]
+        let flags: [KeyPath<Self, Bool>] = [\.mention, \.assigned, \.intake, \.agentWaiting, \.agentDone]
+        return scopes.reduce(0) { n, p in n + (self[keyPath: p].any != other[keyPath: p].any ? 1 : 0) + (self[keyPath: p].mine != other[keyPath: p].mine ? 1 : 0) }
+            + flags.filter { self[keyPath: $0] != other[keyPath: $0] }.count
+    }
+}
+
+// A project that does not use the app notification defaults.
+struct NotificationOverride: Equatable {
+    enum Kind: Equatable { case muted, custom(changes: Int) }
+    let key: String
+    let kind: Kind
 }
 
 enum ProjectView: String, Codable { case board, activity }
@@ -251,6 +266,16 @@ struct ProjectsConfig: Codable {
     func notifications(for key: String) -> ProjectNotificationSettings? {
         let l = local(key)
         return l.muted ? nil : (l.notifications ?? notifications)
+    }
+
+    // The projects that do not use the app notification defaults, by key.
+    var notificationOverrides: [NotificationOverride] {
+        settings.keys.sorted().compactMap { key in
+            let l = settings[key]!
+            if l.muted { return NotificationOverride(key: key, kind: .muted) }
+            guard let n = l.notifications else { return nil }
+            return NotificationOverride(key: key, kind: .custom(changes: n.changes(from: notifications)))
+        }
     }
 
     // The agent, the prompt and the resolved start command for an item. The project settings come first, then the app defaults.

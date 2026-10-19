@@ -93,8 +93,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         bw.isActive = true
     }
 
-    private func card(_ title: String, _ rows: [NSView]) -> NSView { section(title, anchor: nil, rows) }
-
     // A titled card. The anchor is the id that a route anchor and the search scroll to.
     func section(_ title: String, anchor: String?, _ rows: [NSView]) -> NSView {
         let c = ListCard()
@@ -164,18 +162,6 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             ], label: "What OverSire writes", enabled: on,
                note: "Links and labels go in once. The OverSire block sits between markers at the end of the body.")),
         ]))
-    }
-
-    private func notifications(_ b: NSStackView) {
-        b.addFull(card("GitHub Actions", [
-            SwitchRow("Run started", on: NOTIFICATIONS.started) { NOTIFICATIONS.started = $0 },
-            SwitchRow("Run passed", on: NOTIFICATIONS.succeeded) { NOTIFICATIONS.succeeded = $0 },
-            SwitchRow("Run failed", note: "A flaky workflow gets one re-run first.", on: NOTIFICATIONS.failed) { NOTIFICATIONS.failed = $0 },
-            SwitchRow("Run cancelled", on: NOTIFICATIONS.cancelled) { NOTIFICATIONS.cancelled = $0 },
-            SwitchRow("Other endings", on: NOTIFICATIONS.other) { NOTIFICATIONS.other = $0 },
-        ]))
-        b.addFull(Banner(.info, title: "Plane notifications are set for each project.",
-                         actions: [ActionButton("Open project settings") { [weak self] in self?.go(.settings(.projects, tab: .projects)) }]))
     }
 
     // MARK: Embedded settings
