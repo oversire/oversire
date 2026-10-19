@@ -36,6 +36,8 @@ final class PromptGoldenTests: XCTestCase {
                                                           QueueEntry(key: "P-2", title: "Two", added: .distantPast)],
                                                          bodies: ["P-2": "body"], vision: "Small and native.", blockers: ["P-1": ["P-2"]])),
         ("session-summary", .sessionSummary, AgentPrompts.sessionInput(key: "K-1", title: "Title", transcript: "> hi\nok")),
+        ("item-summary", .itemSummary, AgentPrompts.summaryInput(key: "K-1", title: "Title", body: "Line one.\n\n- a")),
+        ("item-summary-long", .itemSummary, AgentPrompts.summaryInput(key: "K-2", title: "T", body: String(repeating: "x", count: 24_010))),
         ("question", .question, AgentPrompts.questionInput(transcript: "t", question: "Why?")),
         ("triage", .triage, AgentPrompts.triageInput(template: "Plan {KEY} ({key}): {title}\n{url}\n\n{body}\n{KEY}", key: "TREBI-9",
                                                      title: "T", url: "https://x/TREBI-9", body: "line one\nline two")),

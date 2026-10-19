@@ -20,6 +20,7 @@ protocol AppData: AnyObject {
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }
     var ciAssist: CIAssist { get }
+    var itemSummaries: ItemSummaries { get }
     var busy: BusyTracker { get }
     var updater: Updater { get }
     var cloudSetup: CloudSetup { get }

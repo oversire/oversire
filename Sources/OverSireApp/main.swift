@@ -96,6 +96,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
+    lazy var itemSummaries = ItemSummaries(path: ITEM_SUMMARIES_PATH)
     lazy var appWindow: AppWindow = {
         AppWindow(data: self)
     }()

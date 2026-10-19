@@ -656,6 +656,7 @@ let WRITEBACK_PATH = (CONFIG_DIR as NSString).appendingPathComponent("writeback.
 let CHECKS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("agent-checks.json")
 let SESSIONS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("sessions.json")
 let CI_ASSIST_PATH = (CONFIG_DIR as NSString).appendingPathComponent("ci-assist.json")
+let ITEM_SUMMARIES_PATH = (CONFIG_DIR as NSString).appendingPathComponent("summaries.json")
 let PROJECT_ACTIVITY_PATH = (CONFIG_DIR as NSString).appendingPathComponent("plane-activity.jsonl")
 
 // REPOS is what the app tracks: PICKED_REPOS plus every repo of PICKED_ORGS.

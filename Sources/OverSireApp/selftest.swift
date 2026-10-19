@@ -672,6 +672,21 @@ func runSelfTest() {
         check(SessionNotes.parse(#"{"done":[],"files":[],"questions":[]}"#) == nil, "empty summary is nil")
     }
 
+    // Item summary: parse, stale check, linked keys.
+    do {
+        let h = ItemSummary.hash("body")
+        let s = ItemSummary.parse("```json\n{\"gist\":\"Deploy it.\",\"points\":[\"a\",\"\",\"b\"],\"open\":[\"None\"]}\n```", hash: h)
+        check(s?.gist == "Deploy it." && s?.points == ["a", "b"] && s?.open == [] && s?.markdown == "Deploy it.\n\n- a\n- b\n", "item summary parse")
+        check(ItemSummary.parse(#"{"gist":" ","points":["a"]}"#, hash: h) == nil, "item summary without gist is nil")
+        check(h == ItemSummary.hash("body") && h != ItemSummary.hash("body "), "item summary hash is stable")
+        let sums = ItemSummaries(path: NSTemporaryDirectory() + "oversire-selftest-summaries.json", ai: { nil })
+        sums.seed("x-1", s!)
+        check(!sums.isStale("X-1", body: "body") && sums.isStale("X-1", body: "body2") && !sums.isStale("X-2", body: "b"), "item summary stale check")
+        check(!ItemSummaries.offers(String(repeating: "a", count: 1_500)) && ItemSummaries.offers(String(repeating: "a", count: 1_501)), "summarize offers only long text")
+        let keys = ItemPage.linkedKeys("See TREBI-265 and https://app.plane.so/ocral/browse/TREBI-266/, again TREBI-265, SPELL-1, utf-8.", except: "SPELL-1")
+        check(keys == ["TREBI-265", "TREBI-266"], "linked keys \(keys)")
+    }
+
     // CI assist: flaky runs, explanation parse, digest facts.
     do {
         func run(_ id: Int, _ sha: String, _ c: String, _ at: String, wf: String = "ci") -> Run {

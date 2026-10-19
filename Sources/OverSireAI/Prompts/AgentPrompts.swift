@@ -44,6 +44,16 @@ public enum AgentPrompts {
         AIInput(text: transcript, context: ["question": question])
     }
 
+    // MARK: Item
+
+    /// The most description characters that go into one summary prompt.
+    public static let summaryBudget = 24_000
+
+    public static func summaryInput(key: String, title: String, body: String) -> AIInput {
+        let text = body.count > summaryBudget ? String(body.prefix(summaryBudget)) + "\n[… the rest is left out …]" : body
+        return AIInput(text: text, context: ["key": key, "title": title])
+    }
+
     // MARK: Triage
 
     /// The template fields: {KEY}, {key}, {title}, {url}, {body} and {vision}. An agent in plan mode runs the prompt,

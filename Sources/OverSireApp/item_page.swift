@@ -26,6 +26,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private let markdown = MarkdownView(width: 600)
     private var markdownHeight: NSLayoutConstraint?
+    private let summaryMarkdown = MarkdownView(width: 600)
+    private var summaryHeight: NSLayoutConstraint?
+    private var descriptionOpen = false
+    private var hiddenSummaries: Set<String> = []
+    private var summaryObserver: Any?
     private var timeline: [ActivityEntry]?
     private var tail: [String] = []
     private var tailAt = Date.distantPast
@@ -49,14 +54,20 @@ final class ItemPage: Page, NSTextFieldDelegate {
     override func viewDidLoad() {
         markdown.translatesAutoresizingMaskIntoConstraints = true
         markdown.onHeight = { [weak self] h in self?.markdownHeight?.constant = max(24, h) }
+        summaryMarkdown.translatesAutoresizingMaskIntoConstraints = true
+        summaryMarkdown.onHeight = { [weak self] h in self?.summaryHeight?.constant = max(20, h) }
         super.viewDidLoad()
         relationObserver = NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self, self.tab == .overview, !self.isEditing else { return }
             self.reload()
         }
+        summaryObserver = NotificationCenter.default.addObserver(forName: ItemSummaries.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.tab == .overview, !self.isEditing else { return }
+            self.reload()
+        }
     }
 
-    deinit { relationObserver.map(NotificationCenter.default.removeObserver) }
+    deinit { [relationObserver, summaryObserver].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver) }
 
     // Below 760 pt the side rail moves under the header as a row of sections.
     override func viewDidLayout() {
@@ -68,7 +79,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override func show(_ r: Route) {
-        if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = [] }; tailAt = .distantPast }
+        if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = []; descriptionOpen = false }; tailAt = .distantPast }
         super.show(r)
     }
 
@@ -287,24 +298,123 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
         if let card = suggestion(item) { main.addFull(card) }
         if let card = plannerCard(item) { main.addFull(card) }
-        let d = Card(title: "Description")
         let body = (item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let sums = data.itemSummaries
+        let long = ItemSummaries.offers(body)
+        let summary = hiddenSummaries.contains(item.key) ? nil : sums.summary(item.key)
+        let busy = sums.busy.contains(item.key.uppercased())
+        var trailing: [NSView] = []
+        if long { trailing.append(NSTextField.text("\(body.count.formatted()) characters", size: 12, color: Palette.dim)) }
+        if long, summary == nil, sums.hasEngine || sums.summary(item.key) != nil {
+            let b = ActionButton(busy ? "Summarizing…" : "Summarize", symbol: "sparkles", key: "S") { [weak self] in
+                guard let self else { return }
+                if self.hiddenSummaries.remove(item.key) == nil { sums.summarize(item) }
+                self.reload()
+            }
+            b.isEnabled = !busy
+            b.toolTip = "Ask the AI for a summary of the description (⌘⇧S)"
+            trailing.append(b)
+        }
+        let d = Card(title: "Description", trailing: trailing)
         if body.isEmpty {
             d.add(NSTextField.text("No description.", size: 12.5, color: Palette.dim))
-        } else {
-            let holder = NSView()
-            holder.translatesAutoresizingMaskIntoConstraints = false
-            markdown.removeFromSuperview()
-            holder.addSubview(markdown)
-            markdown.autoresizingMask = [.width, .height]
-            markdown.frame = holder.bounds
-            let h = holder.heightAnchor.constraint(equalToConstant: max(24, markdown.contentHeight))
-            h.isActive = true
-            markdownHeight = h
-            d.add(holder)
+            main.addFull(d)
+            return
+        }
+        if summary != nil || busy || (long && sums.errors[item.key.uppercased()] != nil) {
+            d.add(summaryPanel(item, body: body, summary: summary, busy: busy))
+        }
+        if summary != nil {
+            let open = descriptionOpen
+            d.add(Row([Glyph(open ? "chevron.down" : "chevron.right", color: Palette.dim, size: 11),
+                       NSTextField.text(open ? "Hide full description" : "Show full description", size: 12.5, color: Palette.mut), Spacer()],
+                      height: 26, inset: 2, label: open ? "Hide full description" : "Show full description") { [weak self] in
+                self?.descriptionOpen.toggle()
+                self?.reload()
+            })
+        }
+        if summary == nil || descriptionOpen {
+            d.add(markdownHolder(markdown, height: &markdownHeight, min: 24))
             data.projectStore.resolveImages(body, projectKey: pk) { [weak self] out in self?.markdown.show(out, mode: .rendered) }
         }
         main.addFull(d)
+    }
+
+    private func markdownHolder(_ view: MarkdownView, height: inout NSLayoutConstraint?, min: CGFloat) -> NSView {
+        let holder = NSView()
+        holder.translatesAutoresizingMaskIntoConstraints = false
+        view.removeFromSuperview()
+        holder.addSubview(view)
+        view.autoresizingMask = [.width, .height]
+        view.frame = holder.bounds
+        let h = holder.heightAnchor.constraint(equalToConstant: max(min, view.contentHeight))
+        h.isActive = true
+        height = h
+        return holder
+    }
+
+    // MARK: Summary
+
+    // The AI summary of a long description: the cached one, a placeholder while the AI works, or the error.
+    private func summaryPanel(_ item: Item, body: String, summary: ItemSummary?, busy: Bool) -> NSView {
+        let sums = data.itemSummaries
+        let k = item.key.uppercased()
+        let v = NSStackView(v: [], spacing: 9)
+        var head: [NSView] = [Glyph("sparkles", color: Palette.run, size: 12),
+                              NSTextField.text("AI SUMMARY", size: 11, weight: .semibold, color: Palette.dim), Spacer()]
+        if let summary { head.append(NSTextField.text(relativeTime(summary.at), size: 12, color: Palette.dim)) }
+        if busy {
+            head.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Summarizing…", size: 12, color: Palette.dim)], spacing: 5))
+        } else if summary != nil, sums.hasEngine {
+            head.append(ActionButton("Refresh", symbol: "arrow.clockwise", style: .link) { sums.summarize(item) })
+        }
+        if summary != nil {
+            head.append(ActionButton("Hide", style: .link) { [weak self] in
+                self?.hiddenSummaries.insert(item.key)
+                self?.reload()
+            })
+        }
+        v.addFull(NSStackView(h: head, spacing: 6))
+        if let err = sums.errors[k], !busy {
+            v.addFull(Banner(.bad, title: "No summary.", body: err,
+                             actions: sums.hasEngine ? [ActionButton("Retry") { sums.summarize(item) }] : []))
+        } else if summary != nil, sums.isStale(k, body: body), !busy {
+            v.addFull(Banner(.warning, title: "The description changed after this summary.", body: "Click Refresh for a new one."))
+        }
+        if let summary {
+            v.addFull(markdownHolder(summaryMarkdown, height: &summaryHeight, min: 20))
+            summaryMarkdown.show(summary.markdown, mode: .rendered)
+            let linked = ItemPage.linkedKeys(body, except: k).filter { data.projectStore.item(key: $0) != nil }
+            if !linked.isEmpty {
+                let chips = linked.map { key in Chiplet(key, symbol: "link") { [weak self] in self?.go(.item(key, .overview)) } as NSView }
+                v.addFull(NSStackView(h: [NSTextField.text("Linked:", size: 12, color: Palette.dim), Wrap(chips), Spacer()], spacing: 6))
+            }
+        } else if busy {
+            v.addFull(NSTextField.text("The AI reads \(body.count.formatted()) characters. You can leave this page. The summary goes into the cache.",
+                                       size: 12.5, color: Palette.dim, lines: 2))
+        }
+        let box = Box(fill: Palette.bg, border: Palette.line, radius: 8)
+        box.addSubview(v)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
+            v.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
+            v.topAnchor.constraint(equalTo: box.topAnchor, constant: 12),
+            v.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -12),
+        ])
+        return box
+    }
+
+    // Item keys in a description, in order, without repeats. Pure, for the selftest.
+    static func linkedKeys(_ body: String, except: String) -> [String] {
+        guard let re = try? NSRegularExpression(pattern: "\\b[A-Z][A-Z0-9]{1,15}-[0-9]{1,6}\\b") else { return [] }
+        var out: [String] = []
+        for m in re.matches(in: body, range: NSRange(body.startIndex..., in: body)) {
+            guard let r = Range(m.range, in: body) else { continue }
+            let k = String(body[r])
+            if k != except, !out.contains(k) { out.append(k) }
+            if out.count == 8 { break }
+        }
+        return out
     }
 
     // MARK: Planner

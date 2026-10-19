@@ -29,6 +29,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                      writeBack: PlaneWriteBack(path: NSTemporaryDirectory() + "oversire-uishots/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: NSTemporaryDirectory() + "oversire-uishots/ci.json")
+    lazy var itemSummaries = ItemSummaries(path: NSTemporaryDirectory() + "oversire-uishots/summaries.json",
+                                           ai: { UIShots.aiKey.map { AIClient(cfg: AI_CFG, key: $0) } })
     lazy var aiChecks = AgentJudge(path: NSTemporaryDirectory() + "oversire-uishots/checks.json", agents: agentIndex, queue: queue)
     let relay = LiveSync(secrets: SecretStore(service: "com.oversire.app.cloud"), cursors: CursorStore(url: nil))
     private let dir: String
@@ -130,6 +132,21 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         }
         return [order("o-h1", "OVERSIRE-85", WorkOrderHold(blockers: [item("OVERSIRE-84")], since: Date().addingTimeInterval(-1800))),
                 order("o-h2", "OVERSIRE-90", WorkOrderHold(areas: ["contract"], since: Date().addingTimeInterval(-600)))]
+    }
+
+    // OVERSIRE_UISHOTS_SUMMARY=KEY-1,KEY-2: a summary for each item. A key with "~" at the end gets a stale summary.
+    private func seedSummaries() {
+        for k in (ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SUMMARY"] ?? "").split(separator: ",").map(String.init) {
+            let stale = k.hasSuffix("~")
+            let key = stale ? String(k.dropLast()) : k
+            guard let item = projectStore.item(key: key)?.item else { print("UISHOTS no item \(key)"); continue }
+            let body = (item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            itemSummaries.seed(key, ItemSummary(gist: "\(item.title): a sample summary from `--uishots`, not from the AI.",
+                                                points: ["The first key fact of the description.", "A step with the path `Sources/OverSireApp/item_page.swift`.",
+                                                         "A decision and its reason."],
+                                                open: ["One open question."], hash: stale ? "old" : ItemSummary.hash(body),
+                                                at: Date().addingTimeInterval(stale ? -3 * 86_400 : -7200)))
+        }
     }
 
     private func seedPlanner() {
@@ -385,6 +402,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private func shoot() {
         UIShots.shooting = true
         seedPlanner()
+        seedSummaries()
         let w = AppWindow(data: self)
         window = w
         w.window?.setFrameAutosaveName("")
