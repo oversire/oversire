@@ -48,7 +48,9 @@ final class AgentJudge {
         self.path = path
         self.agents = agents
         self.queue = queue
-        if let d = FileManager.default.contents(atPath: path), let c = try? JSONDecoder().decode([Judgement].self, from: d) { checks = c }
+        guard let d = FileManager.default.contents(atPath: path) else { return }
+        do { checks = try JSONDecoder().decode([Judgement].self, from: d) }
+        catch { log.error("AI checks: load of \(path, privacy: .public) failed: \(error.localizedDescription, privacy: .public)") }
     }
 
     var pending: [Judgement] {
