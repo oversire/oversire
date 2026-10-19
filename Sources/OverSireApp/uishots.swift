@@ -98,6 +98,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
+    // OVERSIRE_UISHOTS_AI=on: Settings › AI shows a sample key that passed Test. No AI job runs.
+    static let aiKey = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AI"] == "on" ? "sk-ant-uishots-3f9a" : nil
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()
@@ -364,6 +366,13 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         REPOS = RepoCatalog(path: REPO_CACHE_PATH).resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
         assignRepoColors(REPOS)
         projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: [])
+        if let key = UIShots.aiKey {
+            AI_CFG.format = .anthropic
+            AI_CFG.baseURL = "https://api.anthropic.com"
+            AI_CFG.model = "claude-haiku-5-5"
+            AI_CFG.enabled = true
+            AI_CFG.verified = AI_CFG.fingerprint(key: key)
+        }
         if UIShots.commands {
             PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]
             AgentCommandsCard.drafts = ["codex": "codex --full-auto; echo done"]

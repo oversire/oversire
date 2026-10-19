@@ -23,9 +23,7 @@ extension SettingsPage {
     func accounts(_ b: NSStackView) {
         providers(b)
         live(b)
-        let records = cloudAIRecords
-        b.addFull(CloudAICard(records))
-        if let records, UIShots.cloud == nil { RunnerSetup.shared.offerOnce(records: records) }
+        if let records = cloudAIRecords, UIShots.cloud == nil { RunnerSetup.shared.offerOnce(records: records) }
     }
 
     private func live(_ b: NSStackView) {
