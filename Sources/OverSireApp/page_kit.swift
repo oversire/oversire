@@ -215,6 +215,8 @@ final class Pill: Box {
         super.init(fill: tone.color.withAlphaComponent(0.16), border: nil, radius: 9)
         let s = NSStackView(h: [Glyph(tone.symbol, color: tone.color, size: 10),
                                 NSTextField.text(text ?? tone.word, size: 11.5, weight: .semibold, color: tone.color)], spacing: 4)
+        // The pill keeps its full text. The views around it give way.
+        s.arrangedSubviews.last?.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(s)
         NSLayoutConstraint.activate([
             s.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
@@ -317,11 +319,14 @@ class Row: Box {
 
     // Views in the row that show only on hover or focus. They keep their space.
     var revealViews: [NSView] = [] { didSet { updateFill() } }
+    // The fill and border when the row has no hover, selection or focus. A card or a tile sets them.
+    var restFill: NSColor? { didSet { updateFill() } }
+    var restBorder: NSColor? { didSet { updateFill() } }
 
     private func updateFill() {
-        fill = selected || (hover && onClick != nil) ? Palette.sel : nil
+        fill = selected || (hover && onClick != nil) ? Palette.sel : restFill
         let focused = window?.firstResponder === self
-        border = focused ? Palette.acc : nil
+        border = focused ? Palette.acc : restBorder
         overlay?.isHidden = !(hover || focused || hoverViews.contains { $0 is NSProgressIndicator })
         revealViews.forEach { $0.alphaValue = hover || focused ? 1 : 0 }
     }
@@ -419,13 +424,15 @@ final class TwoLine: NSStackView {
 
 // A number tile on a dashboard. A click opens the matching page.
 final class Tile: Row {
-    init(_ value: String, _ caption: String, tone: Tone, onClick: (() -> Void)?) {
+    /// `ring`: a wider border in this color, for a tile that asks for attention.
+    init(_ value: String, _ caption: String, tone: Tone, ring: NSColor? = nil, onClick: (() -> Void)?) {
         let v = NSTextField.text(value, size: 22, weight: .semibold)
         v.font = .monospacedDigitSystemFont(ofSize: 22, weight: .semibold)
         let c = NSStackView(h: [Glyph(tone, size: 12), NSTextField.text(caption, size: 12, color: Palette.mut, lines: 2)], spacing: 5, align: .top)
         let col = NSStackView(v: [v, c], spacing: 2)
         super.init([col], height: 64, inset: 14, label: "\(value) \(caption)", onClick: onClick)
-        fill = Palette.panel; border = Palette.line; radius = 10
+        if ring != nil { borderWidth = 2 }
+        restFill = Palette.panel; restBorder = ring ?? Palette.line; radius = 10
     }
     required init?(coder: NSCoder) { fatalError() }
 }

@@ -311,7 +311,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             if cached != nil, p.route != r { p.show(r) }
         }
         window?.title = r.title
-        window?.subtitle = r.url.absoluteString
+        window?.subtitle = r.crumbs.joined(separator: " › ")
         window?.setAccessibilityTitle("OverSire, \(r.title)")
         updateNav()
         reloadSidebar()
@@ -376,9 +376,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private let paletteId = NSToolbarItem.Identifier("palette")
     private let refreshId = NSToolbarItem.Identifier("refresh")
     private let settingsId = NSToolbarItem.Identifier("settings")
+    private let copyId = NSToolbarItem.Identifier("copy")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .flexibleSpace, navId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, refreshId, settingsId]
+        [.toggleSidebar, .flexibleSpace, navId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, copyId, refreshId, settingsId]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
 
@@ -411,6 +412,16 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             i.view = b
             i.label = "Refresh"
             return i
+        case copyId:
+            let i = NSToolbarItem(itemIdentifier: id)
+            let b = NSButton(image: NSImage(systemSymbolName: "link", accessibilityDescription: "Copy the link of this page")!, target: self,
+                             action: #selector(copyLink))
+            b.bezelStyle = .texturedRounded
+            b.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            b.toolTip = "Copy the oversire:// link of this page"
+            i.view = b
+            i.label = "Copy link"
+            return i
         case settingsId:
             let i = NSToolbarItem(itemIdentifier: id)
             let b = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")!, target: self,
@@ -437,6 +448,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
 
     @objc func goBack(_ sender: Any?) { router.back() }
     @objc func goForward(_ sender: Any?) { router.forward() }
+    @objc func copyLink() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(router.current.url.absoluteString, forType: .string)
+    }
     @objc func refreshNow() { data.refresh(force: true, completion: nil) }
     @objc func toggleSidebarNow(_ sender: Any?) { split.toggleSidebar(sender) }
     func setSidebarWidth(_ w: CGFloat) { split.splitView.setPosition(w, ofDividerAt: 0) }

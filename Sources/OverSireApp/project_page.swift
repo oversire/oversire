@@ -71,7 +71,7 @@ final class BoardCard: Row {
                                   NSTextField.text(item.title, size: 12.5, weight: .medium, lines: 3)], spacing: 4)
         if !chips.isEmpty { col.addArrangedSubview(NSStackView(h: chips, spacing: 5)) }
         super.init([col], height: 54, inset: 10, label: "\(item.key) \(item.title)") { go(.item(item.key, .overview)) }
-        fill = Palette.raise; border = Palette.line; radius = 8
+        restFill = Palette.raise; restBorder = Palette.line; radius = 8
         itemActions(url: item.url, key: item.key)
         commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
     }
@@ -127,7 +127,7 @@ final class ProjectPage: Page {
         gear.toolTip = "Project settings (⌘,)"
         gear.setAccessibilityLabel("Project settings")
         actions.append(gear)
-        col.addFull(PageHeader(snap.summary.title, caption: "\(snap.summary.identifier) · \(open) open · updated \(relativeTime(snap.fetchedAt))", actions: actions))
+        col.addFull(PageHeader(snap.summary.title, caption: "\(open) open · updated \(relativeTime(snap.fetchedAt))", actions: actions))
 
         let filters = NSStackView(h: [
             ToggleChip("Mine", on: onlyMine) { [weak self] in self?.flip(\.onlyMine) },
@@ -148,7 +148,7 @@ final class ProjectPage: Page {
             let head = Row([StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
                             NSTextField.text(opt.name, size: 12.5, weight: .semibold),
                             NSTextField.text("\(its.count)", size: 12, color: Palette.dim), Spacer()], height: 32)
-            head.fill = Palette.raise
+            head.restFill = Palette.raise
             list.add(head)
             let m = more[opt.id] ?? MoreRows()
             more[opt.id] = m

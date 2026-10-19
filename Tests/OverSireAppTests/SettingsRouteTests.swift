@@ -29,6 +29,15 @@ final class SettingsRouteTests: XCTestCase {
         XCTAssertEqual(Route.queue.path, "queue")
     }
 
+    func testCrumbsDoNotRepeatTheTitle() {
+        XCTAssertEqual(Route.item("OVERSIRE-131", .overview).crumbs, ["Projects", "OVERSIRE"])
+        XCTAssertEqual(Route.run(repo: "oversire/oversire", id: "9").crumbs, ["Runs", "oversire/oversire"])
+        XCTAssertEqual(Route.run(repo: "oversire/oversire", id: "9").title, "Run 9")
+        XCTAssertEqual(Route.settings(.ai).title, "AI")
+        XCTAssertTrue(Route.home.crumbs.isEmpty)
+        for r in Route.samples { XCTAssertFalse(r.crumbs.contains(r.title), "\(r)") }
+    }
+
     func testNewPagesKeepTheirSlug() {
         for p in Route.SettingsPage.allCases {
             XCTAssertEqual(open("oversire://settings/\(p.rawValue)"), .settings(p), p.rawValue)

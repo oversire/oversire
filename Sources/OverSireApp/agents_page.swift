@@ -10,13 +10,12 @@ final class AgentsPage: Page {
     private var replies: [String: NSTextField] = [:]
     private var sending: Set<String> = []
     private var note: (Tone, String)?
-    private let table = ColumnLayout(id: "worktrees", columns: [
-        TableColumn(id: "worktree", title: "Worktree", width: 200, min: 100),
-        TableColumn(id: "repo", title: "Repo", width: 130, min: 60, optional: true),
-        TableColumn(id: "branch", title: "Branch", width: 170, min: 60, optional: true),
+    private var allWorktrees = false
+    private let table = ColumnLayout(id: "worktrees-2", columns: [
+        TableColumn(id: "worktree", title: "Worktree", width: 260, min: 120),
+        TableColumn(id: "repo", title: "Repo and branch", width: 260, min: 80, optional: true),
         TableColumn(id: "session", title: "Session", width: 130, min: 60),
         TableColumn(id: "terms", title: "Terms", width: 44, min: 36, optional: true),
-        TableColumn(id: "item", title: "Item", width: 124, min: 60),
         TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
     ])
 
@@ -43,11 +42,25 @@ final class AgentsPage: Page {
         let waiting = idx.agents.filter { $0.value.phase == .waiting }.sorted { $0.value.since < $1.value.since }
         for (key, a) in waiting { col.addFull(waitingCard(key, a)) }
 
-        col.addFull(SectionTitle("Worktrees", count: idx.cards.count))
+        let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
+        let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
+        let filter = Segmented(["Active \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
+            self?.allWorktrees = i == 1
+            self?.reload()
+        }
+        col.addFull(SectionTitle("Worktrees", action: filter))
         let list = ListCard()
         list.add(TableHeader(table))
-        for c in idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity }) { list.add(cardRow(c)) }
-        if idx.cards.isEmpty { list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed")) }
+        for c in allWorktrees ? cards : active { list.add(cardRow(c)) }
+        if cards.isEmpty {
+            list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed"))
+        } else if !allWorktrees, active.count < cards.count {
+            let n = cards.count - active.count
+            list.add(Row([ActionButton("\(n) \(n == 1 ? "worktree has" : "worktrees have") no session · Show all", style: .link) { [weak self] in
+                self?.allWorktrees = true
+                self?.reload()
+            }, Spacer()], height: 32, label: "Show all worktrees"))
+        }
         col.addFull(list)
 
         col.addFull(SectionTitle("Orca activity"))
@@ -134,6 +147,11 @@ final class AgentsPage: Page {
         return box
     }
 
+    /// A worktree with an item, or with an agent that works or waits.
+    static func isActive(_ c: Workspace, linked: Bool) -> Bool {
+        linked || c.agents.contains { $0.phase == .working || $0.phase == .waiting }
+    }
+
     private func cardKey(_ c: Workspace) -> String? {
         data.agentIndex.agents.first { $0.value.card == c.id }?.key
             ?? data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }?.key
@@ -151,21 +169,26 @@ final class AgentsPage: Page {
         } else {
             agent = Chiplet("Shell only", symbol: "terminal")
         }
-        let item: NSView = key.map { k in Chiplet(k, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(k, .overview)) } }
-            ?? NSTextField.text("unlinked", size: 12, color: Palette.dim)
         let ci: NSView = key.flatMap { data.workstreams.stream($0)?.ci }.map { Glyph($0) as NSView } ?? NSTextField.text("—", color: Palette.dim)
-        let name = NSTextField.text(c.name, size: 12.5, mono: true)
-        name.lineBreakMode = .byTruncatingMiddle
-        let branch = NSTextField.text(co?.branch ?? "—", size: 12, color: Palette.mut, mono: true)
-        branch.lineBreakMode = .byTruncatingMiddle
+        let title = key.flatMap { data.projectStore.item(key: $0)?.2.title }
+        let name = title.map { NSTextField.text($0, size: 12.5) } ?? NSTextField.text(c.name, size: 12.5, mono: true)
+        name.lineBreakMode = title == nil ? .byTruncatingMiddle : .byTruncatingTail
+        name.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        name.toolTip = c.name
+        var worktree: [NSView] = [name]
+        if let key { worktree.insert(Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) }, at: 0) }
+        let place = NSTextField.text([c.repo, co?.branch].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
+                                     size: 12, color: Palette.mut, mono: true)
+        place.lineBreakMode = .byTruncatingMiddle
         let cells: [String: NSView] = [
-            "worktree": name, "repo": NSTextField.text(c.repo, size: 12, color: Palette.mut), "branch": branch,
-            "session": agent, "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "item": item, "ci": ci,
+            "worktree": NSStackView(h: worktree, spacing: 6), "repo": place,
+            "session": agent, "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
         ]
-        let open = ActionButton(key == nil ? "Open in Orca" : "Session", style: .plain) { [weak self] in
+        let open = ActionButton("Open", style: .plain) { [weak self] in
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }
-        let label = "\(c.name), \(c.repo), \(c.liveTerminals) terminals" + (key.map { ", item \($0)" } ?? ", unlinked")
+        open.setAccessibilityLabel(key.map { "Open the session of \($0)" } ?? "Open \(c.name) in Orca")
+        let label = "\(c.name), \(c.repo), \(c.liveTerminals) terminals" + (key.map { ", item \($0)" } ?? ", no item")
         let row = TableRow(table, cells: cells, trailing: [open], height: 40, label: label) { [weak self] in
             if let key { self?.go(.item(key, .overview)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }

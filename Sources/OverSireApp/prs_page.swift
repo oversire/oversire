@@ -30,13 +30,20 @@ final class PRsPage: Page {
             }
             return true
         }
+        guard !all.isEmpty else {
+            let card = ListCard()
+            card.add(data.firstLoad ? LoadingNote("Loading pull requests")
+                     : EmptyNote("No review waits for you, and you have no open pull request. OverSire reads the repos of Settings › Projects and repos with the gh CLI.",
+                                 symbol: "arrow.triangle.pull"))
+            col.addFull(card)
+            return
+        }
         let reviews = all.filter { !$0.pr.mine }, mine = all.filter { $0.pr.mine }
-        for (title, list, empty) in [("Review requests", reviews, "No review waits for you."), ("My pull requests", mine, "You have no open pull request.")] {
+        for (title, list) in [("Review requests", reviews), ("My pull requests", mine)] where !list.isEmpty {
             col.addFull(SectionTitle(title, count: list.count))
             let card = ListCard()
-            if !list.isEmpty { card.add(TableHeader(table)) }
+            card.add(TableHeader(table))
             for e in list { card.add(row(e.repo, e.pr)) }
-            if card.isEmpty { card.add(data.firstLoad ? LoadingNote("Loading pull requests") : EmptyNote(empty)) }
             col.addFull(card)
         }
     }
@@ -66,7 +73,7 @@ final class PRsPage: Page {
         if let key = linkedKey(repo, p) {
             cells["item"] = Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) }
         } else {
-            cells["item"] = NSTextField.text("unlinked", size: 11.5, color: Palette.dim)
+            cells["item"] = NSTextField.text("—", color: Palette.dim)
         }
         if let t = checks(repo, p) { cells["ci"] = Chiplet("CI \(t.word.lowercased())", symbol: t.symbol, color: t.color) }
         var actions: [NSView] = []

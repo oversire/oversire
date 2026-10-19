@@ -35,10 +35,14 @@ struct InboxEntry {
     var url: String? = nil
     var intake: (projectKey: String, item: IntakeItem)? = nil
     var activityId: String? = nil
+    /// The other Plane changes of the same item and day, in this one line.
+    var groupedIds: [String] = []
     var itemKey: String? = nil
     var itemURL: String? = nil
     var projectKey: String? = nil     // "SLING"
     var priority: String? = nil       // "High"; nil counts as "None"
+    /// The item of a Plane change, also when the item is gone.
+    var groupKey: String? = nil
 }
 
 // The project and priority filters of the Inbox. An empty set lets each entry pass.
@@ -87,11 +91,13 @@ final class InboxFeed {
             let found = store.item(e.itemId)
             let key = found?.item.key ?? ""
             let source: InboxEntry.Source = { if case .mention = e.change { return .mention }; return .plane }()
-            out.append(InboxEntry(id: "plane|" + e.id, source: source, title: "\(key) \(found?.item.title ?? "")".trimmingCharacters(in: .whitespaces),
+            let title = found.map { "\($0.item.key) \($0.item.title)" } ?? "A removed item"
+            out.append(InboxEntry(id: "plane|" + e.id, source: source, title: title,
                                   body: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at, unread: e.unread,
                                   route: key.isEmpty ? nil : .item(key, .activity), url: e.url, activityId: e.id,
-                                  itemKey: found?.item.key, itemURL: found?.item.url))
+                                  itemKey: found?.item.key, itemURL: found?.item.url, groupKey: "\(e.projectKey)|\(e.itemId)"))
         }
+        out = Self.grouped(out)
         let day = Date().addingTimeInterval(-86400)
         for (repo, runs) in data.grouped {
             for r in latestPerWorkflow(runs) where r.status == "completed" && lastActivity(r) > day && (r.isFailure || data.workstreams.link(runId: r.id) != nil) {
@@ -99,7 +105,7 @@ final class InboxFeed {
                 let link = data.workstreams.link(runId: r.id)
                 let id = "run|\(r.id)|\(r.attempt ?? 1)"
                 out.append(InboxEntry(id: id, source: .run, title: "\(r.workflowName ?? r.name) #\(r.number) · \(t.word)",
-                                      body: "\(repo) · \(r.headBranch)" + (link.map { " · \($0.key)" } ?? " · unlinked"),
+                                      body: "\(repo) · \(r.headBranch)" + (link.map { " · \($0.key)" } ?? ""),
                                       at: lastActivity(r), unread: !read.contains(id), route: .run(repo: repo, id: r.id), url: r.url))
             }
         }
@@ -142,6 +148,26 @@ final class InboxFeed {
         return out.sorted { $0.at > $1.at }
     }
 
+    /// One line for the Plane changes of one item on one day. The newest change shows, plus the count.
+    static func grouped(_ list: [InboxEntry], calendar: Calendar = .current) -> [InboxEntry] {
+        var out: [InboxEntry] = []
+        var at: [String: Int] = [:]
+        for e in list.sorted(by: { $0.at > $1.at }) {
+            guard e.source == .plane, let key = e.groupKey ?? e.itemKey, e.activityId != nil else { out.append(e); continue }
+            let k = "\(key)|\(calendar.startOfDay(for: e.at).timeIntervalSince1970)"
+            guard let i = at[k] else { at[k] = out.count; out.append(e); continue }
+            out[i].groupedIds.append(e.activityId!)
+            out[i].unread = out[i].unread || e.unread
+        }
+        for i in out.indices where !out[i].groupedIds.isEmpty {
+            let e = out[i]
+            out[i] = InboxEntry(id: e.id, source: e.source, title: e.title, body: "\(e.groupedIds.count + 1) changes · last: \(e.body)", at: e.at,
+                                unread: e.unread, route: e.route, url: e.url, activityId: e.activityId, groupedIds: e.groupedIds,
+                                itemKey: e.itemKey, itemURL: e.itemURL, groupKey: e.groupKey)
+        }
+        return out
+    }
+
     // The item of a run line.
     private func linkedKey(_ e: InboxEntry, _ data: AppData) -> String? {
         if case .run(_, let id) = e.route { return data.workstreams.link(runId: id)?.key }
@@ -149,20 +175,20 @@ final class InboxFeed {
     }
 
     func markRead(_ e: InboxEntry, store: ProjectStore) {
-        if let a = e.activityId { store.markActivityRead(a); return }
+        if let a = e.activityId { ([a] + e.groupedIds).forEach(store.markActivityRead); return }
         read.insert(e.id)
         save()
     }
 
     func markUnread(_ e: InboxEntry, store: ProjectStore) {
-        if let a = e.activityId { store.markActivityUnread(a); return }
+        if let a = e.activityId { ([a] + e.groupedIds).forEach(store.markActivityUnread); return }
         read.remove(e.id)
         save()
     }
 
     func markAllRead(_ list: [InboxEntry], store: ProjectStore) {
         for e in list where e.unread && e.source != .intake {
-            if let a = e.activityId { store.markActivityRead(a) } else { read.insert(e.id) }
+            if let a = e.activityId { ([a] + e.groupedIds).forEach(store.markActivityRead) } else { read.insert(e.id) }
         }
         save()
     }
@@ -181,9 +207,11 @@ final class InboxRow: TableRow {
         TableColumn(id: "title", title: "Title", width: 300, min: 160, flexible: true),
         TableColumn(id: "when", title: "When", width: 56, min: 40, optional: true),
     ])
+    /// The Intake tab has one source only.
+    static let intakeLayout = ColumnLayout(id: "inbox-intake", columns: layout.columns.filter { $0.id != "source" })
     var onKey: ((String) -> Bool)?
 
-    init(_ e: InboxEntry, onClick: @escaping () -> Void) {
+    init(_ e: InboxEntry, layout: ColumnLayout = InboxRow.layout, onClick: @escaping () -> Void) {
         let dot = Box(fill: e.unread ? Palette.acc : .clear, border: nil, radius: 3.5)
         dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
         dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
@@ -193,7 +221,7 @@ final class InboxRow: TableRow {
             "title": TwoLine(e.title, e.body, weight: e.unread ? .semibold : .regular),
             "when": NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim),
         ]
-        super.init(InboxRow.layout, cells: cells, height: 48,
+        super.init(layout, cells: cells, height: 48,
                    label: (e.unread ? "Unread. " : "") + "\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -264,7 +292,7 @@ final class InboxPage: Page {
         }
         let shown = kept.filter { tab == .all || $0.source.tab == tab }
         let list = ListCard()
-        if !shown.isEmpty { list.add(TableHeader(InboxRow.layout)) }
+        if !shown.isEmpty { list.add(TableHeader(tab == .intake ? InboxRow.intakeLayout : InboxRow.layout)) }
         list.add(shown, more: more) { [unowned self] in self.row($0) }
         if list.isEmpty, data.loadingFirst { list.add(LoadingNote("Loading the inbox")) }
         if list.isEmpty {
@@ -352,7 +380,7 @@ final class InboxPage: Page {
             }
         }
         actions.forEach { ($0 as? NSButton)?.controlSize = .small }
-        let r = InboxRow(e) { [weak self] in self?.open(e) }
+        let r = InboxRow(e, layout: tab == .intake ? InboxRow.intakeLayout : InboxRow.layout) { [weak self] in self?.open(e) }
         if e.intake == nil, let key = e.itemKey, let url = e.itemURL {
             r.itemActions(url: url, key: key)
         } else if e.intake == nil, e.source == .run, let url = e.url {

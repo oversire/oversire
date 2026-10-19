@@ -188,13 +188,27 @@ enum Route: Equatable {
         case .agents: return "Sessions"
         case .queue: return "Queue"
         case .runs: return "Runs"
-        case .run(let repo, let id): return "Run \(id) · \(repo)"
+        case .run(_, let id): return "Run \(id)"
         case .prs: return "Pull requests"
         case .insights: return "Insights"
-        case .settings: return "Settings"
+        case .settings(let p, _, _): return p.title
         case .project(let k): return k
-        case .projectSettings(let k, _): return "\(k) settings"
+        case .projectSettings: return "Project settings"
         case .item(let k, _): return k
+        }
+    }
+
+    /// The places above this one, for the title bar.
+    var crumbs: [String] {
+        switch self {
+        case .run(let repo, _): return ["Runs", repo]
+        case .settings: return ["Settings"]
+        case .project: return ["Projects"]
+        case .projectSettings(let k, _): return ["Projects", k]
+        case .item(let k, _):
+            guard let dash = k.lastIndex(of: "-") else { return ["Projects"] }
+            return ["Projects", String(k[..<dash])]
+        default: return []
         }
     }
 

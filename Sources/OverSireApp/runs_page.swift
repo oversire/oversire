@@ -6,7 +6,6 @@ final class RunLine: TableRow {
     static let layout = ColumnLayout(id: "runs", columns: [
         TableColumn(id: "state", title: "", width: 16, min: 16),
         TableColumn(id: "run", title: "Run", width: 300, min: 160, flexible: true),
-        TableColumn(id: "progress", title: "Progress", width: 70, min: 50, optional: true),
         TableColumn(id: "item", title: "Item", width: 112, min: 60),
         TableColumn(id: "when", title: "When", width: 90, min: 50, optional: true),
     ])
@@ -14,17 +13,17 @@ final class RunLine: TableRow {
     init(repo: String, run r: Run, data: AppData, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         let tone = Tone(r)
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
-        var cells: [String: NSView] = [
-            "state": Glyph(tone),
-            "run": TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(name) · \(r.headBranch) · \(r.displayTitle)"),
-        ]
         let live = r.status != "completed"
         let total = live ? r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) : nil
-        if live { cells["progress"] = RunClock(r, total: total, parts: .bar) }
+        let run: NSView = TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(name) · \(r.headBranch) · \(r.displayTitle)")
+        var cells: [String: NSView] = [
+            "state": Glyph(tone),
+            "run": live ? NSStackView(v: [run, RunClock(r, total: total, parts: .bar, inline: true)], spacing: 3) : run,
+        ]
         if let link = data.workstreams.link(runId: r.id) {
             cells["item"] = Chiplet(link.key, color: Palette.fg, mono: true) { go(.item(link.key, .overview)) }
         } else {
-            cells["item"] = Chiplet("unlinked")
+            cells["item"] = NSTextField.text("—", color: Palette.dim)
         }
         let when = live ? "running" : relativeTime(lastActivity(r))
         cells["when"] = live ? RunClock(r, total: total, parts: .times) : NSTextField.text(when, size: 11.5, color: Palette.dim)
@@ -319,7 +318,7 @@ final class RunPage: Page {
 
     override func build(_ col: NSStackView) {
         guard let r = current else {
-            col.addFull(PageHeader(route.title, caption: repo))
+            col.addFull(PageHeader(route.title))
             let c = ListCard()
             c.add(LoadingNote("Loading the run"))
             col.addFull(c)

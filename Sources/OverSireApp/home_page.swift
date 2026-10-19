@@ -9,6 +9,7 @@ struct NeedsYou: Equatable {
     let body: String
     let at: Date
     let route: Route
+    var keys: [String] = []   // the items of a grouped line
     var tone: Tone {
         switch kind {
         case .agentWaiting: return .waiting
@@ -31,6 +32,23 @@ struct NeedsYou: Equatable {
 
     static func ==(a: NeedsYou, b: NeedsYou) -> Bool { a.kind == b.kind && a.title == b.title && a.route == b.route }
 
+    /// One line for each check, or one line for each verdict when two or more checks have it.
+    static func checks(_ pending: [Judgement]) -> [NeedsYou] {
+        [Judgement.Verdict.done, .stuck].flatMap { v -> [NeedsYou] in
+            let list = pending.filter { $0.verdict == v }
+            let at = list.map(\.at).max() ?? .distantPast
+            if list.count > 1 {
+                return [NeedsYou(kind: .aiCheck, title: "AI: \(list.count) sessions \(v == .done ? "look done" : "look stuck")",
+                                 body: list.map(\.key).joined(separator: " · "), at: at, route: .queue, keys: list.map(\.key))]
+            }
+            return list.map { c in
+                NeedsYou(kind: .aiCheck, title: "AI: the \(c.key) session \(c.verdict.word.lowercased())",
+                         body: c.verdict == .done ? "Approve to start the next item in the queue." : "Approve a nudge, or stop it.",
+                         at: c.at, route: .queue)
+            }
+        }
+    }
+
     static func collect(_ data: AppData) -> [NeedsYou] {
         var out: [NeedsYou] = []
         let ws = data.workstreams
@@ -38,11 +56,7 @@ struct NeedsYou: Equatable {
             out.append(NeedsYou(kind: .agentWaiting, title: "\(key) asks a question",
                                 body: a.message ?? "The session waits for your answer.", at: a.since, route: .item(key, .overview)))
         }
-        for c in data.aiChecks.pending {
-            out.append(NeedsYou(kind: .aiCheck, title: "AI: the \(c.key) session \(c.verdict.word.lowercased())",
-                                body: c.verdict == .done ? "Approve to start the next item in the queue." : "Approve a nudge, or stop it.",
-                                at: c.at, route: .queue))
-        }
+        out += checks(data.aiChecks.pending)
         for (repo, r) in failingRuns(data.grouped) {
             let link = ws.link(runId: r.id)
             let watched = link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false
@@ -72,7 +86,8 @@ struct NeedsYou: Equatable {
 final class NeedsYouRow: Row {
     init(_ n: NeedsYou, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         let when = NSTextField.text(relativeTime(n.at), size: 11.5, color: Palette.dim)
-        super.init([Glyph(n.tone), TwoLine(n.title, n.body), when], height: 46,
+        let review: [NSView] = n.keys.isEmpty ? [] : [ActionButton("Review") { go(n.route) }]
+        super.init([Glyph(n.tone), TwoLine(n.title, n.body)] + review + [when], height: 46,
                    label: "\(n.tone.word): \(n.title). \(n.body)") { go(n.route) }
         if case .run(let repo, let id) = n.route, let commands,
            let r = commands.data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) {
@@ -121,7 +136,7 @@ final class WorkstreamCard: Row {
             chips.append(Chiplet("No CI yet"))
         }
         if let p = s.prs.first { chips.append(Chiplet("PR #\(p.pr.number) \(p.pr.isDraft ? "draft" : p.pr.state.lowercased())", symbol: "arrow.triangle.pull")) }
-        let chipRow = NSStackView(h: chips, spacing: 6)
+        let chipRow = NSStackView(h: chips + [Spacer()], spacing: 6)
         // In a narrow card the last chips drop out first. The state pill stays.
         for (i, c) in chips.enumerated() where i > 0 { chipRow.setVisibilityPriority(.init(rawValue: 900 - Float(i) * 10), for: c) }
         chipRow.setClippingResistancePriority(.defaultLow, for: .horizontal)
@@ -146,7 +161,7 @@ final class WorkstreamCard: Row {
         super.init([v], height: 70, inset: 14, label: "\(s.key) \(s.item?.title ?? ""), " + chips.compactMap { $0.accessibilityLabel() }.joined(separator: ", ")) {
             go(.item(s.key, .overview))
         }
-        fill = Palette.panel; border = Palette.line; radius = 10
+        restFill = Palette.panel; restBorder = Palette.line; radius = 10
         if let term = col.last as? Box, col.count == 3 { term.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
         if let item = s.item { itemActions(url: item.url, key: s.key) }
     }
@@ -182,12 +197,15 @@ final class HomePage: Page {
         df.dateFormat = "EEEE, MMM d"
         col.addFull(PageHeader("Home", caption: "\(df.string(from: Date())) · \(streams.count) workstream\(streams.count == 1 ? "" : "s") · \(running.count) run\(running.count == 1 ? "" : "s") in progress"))
 
+        let checks = data.aiChecks.pending.count
         let linked = running.filter { data.workstreams.link(runId: $0.run.id) != nil }.count
         var tiles: [NSView] = [
             Tile("\(running.count)", "Running now · \(linked) linked", tone: .running) { [weak self] in self?.go(.runs(.running)) },
             Tile("\(failing.count)", failing.isEmpty ? "Failing runs · all green" : "Failing runs", tone: failing.isEmpty ? .ok : .bad) { [weak self] in self?.go(.runs(.failed)) },
             Tile("\(agents.count)", "Sessions · \(agents.filter { $0.phase == .waiting }.count) need input", tone: .working) { [weak self] in self?.go(.agents) },
-            Tile("\(data.queue.count)", "Queue · \(data.aiChecks.pending.count) AI checks", tone: .queued) { [weak self] in self?.go(.queue) },
+            Tile("\(data.queue.count)", "Queue · \(checks) AI check\(checks == 1 ? "" : "s")", tone: .queued, ring: checks > 0 ? Palette.intake : nil) { [weak self] in
+                self?.go(.queue)
+            },
         ]
         if data.has(.intake) {
             tiles.append(Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),
