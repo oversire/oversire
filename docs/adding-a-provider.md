@@ -154,11 +154,14 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.rerunJob` | `JobRerunning` |
 | `.sessionInput`, `.sessionTail` | `SessionIO` |
 | `.reveal` | `Revealing` |
+| `.sessionHistory` | `SessionHistoryReading` |
 | `.relations` | `RelationManaging` |
 | `.projectSettings` | `ProjectSettingsReading` |
 | `.projectSettingsEdit` | `ProjectSettingsEditing` |
 
 Add the capability to `capabilities` and conform to the protocol. The suite fails when one is there without the other. The UI hides a feature that no account supports.
+
+`SessionHistoryReading` gives the status job the turns of a session as a `SessionDigest`. Read the transcript of the agent, not the screen. For a session on this Mac, use the injected `TranscriptReading`. For a remote host, run a read command on that host. Throw `ProviderError.notFound` when there is no record. Throw `.unsupported(.sessionHistory)` when the session cannot have a record. Then the app uses the screen only and writes no warning. Each other error writes a warning to Settings › Logs.
 
 ## 6. Record fixtures
 

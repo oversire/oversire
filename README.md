@@ -79,6 +79,8 @@ AI helps in New item and in the editor. It is off until you set it up. Go to **S
 
 Each change saves at once. There is no Save button.
 
+**Local CLI** is the second engine. It uses an agent CLI on this Mac, for example `claude` or `codex`, and the subscription of that CLI. It needs no API key. Settings › AI sets the order of the engines. When one engine is not available, OverSire uses the next one. See [docs/ai-and-logs.md](docs/ai-and-logs.md).
+
 What AI does:
 - **Title and fields** — from the description, it suggests a title, two other titles, and field values. Click Suggest again for new ones
 - **Tidy** — makes the description into clear Markdown. Undo is one click
@@ -360,6 +362,8 @@ Each workflow on each branch counts. A newer run of the same workflow replaces a
 
 A small blue dot on the icon means a tracked project has unread activity. The CI colour still wins. Turn the dot off in Settings › General › Menu bar popover.
 
+A small amber ▲ on the icon means that a background job of OverSire has a problem, for example an AI job or a poll. Settings › Logs shows the problem and the log. See [docs/ai-and-logs.md](docs/ai-and-logs.md).
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -371,6 +375,7 @@ A small blue dot on the icon means a tracked project has unread activity. The CI
 | "Plane does not accept the token" | The token is not for that workspace, or it expired. Make a new token in that workspace |
 | A workspace stays on polling | A Plane webhook needs a workspace admin. Also check that the cloud is up to date |
 | Quick capture shortcut does nothing | Another app has the shortcut. Settings › General › Quick capture and snap shows the error. Record a different shortcut |
+| Amber ▲ on the menu bar icon | A background job fails. Open Settings › Logs. The problem has a button to its settings |
 | AI switch is disabled | Click Test in Settings › AI. A change to the format, URL, model or key needs a new test |
 | Popover closes while typing | Expand a PR or open an item first — this switches to semitransient mode |
 | Config changes not taking effect | Each change in Settings saves at once and takes effect without a restart. Check that the change shows in `~/.config/oversire/config.json` |
