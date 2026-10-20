@@ -418,7 +418,7 @@ final class AgentJudge {
             self.busy.remove(key)
             let old = self.ends.first { $0.key == key && $0.message == a.messageHash }
             var e = SessionEnd(id: old?.id ?? UUID().uuidString, key: key, message: a.messageHash, verdict: v, steps: steps,
-                               followUpAt: follow, blockedBy: by, at: self.now(), byAI: ai)
+                               followUpAt: follow, blockedBy: by.filter { $0 != key.uppercased() }, at: self.now(), byAI: ai)
             // A check again keeps the ticks of the same steps.
             for i in e.steps.indices { e.steps[i].ticked = old?.steps.first { $0.text == e.steps[i].text }?.ticked }
             e.snoozedUntil = old?.snoozedUntil

@@ -168,7 +168,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             if inQueue { self.go(.queue) } else { self.data.queue.add(item, snap: snap) }
         }]
         if let a = stream?.agent {
-            actions.append(Pill(Tone(a.phase), text: a.label()))
+            actions.append(data.agentIndex.pill(key) ?? Pill(Tone(a.phase), text: a.label()))
         } else {
             let b = ActionButton("Start in Orca", symbol: "play.fill", style: .primary)
             b.onClick = { [weak self, weak b] in
@@ -506,7 +506,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
         let left = NSStackView(v: [], spacing: 8)
         if let a = s.agent {
-            left.addFull(NSStackView(h: [NSTextField.text("Session", size: 12.5, weight: .semibold), Pill(Tone(a.phase), text: a.label()), Spacer()], spacing: 6))
+            left.addFull(NSStackView(h: [NSTextField.text("Session", size: 12.5, weight: .semibold), data.agentIndex.pill(key) ?? Pill(Tone(a.phase), text: a.label()), Spacer()], spacing: 6))
             let lines = tail.isEmpty ? [a.message ?? "Reading the terminal…"] : Array(tail.suffix(14))
             left.addFull(TermView(lines: lines, height: 150))
             if a.phase != .done && a.phase != .failed { left.addFull(replyRow()) }
@@ -586,7 +586,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func session(_ main: NSStackView, stream: Workstream?) {
         if let a = stream?.agent {
             let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
-            c.add(NSStackView(h: [Pill(Tone(a.phase), text: a.label()), Chiplet(a.agent.rawValue, symbol: "cpu"),
+            c.add(NSStackView(h: [data.agentIndex.pill(key) ?? Pill(Tone(a.phase), text: a.label()), Chiplet(a.agent.rawValue, symbol: "cpu"),
                                   NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 6))
             c.add(tail.isEmpty ? InlineSpinner("Reading the terminal…") : TermView(lines: tail, height: 300))
             if a.phase != .done && a.phase != .failed { c.add(replyRow()) }

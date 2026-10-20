@@ -19,6 +19,16 @@ extension Tone {
 }
 
 extension AgentIndex {
+    /// The state pill of a session: the SessionState after a screen read, else the runtime phase.
+    func pill(_ key: String) -> Pill? {
+        if let st = state(key) {
+            let p = Pill(Tone(st), text: pillText(key) ?? st.label)
+            p.toolTip = st.facts
+            return p
+        }
+        return agent(key).map { Pill(Tone($0.phase), text: $0.label()) }
+    }
+
     /// The pill text of a session: "Quiet 12m", "Background 27m", "Session done".
     func pillText(_ key: String) -> String? {
         guard let st = state(key), let a = agent(key) else { return nil }
