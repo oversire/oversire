@@ -25,8 +25,8 @@ struct StatusCard {
             p.toolTip = s.byAI ? "Written by the AI engine" : "From the closing message, without AI"
             trailing.append(p)
             trailing.append(NSTextField.text(reading ? "Reading…" : relativeAgo(s.at), size: 12, color: Palette.dim))
-        } else if let agent {
-            trailing.append(agents.pill(k) ?? Pill(Tone(agent.phase), text: agent.label()))
+        } else if let st = job.item(k) {
+            trailing.append(StatusPill(st))
         }
         let closed = data.projectStore.isDone(key: k)
         if agent != nil {

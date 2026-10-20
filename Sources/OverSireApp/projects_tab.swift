@@ -409,7 +409,8 @@ final class AgentPill: NSView {
     private let color: NSColor
     private let dashed: Bool
 
-    init(_ agent: AgentSession) {
+    // `status` gives the word and the color of the item status. The phase gives the dash and the pulse.
+    init(_ agent: AgentSession, status: ItemStatus? = nil) {
         switch agent.phase {
         case .working: color = AgentPill.orca
         case .waiting: color = .systemOrange
@@ -417,16 +418,17 @@ final class AgentPill: NSView {
         case .starting, .failed: color = .secondaryLabelColor
         }
         dashed = agent.phase == .starting || agent.phase == .failed
-        let l = NSTextField(labelWithString: agent.label())
+        let text = status?.label ?? agent.label()
+        let l = NSTextField(labelWithString: text)
         l.font = .systemFont(ofSize: 10.5, weight: .semibold)
-        l.textColor = agent.phase == .failed ? .systemRed : color
+        l.textColor = agent.phase == .failed ? .systemRed : status?.tone.color ?? color
         let tw = ceil(l.intrinsicContentSize.width)
         super.init(frame: NSRect(x: 0, y: 0, width: tw + 26, height: 18))
         l.frame = NSRect(x: 19, y: 1, width: tw + 2, height: 15)
         addSubview(l)
         let dot = NSView(frame: NSRect(x: 8, y: 5.5, width: 7, height: 7))
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = (agent.phase == .failed ? NSColor.systemRed : color).cgColor
+        dot.layer?.backgroundColor = (agent.phase == .failed ? NSColor.systemRed : status?.tone.color ?? color).cgColor
         dot.layer?.cornerRadius = 3.5
         if agent.phase == .working || agent.phase == .starting {
             let pulse = CABasicAnimation(keyPath: "opacity")
@@ -436,10 +438,10 @@ final class AgentPill: NSView {
         }
         addSubview(dot)
         var tip = "\(agent.agent.rawValue) · \(agent.repo.isEmpty ? "Orca" : agent.repo)"
-        if let m = agent.message, !m.isEmpty { tip += "\n" + String(m.prefix(300)) }
+        if let h = status?.headline, !h.isEmpty { tip += "\n" + h } else if let m = agent.message, !m.isEmpty { tip += "\n" + String(m.prefix(300)) }
         toolTip = tip + (agent.phase == .failed ? "" : "\nClick to open the terminal in Orca")
         setAccessibilityRole(.button)
-        setAccessibilityLabel("Session: " + agent.label())
+        setAccessibilityLabel("Session: " + text)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -469,11 +471,11 @@ final class ProjectItemRow: NSView {
 
     // `agent` shows a pill. `canStart` shows ▶ on hover when no agent works on the item.
     init(item: Item, snap: ProjectSnapshot, unread: Bool, last: String?, w: CGFloat, expanded: Bool,
-         progress: (done: Int, total: Int)? = nil, agent: AgentSession? = nil, canStart: Bool = false) {
+         progress: (done: Int, total: Int)? = nil, agent: AgentSession? = nil, status: ItemStatus? = nil, canStart: Bool = false) {
         self.urlStr = item.url
         self.expanded = expanded
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: ROW_H))
-        let pill = agent.map(AgentPill.init)
+        let pill = agent.map { AgentPill($0, status: status) }
         hasAgent = agent != nil
         let reserve: CGFloat = pill.map { $0.frame.width + 6 } ?? (canStart ? 28 : 0)
         wantsLayer = true
@@ -740,6 +742,7 @@ extension TabVC {
         }
         let tracked = (NSApp.delegate as? GHActionsBar)?.projectCatalog.resolve(PROJECTS_CFG) ?? []
         let agents = (NSApp.delegate as? GHActionsBar)?.agentIndex.ready
+        let job = (NSApp.delegate as? GHActionsBar)?.statusJob
         if PROJECTS_CFG.workspaces.isEmpty {
             return [EmptyRow("Add a Plane workspace in Settings → Providers.", w: w, icon: "square.grid.2x2")]
         }
@@ -801,7 +804,7 @@ extension TabVC {
                 let row = ProjectItemRow(item: item, snap: snap, unread: store.isUnread(itemId: item.id),
                                          last: last, w: w, expanded: false,
                                          progress: progress.total > 0 ? progress : nil,
-                                         agent: agents?.agent(item.key),
+                                         agent: agents?.agent(item.key), status: job?.item(item.key),
                                          canStart: agents != nil && agents?.agent(item.key) == nil
                                             && snap.option(item.statusOptionId)?.category ?? .todo == .todo)
                 row.onToggle = { ItemWindow.show(item.id) }

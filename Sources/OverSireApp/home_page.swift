@@ -128,10 +128,10 @@ final class HomeRunRow: Row {
 
 // A workstream on Home: item, checkout, agent, CI and PR in one card.
 final class WorkstreamCard: Row {
-    init(_ s: Workstream, go: @escaping (Route) -> Void) {
+    init(_ s: Workstream, status: ItemStatus?, go: @escaping (Route) -> Void) {
         let title = NSTextField.text(s.item?.title ?? "Not in a tracked project", size: 13.5, weight: .semibold)
         var chips: [NSView] = []
-        if let a = s.agent { chips.append(Pill(Tone(a.phase), text: a.label())) }
+        if let status { chips.append(StatusPill(status)) }
         if let co = s.checkouts.first(where: { !$0.branch.isEmpty }) ?? s.checkouts.first {
             chips.append(Chiplet((co.path as NSString).lastPathComponent, symbol: "folder", mono: true))
             if !co.branch.isEmpty { chips.append(Chiplet(co.branch, symbol: "arrow.triangle.branch", mono: true)) }
@@ -234,7 +234,7 @@ final class HomePage: Page {
             c.add(EmptyNote("No session works now. Start an item from its page or from the queue.", symbol: "moon.zzz"))
             main.addFull(c)
         }
-        for s in streams.prefix(10) { main.addFull(WorkstreamCard(s) { [weak self] in self?.go($0) }) }
+        for s in streams.prefix(10) { main.addFull(WorkstreamCard(s, status: data.statusJob.item(s.key)) { [weak self] in self?.go($0) }) }
         let next = data.queue.upNext(store: data.projectStore)
         if !next.isEmpty {
             let c = Card(title: "Up next", trailing: [ActionButton("Open queue") { [weak self] in self?.go(.queue) }])

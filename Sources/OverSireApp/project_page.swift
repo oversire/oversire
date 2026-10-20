@@ -8,14 +8,15 @@ final class ItemLine: TableRow {
          TableColumn(id: "key", title: "ID", width: keyWidth, min: 60),
          TableColumn(id: "title", title: "Title", width: 200, min: 160, flexible: true),
          TableColumn(id: "sub", title: "Sub", width: 52, min: 36, optional: true),
-         TableColumn(id: "session", title: "Session", width: 112, min: 60, optional: true),
+         TableColumn(id: "session", title: "Status", width: 132, min: 60, optional: true),
          TableColumn(id: "ci", title: "CI", width: 56, min: 36, optional: true),
          TableColumn(id: "priority", title: "Priority", width: 72, min: 50, optional: true),
          TableColumn(id: "who", title: "Who", width: 34, min: 24, optional: true),
          TableColumn(id: "updated", title: "Updated", width: 60, min: 44, optional: true)]
     }
 
-    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, layout: ColumnLayout, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
+    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?, layout: ColumnLayout, commands: RowCommander? = nil,
+         go: @escaping (Route) -> Void) {
         let opt = snap.option(item.statusOptionId)
         var cells: [String: NSView] = [
             "status": StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16),
@@ -28,11 +29,11 @@ final class ItemLine: TableRow {
             cells["sub"] = NSStackView(h: [ProgressRing(done: prog.done, total: prog.total).sized(14),
                                            NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)], spacing: 4)
         }
-        if let a = stream?.agent { cells["session"] = Pill(Tone(a.phase), text: a.label()) }
+        cells["session"] = StatusPill.or(status)
         if let ci = stream?.ci { cells["ci"] = Chiplet("CI", symbol: ci.symbol, color: ci.color) }
         if let p = item.fields["Priority"], p != "None" { cells["priority"] = Chiplet(p) }
         if let who = item.assignees.first { cells["who"] = Avatar(who) }
-        let parts = [opt?.name, stream?.agent?.label(), stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
+        let parts = [opt?.name, status?.label, stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
         super.init(layout, cells: cells, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
         itemActions(url: item.url, key: item.key)
         commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
@@ -62,14 +63,14 @@ final class Avatar: Box {
 
 // A card on the board: key, title and chips.
 final class BoardCard: Row {
-    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
+    init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
         var chips: [NSView] = []
-        if let a = stream?.agent { chips.append(Pill(Tone(a.phase), text: a.label())) }
+        if let status { chips.append(StatusPill(status)) }
         if let ci = stream?.ci { chips.append(Glyph(ci, size: 12)) }
         if let p = item.fields["Priority"], p != "None" { chips.append(Chiplet(p)) }
         let col = NSStackView(v: [NSTextField.text(item.key, size: 11, color: Palette.dim, mono: true),
                                   NSTextField.text(item.title, size: 12.5, weight: .medium, lines: 3)], spacing: 4)
-        if !chips.isEmpty { col.addArrangedSubview(NSStackView(h: chips, spacing: 5)) }
+        if !chips.isEmpty { col.addArrangedSubview(NSStackView(h: chips + [Spacer()], spacing: 5)) }
         super.init([col], height: 54, inset: 10, label: "\(item.key) \(item.title)") { go(.item(item.key, .overview)) }
         restFill = Palette.raise; restBorder = Palette.line; radius = 8
         itemActions(url: item.url, key: item.key)
@@ -152,7 +153,7 @@ final class ProjectPage: Page {
             list.add(head)
             let m = more[opt.id] ?? MoreRows()
             more[opt.id] = m
-            list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), layout: table) { self?.go($0) } }
+            list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), status: self?.data.statusJob.item(i.key), layout: table) { self?.go($0) } }
         }
         if list.list.arrangedSubviews.count == 1 { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
         col.addFull(list)
@@ -176,7 +177,7 @@ final class ProjectPage: Page {
             c.add(NSStackView(h: [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
                                   NSTextField.text(opt.name, size: 12.5, weight: .semibold),
                                   NSTextField.text("\(its.count)", size: 12, color: Palette.dim)], spacing: 6))
-            for i in its.prefix(25) { c.add(BoardCard(i, snap: snap, stream: ws.stream(i.key), commands: commands) { [weak self] in self?.go($0) }) }
+            for i in its.prefix(25) { c.add(BoardCard(i, snap: snap, stream: ws.stream(i.key), status: data.statusJob.item(i.key), commands: commands) { [weak self] in self?.go($0) }) }
             if its.count > 25 { c.add(NSTextField.text("\(its.count - 25) more", size: 12, color: Palette.dim)) }
             if its.isEmpty { c.add(NSTextField.text("No items", size: 12, color: Palette.dim)) }
             return c
@@ -228,7 +229,7 @@ final class MyItemsPage: Page {
         let card = ListCard()
         if !ordered.isEmpty { card.add(TableHeader(table)) }
         card.add(ordered, more: more) { [weak self, table, commands] e in
-            ItemLine(e.item, snap: e.snap, stream: e.stream, layout: table, commands: commands) { self?.go($0) }
+            ItemLine(e.item, snap: e.snap, stream: e.stream, status: self?.data.statusJob.item(e.item.key), layout: table, commands: commands) { self?.go($0) }
         }
         pageBusy = data.projectsLoading
         if card.isEmpty { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }

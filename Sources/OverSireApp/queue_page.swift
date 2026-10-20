@@ -239,15 +239,7 @@ final class QueuePage: Page {
     }
 
     private func runningCard(_ c: QueueBoard.Card, kind: (String) -> AreaKind) -> NSView {
-        let idx = data.agentIndex
-        var badge: NSView? = idx.agent(c.key).map { Pill(Tone($0.phase), text: $0.label()) }
-        if let st = idx.state(c.key) {
-            var views: [NSView] = [Pill(Tone(st), text: idx.pillText(c.key) ?? st.label)]
-            if let j = data.statusJob.pending.first(where: { $0.key == c.key.uppercased() }) {
-                views.append(NSTextField.text(j.word, size: 11.5, weight: .medium, color: Tone(j.state).color))
-            }
-            badge = NSStackView(h: views, spacing: 6)
-        }
+        let badge = data.statusJob.item(c.key).map { StatusPill($0) }
         return card(c, lead: Glyph("play.fill", color: Palette.run, size: 10), badge: badge, kind: kind,
                     note: claimText(c.key), label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) }
     }
@@ -306,8 +298,7 @@ final class QueuePage: Page {
     // The dense list: one line per item.
     private func list(_ card: Card, _ b: QueueBoard, lane: QueueLane, pick: QueueLane.Pick, kind: @escaping (String) -> AreaKind) {
         for c in b.running {
-            let a = data.agentIndex.agent(c.key)
-            card.add(line(c, lead: Glyph("play.fill", color: Palette.run, size: 11), kind: kind, status: a.map { Pill(Tone($0.phase), text: $0.label()) },
+            card.add(line(c, lead: Glyph("play.fill", color: Palette.run, size: 11), kind: kind, status: data.statusJob.item(c.key).map { StatusPill($0) },
                           label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) })
         }
         let entries = lane.entries

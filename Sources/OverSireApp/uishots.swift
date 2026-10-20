@@ -566,6 +566,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         // explain:loading, explain:result or explain:error, at the first run row, else at the window center.
                         let row = UIShots.find(root) { ($0 as? Row)?.menuItems != nil && ($0.accessibilityLabel() ?? "").contains("#") } ?? root
                         ExplainPopover.sample(at: row, phase: UIShots.explainPhase(String(p.dropFirst(8))))
+                    } else if p.hasPrefix("hover:"), let root = w.window?.contentView {
+                        // hover:<text>: the summary of the first status pill whose label has the text.
+                        let text = String(p.dropFirst(6))
+                        if let pill = UIShots.find(root, { ($0 as? StatusPill).map { text.isEmpty || $0.status.label.contains(text) } ?? false }) as? StatusPill {
+                            pill.hover?.show()
+                        } else { print("UISHOTS no status pill \(p)") }
                     } else if p.hasPrefix("snap:") {
                         self.snapPanel?.close()
                         self.snapPanel = UIShots.snapSample(String(p.dropFirst(5)), shooting: w)
@@ -591,7 +597,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -637,7 +643,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber ?? QueuePage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber ?? QueuePage.windowNumber ?? CommandPalette.windowNumber ?? HoverSummary.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")

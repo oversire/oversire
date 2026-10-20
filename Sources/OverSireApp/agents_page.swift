@@ -171,12 +171,8 @@ final class AgentsPage: Page {
         let job = data.statusJob
         let agent: NSView
         var live = false
-        if let key, let a = data.agentIndex.agent(key), a.card == c.id, let st = data.agentIndex.state(key) {
-            agent = Pill(Tone(st), text: data.agentIndex.pillText(key) ?? st.label)
-            agent.toolTip = st.facts + " · " + data.agentIndex.screenText(key)
-            live = true
-        } else if let key, let a = data.agentIndex.agent(key), a.card == c.id {
-            agent = Pill(Tone(a.phase), text: a.label())
+        if let key, let a = data.agentIndex.agent(key), a.card == c.id, let s = job.item(key) {
+            agent = StatusPill(s)
             live = true
         } else if let g = c.agents.min(by: { $0.rank < $1.rank }) {
             agent = Pill(tone(g.phase))
@@ -208,7 +204,8 @@ final class AgentsPage: Page {
             meta = "Status requested"
         } else if let s = status {
             let old = job.outOfDate(s)
-            head = s.reply.headline.isEmpty ? s.word : s.word + ": " + s.reply.headline
+            // The State pill shows the word. A status that does not hold keeps the word here.
+            head = s.reply.headline.isEmpty || old != nil ? s.word + (s.reply.headline.isEmpty ? "" : ": " + s.reply.headline) : s.reply.headline
             headColor = old != nil ? Palette.dim : s.state == .unfinished || s.state == .stuck ? Palette.warn : Palette.fg
             meta = ([relativeAgo(s.at), s.cause] + (old.map { [$0] } ?? [])).joined(separator: " · ")
         } else if let key, data.projectStore.isDone(key: key) {

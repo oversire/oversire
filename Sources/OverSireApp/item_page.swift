@@ -155,8 +155,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
             guard let self else { return }
             if inQueue { self.go(.queue) } else { self.data.queue.add(item, snap: snap) }
         }]
-        if let a = stream?.agent ?? data.agentIndex.agent(key) {
-            actions.append(data.agentIndex.pill(key) ?? Pill(Tone(a.phase), text: a.label()))
+        if let s = data.statusJob.item(key) {
+            actions.append(StatusPill(s))
         } else {
             let b = ActionButton("Start in Orca", symbol: "play.fill", style: .primary)
             b.onClick = { [weak self, weak b] in
@@ -443,8 +443,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func session(_ main: NSStackView, stream: Workstream?) {
         if let a = stream?.agent {
             let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
-            c.add(NSStackView(h: [data.agentIndex.pill(key) ?? Pill(Tone(a.phase), text: a.label()), Chiplet(a.agent.rawValue, symbol: "cpu"),
+            let s = data.statusJob.item(key)
+            c.add(NSStackView(h: [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"),
                                   NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 6))
+            if let h = s?.headline, !h.isEmpty { c.add(NSTextField.text(h, size: 12.5, color: Palette.mut, lines: 3)) }
             c.add(tail.isEmpty ? InlineSpinner("Reading the terminal…") : TermView(lines: tail, height: 300))
             if a.phase != .done && a.phase != .failed { c.add(replyRow()) }
             main.addFull(c)
@@ -545,7 +547,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             list.add(Row([ProgressRing(done: progress.done, total: progress.total).sized(16),
                           NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], height: 36))
         }
-        for k in kids { list.add(ItemLine(k, snap: snap, stream: data.workstreams.stream(k.key), layout: subTable) { [weak self] in self?.go($0) }) }
+        for k in kids { list.add(ItemLine(k, snap: snap, stream: data.workstreams.stream(k.key), status: data.statusJob.item(k.key), layout: subTable) { [weak self] in self?.go($0) }) }
         if progress.total > kids.count {
             list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in Plane", size: 12, color: Palette.acc)], height: 32) {
                 NSWorkspace.shared.open(URL(string: item.url)!) })

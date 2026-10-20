@@ -140,10 +140,13 @@ final class GlanceVC: NSViewController {
         let ordered = MyItemsPage.order(mine)
         section("My items", count: ordered.count, ordered.prefix(5).map { e in
             let status = e.snap.option(e.item.statusOptionId)?.name ?? "No status"
-            let sub = [e.item.key, status, e.stream?.agent?.label()].compactMap { $0 }.joined(separator: " · ")
-            let tone = e.stream?.agent.map { Tone($0.phase) } ?? Tone(symbol: "circle", color: Palette.mut, word: status)
-            return Row([Glyph(tone), TwoLine(e.item.title, sub)], height: 40,
-                       label: "\(e.item.title), \(sub)") { [weak self] in self?.open(.item(e.item.key, .overview)) }
+            let st = data.statusJob.item(e.item.key)
+            let sub = [e.item.key, status, st?.label].compactMap { $0 }.joined(separator: " · ")
+            let tone = st?.tone ?? Tone(symbol: "circle", color: Palette.mut, word: status)
+            let row = Row([Glyph(tone), TwoLine(e.item.title, sub)], height: 40,
+                          label: "\(e.item.title), \(sub)") { [weak self] in self?.open(.item(e.item.key, .overview)) }
+            row.toolTip = st.map(\.tip)
+            return row
         }, more: ordered.count > 5 ? ("All my items", .mine) : nil, empty: data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")
 
         let next = data.queue.lanes.compactMap { l in l.entries.first.map { (l, $0) } }
@@ -189,9 +192,12 @@ final class GlanceVC: NSViewController {
     private func agentRow(_ key: String, _ a: AgentSession) -> NSView {
         let title = data.workstreams.stream(key)?.item?.title ?? a.repo
         let msg = a.message?.replacingOccurrences(of: "\n", with: " ")
-        let sub = [key, a.label(), a.phase == .waiting ? msg : nil].compactMap { $0 }.joined(separator: " · ")
-        let row = Row([Glyph(Tone(a.phase)), TwoLine(title, sub)], height: 40,
-                      label: "\(Tone(a.phase).word): \(title), \(sub)") { [weak self] in self?.open(.item(key, .overview)) }
+        let st = data.statusJob.item(key)
+        let tone = st?.tone ?? Tone(a.phase)
+        let sub = [key, st?.label ?? a.label(), a.phase == .waiting ? msg : nil].compactMap { $0 }.joined(separator: " · ")
+        let row = Row([Glyph(tone), TwoLine(title, sub)], height: 40,
+                      label: "\(tone.word): \(title), \(sub)") { [weak self] in self?.open(.item(key, .overview)) }
+        row.toolTip = st.map(\.tip)
         if a.card != nil { row.stack.addArrangedSubview(orcaButton(key)) }
         return row
     }

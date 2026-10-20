@@ -72,6 +72,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     private var agentObserver: Any?
     private var agentTail: (key: String, lines: [String], at: Date)?
     private var agents: AgentIndex? { (NSApp.delegate as? GHActionsBar)?.agentIndex.ready }
+    private var statusHover: HoverSummary?   // the summary of the session chip
 
     init(store: ProjectStore) {
         self.store = store
@@ -302,11 +303,13 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         }
         if let agents {
             if let a = agents.agent(item.key) {
-                let tint: NSColor = a.phase == .waiting ? .systemOrange : a.phase == .done ? .systemGreen
-                    : a.phase == .failed ? C_FAILURE : AgentPill.orca
-                let c = Chip("◉ " + a.label(), menu: false, tint: tint)
+                let st = (NSApp.delegate as? GHActionsBar)?.statusJob.item(item.key)
+                let tint: NSColor = a.phase == .failed ? C_FAILURE : st?.tone.color ?? AgentPill.orca
+                let c = Chip("◉ " + (st?.label ?? a.label()), menu: false, tint: tint)
                 c.target = self; c.action = #selector(agentChip(_:))
-                c.toolTip = a.phase == .failed ? (a.message ?? "") : "Open the terminal in Orca"
+                c.toolTip = a.phase == .failed ? (a.message ?? "") : nil
+                if a.phase != .failed, let st { statusHover = HoverSummary(st, on: c) }
+                c.setAccessibilityHelp("Open the terminal in Orca")
                 place(c)
             } else {
                 let c = Chip("▶ Start in Orca", menu: false, tint: AgentPill.orca)
@@ -492,6 +495,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
             let agent = agents?.agent(kid.key)
             let row = ProjectItemRow(item: kid, snap: snap, unread: store.isUnread(itemId: kid.id), last: nil, w: w,
                                      expanded: false, progress: p.total > 0 ? p : nil, agent: agent,
+                                     status: (NSApp.delegate as? GHActionsBar)?.statusJob.item(kid.key),
                                      canStart: agents != nil && agent == nil && snap.option(kid.statusOptionId)?.category ?? .todo == .todo)
             row.onToggle = { [weak self] in self?.open(kid.id, push: true) }
             if let agents {

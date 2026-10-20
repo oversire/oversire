@@ -797,6 +797,23 @@ func runSelfTest() {
         check(SnapTicket.title(b) == "Snap basket · 1 shot · The jobs list is empty.", "snap: ticket title")
     }
 
+    // Item status: the AI status while it holds, else the screen state, else the runtime phase.
+    do {
+        let t = Date()
+        let a = AgentSession(phase: .done, since: t)
+        let s = SessionStatus(id: "s", key: "K-1", reply: StatusReply(state: .stuck, headline: "h"), ticks: [], at: t, trigger: .idle,
+                              byAI: true, read: "")
+        func of(_ st: SessionStatus?, old: String? = nil, state: SessionState?, agent: AgentSession?) -> ItemStatus? {
+            ItemStatus.resolve(status: st, outOfDate: old, state: state, stateText: nil, agent: agent, terminals: 1, screen: nil,
+                               idleNote: nil, now: t)
+        }
+        check(of(s, state: .done, agent: a)?.label == "Looks stuck ✦", "status: a current AI status wins")
+        check(of(s, old: "Out of date", state: .done, agent: a)?.source == .screen, "status: an old AI status gives the screen state")
+        check(of(nil, state: .background, agent: a)?.text == "Background command", "status: the screen state without AI")
+        check(of(nil, state: nil, agent: AgentSession(phase: .starting, since: t))?.text == "Starting…", "status: the runtime phase")
+        check(of(nil, state: nil, agent: nil) == nil, "status: no session")
+    }
+
     // New session: the shortcut and the prompt templates.
     check(SessionConfig().shortcutLabel == "⌃⌥⌘N", "session: shortcut label \(SessionConfig().shortcutLabel)")
     let intakePrompt = SessionPrompt.intake(SessionPrompt.intakeDefault, values: ["text": "Fix it", "key": "K-1", "item": "i1", "workspace": "w", "project": "K"], files: false)

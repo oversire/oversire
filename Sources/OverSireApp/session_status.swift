@@ -147,7 +147,7 @@ final class StatusJob {
     private(set) var errors: [String: String] = [:]
     private var tried: [String: String] = [:]      // key → the screen and message of the last call
     private let path: String
-    private let agents: AgentIndex
+    let agents: AgentIndex
     private let queue: WorkQueue
     private var world: (workstreams: WorkstreamIndex, store: ProjectStore)?
     var now: () -> Date = Date.init
