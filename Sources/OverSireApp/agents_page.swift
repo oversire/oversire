@@ -51,7 +51,7 @@ final class AgentsPage: Page {
 
         let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
         let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
-        let filter = Segmented(["Active \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
+        let filter = Segmented(["With item \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
             self?.allWorktrees = i == 1
             self?.reload()
         }
@@ -63,7 +63,7 @@ final class AgentsPage: Page {
             list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed"))
         } else if !allWorktrees, active.count < cards.count {
             let n = cards.count - active.count
-            list.add(Row([ActionButton("\(n) \(n == 1 ? "worktree has" : "worktrees have") no session · Show all", style: .link) { [weak self] in
+            list.add(Row([ActionButton("\(n) \(n == 1 ? "worktree has" : "worktrees have") no item · Show all", style: .link) { [weak self] in
                 self?.allWorktrees = true
                 self?.reload()
             }, Spacer()], height: 32, label: "Show all worktrees"))
@@ -154,10 +154,8 @@ final class AgentsPage: Page {
         return box
     }
 
-    /// A worktree with an item, or with an agent that works or waits.
-    static func isActive(_ c: Workspace, linked: Bool) -> Bool {
-        linked || c.agents.contains { $0.phase == .working || $0.phase == .waiting }
-    }
+    /// A worktree with an item. A working agent without an item key does not count.
+    static func isActive(_ c: Workspace, linked: Bool) -> Bool { linked }
 
     private func cardKey(_ c: Workspace) -> String? {
         data.agentIndex.agents.first { $0.value.card == c.id }?.key

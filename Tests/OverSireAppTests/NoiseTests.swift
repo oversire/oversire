@@ -28,8 +28,8 @@ final class NoiseTests: XCTestCase {
             Workspace(id: "w", repo: "r", path: "/p", name: "w", comment: nil, liveTerminals: 2, lastActivity: Date(),
                       agents: phases.map { AgentSession(phase: $0, since: Date()) })
         }
-        XCTAssertTrue(AgentsPage.isActive(ws([]), linked: true))
-        XCTAssertTrue(AgentsPage.isActive(ws([.done, .waiting]), linked: false))
-        XCTAssertFalse(AgentsPage.isActive(ws([.done]), linked: false), "a shell or a done agent alone is not active")
+        XCTAssertTrue(AgentsPage.isActive(ws([.done]), linked: true), "a worktree with an item shows")
+        XCTAssertFalse(AgentsPage.isActive(ws([.working, .waiting]), linked: false), "a working agent without an item key hides")
+        XCTAssertFalse(AgentsPage.isActive(ws([]), linked: false), "a shell alone hides")
     }
 }
