@@ -153,7 +153,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let inQueue = data.queue.contains(key)
         var actions: [NSView] = [ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
             guard let self else { return }
-            if inQueue { self.go(.queue) } else { self.data.queue.add(item, snap: snap) }
+            if inQueue { self.go(.work(.items)) } else { self.data.queue.add(item, snap: snap) }
         }]
         if let s = data.statusJob.item(key) {
             actions.append(StatusPill(s))
@@ -407,7 +407,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func suggestion(_ item: Item) -> NSView? {
         guard hasCloud, data.suggestions.openPlan(naming: item.key) != nil else { return nil }
         return Banner(.info, title: "The Planner has a plan change for \(item.key).",
-                      actions: [ActionButton("Review") { [weak self] in self?.go(.queue) }])
+                      actions: [ActionButton("Review") { [weak self] in self?.go(.work(.lanes)) }])
     }
 
     private func replyRow() -> NSView {

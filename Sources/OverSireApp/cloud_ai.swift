@@ -115,7 +115,7 @@ extension Page {
         let lane = data.queue.lanes.first { $0.project == s.lane }
         c.add(NSStackView(h: [Chiplet("Planner", symbol: "arrow.triangle.branch", color: Palette.intake),
                               NSTextField.text("Plan change for \(lane?.identifier ?? "a lane")", size: 13, weight: .semibold), Spacer(),
-                              ActionButton("Show the plan", style: .link) { [weak self] in self?.go(.queue) }, PlannerCard.cloudMark()], spacing: 7))
+                              ActionButton("Show the plan", style: .link) { [weak self] in self?.go(.work(.lanes)) }, PlannerCard.cloudMark()], spacing: 7))
         c.add(planReview(s, draft: draft))
         return c
     }

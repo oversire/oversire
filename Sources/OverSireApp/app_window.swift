@@ -536,7 +536,6 @@ struct SidebarModel {
             n + s.rootItems.filter { $0.isMine(s.me) && s.option($0.statusOptionId)?.category != .done }.count
         }
         let prs = data.prGrouped.reduce(0) { $0 + $1.1.count }
-        let plans = UIShots.cloud ?? data.relay.canRun ? data.suggestions.openPlans().count : 0
         let intake = store.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }
 
         func e(_ r: Route, _ title: String, _ symbol: String, badge: Int? = nil, alert: Int = 0, tone: NSColor? = nil,
@@ -550,15 +549,13 @@ struct SidebarModel {
 
         var out: [SidebarLine] = [
             e(.home, "Home", "house", alert: NeedsYou.collect(data).count, tone: Palette.bad, what: "need you"),
-            e(.mine, "My items", "person.crop.circle", badge: mine),
-            e(.agents, "Sessions", "cpu", badge: agents.count, alert: waiting, tone: Palette.warn, what: "need input"),
-            e(.queue, "Queue", "list.number", badge: plans),
+            e(.work(.items), "Work", "person.crop.circle", badge: mine, alert: waiting, tone: Palette.warn, what: "need input"),
             e(.runs(.all), "Runs", "play.circle", badge: running, alert: failing, tone: Palette.bad, what: "failing"),
             e(.prs, "Pull requests", "arrow.triangle.pull", badge: prs),
             e(.insights, "Insights", "chart.bar"),
         ]
         // Intake needs a tracker with intake.
-        if data.has(.intake) { out.insert(e(.intake(nil), "Intake", "tray.and.arrow.down", badge: intake, alert: intake, tone: Palette.intake, what: "wait for triage"), at: 1) }
+        if data.has(.intake) { out.insert(e(.intake(nil), "Intake", "tray.and.arrow.down", badge: intake, alert: intake, tone: Palette.intake, what: "wait for triage"), at: 2) }
         let projects = PROJECTS_CFG.sorted(store.tracked).filter { !PROJECTS_CFG.local($0.identifier).hidden }
         if !projects.isEmpty {
             out.append(.header("Projects"))
@@ -586,7 +583,7 @@ enum PageFactory {
         case .home: return HomePage(r, data: data, router: router)
         case .intake: return IntakeListPage(r, data: data, router: router)
         case .activity: return ActivityPage(r, data: data, router: router)
-        case .mine, .work(.items): return WorkPage(r, data: data, router: router)
+        case .work(.items): return WorkPage(r, data: data, router: router)
         case .work(.worktrees): return AgentsPage(r, data: data, router: router)
         case .work(.lanes): return QueuePage(r, data: data, router: router)
         case .project: return ProjectPage(r, data: data, router: router)
@@ -594,8 +591,6 @@ enum PageFactory {
         case .item: return ItemPage(r, data: data, router: router)
         case .runs: return RunsPage(r, data: data, router: router)
         case .run: return RunPage(r, data: data, router: router)
-        case .agents: return AgentsPage(r, data: data, router: router)
-        case .queue: return QueuePage(r, data: data, router: router)
         case .settings: return SettingsPage(r, data: data, router: router)
         case .prs: return PRsPage(r, data: data, router: router)
         case .insights: return InsightsPage(r, data: data, router: router)

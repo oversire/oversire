@@ -112,6 +112,18 @@ A workspace root often holds many repositories that depend on each other. The ag
 - **Automatic insights** — slowest workflow, biggest failure source, and the branches that fail most
 - **Copy report for AI** — copies a full markdown report plus a task prompt, ready to paste into Claude or ChatGPT
 
+### Window pages
+The sidebar of the window has these pages:
+
+- **Home** — six counters, the morning digest and the **Needs you** list. The badge counts the rows that need you. **Moving now** shows the sessions and runs that work now
+- **Work** — **Items** shows your open items in priority lanes, then **Up next** (the queue). **Worktrees** shows the Orca worktrees and their state. **Lane board** shows each queue lane as a board
+- **Intake** — the items that wait for triage
+- **Runs**, **Pull requests** and **Insights**
+- **Projects** — one page for each tracked project
+- **Views** — **Activity** (the change feed), **Failing runs** and **Unlinked runs**
+
+Old links still work: `oversire://mine` opens Work › Items, `oversire://sessions` opens Work › Worktrees, and `oversire://queue` or `oversire://plan` opens the lane board.
+
 ### General
 - **Tabbed interface** — switch between Actions, PRs, Projects and Insights. Hide a tab from Settings › General › Menu bar popover
 - **Repo filter** — "All Repos" or pick a specific repo; persists across tabs
@@ -307,7 +319,7 @@ OverSire Cloud can also run AI jobs on the server, for example triage of new ite
 
 The runner is [oversire-runner](https://github.com/oversire/runner), a small program that dials out to the cloud. To use this Mac, click **Use this Mac** in the Cloud AI section. The app downloads the runner, checks its SHA-256 and its Developer ID signature, installs it in `~/Library/Application Support/OverSire/runner/`, pairs it and starts it as a login item. The runner only does orders that its allow list (`~/.config/oversire-runner/allow.json`) permits.
 
-A runner without Orca can use its own runtime, `oversire`. It starts a coding agent CLI in a git worktree for each item. **Sessions** shows these runner sessions. When an agent asks for a permission, the page shows the request with **Allow** and **Deny**. No answer before the time limit is a deny.
+A runner without Orca can use its own runtime, `oversire`. It starts a coding agent CLI in a git worktree for each item. **Work › Worktrees** shows these runner sessions. When an agent asks for a permission, the page shows the request with **Allow** and **Deny**. No answer before the time limit is a deny.
 - **Disconnect:** **Disconnect** deletes the token from the Keychain. The webhooks stay, because other Macs can use them.
 
 ## Using the PRs tab

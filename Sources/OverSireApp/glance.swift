@@ -119,7 +119,7 @@ final class GlanceVC: NSViewController {
         section("Running", count: running.count, running.prefix(6).map { runRow($0.0, $0.1) }, empty: "No run is in progress.")
         let agents = data.agentIndex.agents.filter { $0.value.phase != .failed }.sorted { ($0.value.rank, $0.key) < ($1.value.rank, $1.key) }
         section("Sessions", count: agents.count, agents.prefix(6).map { agentRow($0.key, $0.value) },
-                more: agents.count > 6 ? ("All sessions", .agents) : nil, empty: "No session works now.")
+                more: agents.count > 6 ? ("All worktrees", .work(.worktrees)) : nil, empty: "No session works now.")
     }
 
     private func runs() {
@@ -147,19 +147,19 @@ final class GlanceVC: NSViewController {
                           label: "\(e.item.title), \(sub)") { [weak self] in self?.open(.item(e.item.key, .overview)) }
             row.toolTip = st.map(\.tip)
             return row
-        }, more: ordered.count > 5 ? ("All my items", .mine) : nil, empty: data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")
+        }, more: ordered.count > 5 ? ("All my items", .work(.items)) : nil, empty: data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")
 
         let next = data.queue.lanes.compactMap { l in l.entries.first.map { (l, $0) } }
         section("Queue next", count: next.count, next.map { l, e in
             Row([Glyph("list.number", color: Palette.mut), TwoLine("\(e.key) \(e.title)", "\(l.identifier) · \(e.condition.label)" + (data.queue.state(l.project)?.error.map { " · \($0)" } ?? ""))],
-                height: 40, label: "Next in \(l.identifier): \(e.key) \(e.title), \(e.condition.label)") { [weak self] in self?.open(.queue) }
+                height: 40, label: "Next in \(l.identifier): \(e.key) \(e.title), \(e.condition.label)") { [weak self] in self?.open(.work(.items)) }
         }, empty: "The queue is empty.")
         // One line only when a plan change waits. No status light change, no notification.
         let plans = UIShots.cloud ?? data.relay.canRun ? data.suggestions.openPlans().reduce(0) { $0 + ($1.plan?.lines.count ?? 0) } : 0
         if plans > 0 {
             let text = "Plan: \(plans) suggestion\(plans == 1 ? "" : "s")"
             body.addFull(Row([Glyph("rectangle.split.3x1", color: Palette.intake), NSTextField.text(text, size: 12.5), Spacer(),
-                              Glyph("chevron.right", color: Palette.dim, size: 11)], height: 32, label: text) { [weak self] in self?.open(.queue) })
+                              Glyph("chevron.right", color: Palette.dim, size: 11)], height: 32, label: text) { [weak self] in self?.open(.work(.items)) })
         }
 
         guard data.has(.intake) else { return }

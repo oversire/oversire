@@ -124,11 +124,12 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         func go(_ r: Route) -> () -> Void { { [weak owner] in owner?.show(r) } }
         var out: [Entry] = []
         let pages: [(Route, String, String)] = [
-            (.home, "Home", "house"), (.intake(nil), "Intake", "tray.and.arrow.down"), (.activity, "Activity", "clock.arrow.circlepath"),
-            (.mine, "My items", "person.crop.circle"), (.agents, "Sessions", "cpu"), (.queue, "Queue", "list.number"),
-            (.runs(.all), "Runs", "play.circle"), (.runs(.failed), "Runs › Failed", "xmark.octagon"),
-            (.runs(.unlinked), "Runs › Unlinked", "link.badge.plus"), (.prs, "Pull requests", "arrow.triangle.pull"),
-            (.insights, "Insights", "chart.bar"),
+            (.home, "Home", "house"), (.work(.items), "Work › Items", "person.crop.circle"),
+            (.work(.worktrees), "Work › Worktrees", "cpu"), (.work(.lanes), "Work › Lane board", "list.number"),
+            (.intake(nil), "Intake", "tray.and.arrow.down"),
+            (.runs(.all), "Runs", "play.circle"), (.prs, "Pull requests", "arrow.triangle.pull"), (.insights, "Insights", "chart.bar"),
+            (.activity, "Activity", "clock.arrow.circlepath"), (.runs(.failed), "Failing runs", "xmark.octagon"),
+            (.runs(.unlinked), "Unlinked runs", "link.badge.plus"),
         ]
         for (r, t, s) in pages { out.append(Entry(title: t, detail: r.url.absoluteString, symbol: s, kind: "Page", run: go(r))) }
         for p in Route.SettingsPage.allCases {

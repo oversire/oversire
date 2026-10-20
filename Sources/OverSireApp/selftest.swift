@@ -55,7 +55,7 @@ func runSelfTest() {
                   updatedAt: "", createdAt: "", startedAt: nil, number: 2, workflowName: "ci", actorLogin: nil, attempt: 1)
     check(overallStatus([("o/r", [bad])]).color == C_FAILURE, "failed run turns the icon red")
     let icon = MenuIconState(runs: [("o/r", [bad])], waitingAgents: 1, unread: 0, unreadDot: false)
-    check(Route(path: "agents") == .agents && Route.agents.path == "sessions", "old agents path opens Sessions")
+    check(Route(path: "agents") == .work(.worktrees) && Route(path: "mine") == .work(.items), "old paths open the Work tabs")
     check(icon.color == C_FAILURE && icon.badge == "xmark.circle.fill" && icon.dot && icon.label.contains("1 session waits"), "icon: red cross, dot for a waiting session")
     check(!MenuIconState(runs: [("o/r", [run("main", "in_progress")])], waitingAgents: 0, unread: 3, unreadDot: false).dot, "icon: no dot when unread dot is off")
     check(MenuIconState(runs: [("o/r", [run("main", "in_progress")])], waitingAgents: 0, unread: 3, unreadDot: true).active, "icon: active while a run is in progress")
@@ -544,7 +544,7 @@ func runSelfTest() {
     check(router.current == .intake("SLING") && router.canGoForward, "back goes to the page before")
     router.forward()
     check(router.current == .runs(.all) && !router.canGoForward, "forward returns")
-    router.back(); router.go(.agents)
+    router.back(); router.go(.work(.worktrees))
     check(!router.canGoForward, "a new page clears forward")
 
     // Workstream linking: branches and SHAs → item key, or unlinked.

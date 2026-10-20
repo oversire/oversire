@@ -24,9 +24,12 @@ final class SettingsRouteTests: XCTestCase {
         }
     }
 
-    func testPlanOpensTheQueue() {
-        XCTAssertEqual(open("oversire://plan"), .queue, "the Plan page is the Board view of the Queue now")
-        XCTAssertEqual(Route.queue.path, "queue")
+    func testOldLinksOpenTheWorkTabs() {
+        let cases: [(String, Route)] = [
+            ("mine", .work(.items)), ("sessions", .work(.worktrees)), ("agents", .work(.worktrees)),
+            ("queue", .work(.lanes)), ("plan", .work(.lanes)),
+        ]
+        for (path, want) in cases { XCTAssertEqual(open("oversire://\(path)"), want, path) }
     }
 
     func testCrumbsDoNotRepeatTheTitle() {

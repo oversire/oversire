@@ -5,18 +5,9 @@ import OverSireCore
 final class AgentsPage: Page {
     /// The prompt ids with an answer on the way.
     private var answering: Set<String> = []
-    private var tails: [String: [String]] = [:]
-    private var tailAt: [String: Date] = [:]
-    private var replies: [String: NSTextField] = [:]
-    private var sending: Set<String> = []
     private var note: (Tone, String)?
     private var allWorktrees = false
     private var expanded: Set<String> = UIShots.sessions ? ["uishots-card-3"] : []     // card ids with the status open
-    private lazy var needsYou: NeedsYouCard = {
-        let c = NeedsYouCard(page: self)
-        c.inputDetail = { [weak self] key, a in self?.inputDetail(key, a) ?? NSView() }
-        return c
-    }()
     private let table = ColumnLayout(id: "worktrees-4", columns: [
         TableColumn(id: "worktree", title: "Worktree", width: 290, min: 140),
         TableColumn(id: "state", title: "State", width: 150, min: 60),
@@ -24,8 +15,6 @@ final class AgentsPage: Page {
         TableColumn(id: "terms", title: "Terms", width: 44, min: 36, optional: true),
         TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
     ])
-
-    override var isEditing: Bool { super.isEditing || replies.values.contains { !$0.stringValue.isEmpty } }
 
     override func build(_ col: NSStackView) {
         let idx = data.agentIndex
@@ -39,8 +28,7 @@ final class AgentsPage: Page {
             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() },
         ]
-        if inWork { WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, in: col) }
-        else { col.addFull(PageHeader("Sessions", caption: caption, actions: actions)) }
+        WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, in: col)
         if let note { col.addFull(Banner(note.0, title: note.1)) }
         if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty { runnerSessions(col, sessions) }
         guard idx.ready != nil else {
@@ -49,15 +37,13 @@ final class AgentsPage: Page {
             return
         }
 
-        if !inWork, let c = needsYou.card() { col.addFull(c) }
-
         let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
         let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
         let filter = Segmented(["With item \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
             self?.allWorktrees = i == 1
             self?.reload()
         }
-        if inWork { col.addFull(NSStackView(h: [Spacer(), filter], spacing: 0)) } else { col.addFull(SectionTitle("Worktrees", action: filter)) }
+        col.addFull(NSStackView(h: [Spacer(), filter], spacing: 0))
         let list = ListCard()
         list.add(TableHeader(table))
         for c in allWorktrees ? cards : active { list.add(cardRow(c)) }
@@ -166,9 +152,6 @@ final class AgentsPage: Page {
     }
 
     private func cardKey(_ c: Workspace) -> String? { Self.cardKey(c, data: data) }
-
-    // In Work › Worktrees the page has the Work header, and Home has the Needs you card.
-    private var inWork: Bool { if case .work = route { return true }; return false }
 
     private func cardRow(_ c: Workspace) -> NSView {
         let key = cardKey(c)
@@ -282,57 +265,6 @@ final class AgentsPage: Page {
     /// ⌘R: read each session again and write its status.
     func checkAgain() {
         data.statusJob.refresh(keys: data.statusJob.refreshable)
-    }
-
-    // The screen and a reply field under a Needs input row.
-    private func inputDetail(_ key: String, _ a: AgentSession) -> NSView {
-        loadTail(key)
-        let lines = tails[key].map { Array($0.suffix(10)) } ?? [a.message ?? "Reading the terminal…"]
-        let v = NSStackView(v: [TermView(lines: lines, height: 130), replyRow(key)], spacing: 6)
-        v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
-        return v
-    }
-
-    private func loadTail(_ key: String) {
-        guard -(tailAt[key] ?? .distantPast).timeIntervalSinceNow > 5 else { return }
-        tailAt[key] = Date()
-        data.agentIndex.tail(key) { [weak self] lines in
-            guard let self, !lines.isEmpty, lines != self.tails[key] else { return }
-            self.tails[key] = lines
-            if !self.isEditing { self.reload() }
-        }
-    }
-
-    private func replyRow(_ key: String) -> NSView {
-        let f = NSTextField()
-        f.placeholderString = "Send to the session…"
-        f.setAccessibilityLabel("Reply to the session of \(key)")
-        f.stringValue = replies[key]?.stringValue ?? ""
-        f.identifier = NSUserInterfaceItemIdentifier(key)
-        f.target = self
-        f.action = #selector(sendReply(_:))
-        replies[key] = f
-        let b = ActionButton("Send", style: .primary) { [weak self, weak f] in if let f { self?.sendReply(f) } }
-        if sending.contains(key) { b.busy("Sending…") }
-        return NSStackView(h: [f, b], spacing: 6)
-    }
-
-    @objc private func sendReply(_ f: NSTextField) {
-        guard let key = f.identifier?.rawValue else { return }
-        let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sending.contains(key) else { return }
-        sending.insert(key)
-        reload()
-        data.agentIndex.send(key, text: text) { [weak self] err in
-            guard let self else { return }
-            self.sending.remove(key)
-            if let err { self.note = (.bad, "Could not send to \(key): \(err.message)") } else {
-                self.replies[key]?.stringValue = ""
-                self.note = nil
-                self.tailAt[key] = nil
-            }
-            self.reload()
-        }
     }
 
     private func eventRow(_ e: OrcaEvent) -> NSView {

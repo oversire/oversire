@@ -1,6 +1,6 @@
 # The Planner
 
-The Planner orders the queue lanes. Two items that change the same code area then do not run at the same time. The Planner is paid: it needs OverSire Cloud. The Queue board, the area tags and the queue gate work without the cloud.
+The Planner orders the queue lanes. Two items that change the same code area then do not run at the same time. The Planner is paid: it needs OverSire Cloud. The lane board, the area tags and the queue gate work without the cloud.
 
 ## Terms
 
@@ -18,14 +18,14 @@ The Planner orders the queue lanes. Two items that change the same code area the
 
 ## The board
 
-The Queue page shows each lane as a card. The Board view has four columns:
+The lane board (Work › Lane board) shows each lane as a card. The Board view has four columns:
 
 - **Running**: the items that run now, plus one "Free slot" for each free slot.
 - **Up next**: the items with no hold, in start order. Number 1 starts when a slot frees.
 - **Waits**: the items with a hold: `⏸ Waits for KEY` (an open blocker) or `⊘ Area used by KEY` (a busy area).
 - **Held**: the work orders that the hub holds (cloud). A card shows `⏸ Waits for KEY` for a blocker, or `⊘ Area busy: AREA`.
 
-A card in Running or Up next that shares an area with another card that runs at the same time gets a red border and the line `▲ Same area as KEY (area)`. The List view shows the same items as one line each. The actions (↑, ↓, Start now, ✕) show when the pointer is on a card or the card has focus. `oversire://plan` opens the Queue page.
+A card in Running or Up next that shares an area with another card that runs at the same time gets a red border and the line `▲ Same area as KEY (area)`. The List view shows the same items as one line each. The actions (↑, ↓, Start now, ✕) show when the pointer is on a card or the card has focus. `oversire://plan` and `oversire://queue` open the lane board.
 
 ## The plan change
 
@@ -35,7 +35,7 @@ The Planner writes one open suggestion for each lane, with a `plan` proposal (`P
 - `relations`: add or remove a `blockedBy`, `blocks` or `relatesTo` relation in the tracker.
 - `areas`: add or remove an area on an item.
 
-Each line has a reason. Review the change in the "Planner order" line of the Queue page, in the Inbox (Suggestions) or on the item page. Clear a line to keep it out. `SuggestionEdit.drop` names the lines by index: first the order lines, then the relations lines, then the areas lines. The hub then writes the areas, the lane order and the relations, in that sequence.
+Each line has a reason. Review the change in the "Planner order" line of the lane board or on the item page. Clear a line to keep it out. `SuggestionEdit.drop` names the lines by index: first the order lines, then the relations lines, then the areas lines. The hub then writes the areas, the lane order and the relations, in that sequence.
 
 The hub checks each line before it writes the suggestion. It drops a line that makes a cycle, names an unknown item, or moves a running item. It also drops an order line that makes the overlap count higher. It does not check the overlap count for the areas lines. Thus the review text can say that the change lowers, raises or keeps the overlaps.
 
@@ -62,4 +62,4 @@ Settings › Agents and queue › Intake and planner, for each project:
 - Feature areas: One at a time, or Allow two at once.
 - Areas: the catalog. Set the kind, edit the rules, accept or dismiss a proposed area, add an area, or scan the imports.
 
-The slot count is the same as the slot chip on the Queue page. The default is 3.
+The slot count is the same as the slot chip on the lane board. The default is 3.

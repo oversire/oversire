@@ -60,10 +60,7 @@ enum Route: Equatable {
     case home
     case intake(String?)            // project identifier, nil for all
     case activity
-    case mine
     case work(WorkTab)
-    case agents
-    case queue
     case runs(RunFilter)
     case run(repo: String, id: String)
     case prs
@@ -78,10 +75,7 @@ enum Route: Equatable {
         case .home: return "home"
         case .intake(let p): return p.map { "intake/\($0)" } ?? "intake"
         case .activity: return "activity"
-        case .mine: return "mine"
         case .work(let t): return t == .items ? "work" : "work/\(t.rawValue)"
-        case .agents: return "sessions"
-        case .queue: return "queue"
         case .runs(let f): return f == .all ? "runs" : "runs/\(f.rawValue)"
         case .run(let repo, let id): return "run/\(repo)/\(id)"
         case .prs: return "prs"
@@ -122,11 +116,11 @@ enum Route: Equatable {
         case "inbox": self = rest.first?.lowercased() == "intake" ? .intake(nil) : .home
         case "intake": self = .intake(rest.first?.uppercased())
         case "activity": self = .activity
-        case "mine": self = .mine
         case "work": self = .work(rest.first.flatMap { WorkTab(rawValue: $0.lowercased()) } ?? .items)
-        case "sessions", "agents": self = .agents
-        // The Plan page is now the Board view of the Queue.
-        case "queue", "plan": self = .queue
+        // Old links: My items, Sessions and the Queue (and its Plan page) are tabs of Work now.
+        case "mine": self = .work(.items)
+        case "sessions", "agents": self = .work(.worktrees)
+        case "queue", "plan": self = .work(.lanes)
         case "runs": self = .runs(rest.first.flatMap { RunFilter(rawValue: $0.lowercased()) } ?? .all)
         case "run":
             guard rest.count == 3, Int(rest[2]) != nil else { return nil }
@@ -190,10 +184,7 @@ enum Route: Equatable {
         case .home: return "Home"
         case .intake: return "Intake"
         case .activity: return "Activity"
-        case .mine: return "My items"
         case .work: return "Work"
-        case .agents: return "Sessions"
-        case .queue: return "Queue"
         case .runs: return "Runs"
         case .run(_, let id): return "Run \(id)"
         case .prs: return "Pull requests"
@@ -221,7 +212,7 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .intake(nil), .intake("SLING"), .activity, .mine, .work(.items), .work(.worktrees), .work(.lanes), .agents, .queue, .runs(.all), .runs(.unlinked),
+        .home, .intake(nil), .intake("SLING"), .activity, .work(.items), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),

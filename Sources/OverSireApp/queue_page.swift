@@ -49,7 +49,7 @@ final class QueuePage: Page {
         let add = ActionButton("Add", symbol: "plus")
         add.onClick = { [weak self, weak add] in if let add { self?.addMenu(add) } }
         add.setAccessibilityLabel("Add to the queue")
-        col.addFull(PageHeader("Queue", caption: "Items start in Orca, in order, when a slot frees.", actions: [
+        col.addFull(PageHeader("Lane board", caption: "Items start in Orca, in order, when a slot frees.", actions: [
             ToggleChip("Auto start", on: AGENTS.autoStart) { [weak self] in AGENTS.autoStart.toggle(); saveConfig(); self?.reload() },
             NSTextField.text("AI checks", size: 12, color: Palette.dim), mode, view, add,
         ]))
@@ -83,12 +83,12 @@ final class QueuePage: Page {
         col.addFull(planeNote())
     }
 
-    // The checks moved to the Sessions page. One line links there.
+    // The checks moved to Work › Worktrees. One line links there.
     private func needsYou(_ col: NSStackView) {
         let n = NeedsYouCard(page: self).count(data)
         guard n > 0 else { return }
         let tone = Tone(SessionState.needsInput)
-        let link = ActionButton("\(n) \(n == 1 ? "session needs" : "sessions need") you · Sessions", style: .link) { [weak self] in self?.go(.agents) }
+        let link = ActionButton("\(n) \(n == 1 ? "session needs" : "sessions need") you · Worktrees", style: .link) { [weak self] in self?.go(.work(.worktrees)) }
         col.addFull(NSStackView(h: [Glyph(tone.symbol, color: tone.color, size: 12), link, Spacer()], spacing: 6))
     }
 
