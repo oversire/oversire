@@ -17,11 +17,12 @@ def prompt_text(e):
     """The text of a human prompt, or None for every other line."""
     if e.get("type") != "user" or e.get("isMeta") or e.get("isCompactSummary"):
         return None
-    c = (e.get("message") or {}).get("content")
+    m = e.get("message")
+    c = m.get("content") if isinstance(m, dict) else None
     if isinstance(c, list):
         if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
             return None
-        c = "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+        c = "\n".join(b["text"] for b in c if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
     if not isinstance(c, str):
         return None
     return c.strip()
@@ -42,7 +43,8 @@ def digest(path, earlier=12, full=3, max_chars=4000, source="file"):
                 continue
             if not isinstance(e, dict) or e.get("isSidechain"):
                 continue
-            session = session or e.get("sessionId")
+            if not session and isinstance(e.get("sessionId"), str):
+                session = e["sessionId"]
             p = prompt_text(e)
             if p is not None:
                 if p.startswith("[Request interrupted"):
@@ -51,10 +53,12 @@ def digest(path, earlier=12, full=3, max_chars=4000, source="file"):
                 elif p and not is_notice(p) and not p.startswith("Caveat:"):
                     turns.append({"prompt": p, "text": [], "tools": 0, "interrupted": False})
             elif e.get("type") == "assistant" and turns:
-                for b in (e.get("message") or {}).get("content") or []:
+                m = e.get("message")
+                c = m.get("content") if isinstance(m, dict) else None
+                for b in c if isinstance(c, list) else []:
                     if not isinstance(b, dict):
                         continue
-                    if b.get("type") == "text" and b.get("text", "").strip():
+                    if b.get("type") == "text" and isinstance(b.get("text"), str) and b["text"].strip():
                         turns[-1]["text"].append(b["text"].strip())
                     elif b.get("type") == "tool_use":
                         turns[-1]["tools"] += 1

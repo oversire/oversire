@@ -9,6 +9,10 @@ let package = Package(
     products: [
         .executable(name: "oversire", targets: ["OverSireApp"]),
     ],
+    // The AgentBinder product only: it has no dependencies.
+    dependencies: [
+        .package(path: "../agent-binder"),
+    ],
     targets: [
         .target(name: "OverSireCore"),
         .target(name: "OverSireSync", dependencies: ["OverSireCore"]),
@@ -26,7 +30,8 @@ let package = Package(
         .executableTarget(
             name: "OverSireApp",
             dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "GitHubKit",
-                           "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca"],
+                           "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca",
+                           .product(name: "AgentBinder", package: "agent-binder")],
             // The UI code predates strict concurrency. It moves to .v6 page by page.
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: ["Cocoa", "UserNotifications", "Network", "Carbon", "WebKit", "ScreenCaptureKit", "Speech", "CoreImage"].map { .linkedFramework($0) }
