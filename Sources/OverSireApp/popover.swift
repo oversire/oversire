@@ -98,10 +98,10 @@ class TabVC: NSViewController {
         if showsSubBar { container.addSubview(subBar(w)) }
 
         // ── Footer (fixed at bottom) ──
-        let footer = Footer(w, updated: updated)
+        let footer = Footer(w, updated: updated, problems: (NSApp.delegate as? AppData)?.openProblems ?? [])
 
         // ── Scroll content ──
-        let scrollH = POP_MAX_H - chrome - FTR_H
+        let scrollH = POP_MAX_H - chrome - footer.frame.height
         scrollView = NSScrollView(frame: NSRect(x: 0, y: chrome, width: w, height: scrollH))
         scrollView.hasVerticalScroller = true; scrollView.drawsBackground = false; scrollView.autohidesScrollers = true
         doc = Flipped(frame: NSRect(x: 0, y: 0, width: w, height: scrollH))
@@ -172,12 +172,12 @@ class TabVC: NSViewController {
     // expansions grow the popover instead of forcing a scroll.
     func relayout() {
         guard footerView != nil else { return }
-        let scrollHMax = POP_MAX_H - chrome - FTR_H
+        let scrollHMax = POP_MAX_H - chrome - footerView.frame.height
         let visScrollH = min(doc.frame.height, scrollHMax)
         scrollView.frame.origin.y = chrome
         scrollView.frame.size.height = visScrollH
         footerView.frame.origin.y = chrome + visScrollH
-        var totalH = chrome + visScrollH + FTR_H
+        var totalH = chrome + visScrollH + footerView.frame.height
         if let sheet {
             totalH = max(totalH, sheet.cardHeight)
             sheet.frame = NSRect(x: 0, y: 0, width: POP_W, height: totalH)

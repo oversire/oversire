@@ -94,6 +94,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .agents: agents(body)
         case .ai: ai(body)
         case .notifications: notifications(body)
+        case .logs: logs(body)
         }
         let filler = NSView()
         filler.setContentHuggingPriority(.init(1), for: .vertical)
@@ -124,8 +125,10 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         hits = SettingsIndex.search(Self.query)
         if Self.query.trimmingCharacters(in: .whitespaces).isEmpty {
             for p in Route.SettingsPage.allCases {
-                let r = Row([Glyph(p.symbol, size: 13), NSTextField.text(p.title, size: 12.5, weight: p == page ? .semibold : .regular), Spacer()],
-                            height: 32, label: p.title) { [weak self] in self?.go(.settings(p)) }
+                let n = p == .logs ? data.openProblems.count ?? 0 : 0
+                var cells: [NSView] = [Glyph(p.symbol, size: 13), NSTextField.text(p.title, size: 12.5, weight: p == page ? .semibold : .regular), Spacer()]
+                if n > 0 { cells.append(NSTextField.text("▲ \(n)", size: 11.5, weight: .semibold, color: Palette.warn)) }
+                let r = Row(cells, height: 32, label: n > 0 ? "\(p.title), \(n) problem\(n == 1 ? "" : "s")" : p.title) { [weak self] in self?.go(.settings(p)) }
                 r.selected = p == page
                 nav.add(r)
             }

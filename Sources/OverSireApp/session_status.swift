@@ -28,6 +28,7 @@ struct SessionStatus: Codable, Equatable {
     var handled = Handled.open
     var snoozedUntil: Date?
     var told: Date?             // the last "Tell the agent"
+    var partial: String?        // why the job read the screen only
 
     var state: StatusReply.State { reply.state }
     var passed: Int { ticks.filter { $0 }.count }
@@ -280,9 +281,13 @@ final class StatusJob {
         agents.history(key) { [weak self] r in
             guard let self else { return }
             var digest: SessionDigest?
+            var partial: String?
             switch r {
             case .success(let d): digest = d
-            case .failure(let e): log.info("Status: no history for \(key, privacy: .public): \(e.message, privacy: .public)")
+            case .failure(.unsupported): break
+            case .failure(let e):
+                log.info("Status: no history for \(key, privacy: .public): \(e.message, privacy: .public)")
+                partial = "The history read failed: \(e.message)"
             }
             let live = [.working, .longCommand, .background].contains(st) || digest == nil
             let ws = self.world?.workstreams.stream(key)
@@ -300,7 +305,9 @@ final class StatusJob {
                 case .success(let text):
                     if let reply = AgentPrompts.parseStatus(text, key: key) {
                         self.errors[key] = nil
-                        self.put(facts(reply, true, read))
+                        var s = facts(reply, true, read)
+                        s.partial = partial
+                        self.put(s)
                     } else {
                         self.errors[key] = "The AI reply had no status"
                     }

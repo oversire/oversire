@@ -75,7 +75,7 @@ final class QueuePage: Page {
         }
         for lane in q.lanes {
             let prefix = lane.identifier.uppercased() + "-"
-            let mine = held.filter { Self.key($0)?.uppercased().hasPrefix(prefix) == true }
+            let mine = held.filter { $0.itemKey?.uppercased().hasPrefix(prefix) == true }
             held.removeAll { o in mine.contains { $0.id == o.id } }
             col.addFull(laneCard(lane, held: mine))
         }
@@ -124,7 +124,7 @@ final class QueuePage: Page {
         let planner = data.planner
         let kind: (String) -> AreaKind = { draft?.kinds?[$0] ?? planner.kind($0, project: lane.project) }
         let b = QueueBoard(lane: lane, running: q.running(lane), slots: slots, holds: pick.holds,
-                           held: held.compactMap { o in Self.key(o).map { ($0, o.hold) } },
+                           held: held.compactMap { o in o.itemKey.map { ($0, o.hold) } },
                            areas: { book?.areas(key: $0) ?? [] }, kind: kind, draft: draft)
         if board { c.add(columns(b, lane: lane, pick: pick, kind: kind)) } else { list(c, b, lane: lane, pick: pick, kind: kind) }
         return c
@@ -361,16 +361,11 @@ final class QueuePage: Page {
         data.planner.update(project) { $0.slots = n }
     }
 
-    private static func key(_ o: WorkOrder) -> String? {
-        guard case .start(let req) = o.order else { return nil }
-        return req.item?.key ?? URL(fileURLWithPath: req.repo).lastPathComponent
-    }
-
     // Held work orders that match no lane.
     private func heldCard(_ orders: [WorkOrder]) -> NSView {
         let c = Card(title: "Held work orders", trailing: [PlannerCard.cloudMark()], padding: 12, spacing: 2)
         for o in orders {
-            guard let key = Self.key(o) else { continue }
+            guard let key = o.itemKey else { continue }
             let note = o.hold.flatMap(QueueBoard.note) ?? "Held"
             c.add(line(QueueBoard.Card(key: key, note: note), lead: Glyph("pause.circle", color: Palette.warn, size: 11), kind: { _ in .core },
                        status: Chiplet(note, color: Palette.warn), label: "\(key) held") { [weak self] in self?.go(.item(key, .overview)) })

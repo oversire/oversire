@@ -14,7 +14,7 @@ enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
-        case general, accounts, projects, agents, ai, notifications
+        case general, accounts, projects, agents, ai, notifications, logs
 
         var title: String {
             switch self {
@@ -24,6 +24,7 @@ enum Route: Equatable {
             case .agents: return "Agents and queue"
             case .ai: return "AI"
             case .notifications: return "Notifications"
+            case .logs: return "Logs"
             }
         }
 
@@ -35,6 +36,7 @@ enum Route: Equatable {
             case .agents: return "terminal"
             case .ai: return "sparkles"
             case .notifications: return "bell"
+            case .logs: return "list.bullet.rectangle"
             }
         }
 

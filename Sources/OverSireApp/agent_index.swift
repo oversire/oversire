@@ -394,7 +394,20 @@ final class AgentIndex: NSObject {
             return
         }
         Task {
+            let start = Date()
             let r = await Result(awaiting: { try await rt.history(of: a, in: ws, budget: budget) })
+            let ms = Int(Date().timeIntervalSince(start) * 1000)
+            switch r {
+            case .success(let d):
+                var e = LogEntry(level: .ok, area: .sessions, job: "History read", subject: key, host: "\(rt.account)",
+                                 message: "\(d.turns) turns", ms: ms)
+                e.verbose = true
+                APP_LOG.write(e)
+            case .failure(.unsupported): break
+            case .failure(let e):
+                APP_LOG.write(LogEntry(level: .warn, area: .sessions, job: "History read", subject: key, host: "\(rt.account)",
+                                       message: "Used the screen only: \(e.message)", ms: ms))
+            }
             DispatchQueue.main.async { done(r) }
         }
     }

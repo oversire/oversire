@@ -20,6 +20,11 @@ public struct AIRouter: Sendable {
         self.skipped = skipped
     }
 
+    /// A copy that reports the skipped engines to `skipped`, for one task.
+    public func with(skipped: @escaping @Sendable (EngineID, AIError) -> Void) -> AIRouter {
+        AIRouter(engines: engines, store: store, now: now, skipped: skipped)
+    }
+
     public func run(_ task: AITask) async throws -> AIResult {
         var last = AIError.notConfigured
         for e in engines {

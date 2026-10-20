@@ -49,9 +49,30 @@ struct StatusCard {
         } else {
             noStatus(c)
         }
+        if let why = s?.partial { c.add(Self.partialNote("From the screen only. " + why, key: k, go: go)) }
         c.add(chips())
         if let s { c.add(NSTextField.text(s.read + (s.byAI ? " · by AI" : "") + " · " + s.cause, size: 11.5, color: Palette.dim, lines: 2)) }
         return c
+    }
+
+    // An amber note where the data is partial, with a link to the log lines of the item.
+    static func partialNote(_ text: String, key: String, go: @escaping (Route) -> Void) -> NSView {
+        let box = Box(fill: Palette.warn.withAlphaComponent(0.1), border: nil, radius: 6)
+        let row = NSStackView(h: [NSTextField.text("▲", size: 12, color: Palette.warn),
+                                  NSTextField.text(text, size: 12, color: Palette.fg, lines: 2),
+                                  ActionButton("View log", style: .link) {
+                                      LogListView.model = LogListModel(filter: .all, text: key)
+                                      go(.settings(.logs, anchor: SettingsAnchor.log.rawValue))
+                                  }, Spacer()], spacing: 6, align: .top)
+        row.setAccessibilityElement(true)
+        row.setAccessibilityLabel("Warning: " + text)
+        box.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 8), row.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -8),
+            row.topAnchor.constraint(equalTo: box.topAnchor, constant: 6), row.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -6),
+        ])
+        return box
     }
 
     private func body(_ c: Card, _ s: SessionStatus, reading: Bool) {

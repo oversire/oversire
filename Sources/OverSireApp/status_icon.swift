@@ -11,13 +11,18 @@ struct MenuIconState: Equatable {
     let label: String
     let active: Bool
     let dot: Bool
+    /// The open OverSire problems. The ▲ shows only when the Logs settings keep the mark on.
+    let problems: Int
 
-    init(runs: [(String, [Run])], waitingAgents: Int, unread: Int, unreadDot: Bool) {
+    init(runs: [(String, [Run])], waitingAgents: Int, unread: Int, unreadDot: Bool, problems: Int = 0) {
         let (c, b, l) = overallStatus(runs)
         color = c; badge = b
         active = hasActive(runs)
         dot = waitingAgents > 0 || (unreadDot && unread > 0)
-        label = waitingAgents > 0 ? "\(l) · \(waitingAgents) session\(waitingAgents == 1 ? "" : "s") wait\(waitingAgents == 1 ? "s" : "")" : l
+        self.problems = problems
+        var text = waitingAgents > 0 ? "\(l) · \(waitingAgents) session\(waitingAgents == 1 ? "" : "s") wait\(waitingAgents == 1 ? "s" : "")" : l
+        if problems > 0 { text += " · \(problems) problem\(problems == 1 ? "" : "s")" }
+        label = text
     }
 }
 
@@ -71,7 +76,7 @@ func tintedIcon(_ base: NSImage?, _ color: NSColor) -> NSImage {
 
 // Menu bar icon: the ring with a status glyph (check / cross / hourglass) as its light.
 // The shape conveys state independently of the tint colour. Without a glyph, a plain light shows.
-func statusBadgedIcon(_ base: NSImage?, color: NSColor, badge: String?, dot: Bool = false) -> NSImage {
+func statusBadgedIcon(_ base: NSImage?, color: NSColor, badge: String?, dot: Bool = false, problem: Bool = false) -> NSImage {
     guard let base = base else { return NSImage() }
     let sz = base.size
     let img = NSImage(size: sz, flipped: false) { rect in
@@ -105,6 +110,25 @@ func statusBadgedIcon(_ base: NSImage?, color: NSColor, badge: String?, dot: Boo
             }
             C_RUNNING.setFill()
             NSBezierPath(ovalIn: dRect).fill()
+        }
+        // An amber ▲ at the lower corner for an OverSire problem. The light keeps the state of the work.
+        if problem {
+            let w: CGFloat = 7, h: CGFloat = 6
+            let tri = NSBezierPath()
+            tri.move(to: NSPoint(x: sz.width - w, y: 0))
+            tri.line(to: NSPoint(x: sz.width, y: 0))
+            tri.line(to: NSPoint(x: sz.width - w / 2, y: h))
+            tri.close()
+            if let ctx = NSGraphicsContext.current?.cgContext {
+                ctx.saveGState()
+                ctx.setBlendMode(.destinationOut)
+                NSColor.black.setStroke()
+                tri.lineWidth = 2.4
+                tri.stroke()
+                ctx.restoreGState()
+            }
+            C_QUEUED.setFill()
+            tri.fill()
         }
         return true
     }

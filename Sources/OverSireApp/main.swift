@@ -84,6 +84,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
+    var logs: LogStore?
+    private var orderLog: WorkOrderLog?
     lazy var planner = PlannerBook(writes: STORE_WRITES)
     lazy var plannerSignals = PlannerSignals(commands: ProcessRunner(), writes: STORE_WRITES)
     var signalTimer: Timer?
@@ -126,6 +128,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     private func launch() {
         WorkstreamIndex.formats = ENV.keyFormats
+        startLogs()
         installMainMenu()
         applyShowIn()
         REPOS = catalog.resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
@@ -475,6 +478,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             let totalRuns = runRes.reduce(0) { $0 + $1.1.count }
             let totalPRs = prRes.reduce(0) { $0 + $1.1.count }
             log.info("Refresh done in \(String(format: "%.1f", elapsed), privacy: .public)s — \(totalRuns) runs, \(totalPRs) PRs")
+            Self.logPoll(found.filter { $0.1 == nil }.map(\.0), runs: totalRuns, ms: Int(elapsed * 1000))
             DispatchQueue.main.async {
                 self.detectTransitions(runRes)
                 self.ciAssist.observe(runRes)
@@ -497,6 +501,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.runPendingPartial()
             }
         }
+    }
+
+    // One line for each poll. A failed repo makes an error, so a gh login problem shows on the Logs page.
+    static func logPoll(_ failed: [String], runs: Int, ms: Int) {
+        var e = failed.isEmpty
+            ? LogEntry(level: .ok, area: .sync, job: "GitHub poll", host: "gh", message: "\(runs) runs", ms: ms)
+            : LogEntry(level: .error, area: .sync, job: "GitHub poll", subject: failed.joined(separator: ", "), host: "gh",
+                       message: "Could not read the runs of \(failed.count) repos. Run gh auth status in a terminal.", ms: ms)
+        e.verbose = failed.isEmpty ? true : nil
+        APP_LOG.write(e)
     }
 
     // Refreshes only the given repos and merges them into the current data.
@@ -653,7 +667,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func updateIcon() {
         let k = MenuIconState(runs: visibleGrouped(grouped), waitingAgents: agentIndex.agents.values.filter { $0.phase == .waiting }.count,
-                              unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot)
+                              unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot,
+                              problems: openProblems.count)
         statusItem.button?.toolTip = "OverSire \u{2014} \(k.label)"
         // The shots in the open snap baskets, as a count next to the icon.
         let shots = snap.shotCount
@@ -664,7 +679,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // observer again. Without this check the two loop and use a full CPU core.
         guard k != iconKey else { return }
         iconKey = k
-        statusItem.button?.image = statusBadgedIcon(ghIcon, color: k.color, badge: k.badge, dot: k.dot)
+        statusItem.button?.image = statusBadgedIcon(ghIcon, color: k.color, badge: k.badge, dot: k.dot, problem: k.problems > 0)
         statusItem.button?.setAccessibilityLabel("OverSire, \(k.label)")
         if k.active { startAnimation() } else { stopAnimation() }
     }
@@ -835,6 +850,24 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
     }
 
+    // Only the app writes logs. Tests and the CLI paths keep NoLog.
+    private func startLogs() {
+        let problems = ProblemTracker(path: PROBLEMS_PATH)
+        problems.opened = { [weak self] p in
+            guard NOTIFICATIONS.problems else { return }
+            self?.notify(title: "OverSire problem", subtitle: p.job + (p.host.map { " · \($0)" } ?? ""), body: p.message, id: "problem-" + p.key)
+        }
+        let store = LogStore(dir: LOGS_DIR, problems: problems)
+        store.secrets = [AIClient.keyStore.get(AIClient.keyName)].compactMap { $0 }
+        logs = store
+        APP_LOG = store
+        orderLog = WorkOrderLog(writes: STORE_WRITES)
+        NotificationCenter.default.addObserver(forName: ProblemTracker.changed, object: problems, queue: .main) { [weak self] _ in
+            self?.updateIcon()
+        }
+        Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in problems.expire() }
+    }
+
     func notify(title: String, subtitle: String, body: String, id: String) {
         let c = UNMutableNotificationContent()
         c.title = title; c.subtitle = subtitle; c.body = body; c.sound = .default
@@ -978,6 +1011,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         if popover.isShown { popover.performClose(nil) }
         open(route)
     }
+
+    @objc func showLogs() { showSettings(.settings(.logs)) }
 
     @objc func showRelaySettings() { showSettings(.settings(.accounts, anchor: SettingsAnchor.live.rawValue)) }
 

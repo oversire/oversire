@@ -28,6 +28,7 @@ struct AppConfig: Codable {
     var general: GeneralConfig?
     var linking: LinkRules?
     var agents: AgentsConfig?
+    var logs: LogConfig?
     var accounts: [AccountConfig]?   // one entry for each connected vendor account
 }
 
@@ -142,12 +143,14 @@ struct NotificationSettings: Codable {
     var failed = true
     var cancelled = true
     var other = true
+    var problems = false                // a notification when an OverSire problem opens
 
     init() {}
 
     // Hand-written config files may omit individual switches.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        problems = try c.decodeIfPresent(Bool.self, forKey: .problems) ?? false
         started = try c.decodeIfPresent(Bool.self, forKey: .started) ?? true
         succeeded = try c.decodeIfPresent(Bool.self, forKey: .succeeded) ?? true
         failed = try c.decodeIfPresent(Bool.self, forKey: .failed) ?? true
@@ -696,6 +699,24 @@ struct AIConfig: Codable, Equatable {
     func isOn(key: String?) -> Bool { enabled && engineVerified(key: key) }
 }
 
+// Settings › Logs.
+struct LogConfig: Codable, Equatable {
+    var keepDays = 7
+    var keepAIText = true               // the input and the output of AI jobs
+    var debug = false                   // also each poll and each screen read
+    var menuMark = true                 // a ▲ on the menu bar light while a problem is open
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        keepDays = try c.decodeIfPresent(Int.self, forKey: .keepDays) ?? 7
+        keepAIText = try c.decodeIfPresent(Bool.self, forKey: .keepAIText) ?? true
+        debug = try c.decodeIfPresent(Bool.self, forKey: .debug) ?? false
+        menuMark = try c.decodeIfPresent(Bool.self, forKey: .menuMark) ?? true
+    }
+}
+
 // Which main tabs are shown. Projects uses ProjectsConfig.showTab.
 struct TabVisibility: Codable {
     var actions = true
@@ -723,6 +744,8 @@ let STATUS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("session-statu
 let SESSIONS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("sessions.json")
 let CI_ASSIST_PATH = (CONFIG_DIR as NSString).appendingPathComponent("ci-assist.json")
 let ITEM_SUMMARIES_PATH = (CONFIG_DIR as NSString).appendingPathComponent("summaries.json")
+let LOGS_DIR = (CONFIG_DIR as NSString).appendingPathComponent("logs")
+let PROBLEMS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("problems.json")
 let PROJECT_ACTIVITY_PATH = (CONFIG_DIR as NSString).appendingPathComponent("plane-activity.jsonl")
 
 // REPOS is what the app tracks: PICKED_REPOS plus every repo of PICKED_ORGS.
@@ -746,6 +769,7 @@ var AI_CFG = AIConfig()
 var GENERAL = GeneralConfig()
 var LINKING = LinkRules()
 var AGENTS = AgentsConfig()
+var LOGS_CFG = LogConfig()
 var ACCOUNTS: [AccountConfig] = []
 let DEFAULT_BRANCHES: Set<String> = ["main", "develop"]
 
@@ -788,6 +812,7 @@ func loadConfig() {
     if let g = c.general { GENERAL = g }
     if let l = c.linking { LINKING = l }
     if let a = c.agents { AGENTS = a }
+    if let l = c.logs { LOGS_CFG = l }
     ACCOUNTS = AppEnvironment.accounts(from: c)
     AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
     ENV.load(ACCOUNTS)
@@ -806,7 +831,7 @@ func saveConfig() {
                       filterDefaultBranches: FILTER_DEFAULT_BRANCHES, sortByRecent: SORT_BY_RECENT,
                       oneRowPerWorkflow: ONE_ROW_PER_WORKFLOW, latestAcrossBranches: LATEST_ACROSS_BRANCHES,
                       repoColors: REPO_COLORS.isEmpty ? nil : REPO_COLORS, autoUpdate: AUTO_UPDATE,
-                      relay: RELAY, notifications: NOTIFICATIONS, tabs: TABS, projects: PROJECTS_CFG, ai: AI_CFG, general: GENERAL, linking: LINKING, agents: AGENTS)
+                      relay: RELAY, notifications: NOTIFICATIONS, tabs: TABS, projects: PROJECTS_CFG, ai: AI_CFG, general: GENERAL, linking: LINKING, agents: AGENTS, logs: LOGS_CFG)
     c.accounts = ACCOUNTS
     if let data = try? JSONEncoder().encode(c) {
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]

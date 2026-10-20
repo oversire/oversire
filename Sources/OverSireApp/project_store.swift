@@ -115,10 +115,25 @@ final class ProjectStore {
             var error: String?
             for (n, (p, client, previous)) in jobs.enumerated() {
                 if n > 0, let token { await MainActor.run { self.busy?.update(token, label(n)) } }
-                guard let client else { error = "\(p.ref.workspace): " + ProjectStore.noToken; continue }
+                let started = Date()
+                let line = { (level: LogLevel, msg: String) in
+                    var e = LogEntry(level: level, area: .sync, job: "Plane poll", subject: p.identifier, host: p.ref.workspace,
+                                     message: msg, ms: Int(Date().timeIntervalSince(started) * 1000))
+                    e.verbose = level == .ok ? true : nil
+                    APP_LOG.write(e)
+                }
+                guard let client else {
+                    error = "\(p.ref.workspace): " + ProjectStore.noToken
+                    line(.error, ProjectStore.noToken)
+                    continue
+                }
                 switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
-                case .success(let s): fresh.append(s)
-                case .failure(let e): error = "\(p.ref.workspace): " + e.message
+                case .success(let s):
+                    fresh.append(s)
+                    line(.ok, "\(s.items.count) items")
+                case .failure(let e):
+                    error = "\(p.ref.workspace): " + e.message
+                    line(.error, e.message)
                 }
             }
             let failed = error != nil

@@ -74,6 +74,11 @@ extension SettingsPage {
             .init("Session is done", on: PROJECTS_CFG.notifications.agentDone) { PROJECTS_CFG.notifications.agentDone = $0 },
         ], label: "Agents and mentions"))]))
 
+        b.addFull(section(.oversire, [
+            SwitchRow("OverSire problems", note: "A background job of OverSire fails, for example an AI job or a poll. Settings › Logs shows the details.",
+                      on: NOTIFICATIONS.problems) { NOTIFICATIONS.problems = $0; settingsChanged() },
+        ]))
+
         b.addFull(section(.overrides, overrideRows()))
     }
 

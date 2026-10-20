@@ -44,6 +44,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private var snapPanel: ShotEditorPanel?
     private var basketPanel: BasketPanel?
     private var sessionWindow: NSWindow?
+    var logs: LogStore?
 
     init(dir: String, paths: [String]) {
         self.dir = dir
@@ -104,6 +105,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let aiKey = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AI"] == "on" ? "sk-ant-uishots-3f9a" : nil
     // OVERSIRE_UISHOTS_OVERRIDES=on: Settings › Notifications shows one muted project and one with custom notifications.
     static let overrides = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_OVERRIDES"] == "on"
+    // OVERSIRE_UISHOTS_LOGS=1: sample log lines and two open problems. A partial Status on OVERSIRE-91.
+    static let sampleLogs = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOGS"] == "1"
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()
@@ -213,8 +216,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 statusJob.seed(e)
                 UIShots.expandBlocked = e.id
             } else if key == "OVERSIRE-91" {
-                statusJob.seed(status(StatusReply(state: .done, headline: "The Planner page is merged into main and all tests pass.",
-                                                  done: ["The Plan page shows the lanes.", "The tests pass."]), .done, 40))
+                var s = status(StatusReply(state: .done, headline: "The Planner page is merged into main and all tests pass.",
+                                           done: ["The Plan page shows the lanes.", "The tests pass."]), .done, 40)
+                if UIShots.sampleLogs { s.partial = "The history read on mbp failed: python3 not found." }
+                statusJob.seed(s)
             }
         }
         agentIndex.seed(cards: cards)
@@ -471,6 +476,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             AI_CFG.verified = AI_CFG.fingerprint(key: key)
         }
         if ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENGINE"] == "cli" { Self.seedLocalCLI() }
+        if UIShots.sampleLogs { seedLogs() }
         if UIShots.overrides {
             PROJECTS_CFG.settings["TREBI", default: ProjectLocalSettings()].muted = true
             var n = PROJECTS_CFG.notifications
@@ -570,6 +576,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("session:") {
                         self.sessionWindow?.orderOut(nil)
                         self.sessionWindow = UIShots.sessionSample(String(p.dropFirst(8)), shooting: w)
+                    } else if p == "popover" {
+                        self.glance = self.popoverSample()
+                    } else if p == "menuicon" {
+                        self.glance = UIShots.menuIconSample()
                     } else if p == "kit" {
                         self.glance = UIShots.kitSample()
                     } else if p.hasPrefix("palette:") {
@@ -777,6 +787,82 @@ extension UIShots {
 
 // The Local CLI table from fixed detections, with no probe.
 extension UIShots {
+    // The lines of the Logs design board, in a temp folder.
+    private func seedLogs() {
+        let dir = UIShots.tmp + "/logs"
+        for f in (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [] { try? FileManager.default.removeItem(atPath: dir + "/" + f) }
+        try? FileManager.default.removeItem(atPath: UIShots.tmp + "/problems.json")
+        let store = LogStore(dir: dir, problems: ProblemTracker(path: UIShots.tmp + "/problems.json"))
+        self.logs = store
+        let now = Date()
+        func line(_ min: Double, _ level: LogLevel, _ area: LogArea, _ job: String, _ subject: String?, _ host: String?, _ msg: String, _ ms: Int?,
+                  _ fill: (inout LogEntry) -> Void = { _ in }) {
+            var e = LogEntry(at: now.addingTimeInterval(-min * 60), level: level, area: area, job: job, subject: subject, host: host, message: msg, ms: ms)
+            fill(&e)
+            store.write(e)
+        }
+        line(31, .ok, .sync, "GitHub poll", nil, "gh", "4 repos · no change", 1300)
+        line(19, .ok, .ai, "CI cause", "oversire #812", "local-cli", "Test timeout in LiveSyncTests", 3200) {
+            $0.engine = "local-cli"; $0.model = "claude"; $0.output = "cause: LiveSyncTests waited 30 s for a fake event."
+        }
+        line(12, .ok, .runner, "Work order", "OVERSIRE-149", "mbp", "The runner has it", nil)
+        line(11.9, .ok, .sync, "Plane poll", "OVERSIRE", "ocral", "3 items changed", 800)
+        line(11.5, .ok, .ai, "Status", "OVERSIRE-148", "local-cli", "Working · idle 10 min", 5900)
+        for m in [29.0, 20, 11] {
+            line(m, .warn, .sessions, "History read", "TOWERTAIL-61", "mbp", "Used the screen only: python3 not found on mbp.", 1100) {
+                $0.exit = 127; $0.outputTail = "bash: python3: command not found\n(no OVERSIRE-DIGEST-END marker)"
+            }
+        }
+        line(3, .ok, .ai, "Summary", "OVERSIRE-150", "local-cli", "Done", 4800) {
+            $0.engine = "local-cli"; $0.model = "claude"; $0.reason = "Auto: updated in the last 7 days"; $0.tokensIn = 1020; $0.tokensOut = 188
+            $0.output = "gist: Logs page and problem marks for background jobs."
+        }
+        line(0.9, .error, .ai, "Summary", "OVERSIRE-152", "api-key", "401 Unauthorized: invalid x-api-key", 400) {
+            $0.engine = "api-key"; $0.model = "deepseek"; $0.reason = "Description changed"
+            $0.output = #"{"error":{"type":"authentication_error","message":"invalid x-api-key"}}"#
+        }
+        line(0.5, .ok, .ai, "Status", "OVERSIRE-137", "local-cli", "Done", 6200) {
+            $0.engine = "local-cli"; $0.model = "claude-haiku-5-5"; $0.reason = "Turn end (Orca: done)"; $0.tokensIn = 2864; $0.tokensOut = 612; $0.stop = "end_turn"
+            $0.input = "Item OVERSIRE-137: Status card\nLast turns: 3 · closing messages: 2 · description: yes"
+            $0.output = "state: blocked\nheadline: Shipped in v1.3.13; a live test of \"Tell the agent\" still needs you.\nneedsYou: Install v1.3.13"
+        }
+        LogListView.model = LogListModel()
+        LogListView.open = store.entries.first
+    }
+
+    // The footer of the popover with the problem line, in a plain window.
+    private func popoverSample() -> NSWindow {
+        let f = Footer(POP_W, updated: Date(), problems: openProblems)
+        let g = NSWindow(contentRect: NSRect(x: 1360, y: 200, width: POP_W, height: f.frame.height), styleMask: [.borderless], backing: .buffered, defer: false)
+        g.contentView = f
+        g.orderFrontRegardless()
+        return g
+    }
+
+    // The menu bar icon at 4x: no problem, a problem, and a problem on a failed run.
+    static func menuIconSample() -> NSWindow {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let g = NSWindow(contentRect: NSRect(x: 1360, y: 200, width: 420, height: 150), styleMask: [.borderless], backing: .buffered, defer: false)
+        let bg = Box(fill: dark ? NSColor(white: 0.17, alpha: 1) : NSColor(white: 0.92, alpha: 1), border: nil, radius: 0)
+        let cells = [("No problem", C_SUCCESS, "checkmark", false), ("Problem open", C_SUCCESS, "checkmark", true), ("Failed run and problem", C_FAILURE, "xmark", true)]
+            .map { title, color, badge, mark -> NSView in
+                let img = NSImageView(image: statusBadgedIcon(loadGHIcon(), color: color, badge: badge, problem: mark))
+                img.imageScaling = .scaleProportionallyUpOrDown
+                img.widthAnchor.constraint(equalToConstant: 72).isActive = true
+                img.heightAnchor.constraint(equalToConstant: 72).isActive = true
+                let v = NSStackView(v: [img, NSTextField.text(title, size: 11.5, color: Palette.mut)], spacing: 8)
+                v.alignment = .centerX
+                return v
+            }
+        let row = NSStackView(h: cells, spacing: 40)
+        bg.addSubview(row)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([row.centerXAnchor.constraint(equalTo: bg.centerXAnchor), row.centerYAnchor.constraint(equalTo: bg.centerYAnchor)])
+        g.contentView = bg
+        g.orderFrontRegardless()
+        return g
+    }
+
     static func seedLocalCLI() {
         AI_CFG.engine = .localCLI
         AI_CFG.cliHarness = "claude"

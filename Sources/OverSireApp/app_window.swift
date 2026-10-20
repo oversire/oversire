@@ -26,11 +26,18 @@ protocol AppData: AnyObject {
     var cloudSetup: CloudSetup { get }
     var repoCatalog: RepoCatalog { get }
     var projectCatalog: ProjectCatalog { get }
+    /// Nil in tests: only the app writes logs.
+    var logs: LogStore? { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func refresh(force: Bool, completion: (() -> Void)?)
     /// True when an account has the feature. Pages hide what no account has.
     func has(_ c: Capability) -> Bool
+}
+
+extension AppData {
+    /// The problems for the marks. Empty when the Logs settings turn the mark off.
+    var openProblems: [Problem] { LOGS_CFG.menuMark ? logs?.problems.open ?? [] : [] }
 }
 
 // A hash of the data that pages show. A poll or event that changes none of it does not rebuild the page.

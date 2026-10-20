@@ -1,4 +1,5 @@
 import Foundation
+import os
 import OverSireCore
 import OverSireAI
 
@@ -48,18 +49,64 @@ final class AIClient {
         let (router, task) = (router, AITask(id: id, kind: kind, subject: subject, input: input))
         let retry = cfg.engine == .localCLI && cfg.fallback == .wait && kind != .ping
         Task {
-            var r = await Self.attempt(router, task)
+            var r = await Self.attempt(router, task, cfg: self.cfg)
             if retry, case .failure(.unavailable) = r {
                 try? await Task.sleep(nanoseconds: UInt64(Self.retryDelay * 1e9))
-                r = await Self.attempt(router, task)
+                r = await Self.attempt(router, task, cfg: self.cfg)
             }
             DispatchQueue.main.async { done(r) }
         }
     }
 
-    private static func attempt(_ router: AIRouter, _ task: AITask) async -> Result<String, AIError> {
-        do { return .success(try await router.run(task).text) } catch {
-            return .failure(error as? AIError ?? .network(error.localizedDescription))
+    // Writes one log line for the task, and one warning for each engine that the router passed over.
+    private static func attempt(_ router: AIRouter, _ task: AITask, cfg: AIConfig) async -> Result<String, AIError> {
+        let skips = OSAllocatedUnfairLock(initialState: [(EngineID, AIError)]())
+        let start = Date()
+        let r: Result<AIResult, AIError>
+        do {
+            r = .success(try await router.with { id, e in skips.withLock { $0.append((id, e)) }; Self.skipped(id, e) }.run(task))
+        } catch {
+            r = .failure(error as? AIError ?? .network(error.localizedDescription))
+        }
+        guard task.kind != .ping else { return r.map(\.text) }
+        let job = jobName(task.kind)
+        let subject = task.id.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init)
+        let ms = Int(Date().timeIntervalSince(start) * 1000)
+        let passed = skips.withLock { $0 }
+        for (id, e) in passed where e != .notConfigured {
+            APP_LOG.write(LogEntry(level: .warn, area: .ai, job: job, subject: subject, host: id.rawValue, message: "Skipped: \(e.message)"))
+        }
+        let used = (try? r.get())?.engine ?? router.engines.map(\.id).first { id in !passed.contains { $0.0 == id } } ?? passed.first?.0
+        var e: LogEntry
+        switch r {
+        case .success(let res):
+            e = LogEntry(level: .ok, area: .ai, job: job, subject: subject, host: res.engine.rawValue, message: "Done", ms: ms)
+            e.output = String(res.text.prefix(4000))
+        case .failure(let err):
+            e = LogEntry(level: .error, area: .ai, job: job, subject: subject, host: used?.rawValue, message: err.message, ms: ms)
+        }
+        e.engine = (used ?? .apiKey).rawValue
+        e.model = used == .localCLI ? [cfg.cliHarness, cfg.cliModel].filter { !$0.isEmpty }.joined(separator: " · ") : cfg.apiKey.model
+        e.input = (try? task.kind.prompt(task.input)).map { String($0.user.prefix(4000)) }
+        APP_LOG.write(e)
+        return r.map(\.text)
+    }
+
+    static func jobName(_ k: AITaskKind) -> String {
+        switch k {
+        case .status: return "Status"
+        case .itemSummary, .sessionSummary: return "Summary"
+        case .sessionEnd: return "Session end"
+        case .failureReason: return "CI cause"
+        case .digest: return "CI digest"
+        case .order: return "Queue order"
+        case .draft: return "Titles"
+        case .tidy: return "Tidy"
+        case .triage: return "Triage"
+        case .question: return "Question"
+        case .changeSummary: return "PR summary"
+        case .check: return "Check"
+        default: return k.rawValue
         }
     }
 

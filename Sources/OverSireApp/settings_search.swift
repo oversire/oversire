@@ -7,7 +7,8 @@ enum SettingsAnchor: String, CaseIterable {
     case projects, refresh, repos, linking, writeback
     case sessions, queue, planner
     case engine, localCLI = "local-cli", apiKey = "api-key", use, cloudAI = "cloud-ai"
-    case ci, tracker, mentions, overrides
+    case ci, tracker, mentions, oversire, overrides
+    case problems, log, logSettings = "log-settings"
 
     var title: String {
         switch self {
@@ -35,7 +36,11 @@ enum SettingsAnchor: String, CaseIterable {
         case .ci: return "CI runs"
         case .tracker: return "Tracker items"
         case .mentions: return "Agents and mentions"
+        case .oversire: return "OverSire"
         case .overrides: return "Project overrides"
+        case .problems: return "Problems"
+        case .log: return "Log"
+        case .logSettings: return "Log settings"
         }
     }
 
@@ -46,7 +51,8 @@ enum SettingsAnchor: String, CaseIterable {
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .planner: return .agents
         case .engine, .localCLI, .apiKey, .use, .cloudAI: return .ai
-        case .ci, .tracker, .mentions, .overrides: return .notifications
+        case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
+        case .problems, .log, .logSettings: return .logs
         }
     }
 
@@ -138,6 +144,11 @@ struct SettingsIndex {
         Entry("Add to the queue by", .queue, "label bot"),
         Entry("Intake agent in a scratch worktree", .planner, "triage intake prompt"),
         Entry("Planner", .planner, "order mode project"),
+        Entry("OverSire problems", .oversire, "notify error log"),
+        Entry("Keep logs for", .logSettings, "days retention"),
+        Entry("Keep AI input and output", .logSettings, "prompt reply privacy"),
+        Entry("Detail", .logSettings, "debug verbose poll"),
+        Entry("Problem mark in the menu bar", .logSettings, "triangle badge icon"),
         Entry("Feature areas", .planner, "areas code"),
         Entry("Format", .apiKey, "openai anthropic"),
         Entry("Endpoint", .apiKey, "url base"),

@@ -143,10 +143,15 @@ class LoadingRow: NSView {
 }
 
 class Footer: NSView {
-    init(_ w: CGFloat, updated: Date) {
-        super.init(frame: NSRect(x: 0, y: 0, width: w, height: FTR_H))
+    static let problemH: CGFloat = 26
+
+    /// `problems` adds one line above the buttons while OverSire has open problems.
+    init(_ w: CGFloat, updated: Date, problems: [Problem] = []) {
+        let h = FTR_H + (problems.isEmpty ? 0 : Self.problemH)
+        super.init(frame: NSRect(x: 0, y: 0, width: w, height: h))
         wantsLayer = true; layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.9).cgColor
-        let sep = NSView(frame: NSRect(x: 0, y: FTR_H - 0.5, width: w, height: 0.5))
+        if !problems.isEmpty { addSubview(problemLine(problems, w: w)) }
+        let sep = NSView(frame: NSRect(x: 0, y: h - 0.5, width: w, height: 0.5))
         sep.wantsLayer = true; sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
         addSubview(sep)
 
@@ -190,6 +195,30 @@ class Footer: NSView {
 
     let quota = NSTextField(labelWithString: "")
     let stamp = NSTextField(labelWithString: "")
+
+    // "▲ 2 problems · History read, Status   View". View opens Settings › Logs.
+    private func problemLine(_ problems: [Problem], w: CGFloat) -> NSView {
+        let line = NSView(frame: NSRect(x: 0, y: FTR_H, width: w, height: Self.problemH))
+        let jobs = Array(NSOrderedSet(array: problems.map(\.job))).compactMap { $0 as? String }.joined(separator: ", ")
+        let n = problems.count
+        let text = NSMutableAttributedString(string: "▲ ", attributes: [.foregroundColor: C_QUEUED, .font: NSFont.systemFont(ofSize: 11)])
+        text.append(NSAttributedString(string: "\(n) problem\(n == 1 ? "" : "s")",
+                                       attributes: [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 11, weight: .medium)]))
+        text.append(NSAttributedString(string: " · " + jobs, attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.systemFont(ofSize: 11)]))
+        let label = NSTextField(labelWithAttributedString: text)
+        label.lineBreakMode = .byTruncatingTail
+        label.frame = NSRect(x: 12, y: 5, width: w - 90, height: 16)
+        label.setAccessibilityLabel("\(n) OverSire problem\(n == 1 ? "" : "s"): \(jobs)")
+        line.addSubview(label)
+        let view = NSButton(title: "View", target: NSApp.delegate, action: #selector(GHActionsBar.showLogs))
+        view.bezelStyle = .inline; view.font = .systemFont(ofSize: 11)
+        view.frame = NSRect(x: w - 64, y: 2, width: 56, height: 22)
+        line.addSubview(view)
+        let sep = NSView(frame: NSRect(x: 12, y: 0, width: w - 24, height: 0.5))
+        sep.wantsLayer = true; sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        line.addSubview(sep)
+        return line
+    }
 
     func showUpdated(_ updated: Date) {
         let f = DateFormatter(); f.dateFormat = "h:mm:ss a"
