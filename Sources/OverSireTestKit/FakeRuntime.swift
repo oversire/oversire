@@ -3,7 +3,7 @@ import OverSireCore
 
 /// An in-memory agent runtime. A launch makes a workspace with one session. A send adds lines to the session.
 /// Host files stay in memory.
-public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWriting, @unchecked Sendable {
+public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWriting, SessionHistoryReading, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -15,14 +15,18 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     private var screens: [String: [String]] = [:]
     private var shown: [SessionRef] = []
     private var written: [String: Data] = [:]
+    private var histories: [String: SessionDigest] = [:]
 
-    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles]) {
+    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory]) {
         base = FakeProvider(id: "fake-runtime", account: account, capabilities: capabilities)
     }
 
     public var revealed: [SessionRef] { (try? base.locked { shown }) ?? [] }
     /// The host files by path.
     public var hostFiles: [String: Data] { base.lockedValue { written } }
+
+    /// The history that `history(of:)` gives for a session id (paneKey).
+    public func setHistory(_ d: SessionDigest, paneKey: String) { base.lockedValue { histories[paneKey] = d } }
 
     public func probe() async throws -> Identity { try await base.probe() }
     public func poll(since: Cursor?) async throws -> EventPage { try await base.poll(since: since) }
@@ -105,5 +109,11 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
         }
         progress(total, total)
         return paths
+    }
+
+    public func history(of session: AgentSession, in workspace: Workspace, budget: HistoryBudget) async throws -> SessionDigest {
+        guard capabilities.contains(.sessionHistory) else { throw ProviderError.unsupported(.sessionHistory) }
+        guard let d = try base.locked({ histories[session.paneKey ?? ""] }) else { throw ProviderError.notFound }
+        return d
     }
 }

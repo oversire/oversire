@@ -3,26 +3,30 @@ import OverSireCore
 
 /// Orca terminals through the Orca CLI. Each call has an argument array and --json.
 /// With an environment, --environment sends the command to the paired Orca server.
-public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, @unchecked Sendable {
+public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHistoryReading, @unchecked Sendable {
     public static let defaultPath = "/Applications/Orca.app/Contents/Resources/bin/orca"
 
     public let id: ProviderID = .orca
     public let account: AccountID
     public let exe: String
     public let environment: String?
-    public var capabilities: Set<Capability> { [.remoteEnvironments, .sessionInput, .sessionTail, .reveal, .hostFiles] }
+    public var capabilities: Set<Capability> { [.remoteEnvironments, .sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 3600) }
 
     let commands: any CommandRunner
+    /// Reads the transcripts of local sessions. nil: only remote sessions have a history.
+    let transcripts: (any TranscriptReading)?
     /// The wait between two looks for the shell of a new workspace.
     var shellWait: Duration = .milliseconds(300)
     /// The marker id of a host file upload.
     var uploadId: @Sendable () -> String = { UUID().uuidString }
 
-    public init(exe: String = OrcaRuntime.defaultPath, environment: String?, commands: any CommandRunner) {
+    public init(exe: String = OrcaRuntime.defaultPath, environment: String?, commands: any CommandRunner,
+                transcripts: (any TranscriptReading)? = nil) {
         self.exe = exe
         self.environment = environment?.isEmpty == true ? nil : environment
         self.commands = commands
+        self.transcripts = transcripts
         account = AccountID(provider: .orca, id: self.environment ?? "local")
     }
 

@@ -61,6 +61,7 @@ public enum ProviderConformance {
         (.sessionTail, "SessionIO", { $0 is any SessionIO }),
         (.reveal, "Revealing", { $0 is any Revealing }),
         (.hostFiles, "HostFileWriting", { $0 is any HostFileWriting }),
+        (.sessionHistory, "SessionHistoryReading", { $0 is any SessionHistoryReading }),
         (.projectSettings, "ProjectSettingsReading", { $0 is any ProjectSettingsReading }),
         (.projectSettingsEdit, "ProjectSettingsEditing", { $0 is any ProjectSettingsEditing }),
     ]

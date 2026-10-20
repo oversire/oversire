@@ -72,12 +72,12 @@ extension OrcaRuntime: HostFileWriting {
     }
 
     /// A line for the shell, then Enter.
-    private func type(_ h: String, _ line: String) async throws {
+    func type(_ h: String, _ line: String) async throws {
         _ = try await run(["terminal", "send", "--terminal", h, "--text", line, "--enter"])
     }
 
     /// Reads the output until `done` accepts it.
-    private func readUntil(_ h: String, lines: Int, _ done: ([String]) -> Bool) async throws -> [String] {
+    func readUntil(_ h: String, lines: Int, _ done: ([String]) -> Bool) async throws -> [String] {
         let end = ContinuousClock.now + Self.readTimeout
         while true {
             let r = try await run(["terminal", "read", "--terminal", h, "--limit", "\(lines)"])

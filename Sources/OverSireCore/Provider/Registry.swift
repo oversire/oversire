@@ -71,13 +71,16 @@ public struct ProviderEnvironment: Sendable {
     public let commands: any CommandRunner
     public let secrets: any SecretReader
     public let clock: any Clock<Duration>
+    /// nil: the adapters read no local transcripts.
+    public let transcripts: (any TranscriptReading)?
 
     public init(http: any HTTPTransport, commands: any CommandRunner, secrets: any SecretReader,
-                clock: any Clock<Duration> = ContinuousClock()) {
+                clock: any Clock<Duration> = ContinuousClock(), transcripts: (any TranscriptReading)? = nil) {
         self.http = http
         self.commands = commands
         self.secrets = secrets
         self.clock = clock
+        self.transcripts = transcripts
     }
 }
 
