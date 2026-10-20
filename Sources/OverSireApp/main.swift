@@ -102,6 +102,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
     lazy var itemSummaries = ItemSummaries(path: ITEM_SUMMARIES_PATH)
+    lazy var stats = WorkStats(path: WORK_STATS_PATH)
     lazy var appWindow: AppWindow = {
         AppWindow(data: self)
     }()
@@ -240,12 +241,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         newSession.created = { [weak self] k in self?.projectStore.refresh([k], force: true) { _ in } }
         NotificationCenter.default.addObserver(forName: SnapStore.changed, object: snap.store, queue: .main) { [weak self] _ in self?.updateIcon() }
         NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: agentIndex, queue: .main) { [weak self] _ in
+            if let self { self.stats.sample(working: self.agentIndex.agents.keys.filter { self.agentIndex.state($0) == .working }.count) }
             self?.scanCheckouts()
             self?.reloadList()
             self?.updateIcon()
         }
         agentIndex.startTimer()
-        for n in [WorkQueue.changed, StatusJob.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
+        for n in [WorkQueue.changed, WorkStats.changed, StatusJob.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
             }
@@ -490,6 +492,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 if includePRs {
                     self.prGrouped = prRes
                     self.lastPRRefresh = Date()
+                    self.stats.refreshMerged()
                 }
                 self.lastFetch = Date()
                 self.firstLoad = false

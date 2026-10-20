@@ -31,6 +31,14 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: UIShots.tmp + "/ci.json")
+    lazy var stats: WorkStats = {
+        let s = WorkStats(path: UIShots.tmp + "/work-stats.json") { _ in nil }
+        let week = WorkStats.week(Date(), calendar: .current)
+        let repo = REPOS.first ?? "oversire/oversire"
+        s.seed(hours: [3.5, 5, 2.2, 6.1, 4, 0, 0], merged: [0, 0, 1, 2, 2, 3, 4].enumerated().map { n, d in
+            WorkStats.Merged(repo: repo, number: 200 + n, at: week[d].addingTimeInterval(36000)) })
+        return s
+    }()
     lazy var itemSummaries = ItemSummaries(path: UIShots.tmp + "/summaries.json",
                                            ai: { UIShots.aiKey.map { AIClient(cfg: AI_CFG, key: $0) } })
     lazy var statusJob = StatusJob(path: UIShots.tmp + "/session-status.json", agents: agentIndex, queue: queue)

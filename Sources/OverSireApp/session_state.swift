@@ -69,6 +69,7 @@ struct SessionWatch: Equatable {
     var shells = 0
     var turn = ""
     var recap: String?
+    var limit: String?             // the reset time of a usage-limit message
     var readAt: Date
 
     init(at: Date) {
@@ -92,6 +93,7 @@ struct SessionWatch: Equatable {
         shells = s.shells
         turn = s.lastTurn()
         recap = s.recap
+        limit = WorkStats.usageLimit(s.lines)
         readAt = at
     }
 }

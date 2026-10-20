@@ -746,6 +746,7 @@ let STATUS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("session-statu
 let SESSIONS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("sessions.json")
 let CI_ASSIST_PATH = (CONFIG_DIR as NSString).appendingPathComponent("ci-assist.json")
 let ITEM_SUMMARIES_PATH = (CONFIG_DIR as NSString).appendingPathComponent("summaries.json")
+let WORK_STATS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("work-stats.json")
 let LOGS_DIR = (CONFIG_DIR as NSString).appendingPathComponent("logs")
 let PROBLEMS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("problems.json")
 let PROJECT_ACTIVITY_PATH = (CONFIG_DIR as NSString).appendingPathComponent("plane-activity.jsonl")
