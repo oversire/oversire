@@ -219,7 +219,7 @@ final class StatusJob {
     func tick(workstreams: WorkstreamIndex, store: ProjectStore) {
         world = (workstreams, store)
         for (key, a) in agents.agents where !reading.contains(key) {
-            guard let st = agents.state(key), st != .closed, let w = agents.watch(key) else { continue }
+            guard let st = agents.state(key), st != .closed, !store.isDone(key: key), let w = agents.watch(key) else { continue }
             let mark = w.fingerprint + "|" + a.messageHash
             guard tried[key] != mark, status(key).map({ $0.screen != w.fingerprint || $0.message != a.messageHash }) ?? true else { continue }
             let ended = (a.phase == .done || a.phase == .waiting) && w.readAt >= a.since
@@ -247,8 +247,10 @@ final class StatusJob {
         }
     }
 
-    /// The keys that "Status for all" reads: each open session.
-    var refreshable: [String] { agents.agents.keys.filter { k in agents.state(k).map { $0 != .closed } ?? false }.sorted() }
+    /// The keys that "Status for all" reads: each open session of an item that is not Completed or Cancelled.
+    var refreshable: [String] {
+        agents.agents.keys.filter { k in agents.state(k).map { $0 != .closed } ?? false && world?.store.isDone(key: k) != true }.sorted()
+    }
 
     // MARK: Read
 

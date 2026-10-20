@@ -376,6 +376,12 @@ func runSelfTest() {
         check(idx.count == 5, "agent index size \(idx.count)")
         let late = AgentIndex.index(cards, launches: [:], now: t0.addingTimeInterval(2 * 86400))
         check(late["TOWERTAIL-2"]?.phase == .waiting && late["FRITZ-17"]?.phase == .working, "old waiting agents stay")
+        let c0 = cards[0]
+        let doneOnly = [Workspace(id: c0.id, repo: c0.repo, path: c0.path, name: c0.name, comment: nil, liveTerminals: 1,
+                                  lastActivity: c0.lastActivity, agents: c0.agents.filter { $0.phase == .done })]
+        check(AgentIndex.index(doneOnly, launches: [:], now: t0.addingTimeInterval(2 * 86400))["TOWERTAIL-2"] == nil, "an old done agent of a closed item drops")
+        check(AgentIndex.index(doneOnly, launches: [:], open: { $0 == "TOWERTAIL-2" }, now: t0.addingTimeInterval(2 * 86400))["TOWERTAIL-2"]?.phase == .done,
+              "an old done agent of an open item stays")
         let link = AgentLink(key: "SLING-5", workspace: WorkspaceRef(account: AccountID(provider: .orca, id: "local"), id: "r2::/c"), pane: "t5:l5", at: t0)
         let linked = AgentIndex.index(cards, launches: [:], links: ["SLING-5": link], now: t0.addingTimeInterval(3600))
         check(linked["SLING-5"]?.agent == "codex", "a stored agent link keeps the pane after the launch expires")

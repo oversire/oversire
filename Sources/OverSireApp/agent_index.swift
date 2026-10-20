@@ -97,6 +97,8 @@ final class AgentIndex: NSObject {
     // True when the end check of this agent message found steps for the user.
     var blocked: (_ key: String, _ agent: AgentSession) -> Bool = { _, _ in false }
     var quietAfter: () -> TimeInterval = { AGENTS.quietMinutes * 60 }
+    /// True when the item of the key is tracked and not Completed or Cancelled.
+    var open: (String) -> Bool = { _ in false }
 
     private var cfg: OrcaConfig { PROJECTS_CFG.orca }
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
@@ -458,14 +460,15 @@ final class AgentIndex: NSObject {
         let before = agents
         let cardsChanged = self.cards != cards
         self.cards = cards
-        agents = AgentIndex.index(cards, launches: launches, links: links, now: at)
+        agents = AgentIndex.index(cards, launches: launches, links: links, open: open, now: at)
         feed.record(before: before, after: agents)
         readScreens(at: at)
         for (key, a) in agents where a.phase == .waiting || a.phase == .done {
             let tag = "\(a.phase)|\(a.paneKey ?? "")|\(Int(a.since.timeIntervalSince1970))"
             guard notified[key] != tag else { continue }
             if !primed { notified[key] = tag; continue }
-            guard at.timeIntervalSince(a.since) >= 10 else { continue }
+            // An old done agent comes back when its item opens again: it is no news.
+            guard at.timeIntervalSince(a.since) >= 10, at.timeIntervalSince(a.since) < 86400 else { continue }
             notified[key] = tag
             onAlert?(key, a)
         }
@@ -478,9 +481,10 @@ final class AgentIndex: NSObject {
     static let keyRE = try! NSRegularExpression(pattern: "^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 
-    // Item key → the most urgent agent. Old done agents and agents of closed terminals drop out.
+    // Item key → the most urgent agent. Agents of closed terminals drop out.
+    // A done agent older than a day stays only while its item is open: Session done does not mean the item is done.
     static func index(_ cards: [Workspace], launches: [String: PendingLaunch], links: [String: AgentLink] = [:],
-                      now: Date) -> [String: AgentSession] {
+                      open: (String) -> Bool = { _ in false }, now: Date) -> [String: AgentSession] {
         var out: [String: AgentSession] = [:]
         var byPane: [String: String] = [:]
         for (k, l) in links { if let p = l.pane { byPane[p] = k } }
@@ -504,7 +508,7 @@ final class AgentIndex: NSObject {
                 else if let p = g.prompt, let m = browseRE.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)),
                         let r = Range(m.range(at: 1), in: p) { key = String(p[r]).uppercased() }
                 else { continue }
-                if g.phase == .done && (c.liveTerminals == 0 || now.timeIntervalSince(g.since) > 86400) { continue }
+                if g.phase == .done && (c.liveTerminals == 0 || (now.timeIntervalSince(g.since) > 86400 && !open(key))) { continue }
                 put(key, g)
             }
         }

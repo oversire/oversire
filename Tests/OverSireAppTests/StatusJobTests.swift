@@ -75,6 +75,39 @@ final class StatusJobTests: XCTestCase {
         XCTAssertEqual(job.pending.map(\.key), ["A-1"])
     }
 
+    // Session done does not mean the item is done. A Completed or Cancelled item gets no status.
+    func testAClosedItemGetsNoStatus() throws {
+        world = (WorkstreamIndex(), try projects(group: "cancelled"))
+        seed(.done, message: "The page is merged.")
+        job.tick(workstreams: world.0, store: world.1)
+        XCTAssertTrue(engine.tasks.isEmpty)
+        XCTAssertEqual(job.refreshable, [])
+
+        world = (WorkstreamIndex(), try projects(group: "started"))
+        job.tick(workstreams: world.0, store: world.1)
+        settle()
+        XCTAssertEqual(engine.tasks.count, 1)
+        XCTAssertEqual(job.refreshable, ["A-1"])
+    }
+
+    private func projects(group: String) throws -> ProjectStore {
+        let ref = ProjectRef(account: AccountID(provider: ProviderID(rawValue: "plane"), id: "ws"), id: "p1", key: "A")
+        let snap = ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "A", title: "A", url: "https://plane/a", closed: false),
+                                   statusOptions: [StatusOption(id: "s1", name: group, color: "#000", group: group)],
+                                   items: [Item(id: "i1", key: "A-1", title: "Page", url: "https://plane/A-1", statusOptionId: "s1", fields: [:],
+                                                assignees: [], labels: [], author: nil, updatedBy: nil, updatedAt: t0, activityAt: t0,
+                                                commentCount: 0, lastComment: nil, mentionsMe: false)],
+                                   fetchedAt: t0)
+        let path = dir.path + "/state-\(group).json"
+        let disk: [String: AnyEncodable] = ["snapshots": AnyEncodable([ref.storeKey: snap]), "readActivity": AnyEncodable([String]()),
+                                            "readItems": AnyEncodable([String]())]
+        try JSONEncoder().encode(disk).write(to: URL(fileURLWithPath: path))
+        let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                 statePath: path, activityPath: dir.path + "/activity.jsonl")
+        XCTAssertNotNil(store.item(key: "A-1"))
+        return store
+    }
+
     func testIdleWaitsForTheQuietMinutes() {
         seed(.working, message: nil, same: 4 * 60)
         tick()
@@ -148,4 +181,10 @@ final class StatusJobTests: XCTestCase {
         XCTAssertEqual(again.status("A-1")?.state, .blocked)
         XCTAssertEqual(SessionStatus.readText(nil, description: true, screen: true), "Read the screen and the description")
     }
+}
+
+private struct AnyEncodable: Encodable {
+    let value: any Encodable
+    init(_ value: any Encodable) { self.value = value }
+    func encode(to encoder: Encoder) throws { try value.encode(to: encoder) }
 }
