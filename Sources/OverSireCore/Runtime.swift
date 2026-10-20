@@ -175,3 +175,21 @@ public protocol SessionIO: AgentRuntime {
 public protocol Revealing: AgentRuntime {
     func reveal(_ s: SessionRef) async throws
 }
+
+/// A local file for the host of a workspace.
+public struct HostFile: Sendable, Equatable {
+    public var name: String      // the file name on the host; the adapter makes it safe
+    public var data: Data
+
+    public init(name: String, data: Data) {
+        self.name = name
+        self.data = data
+    }
+}
+
+/// Writes files on the host of a workspace. The result is the host path of each file, in order.
+public protocol HostFileWriting: AgentRuntime {
+    /// `dir` is a host folder, for example /tmp/oversire/<session-id>. `progress` gives (bytes sent, total bytes).
+    func writeFiles(_ files: [HostFile], workspacePath: String, dir: String,
+                    progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [String]
+}

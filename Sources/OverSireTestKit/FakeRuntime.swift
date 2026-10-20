@@ -2,7 +2,8 @@ import Foundation
 import OverSireCore
 
 /// An in-memory agent runtime. A launch makes a workspace with one session. A send adds lines to the session.
-public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, @unchecked Sendable {
+/// Host files stay in memory.
+public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWriting, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -13,12 +14,15 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, @unchecked S
     private var terminals: [String: [RuntimeSession]] = [:]
     private var screens: [String: [String]] = [:]
     private var shown: [SessionRef] = []
+    private var written: [String: Data] = [:]
 
-    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal]) {
+    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles]) {
         base = FakeProvider(id: "fake-runtime", account: account, capabilities: capabilities)
     }
 
     public var revealed: [SessionRef] { (try? base.locked { shown }) ?? [] }
+    /// The host files by path.
+    public var hostFiles: [String: Data] { base.lockedValue { written } }
 
     public func probe() async throws -> Identity { try await base.probe() }
     public func poll(since: Cursor?) async throws -> EventPage { try await base.poll(since: since) }
@@ -86,5 +90,20 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, @unchecked S
     public func reveal(_ s: SessionRef) async throws {
         guard capabilities.contains(.reveal) else { throw ProviderError.unsupported(.reveal) }
         try base.locked { shown.append(s) }
+    }
+
+    public func writeFiles(_ files: [HostFile], workspacePath: String, dir: String,
+                           progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [String] {
+        guard capabilities.contains(.hostFiles) else { throw ProviderError.unsupported(.hostFiles) }
+        let total = files.reduce(0) { $0 + $1.data.count }
+        let paths = try base.locked {
+            files.map { f in
+                let p = dir + "/" + f.name
+                written[p] = f.data
+                return p
+            }
+        }
+        progress(total, total)
+        return paths
     }
 }

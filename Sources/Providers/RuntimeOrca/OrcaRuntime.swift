@@ -10,12 +10,14 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, @unchecked S
     public let account: AccountID
     public let exe: String
     public let environment: String?
-    public var capabilities: Set<Capability> { [.remoteEnvironments, .sessionInput, .sessionTail, .reveal] }
+    public var capabilities: Set<Capability> { [.remoteEnvironments, .sessionInput, .sessionTail, .reveal, .hostFiles] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 3600) }
 
     let commands: any CommandRunner
     /// The wait between two looks for the shell of a new workspace.
     var shellWait: Duration = .milliseconds(300)
+    /// The marker id of a host file upload.
+    var uploadId: @Sendable () -> String = { UUID().uuidString }
 
     public init(exe: String = OrcaRuntime.defaultPath, environment: String?, commands: any CommandRunner) {
         self.exe = exe

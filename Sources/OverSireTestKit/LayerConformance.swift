@@ -205,6 +205,12 @@ public enum RuntimeConformance {
         if let rv = rt as? any Revealing {
             _ = await r.step("reveal", { try await rv.reveal(s) })
         }
+        if let hf = rt as? any HostFileWriting {
+            let file = HostFile(name: "conformance.txt", data: Data("hello".utf8))
+            if let paths = await r.step("writeFiles", { try await hf.writeFiles([file], workspacePath: repo, dir: "/tmp/oversire/conformance") { _, _ in } }) {
+                r.expect(paths.count == 1, "writeFiles gave \(paths.count) paths for 1 file")
+            }
+        }
         if let io = rt as? any SessionIO {
             _ = await r.step("close", { try await io.close(s) })
         }
