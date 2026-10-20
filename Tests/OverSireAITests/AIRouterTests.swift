@@ -1,4 +1,5 @@
 import XCTest
+import os
 import OverSireCore
 import OverSireSync
 import OverSireTestKit
@@ -31,6 +32,17 @@ final class AIRouterTests: XCTestCase {
         do { _ = try await AIRouter(engines: [a, b]).run(task); XCTFail("no engine") } catch {
             XCTAssertEqual(error as? AIError, .unavailable("offline"))
         }
+    }
+
+    func testEachFallbackIsReported() async throws {
+        let cli = FakeAIEngine(id: .localCLI)
+        let key = FakeAIEngine(id: .apiKey)
+        cli.on(.digest, .failure(.unavailable("claude is not logged in.")))
+        let seen = OSAllocatedUnfairLock<[String]>(initialState: [])
+        let r = try await AIRouter(engines: [FakeAIEngine(id: "off", available: false), cli, key],
+                                   skipped: { id, e in seen.withLock { $0.append("\(id): \(e.message)") } }).run(task)
+        XCTAssertEqual(r.engine, .apiKey)
+        XCTAssertEqual(seen.withLock { $0 }, ["off: Set up AI in Settings → AI.", "local-cli: claude is not logged in."])
     }
 
     func testOtherErrorsStop() async throws {

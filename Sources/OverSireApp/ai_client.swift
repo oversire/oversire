@@ -17,27 +17,49 @@ final class AIClient {
         self.router = router
     }
 
-    convenience init(cfg: AIConfig, key: String, store: (any Store)? = STORE_WRITES.store) {
-        self.init(cfg: cfg, router: AIRouter(engines: [APIKeyEngine(config: cfg.apiKey, key: key, http: URLSessionTransport())], store: store))
+    convenience init(cfg: AIConfig, key: String?, store: (any Store)? = STORE_WRITES.store) {
+        self.init(cfg: cfg, router: AIRouter(engines: Self.engines(cfg, key: key), store: store, skipped: Self.skipped))
     }
 
     // The saved config, when AI is on.
     static var current: AIClient? {
         let key = keyStore.get(keyName)
-        guard AI_CFG.isOn(key: key), let key else { return nil }
+        guard AI_CFG.isOn(key: key) else { return nil }
         return AIClient(cfg: AI_CFG, key: key)
     }
 
+    // The local CLI first, then the API key when it is the fallback and its Test passed.
+    static func engines(_ cfg: AIConfig, key: String?) -> [any AIEngine] {
+        let api: [any AIEngine] = key.map { [APIKeyEngine(config: cfg.apiKey, key: $0, http: URLSessionTransport())] } ?? []
+        guard cfg.engine == .localCLI else { return api }
+        return [LocalCLI.shared.engine(cfg)] + (cfg.fallback == .apiKey && cfg.keyVerified(key) ? api : [])
+    }
+
+    static let skipped: @Sendable (EngineID, AIError) -> Void = { id, e in
+        log.warning("AI engine \(id.rawValue, privacy: .public) skipped: \(e.message, privacy: .public)")
+    }
+
+    static let retryDelay: TimeInterval = 120
+
     /// `done` runs on the main queue. `id`: a task with the same id replaces the stored result.
+    /// With the fallback "wait", a task that the CLI cannot run now tries once more after `retryDelay`.
     func run(_ kind: AITaskKind, _ input: AIInput, id: String = UUID().uuidString, subject: SubjectRef? = nil,
              done: @escaping (Result<String, AIError>) -> Void) {
         let (router, task) = (router, AITask(id: id, kind: kind, subject: subject, input: input))
+        let retry = cfg.engine == .localCLI && cfg.fallback == .wait && kind != .ping
         Task {
-            let r: Result<String, AIError>
-            do { r = .success(try await router.run(task).text) } catch {
-                r = .failure(error as? AIError ?? .network(error.localizedDescription))
+            var r = await Self.attempt(router, task)
+            if retry, case .failure(.unavailable) = r {
+                try? await Task.sleep(nanoseconds: UInt64(Self.retryDelay * 1e9))
+                r = await Self.attempt(router, task)
             }
             DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    private static func attempt(_ router: AIRouter, _ task: AITask) async -> Result<String, AIError> {
+        do { return .success(try await router.run(task).text) } catch {
+            return .failure(error as? AIError ?? .network(error.localizedDescription))
         }
     }
 

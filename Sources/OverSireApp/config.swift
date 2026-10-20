@@ -1,6 +1,7 @@
 import Foundation
 import OverSireCore
 import OverSireAI
+import AIEngineAgentBinder
 import TrackerPlane
 import CryptoKit
 import os
@@ -597,8 +598,21 @@ struct OrcaConfig: Codable, Equatable {
     }
 }
 
+enum AIEngineChoice: String, Codable { case apiKey, localCLI }
+
+// What a job does when the local CLI fails. Each fallback goes to the log.
+enum AIFallback: String, Codable { case apiKey, wait, skip }
+
 // The API key is in the Keychain, not here.
 struct AIConfig: Codable, Equatable {
+    var engine = AIEngineChoice.apiKey
+    // The local CLI engine (AgentBinder). Empty model or effort uses the default of the CLI.
+    var cliHarness = ""
+    var cliModel = ""
+    var cliEffort = ""
+    var cliLimitPause = 90              // jobs pause above this use of a plan window, in percent
+    var fallback = AIFallback.apiKey
+    var cliVerified = ""                // fingerprint of the last passed test of the CLI
     var format = AIFormat.openai
     var baseURL = ""
     var model = ""
@@ -625,6 +639,13 @@ struct AIConfig: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        engine = try c.decodeIfPresent(AIEngineChoice.self, forKey: .engine) ?? .apiKey
+        cliHarness = try c.decodeIfPresent(String.self, forKey: .cliHarness) ?? ""
+        cliModel = try c.decodeIfPresent(String.self, forKey: .cliModel) ?? ""
+        cliEffort = try c.decodeIfPresent(String.self, forKey: .cliEffort) ?? ""
+        cliLimitPause = try c.decodeIfPresent(Int.self, forKey: .cliLimitPause) ?? 90
+        fallback = try c.decodeIfPresent(AIFallback.self, forKey: .fallback) ?? .apiKey
+        cliVerified = try c.decodeIfPresent(String.self, forKey: .cliVerified) ?? ""
         format = try c.decodeIfPresent(AIFormat.self, forKey: .format) ?? .openai
         baseURL = try c.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
@@ -649,15 +670,30 @@ struct AIConfig: Codable, Equatable {
 
     var apiKey: APIKeyConfig { APIKeyConfig(format: format, baseURL: baseURL, model: model, effort: effort, maxTokens: maxTokens) }
 
-    func fingerprint(key: String) -> String {
-        let raw = "\(format.rawValue)|\(baseURL)|\(model)|\(key)"
-        return SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
+    var localCLI: LocalCLIConfig {
+        LocalCLIConfig(harness: cliHarness, model: cliModel, effort: cliEffort, limitPause: Double(cliLimitPause))
     }
 
-    func isOn(key: String?) -> Bool {
-        guard enabled, let key, !key.isEmpty, !verified.isEmpty else { return false }
+    func fingerprint(key: String) -> String { Self.hash("\(format.rawValue)|\(baseURL)|\(model)|\(key)") }
+
+    var cliFingerprint: String { Self.hash("\(EngineID.localCLI)|\(cliHarness)") }
+
+    private static func hash(_ raw: String) -> String {
+        SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // True when Test passed for the current key settings.
+    func keyVerified(_ key: String?) -> Bool {
+        guard let key, !key.isEmpty, !verified.isEmpty else { return false }
         return verified == fingerprint(key: key)
     }
+
+    var cliVerifiedNow: Bool { !cliHarness.isEmpty && cliVerified == cliFingerprint }
+
+    // True when Test passed for the chosen engine.
+    func engineVerified(key: String?) -> Bool { engine == .localCLI ? cliVerifiedNow : keyVerified(key) }
+
+    func isOn(key: String?) -> Bool { enabled && engineVerified(key: key) }
 }
 
 // Which main tabs are shown. Projects uses ProjectsConfig.showTab.

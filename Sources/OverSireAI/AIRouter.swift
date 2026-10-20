@@ -2,29 +2,38 @@ import Foundation
 import OverSireCore
 
 /// Runs a task on the first available engine. The AI settings give the order.
-/// Hook points: an AgentBinder engine and a cloud credits engine go into `engines`.
+/// Today: the local CLI, then the API key as its fallback. Later: cloud credits.
 public struct AIRouter: Sendable {
     public static let keep = 200
 
     public let engines: [any AIEngine]
     let store: (any Store)?
     let now: @Sendable () -> Date
+    /// Gets each engine that the router passes over, and why. The app writes it to the log.
+    let skipped: (@Sendable (EngineID, AIError) -> Void)?
 
-    public init(engines: [any AIEngine], store: (any Store)? = nil, now: @escaping @Sendable () -> Date = Date.init) {
+    public init(engines: [any AIEngine], store: (any Store)? = nil, now: @escaping @Sendable () -> Date = Date.init,
+                skipped: (@Sendable (EngineID, AIError) -> Void)? = nil) {
         self.engines = engines
         self.store = store
         self.now = now
+        self.skipped = skipped
     }
 
     public func run(_ task: AITask) async throws -> AIResult {
         var last = AIError.notConfigured
-        for e in engines where await e.available() {
+        for e in engines {
+            guard await e.available() else {
+                skipped?(e.id, .notConfigured)
+                continue
+            }
             do {
                 let r = AIResult(task: task.id, engine: e.id, text: try await e.run(task), at: now())
                 if task.kind != .ping { await save(r) }
                 return r
             } catch let AIError.unavailable(why) {
                 last = .unavailable(why)
+                skipped?(e.id, last)
             }
         }
         throw last

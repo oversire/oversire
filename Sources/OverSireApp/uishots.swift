@@ -1,4 +1,5 @@
 import Cocoa
+import AgentBinder
 import OverSireCore
 import OverSireAI
 import OverSireSync
@@ -469,6 +470,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             AI_CFG.enabled = true
             AI_CFG.verified = AI_CFG.fingerprint(key: key)
         }
+        if ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENGINE"] == "cli" { Self.seedLocalCLI() }
         if UIShots.overrides {
             PROJECTS_CFG.settings["TREBI", default: ProjectLocalSettings()].muted = true
             var n = PROJECTS_CFG.notifications
@@ -498,7 +500,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         w.window?.setFrameAutosaveName("")
         let env = ProcessInfo.processInfo.environment
         let width = env["OVERSIRE_UISHOTS_WIDTH"].flatMap(Double.init) ?? 1280
-        w.window?.setFrame(NSRect(x: 40, y: 40, width: width, height: 860), display: true)
+        let height = env["OVERSIRE_UISHOTS_HEIGHT"].flatMap(Double.init) ?? 860
+        w.window?.setFrame(NSRect(x: 40, y: 40, width: width, height: height), display: true)
         if let side = env["OVERSIRE_UISHOTS_SIDEBAR"].flatMap(Double.init) { w.setSidebarWidth(side) }
         w.window?.orderFrontRegardless()
         let routes = paths.isEmpty ? Route.samples.map(\.path) + ["palette:item"] : paths
@@ -771,3 +774,31 @@ extension UIShots {
         RunLoop.main.add(t, forMode: .common)
     }
 }
+
+// The Local CLI table from fixed detections, with no probe.
+extension UIShots {
+    static func seedLocalCLI() {
+        AI_CFG.engine = .localCLI
+        AI_CFG.cliHarness = "claude"
+        AI_CFG.cliModel = "claude-haiku-5-5"
+        AI_CFG.cliEffort = "low"
+        AI_CFG.enabled = true
+        AI_CFG.cliVerified = AI_CFG.cliFingerprint
+        let week = Date().addingTimeInterval(3 * 86400)
+        let five = Date().addingTimeInterval(2 * 3600)
+        let limits = Limits(plan: "max", windows: [LimitWindow(key: .fiveHour, minutes: 300, usedPercent: 18, resetsAt: five),
+                                                   LimitWindow(key: .weekly, minutes: 10080, usedPercent: 41, resetsAt: week)])
+        let bin = URL(fileURLWithPath: "/opt/homebrew/bin/x")
+        LocalCLI.shared.seed([
+            Detection(harness: .claude, path: bin, version: "2.3.1 (Claude Code)", supported: true, ready: true, auth: .ok, authDetail: "flarco@…"),
+            Detection(harness: .codex, path: bin, version: "codex-cli 0.98.0", supported: true, ready: true, auth: .ok, authDetail: "ChatGPT Plus"),
+            Detection(harness: .opencode, path: bin, version: "1.4.2", supported: true, ready: true, auth: .ok, authDetail: "2 providers"),
+            Detection(harness: .gemini, path: bin, version: "0.21.0", supported: true, auth: .missing),
+            Detection(harness: .cursor, detail: .notInstalled),
+            Detection(harness: .copilot, detail: .notInstalled),
+        ], plans: ["claude": limits, "codex": Limits(plan: "plus")],
+           models: ["claude": [ModelInfo(id: "claude-haiku-5-5", name: "Haiku 5.5"), ModelInfo(id: "claude-sonnet-5-5", name: "Sonnet 5.5", isDefault: true)]],
+           limits: limits)
+    }
+}
+

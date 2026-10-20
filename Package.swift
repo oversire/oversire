@@ -17,6 +17,8 @@ let package = Package(
         .target(name: "OverSireCore"),
         .target(name: "OverSireSync", dependencies: ["OverSireCore"]),
         .target(name: "OverSireAI", dependencies: ["OverSireCore"]),
+        // The local CLI engine. It keeps OverSireAI free of AgentBinder.
+        .target(name: "AIEngineAgentBinder", dependencies: ["OverSireCore", "OverSireAI", .product(name: "AgentBinder", package: "agent-binder")]),
         .target(name: "GitHubKit", dependencies: ["OverSireCore"]),
         .target(name: "TrackerPlane", dependencies: ["OverSireCore"], path: "Sources/Providers/TrackerPlane"),
         .target(name: "CodeHostGitHub", dependencies: ["OverSireCore", "GitHubKit"], path: "Sources/Providers/CodeHostGitHub"),
@@ -29,7 +31,7 @@ let package = Package(
         .target(name: "RuntimeTemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/RuntimeTemplate"),
         .executableTarget(
             name: "OverSireApp",
-            dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "GitHubKit",
+            dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "AIEngineAgentBinder", "GitHubKit",
                            "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca",
                            .product(name: "AgentBinder", package: "agent-binder")],
             // The UI code predates strict concurrency. It moves to .v6 page by page.
@@ -42,6 +44,7 @@ let package = Package(
         .testTarget(name: "OverSireCoreTests", dependencies: ["OverSireCore", "OverSireTestKit"]),
         .testTarget(name: "OverSireSyncTests", dependencies: ["OverSireSync", "OverSireTestKit"]),
         .testTarget(name: "OverSireAITests", dependencies: ["OverSireAI", "OverSireTestKit"]),
+        .testTarget(name: "AIEngineAgentBinderTests", dependencies: ["AIEngineAgentBinder", "OverSireTestKit", .product(name: "AgentBinder", package: "agent-binder")]),
         .testTarget(name: "OverSireTestKitTests", dependencies: ["OverSireTestKit"]),
         .testTarget(name: "TrackerPlaneTests", dependencies: ["TrackerPlane", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"]),

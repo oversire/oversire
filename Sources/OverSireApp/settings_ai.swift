@@ -1,6 +1,8 @@
 import Cocoa
 import OverSireCore
 import OverSireAI
+import AIEngineAgentBinder
+import AgentBinder
 
 // An API key field with Show and Hide. It commits on end editing only.
 final class KeyField: NSStackView, NSTextFieldDelegate {
@@ -46,18 +48,22 @@ final class KeyField: NSStackView, NSTextFieldDelegate {
     }
 }
 
-// Settings › AI: the engine, a Test, and the jobs that use AI. Each change saves at once.
-// AI stays off until Test passes for the current format, URL, model and key.
+// Settings › AI: the engine (local CLI or API key), a Test for each, and the jobs that use AI. Each change saves at once.
+// AI stays off until Test passes for the chosen engine.
 extension SettingsPage {
     static var aiTesting = false
     static var aiTestResult: (ok: Bool, text: String)?
+    static var cliTesting = false
+    static var cliTestResult: (ok: Bool, text: String)?
 
     func ai(_ b: NSStackView) {
         if !AI_CFG.isOn(key: aiKey) {
             b.addFull(Banner(.idle, title: "AI is off.",
-                             body: "Set the engine and press Test. The switches take effect when AI is on. The intake agent and flaky marks work without it."))
+                             body: "Pick the engine and press Test. The switches take effect when AI is on. The intake agent and flaky marks work without it."))
         }
         engine(b)
+        if AI_CFG.engine == .localCLI { localCLI(b) }
+        apiKey(b)
         useAIFor(b)
         let cloud = CloudAICard(cloudAIRecords)
         cloud.identifier = SettingsAnchor.cloudAI.id
@@ -67,6 +73,195 @@ extension SettingsPage {
     private var aiKey: String { UIShots.aiKey ?? AIClient.keyStore.get(AIClient.keyName) ?? "" }
 
     private func engine(_ b: NSStackView) {
+        let cfg = AI_CFG
+        let local = cfg.engine == .localCLI
+        let pick = Segmented(["Local CLI · Free", "API key", "Cloud credits · Pro"], selected: local ? 0 : 1, label: "Engine") { [weak self] i in
+            if i < 2 {
+                AI_CFG.engine = i == 0 ? .localCLI : .apiKey
+                saveConfig()
+            }
+            self?.reloadSoon()
+        }
+        pick.setEnabled(false, forSegment: 2)
+        pick.setToolTip("Later. Cloud credits need OverSire Cloud.", forSegment: 2)
+        let verified = cfg.engineVerified(key: aiKey)
+        var rows: [NSView] = [
+            FieldRow("Engine", note: local ? "Your coding agent CLI with its own login and plan." : "Your own endpoint and key.", pick),
+            SwitchRow("Use AI", note: verified ? "Turn off to stop all AI jobs." : "Test must pass first.", on: cfg.enabled && verified, enabled: verified) {
+                AI_CFG.enabled = $0
+            },
+        ]
+        let extra = TextInput(cfg.extraContext, placeholder: "Titles start with a verb.", label: "Extra context", lines: 3) { v in
+            AI_CFG.extraContext = v
+            saveConfig()
+        }
+        let extraRow = NSStackView(v: [], spacing: 6)
+        extraRow.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        extraRow.addArrangedSubview(NSTextField.text("Extra context", size: 13, weight: .medium))
+        extraRow.addFull(extra)
+        extraRow.addArrangedSubview(NSTextField.text("Sent with each request. For example: the product names and how titles start.", size: 11.5, color: Palette.dim))
+        rows.append(extraRow)
+        b.addFull(section(.engine, rows))
+    }
+
+    // The CLIs on this Mac, the model, the effort, the plan limits, the fallback and a Test.
+    private func localCLI(_ b: NSStackView) {
+        let cli = LocalCLI.shared
+        cli.detect()
+        let cfg = AI_CFG
+        if cfg.cliHarness.isEmpty, let first = cli.detections?.first(where: { $0.ready && Self.listed($0) }) {
+            AI_CFG.cliHarness = first.harness.rawValue
+            saveConfig()
+        }
+        let h = AI_CFG.cliHarness
+        cli.loadModels(h)
+        let changed: () -> Void = { [weak self] in
+            Self.cliTestResult = nil
+            saveConfig()
+            self?.reloadSoon()
+        }
+        var rows: [NSView] = [Padded(NSTextField.text(
+            "OverSire runs your coding agent CLI through AgentBinder. Each job runs with no tools, in an empty folder, and uses your own login and plan. "
+                + "The text goes only to the vendor of that CLI. A call takes 4 to 10 s in the background.",
+            size: 12, color: Palette.mut, lines: 3), vertical: 8)]
+        rows.append(cliTable(h, pick: { name in
+            guard name != AI_CFG.cliHarness else { return }
+            AI_CFG.cliHarness = name
+            AI_CFG.cliModel = ""
+            changed()
+        }))
+
+        let models = cli.models[h] ?? []
+        var ids = [""] + models.map(\.id)
+        if !cfg.cliModel.isEmpty, !ids.contains(cfg.cliModel) { ids.append(cfg.cliModel) }
+        let titles = ids.map { id in id.isEmpty ? "Default of the CLI" : models.first { $0.id == id }?.name ?? id }
+        rows.append(FieldRow("Model", note: "From the model list of the CLI. Pick a small, fast model.",
+                             PopUp(titles, selected: ids.firstIndex(of: cfg.cliModel) ?? 0, label: "Model") { i in
+            AI_CFG.cliModel = ids[i]
+            saveConfig()
+        }))
+        let efforts = ["", "low", "medium", "high"]
+        rows.append(FieldRow("Effort", note: "For CLIs that have an effort level.",
+                             PopUp(["Default", "Low", "Medium", "High"], selected: efforts.firstIndex(of: cfg.cliEffort) ?? 0, label: "Effort") { i in
+            AI_CFG.cliEffort = efforts[i]
+            saveConfig()
+        }))
+        rows.append(limitsRow(cli.lastLimits ?? cli.plans[h]))
+        let fallbacks: [AIFallback] = [.apiKey, .wait, .skip]
+        let keyOK = cfg.keyVerified(aiKey)
+        rows.append(FieldRow("If it fails", note: cfg.fallback == .apiKey && !keyOK
+                                ? "The API key has no passed Test, so the job is skipped. Each fallback goes to the log."
+                                : "Wait tries once more after 2 min. Each fallback goes to the log.",
+                             PopUp(["Use the API key", "Wait and try again", "Skip the job"], selected: fallbacks.firstIndex(of: cfg.fallback) ?? 0,
+                                   label: "If it fails") { [weak self] i in
+            AI_CFG.fallback = fallbacks[i]
+            saveConfig()
+            self?.reloadSoon()
+        }))
+        rows.append(testRow(note: "Asks the CLI for one short answer.", testing: Self.cliTesting, result: Self.cliTestResult,
+                            verified: cfg.cliVerifiedNow, tested: !cfg.cliVerified.isEmpty, enabled: !h.isEmpty) { [weak self] in self?.runCLITest() })
+        let again: NSView = cli.detecting ? InlineSpinner("Detecting…") : ActionButton("Detect again", symbol: "arrow.clockwise") { cli.detect(again: true) }
+        rows.append(Row([TwoLine("Detection", "AgentBinder finds each CLI on PATH and reads its login. Press after you install or log in.", lines: 2),
+                         Spacer(), again], height: 52, label: "Detection"))
+        b.addFull(section(.localCLI, rows))
+    }
+
+    // The CLI and the agent library are not in the table.
+    private static func listed(_ d: Detection) -> Bool { d.harness != .fake && d.harness != .native }
+
+    private func cliTable(_ selected: String, pick: @escaping (String) -> Void) -> NSView {
+        let v = NSStackView(v: [], spacing: 0)
+        let head = Row([NSTextField.text("CLI", size: 11, weight: .semibold, color: Palette.dim), NSTextField.text("VERSION", size: 11, weight: .semibold, color: Palette.dim),
+                        NSTextField.text("LOGIN", size: 11, weight: .semibold, color: Palette.dim), NSTextField.text("PLAN", size: 11, weight: .semibold, color: Palette.dim),
+                        Spacer()], height: 28)
+        Self.columns(head)
+        v.addFull(head)
+        guard let all = LocalCLI.shared.detections else {
+            v.addFull(Padded(InlineSpinner("Looking for the CLIs on this Mac…"), vertical: 8))
+            return v
+        }
+        for d in all where Self.listed(d) {
+            let name = d.harness.rawValue
+            let login = Self.login(d)
+            let plan = LocalCLI.shared.plans[name].map(Self.planText) ?? (d.ready ? "—" : "")
+            let row = Row([NSTextField.text(d.harness.binaryName, size: 12.5, weight: .medium, mono: true),
+                           NSTextField.text(d.version.flatMap { v in v.split(separator: " ").first { $0.first?.isNumber == true }.map(String.init) } ?? "—", size: 12, color: Palette.mut, mono: true),
+                           NSStackView(h: [Glyph(login.symbol, color: login.color, size: 11),
+                                           TwoLine(login.text, d.authDetail ?? login.hint, titleSize: 12, weight: .regular)], spacing: 5),
+                           NSTextField.text(plan, size: 12, color: Palette.mut), Spacer()],
+                          height: 46, label: "\(d.harness.binaryName), \(login.text)")
+            Self.columns(row)
+            if d.supported {
+                row.selected = name == selected
+                row.onClick = { pick(name) }
+                row.toolTip = name == selected ? "OverSire uses this CLI" : "Use this CLI"
+            } else {
+                row.alphaValue = 0.6
+            }
+            v.addFull(row)
+        }
+        return v
+    }
+
+    private static func columns(_ r: Row) {
+        for (v, w) in zip(r.stack.arrangedSubviews, [120, 80, 230, 200] as [CGFloat]) {
+            v.widthAnchor.constraint(equalToConstant: w).isActive = true
+        }
+    }
+
+    // A shape and a word for the login state. Color is not the only signal.
+    private static func login(_ d: Detection) -> (symbol: String, color: NSColor, text: String, hint: String?) {
+        switch d.detail {
+        case .notInstalled?: return ("circle", Palette.dim, "Not installed", nil)
+        case .belowFloor(let f)?: return ("exclamationmark.triangle.fill", Palette.warn, "Needs \(f) or newer", "Update the CLI")
+        case .sandboxed?, .noDriver?: return ("circle", Palette.dim, "Not available", nil)
+        case nil: break
+        }
+        switch d.auth {
+        case .ok: return ("checkmark.circle.fill", Palette.ok, "Logged in", nil)
+        case .missing: return ("exclamationmark.triangle.fill", Palette.warn, "Not logged in", "Run \(d.harness.binaryName) once")
+        case .unknown: return ("questionmark.circle", Palette.dim, "Login not known", "Test to check")
+        }
+    }
+
+    private static func planText(_ l: Limits) -> String {
+        let windows = l.windows.filter { $0.key == .fiveHour || $0.key == .weekly }.map { PlanLimits.name($0) }
+        let plan = l.plan.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? ""
+        let limits = windows.isEmpty ? "" : windows.joined(separator: " and ") + " limits"
+        return [plan, limits].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func limitsRow(_ l: Limits?) -> NSView {
+        let steps = [70, 80, 90, 95]
+        let pause = PopUp(steps.map { "\($0)%" }, selected: steps.firstIndex(of: AI_CFG.cliLimitPause) ?? 2, label: "Jobs pause above") { i in
+            AI_CFG.cliLimitPause = steps[i]
+            saveConfig()
+        }
+        var bars: [NSView] = []
+        for w in (l?.windows ?? []).filter({ $0.key != .custom }).prefix(3) {
+            let over = w.usedPercent >= Double(AI_CFG.cliLimitPause)
+            bars.append(NSStackView(h: [NSTextField.text(PlanLimits.name(w), size: 12, color: Palette.mut),
+                                        UsageBar(w.usedPercent / 100, color: over ? Palette.warn : Palette.acc),
+                                        NSTextField.text("\(Int(w.usedPercent))%" + (over ? " ▲" : ""), size: 12, color: over ? Palette.warn : Palette.mut, mono: true)],
+                                    spacing: 6))
+        }
+        if bars.isEmpty { bars = [NSTextField.text("No limits read yet. Test reads them.", size: 12, color: Palette.dim)] }
+        return Row([TwoLine("Plan limits", "From the last call. Jobs pause above", lines: 2), Spacer()] + bars + [pause], height: 52, label: "Plan limits")
+    }
+
+    private func testRow(note: String, testing: Bool, result: (ok: Bool, text: String)?, verified: Bool, tested: Bool, enabled: Bool,
+                         run: @escaping () -> Void) -> NSView {
+        let test = ActionButton(testing ? "Testing…" : "Test", run)
+        test.isEnabled = !testing && enabled
+        let pill: Pill
+        if testing { pill = Pill(.running, text: "Testing") }
+        else if let r = result { pill = Pill(r.ok ? .ok : .bad, text: r.ok ? r.text : "Failed"); pill.toolTip = r.text }
+        else if verified { pill = Pill(.ok, text: "Passed") }
+        else { pill = Pill(.idle, text: tested ? "Changed · test again" : "Not tested") }
+        return Row([TwoLine("Test", result.flatMap { $0.ok ? nil : $0.text } ?? note, lines: 2), Spacer(), pill, test], height: 52, label: "Test")
+    }
+
+    private func apiKey(_ b: NSStackView) {
         let cfg = AI_CFG
         let openai = cfg.format == .openai
         let changed: () -> Void = { [weak self] in
@@ -93,7 +288,11 @@ extension SettingsPage {
             changed()
         }
         let base = cfg.baseURL.isEmpty ? urlHint : cfg.baseURL
-        var rows: [NSView] = [
+        var rows: [NSView] = []
+        if cfg.engine == .localCLI {
+            rows.append(Padded(NSTextField.text("The fallback for Local CLI. A call takes 1 to 3 s and bills your key.", size: 12, color: Palette.mut, lines: 2), vertical: 8))
+        }
+        rows += [
             FieldRow("Format", format),
             FieldRow("Endpoint", note: "POST " + (openai ? OpenAIDialect.endpoint(base) : AnthropicDialect.endpoint(base)), url),
             FieldRow("Model", model),
@@ -114,30 +313,11 @@ extension SettingsPage {
             tokens.widthAnchor.constraint(equalToConstant: 100).isActive = true
             rows.append(FieldRow("Max tokens", tokens))
         }
-        let verified = !aiKey.isEmpty && cfg.verified == cfg.fingerprint(key: aiKey)
-        let test = ActionButton(Self.aiTesting ? "Testing…" : "Test") { [weak self] in self?.runAITest() }
-        test.isEnabled = !Self.aiTesting && !cfg.baseURL.isEmpty && !cfg.model.isEmpty
-        let pill: Pill
-        if Self.aiTesting { pill = Pill(.running, text: "Testing") }
-        else if let r = Self.aiTestResult { pill = Pill(r.ok ? .ok : .bad, text: r.ok ? r.text : "Failed") ; pill.toolTip = r.text }
-        else if verified { pill = Pill(.ok, text: "Passed") }
-        else { pill = Pill(.idle, text: cfg.verified.isEmpty ? "Not tested" : "Changed · test again") }
-        rows.append(Row([TwoLine("Test", Self.aiTestResult.flatMap { $0.ok ? nil : $0.text } ?? "Sends one short request to the endpoint.", lines: 2),
-                         Spacer(), pill, test], height: 52, label: "Test"))
-        rows.append(SwitchRow("Use AI", note: verified ? "Turn off to stop all AI jobs." : "Test must pass first.", on: cfg.enabled && verified, enabled: verified) {
-            AI_CFG.enabled = $0
+        rows.append(testRow(note: "Sends one short request to the endpoint.", testing: Self.aiTesting, result: Self.aiTestResult,
+                            verified: cfg.keyVerified(aiKey), tested: !cfg.verified.isEmpty, enabled: !cfg.baseURL.isEmpty && !cfg.model.isEmpty) { [weak self] in
+            self?.runAITest()
         })
-        let extra = TextInput(cfg.extraContext, placeholder: "Titles start with a verb.", label: "Extra context", lines: 3) { v in
-            AI_CFG.extraContext = v
-            saveConfig()
-        }
-        let extraRow = NSStackView(v: [], spacing: 6)
-        extraRow.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
-        extraRow.addArrangedSubview(NSTextField.text("Extra context", size: 13, weight: .medium))
-        extraRow.addFull(extra)
-        extraRow.addArrangedSubview(NSTextField.text("Sent with each request. For example: the product names and how titles start.", size: 11.5, color: Palette.dim))
-        rows.append(extraRow)
-        b.addFull(section(.engine, rows))
+        b.addFull(section(.apiKey, rows))
     }
 
     private func runAITest() {
@@ -146,13 +326,13 @@ extension SettingsPage {
         reload()
         let tested = AI_CFG
         let key = aiKey
-        AIClient(cfg: tested, key: key).test { [weak self] r in
+        AIClient(cfg: tested, router: AIRouter(engines: [APIKeyEngine(config: tested.apiKey, key: key, http: URLSessionTransport())])).test { [weak self] r in
             Self.aiTesting = false
             switch r {
             case .success(let t):
                 // A pass counts only for the values that were tested.
                 if tested.fingerprint(key: key) == AI_CFG.fingerprint(key: self?.aiKey ?? "") {
-                    if AI_CFG.verified.isEmpty { AI_CFG.enabled = true }
+                    if AI_CFG.verified.isEmpty, AI_CFG.engine == .apiKey { AI_CFG.enabled = true }
                     AI_CFG.verified = AI_CFG.fingerprint(key: key)
                 }
                 Self.aiTestResult = (true, String(format: "Passed in %.1f s", t))
@@ -160,6 +340,30 @@ extension SettingsPage {
                 AI_CFG.verified = ""
                 Self.aiTestResult = (false, e.message)
             }
+            settingsChanged()
+            self?.reload()
+        }
+    }
+
+    private func runCLITest() {
+        Self.cliTesting = true
+        Self.cliTestResult = nil
+        reload()
+        let tested = AI_CFG
+        AIClient(cfg: tested, router: AIRouter(engines: [LocalCLI.shared.engine(tested)])).test { [weak self] r in
+            Self.cliTesting = false
+            switch r {
+            case .success(let t):
+                if tested.cliFingerprint == AI_CFG.cliFingerprint {
+                    if AI_CFG.cliVerified.isEmpty, AI_CFG.engine == .localCLI { AI_CFG.enabled = true }
+                    AI_CFG.cliVerified = AI_CFG.cliFingerprint
+                }
+                Self.cliTestResult = (true, String(format: "Passed in %.1f s", t))
+            case .failure(let e):
+                AI_CFG.cliVerified = ""
+                Self.cliTestResult = (false, e.message)
+            }
+            LocalCLI.shared.refreshLimits()
             settingsChanged()
             self?.reload()
         }
@@ -205,5 +409,33 @@ extension SettingsPage {
             ]),
         ], minWidth: 240))
         b.addFull(v)
+    }
+}
+
+// A thin bar for the use of one plan window. The percent text goes next to it.
+final class UsageBar: NSView {
+    private let fraction: CGFloat
+    private let color: NSColor
+
+    init(_ fraction: Double, color: NSColor) {
+        self.fraction = CGFloat(min(1, max(0, fraction)))
+        self.color = color
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 70).isActive = true
+        heightAnchor.constraint(equalToConstant: 6).isActive = true
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let clip = NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3)
+            Palette.raise.setFill()
+            clip.fill()
+            clip.addClip()
+            color.setFill()
+            NSRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height).fill()
+        }
     }
 }

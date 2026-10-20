@@ -5,7 +5,7 @@ import OverSireCore
 // An AITask is one unit of AI work. An AIEngine runs it. AIRouter picks the engine.
 // Contract/schema/ai-task.json has the JSON form of AITask and AIResult.
 
-/// Open set. Today: the API key of the user. Later: AgentBinder and cloud credits.
+/// Open set. Today: the API key of the user and the local CLI (AgentBinder). Later: cloud credits.
 public struct EngineID: RawRepresentable, Hashable, Sendable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
     public let rawValue: String
     public init(rawValue: String) { self.rawValue = rawValue }
@@ -18,6 +18,7 @@ public struct EngineID: RawRepresentable, Hashable, Sendable, Codable, Expressib
     public var description: String { rawValue }
 
     public static let apiKey: EngineID = "api-key"
+    public static let localCLI: EngineID = "local-cli"
 }
 
 /// Open set. Each kind owns its prompt (Prompts/).

@@ -6,7 +6,7 @@ enum SettingsAnchor: String, CaseIterable {
     case services, live
     case projects, refresh, repos, linking, writeback
     case sessions, queue, planner
-    case engine, use, cloudAI = "cloud-ai"
+    case engine, localCLI = "local-cli", apiKey = "api-key", use, cloudAI = "cloud-ai"
     case ci, tracker, mentions, overrides
 
     var title: String {
@@ -28,6 +28,8 @@ enum SettingsAnchor: String, CaseIterable {
         case .queue: return "Queue"
         case .planner: return "Intake and planner"
         case .engine: return "Engine"
+        case .localCLI: return "Local CLI"
+        case .apiKey: return "API key"
         case .use: return "Use AI for"
         case .cloudAI: return "Cloud AI"
         case .ci: return "CI runs"
@@ -43,7 +45,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .planner: return .agents
-        case .engine, .use, .cloudAI: return .ai
+        case .engine, .localCLI, .apiKey, .use, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .overrides: return .notifications
         }
     }
@@ -137,13 +139,18 @@ struct SettingsIndex {
         Entry("Intake agent in a scratch worktree", .planner, "triage intake prompt"),
         Entry("Planner", .planner, "order mode project"),
         Entry("Feature areas", .planner, "areas code"),
-        Entry("Format", .engine, "openai anthropic"),
-        Entry("Endpoint", .engine, "url base"),
-        Entry("Model", .engine, "gpt claude"),
-        Entry("API key", .engine, "token secret keychain"),
-        Entry("Reasoning effort", .engine, "openai"),
-        Entry("Max tokens", .engine, "anthropic"),
-        Entry("Test", .engine, "verify"),
+        Entry("Format", .apiKey, "openai anthropic"),
+        Entry("Endpoint", .apiKey, "url base"),
+        Entry("Model", .apiKey, "gpt claude"),
+        Entry("API key", .apiKey, "token secret keychain"),
+        Entry("Reasoning effort", .apiKey, "openai"),
+        Entry("Max tokens", .apiKey, "anthropic"),
+        Entry("Test", .apiKey, "verify"),
+        Entry("Local CLI", .localCLI, "agentbinder claude codex opencode subscription free"),
+        Entry("CLI model", .localCLI, "model"),
+        Entry("Plan limits", .localCLI, "limit pause usage"),
+        Entry("If it fails", .localCLI, "fallback wait skip"),
+        Entry("Detect again", .localCLI, "detection login"),
         Entry("Use AI", .engine, "off on"),
         Entry("Extra context", .engine, "prompt"),
         Entry("Done and stuck checks", .use, "sessions quiet"),
