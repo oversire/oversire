@@ -3,8 +3,9 @@ import OverSireCore
 import Quartz
 import UniformTypeIdentifiers
 
-// ─── New session panel ───────────────────────────────────────────────────────
-// Pick a project, type or speak a prompt, attach files, press ⌘↩. The controller starts the session.
+// ─── New panel ───────────────────────────────────────────────────────────────
+// Pick a mode and a project, type or speak, attach files, press ⌘↩. The controller starts the session
+// or makes the item.
 
 final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, QLPreviewPanelDataSource {
     struct Actions {
@@ -24,6 +25,12 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     private var preview: [URL] = []
 
     private let column = NSStackView(v: [], spacing: 12)
+    private let modeControl = NSSegmentedControl()
+    private let titleBox = Box(fill: Palette.bg, border: Palette.line, radius: 7)
+    let titleField = NSTextField()
+    private let fieldsHolder = NSStackView(v: [], spacing: 0)
+    private let statePop = NSPopUpButton()
+    private let priorityPop = NSPopUpButton()
     private let comboBox = Box(fill: Palette.bg, border: Palette.line, radius: 7)
     private let comboKey = NSStackView(h: [], spacing: 0)
     private let comboTag = NSTextField.text("last used", size: 11, color: Palette.dim)
@@ -53,7 +60,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         isOpaque = false
         hasShadow = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        setAccessibilityLabel("New session")
+        setAccessibilityLabel("New")
 
         let root = SessionDropView()
         root.onFiles = { [weak self] in self?.addFiles($0) }
@@ -65,14 +72,16 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
             column.topAnchor.constraint(equalTo: root.topAnchor), column.widthAnchor.constraint(equalToConstant: Self.width),
         ])
 
-        let header = NSStackView(h: [NSTextField.text("New session", size: 14, weight: .semibold), Spacer(),
-                                     NSTextField.text("⌃⌥⌘N from any app · Esc closes", size: 11.5, color: Palette.dim)], spacing: 8)
+        let header = NSStackView(h: [NSTextField.text("New", size: 14, weight: .semibold), buildModes(), Spacer(),
+                                     NSTextField.text("⌘1–3 · Esc closes", size: 11.5, color: Palette.dim)], spacing: 10)
         column.addFull(header)
         column.addFull(buildCombo())
         column.addFull(listHolder)
         column.setCustomSpacing(6, after: comboBox)
+        column.addFull(buildTitle())
         column.addFull(buildPrompt())
         column.addFull(filesHolder)
+        column.addFull(buildFields())
         intakeBox.target = self
         intakeBox.action = #selector(flipIntake)
         column.addFull(NSStackView(v: [intakeBox, intakeHint], spacing: 3))
@@ -108,8 +117,61 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         return comboBox
     }
 
+    private func buildModes() -> NSView {
+        let modes = NewSessionModel.Mode.allCases
+        modeControl.segmentCount = modes.count
+        for (i, m) in modes.enumerated() {
+            modeControl.setLabel(m.label, forSegment: i)
+            modeControl.setImage(NSImage(systemSymbolName: m.symbol, accessibilityDescription: nil), forSegment: i)
+            modeControl.setImageScaling(.scaleProportionallyDown, forSegment: i)
+            modeControl.setToolTip("\(m.label) (⌘\(i + 1))", forSegment: i)
+        }
+        modeControl.trackingMode = .selectOne
+        modeControl.controlSize = .small
+        modeControl.target = self
+        modeControl.action = #selector(modePicked)
+        modeControl.setAccessibilityLabel("What to create")
+        return modeControl
+    }
+
+    private func buildTitle() -> NSView {
+        titleField.isBordered = false
+        titleField.drawsBackground = false
+        titleField.focusRingType = .none
+        titleField.font = .systemFont(ofSize: 13)
+        titleField.delegate = self
+        titleField.setAccessibilityLabel("Title")
+        titleBox.addSubview(titleField)
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            titleBox.heightAnchor.constraint(equalToConstant: 32),
+            titleField.leadingAnchor.constraint(equalTo: titleBox.leadingAnchor, constant: 8), titleField.trailingAnchor.constraint(equalTo: titleBox.trailingAnchor, constant: -8),
+            titleField.centerYAnchor.constraint(equalTo: titleBox.centerYAnchor),
+        ])
+        return titleBox
+    }
+
+    /// State and priority of the Item mode.
+    private func buildFields() -> NSView {
+        statePop.target = self
+        statePop.action = #selector(fieldPicked)
+        statePop.setAccessibilityLabel("State")
+        priorityPop.target = self
+        priorityPop.action = #selector(fieldPicked)
+        priorityPop.setAccessibilityLabel("Priority")
+        for o in StatusOption.priorities.reversed() {
+            priorityPop.addItem(withTitle: o.name)
+            priorityPop.lastItem?.representedObject = o.id
+        }
+        let col = { (name: String, pop: NSPopUpButton) in
+            NSStackView(v: [NSTextField.text(name, size: 11.5, color: Palette.dim), pop], spacing: 4, align: .leading)
+        }
+        let row = NSStackView(h: [col("State", statePop), col("Priority", priorityPop), Spacer()], spacing: 16)
+        fieldsHolder.addFull(row)
+        return fieldsHolder
+    }
+
     private func buildPrompt() -> NSView {
-        promptView.placeholder = "What should the agent do? Paste or drop screenshots and files."
         promptView.font = .systemFont(ofSize: 13)
         promptView.textColor = Palette.fg
         promptView.drawsBackground = false
@@ -162,6 +224,15 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     /// Shows the state again. The combo field and the prompt keep their focus.
     func refresh() {
         let sel = model.selection
+        let session = model.mode == .session
+        modeControl.selectedSegment = NewSessionModel.Mode.allCases.firstIndex(of: model.mode) ?? 0
+        modeControl.isEnabled = !model.isStarting
+        titleBox.isHidden = session
+        titleField.placeholderString = model.text.isEmpty ? "Title" : "Title (empty: \u{201C}\(model.title)\u{201D})"
+        promptView.placeholder = session ? "What should the agent do? Paste or drop screenshots and files."
+                                         : "Description in Markdown. Paste or drop screenshots and files."
+        fieldsHolder.isHidden = model.mode != .item
+        if model.mode == .item { refreshFields(sel) }
         comboKey.clear()
         if let s = sel { comboKey.addArrangedSubview(Chiplet(s.key, mono: true)) }
         comboField.placeholderAttributedString = NSAttributedString(string: sel?.name ?? "Track a project first",
@@ -181,7 +252,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
             promptHint.addArrangedSubview(Glyph("circle.fill", color: Self.listen, size: 8, label: "Listening"))
             promptHint.addArrangedSubview(NSTextField.text("Listening · click the mic or press ⌘D to stop", size: 11.5, color: Self.listen))
         } else {
-            promptHint.addArrangedSubview(NSTextField.text("↩ new line · ⌘↩ or ⌃↩ starts", size: 11.5, color: Palette.dim))
+            promptHint.addArrangedSubview(NSTextField.text("↩ new line · ⌘↩ \(session ? "starts" : "creates") · ⌘V pastes images", size: 11.5, color: Palette.dim))
         }
         micButton.image = NSImage(systemSymbolName: listening ? "mic.fill" : "mic", accessibilityDescription: listening ? "Stop dictation" : "Dictate")
         micButton.contentTintColor = listening ? Self.listen : nil
@@ -191,31 +262,47 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         if !model.files.isEmpty { filesHolder.addFull(buildFiles()) }
         filesHolder.isHidden = model.files.isEmpty
 
-        intakeBox.title = "Create intake item in \(sel?.key ?? "the project")"
+        intakeBox.title = "Also create an intake item in \(sel?.key ?? "the project")"
         intakeBox.state = model.intake ? .on : .off
         intakeBox.isEnabled = !model.isStarting
+        intakeBox.isHidden = !session
         intakeHint.stringValue = model.intakeHint
 
         workspaceHolder.clear()
-        if let s = sel { workspaceHolder.addFull(buildWorkspace(s)) }
-        workspaceHolder.isHidden = sel == nil
+        if let s = sel, session { workspaceHolder.addFull(buildWorkspace(s)) }
+        workspaceHolder.isHidden = workspaceHolder.arrangedSubviews.isEmpty
 
         errorHolder.clear()
         if case .failed(let e) = model.phase {
             var acts: [NSView] = []
-            if hostFilesFailed && !model.intake {
+            if hostFilesFailed && !model.intake && session {
                 acts.append(ActionButton("Send with intake") { [weak self] in
                     self?.model.intake = true
                     self?.start()
                 })
             }
-            errorHolder.addFull(Banner(.bad, title: "The session did not start.", body: e, actions: acts))
+            errorHolder.addFull(Banner(.bad, title: session ? "The session did not start." : "The item was not created.", body: e, actions: acts))
         }
         errorHolder.isHidden = errorHolder.arrangedSubviews.isEmpty
 
         footerHolder.clear()
         footerHolder.addFull(buildFooter())
         fit()
+    }
+
+    private func refreshFields(_ sel: NewSessionModel.Choice?) {
+        let states = sel?.states ?? []
+        if statePop.itemArray.map({ $0.representedObject as? String }) != states.map(\.id) {
+            statePop.removeAllItems()
+            for o in states {
+                statePop.addItem(withTitle: o.name)
+                statePop.lastItem?.representedObject = o.id
+            }
+        }
+        statePop.isEnabled = !states.isEmpty && !model.isStarting
+        if let id = model.itemState, let i = statePop.itemArray.firstIndex(where: { $0.representedObject as? String == id }) { statePop.selectItem(at: i) }
+        if let i = priorityPop.itemArray.firstIndex(where: { $0.representedObject as? String == model.priority }) { priorityPop.selectItem(at: i) }
+        priorityPop.isEnabled = !model.isStarting
     }
 
     private func buildList() -> NSView {
@@ -281,11 +368,11 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         let note = NSTextField.text(model.footerNote, size: 11.5, color: Palette.dim, lines: 2)
         let cancel = ActionButton("Cancel") { [weak self] in self?.dismiss() }
         let title: String
-        if case .starting(let label) = model.phase { title = label } else { title = "Start \(model.agent)  ⌘↩" }
+        if case .starting(let label) = model.phase { title = label } else { title = "\(model.button)  ⌘↩" }
         let start = ActionButton(title, style: .primary) { [weak self] in self?.start() }
         start.isEnabled = model.canStart
         start.toolTip = model.blocker
-        start.setAccessibilityLabel("Start \(model.agent)")
+        start.setAccessibilityLabel(model.button)
         if let b = model.blocker { start.setAccessibilityHelp(b) }
         let row = NSStackView(h: [note, Spacer(), cancel, start], spacing: 8)
         if let b = model.blocker, model.phase == .edit, model.selection != nil {
@@ -344,6 +431,22 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         if model.listOpen { makeFirstResponder(comboField) }
     }
 
+    @objc private func modePicked() { setMode(NewSessionModel.Mode.allCases[max(0, modeControl.selectedSegment)]) }
+
+    func setMode(_ m: NewSessionModel.Mode) {
+        guard !model.isStarting else { return }
+        model.mode = m
+        if case .failed = model.phase { model.phase = .edit }
+        refresh()
+        if m != .session && firstResponder === promptView && model.titleText.isEmpty && model.text.isEmpty { makeFirstResponder(titleField) }
+        if m == .session && firstResponder === titleField.currentEditor() { makeFirstResponder(promptView) }
+    }
+
+    @objc private func fieldPicked() {
+        model.state = statePop.selectedItem?.representedObject as? String
+        model.priority = priorityPop.selectedItem?.representedObject as? String ?? "none"
+    }
+
     @objc private func flipIntake() {
         model.intake = intakeBox.state == .on
         if case .failed = model.phase { model.phase = .edit }
@@ -352,6 +455,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
 
     func start() {
         model.text = promptView.string
+        model.titleText = titleField.stringValue
         guard model.canStart else { return NSSound.beep() }
         if voice.isRecording { voice.stop() }
         actions.start(model)
@@ -418,6 +522,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         if mods == .command, let c = e.charactersIgnoringModifiers?.lowercased() {
             if c == "d" { flipVoice(); return true }
             if c == "o" { pickFiles(); return true }
+            if let n = Int(c), (1...NewSessionModel.Mode.allCases.count).contains(n) { setMode(NewSessionModel.Mode.allCases[n - 1]); return true }
         }
         if (mods == .command || mods == .control) && e.charactersIgnoringModifiers?.lowercased() == "v" { return paste(control: mods == .control) }
         return super.performKeyEquivalent(with: e)
@@ -444,11 +549,23 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     }
 
     func controlTextDidChange(_ n: Notification) {
-        model.type(comboField.stringValue)
+        if (n.object as? NSTextField) === titleField {
+            model.titleText = titleField.stringValue
+            if case .failed = model.phase { model.phase = .edit }
+        } else {
+            model.type(comboField.stringValue)
+        }
         refresh()
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        if control === titleField {
+            switch sel {
+            case #selector(NSResponder.insertNewline(_:)): makeFirstResponder(promptView); return true
+            case #selector(NSResponder.cancelOperation(_:)): cancelOperation(nil); return true
+            default: return false
+            }
+        }
         switch sel {
         case #selector(NSResponder.moveUp(_:)): model.move(-1); refresh(); return true
         case #selector(NSResponder.moveDown(_:)): model.move(1); refresh(); return true
@@ -506,7 +623,9 @@ final class NewSessionController {
     static let changed = Notification.Name("NewSessionChanged")
 
     private let projects: () -> [ProjectSummary]
+    private let states: (String) -> [StatusOption]
     private(set) var panel: NewSessionPanel?
+    var created: (String) -> Void = { _ in }     // gets the store key of the project with a new item
     private(set) var toast: SessionToast?
     private var hotKey: GlobalHotKey?
     private(set) lazy var starter = SessionStarter(
@@ -516,7 +635,11 @@ final class NewSessionController {
         hostFiles: { ENV.runtime as? HostFileWriting },
         root: { [weak self] k in self?.summary(k).flatMap { PROJECTS_CFG.orcaRoot($0) } })
 
-    init(projects: @escaping () -> [ProjectSummary]) { self.projects = projects }
+    /// `states` gives the status options of a project by its store key.
+    init(projects: @escaping () -> [ProjectSummary], states: @escaping (String) -> [StatusOption] = { _ in [] }) {
+        self.projects = projects
+        self.states = states
+    }
 
     var cfg: SessionConfig { PROJECTS_CFG.capture.session }
     var isOpen: Bool { panel?.isVisible == true }
@@ -547,7 +670,7 @@ final class NewSessionController {
         place(p, near: near)
         p.orderFrontRegardless()
         p.makeKey()
-        p.makeFirstResponder(p.model.selection == nil ? p.comboField : p.promptView)
+        p.makeFirstResponder(p.model.selection == nil ? p.comboField : p.model.makesItem ? p.titleField : p.promptView)
         NotificationCenter.default.post(name: Self.changed, object: self)
     }
 
@@ -588,7 +711,8 @@ final class NewSessionController {
     private func summary(_ store: String) -> ProjectSummary? { projects().first { $0.ref.storeKey == store } }
 
     func choices() -> [NewSessionModel.Choice] {
-        projects().map { NewSessionModel.Choice(key: $0.identifier, name: $0.title, store: $0.ref.storeKey, root: PROJECTS_CFG.orcaRoot($0)) }
+        projects().map { NewSessionModel.Choice(key: $0.identifier, name: $0.title, store: $0.ref.storeKey, root: PROJECTS_CFG.orcaRoot($0),
+                                                states: states($0.ref.storeKey)) }
     }
 
     private func chooseRoot(_ store: String) {
@@ -610,10 +734,13 @@ final class NewSessionController {
 
     private func start(_ m: NewSessionModel) {
         guard let p = panel else { return }
-        PROJECTS_CFG.capture.session.intake = m.intake
+        if m.mode == .session { PROJECTS_CFG.capture.session.intake = m.intake }
+        PROJECTS_CFG.capture.session.mode = m.mode
         PROJECTS_CFG.capture.session.lastProject = m.selected
         saveConfig()
-        let req = SessionStarter.Request(project: m.selected, text: m.text, files: m.files, intake: m.intake)
+        if m.makesItem { return create(m, in: p) }
+        let req = SessionStarter.Request(project: m.selected, text: m.text, files: m.files, intake: m.intake,
+                                         title: m.titleText.isEmpty ? nil : m.itemTitle)
         let root = m.selection?.root ?? ""
         p.setPhase(.starting("Starting…"))
         Task { @MainActor [weak self] in
@@ -632,12 +759,44 @@ final class NewSessionController {
         }
     }
 
+    private func create(_ m: NewSessionModel, in p: NewSessionPanel) {
+        let req = SessionStarter.Request(project: m.selected, text: m.text, files: m.files, intake: m.mode == .intake,
+                                         title: m.itemTitle, state: m.itemState, priority: m.priority)
+        p.setPhase(.starting("Creating…"))
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let r = try await self.starter.create(req, intake: m.mode == .intake) { label in DispatchQueue.main.async { p.setPhase(.starting(label)) } }
+                p.orderOut(nil)
+                self.panel = nil
+                NotificationCenter.default.post(name: Self.changed, object: self)
+                self.created(m.selected)
+                self.showToast(r, mode: m.mode, files: m.files.count)
+            } catch {
+                log.error("New \(m.mode.rawValue, privacy: .public): create failed: \(error.localizedDescription, privacy: .public)")
+                p.setPhase(.failed(error.localizedDescription))
+            }
+        }
+    }
+
     func showToast(_ r: SessionStarter.Result, agent: String, root: String, files: Int) {
+        present(SessionToast(title: "Started \(agent) in \((root as NSString).lastPathComponent)", subtitle: "Orca terminal \(r.terminal)",
+                             detail: r.detail(files: files), bad: !r.missing.isEmpty, actions: [
+                                ("Show in Orca", { Task { try? await (ENV.runtime as? AgentTerminal)?.reveal(r.session) } }),
+                                ("New session", { [weak self] in self?.show(near: nil) }),
+                             ]))
+    }
+
+    func showToast(_ r: SessionStarter.Made, mode: NewSessionModel.Mode, files: Int) {
+        present(SessionToast(title: "Created \(mode == .intake ? "intake " : "")\(r.item.key)", subtitle: r.item.url.absoluteString,
+                             detail: r.detail(files: files), bad: !r.missing.isEmpty, actions: [
+                                ("Open", { (NSApp.delegate as? GHActionsBar)?.open(.item(r.item.key, .overview)) }),
+                                ("New \(mode.label.lowercased())", { [weak self] in self?.show(near: nil) }),
+                             ]))
+    }
+
+    private func present(_ t: SessionToast) {
         toast?.orderOut(nil)
-        let t = SessionToast(title: "Started \(agent) in \((root as NSString).lastPathComponent)", subtitle: "Orca terminal \(r.terminal)",
-                             detail: r.detail(files: files), bad: !r.missing.isEmpty,
-                             reveal: { Task { try? await (ENV.runtime as? AgentTerminal)?.reveal(r.session) } },
-                             again: { [weak self] in self?.show(near: nil) })
         toast = t
         t.present()
     }
@@ -647,7 +806,7 @@ final class NewSessionController {
 // The result at the bottom right of the screen. It hides after 10 s.
 
 final class SessionToast: NSPanel {
-    init(title: String, subtitle: String, detail: String, bad: Bool, reveal: @escaping () -> Void, again: @escaping () -> Void) {
+    init(title: String, subtitle: String, detail: String, bad: Bool, actions: [(String, () -> Void)]) {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 100), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .floating
         hidesOnDeactivate = false
@@ -666,8 +825,7 @@ final class SessionToast: NSPanel {
             NSStackView(h: [Glyph(bad ? .warning : .ok, size: 13), NSTextField.text(title, size: 13, weight: .semibold), Spacer(), closeAct], spacing: 6),
             NSTextField.text(subtitle, size: 11.5, color: Palette.mut, mono: true),
             NSTextField.text(detail, size: 12, color: bad ? Palette.bad : Palette.fg, lines: 3),
-            NSStackView(h: [ActionButton("Show in Orca", style: .link) { [weak self] in reveal(); self?.orderOut(nil) },
-                            ActionButton("New session", style: .link) { [weak self] in self?.orderOut(nil); again() }], spacing: 14),
+            NSStackView(h: actions.map { a in ActionButton(a.0, style: .link) { [weak self] in self?.orderOut(nil); a.1() } }, spacing: 14),
         ], spacing: 5)
         col.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 10)
         root.addSubview(col)

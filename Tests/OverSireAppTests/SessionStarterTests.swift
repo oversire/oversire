@@ -48,6 +48,46 @@ final class SessionStarterTests: XCTestCase {
         return (res, steps)
     }
 
+    func testCreateItemModeOpensNoTerminal() async throws {
+        var r = request("The token exchange fails.\nRetry it.", files: 1, intake: false)
+        r.title = "Add a retry"
+        r.state = "s-todo"
+        var steps: [String] = []
+        let made = try await starter().create(r, intake: false) { steps.append($0) }
+        let items = try await tracker.items(tracker.project, since: nil, limit: 10)
+        XCTAssertEqual(items.map(\.title), ["Add a retry"])
+        XCTAssertEqual(items.first?.statusOptionId, "s-todo")
+        XCTAssertEqual(items.first?.body, "The token exchange fails.\nRetry it.")
+        let intake = try await tracker.intake(tracker.project)
+        XCTAssertTrue(intake.isEmpty, "Item mode skips triage")
+        XCTAssertEqual(tracker.uploads.map(\.item), [made.item])
+        XCTAssertEqual(made.missing, [])
+        XCTAssertEqual(steps, ["Creating item…", "Sending 1 file…"])
+        XCTAssertTrue(term.opened.isEmpty)
+        XCTAssertEqual(made.detail(files: 1), "It holds 1 file. No session started.")
+    }
+
+    func testCreateIntakeModeTitleFallsBackToTheFirstLine() async throws {
+        hasTerminal = false
+        roots = [:]
+        let made = try await starter().create(request("Why is the sync slow?\nIt takes 2 min.", intake: true), intake: true) { _ in }
+        let intake = try await tracker.intake(tracker.project)
+        XCTAssertEqual(intake.map(\.name), ["Why is the sync slow?"], "no runtime and no Orca folder are needed")
+        XCTAssertEqual(made.detail(files: 0), "No session started.")
+    }
+
+    func testCreateChecksFilesBeforeAnyChange() async throws {
+        let t = FakeTracker(capabilities: [.intake, .intakeCreate])
+        do {
+            _ = try await starter(tracker: t).create(request("x", files: 1, intake: false), intake: false) { _ in }
+            XCTFail("a tracker with no attachments cannot take files")
+        } catch let e as SessionStartError {
+            XCTAssertEqual(e, .noCreate("FAKE"))
+        }
+        let items = try await t.items(t.project, since: nil, limit: 10)
+        XCTAssertTrue(items.isEmpty)
+    }
+
     func testIntakeWithNoFiles() async throws {
         let (r, steps) = try await start(request("Why is the sync slow?\nIt takes 2 min.", intake: true))
         let made = try await tracker.intake(tracker.project)

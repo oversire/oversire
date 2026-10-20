@@ -81,7 +81,7 @@ final class NewSessionPanelTests: XCTestCase {
         p.setPhase(.failed("no"), hostFiles: false)
         XCTAssertNil(buttons(p).first { $0.title == "Send with intake" })
         p.setPhase(.edit)
-        (buttons(p).first { $0.title.hasPrefix("Create intake item") })?.performClick(nil)
+        (buttons(p).first { $0.title.hasPrefix("Also create an intake item") })?.performClick(nil)
         XCTAssertFalse(p.model.intake)
         p.setPhase(.failed("no"), hostFiles: true)
         let send = buttons(p).first { $0.title == "Send with intake" } as? ActionButton
@@ -134,5 +134,20 @@ final class NewSessionPanelTests: XCTestCase {
     func testPasteMenuStaysOnForAnImageOnlyClipboard() {
         let types = SessionTextView().readablePasteboardTypes
         XCTAssertTrue(types.contains(.png) && types.contains(.tiff) && types.contains(.fileURL))
+    }
+
+    func testCommandDigitsSwitchModeAndHideTheSessionParts() {
+        let p = panel(last: "ocral/s")
+        XCTAssertNotNil(buttons(p).first { $0.title == "Choose folder…" })
+        XCTAssertTrue(p.performKeyEquivalent(with: key(19, "2", .command)))
+        XCTAssertEqual(p.model.mode, .intake)
+        XCTAssertNil(buttons(p).first { $0.title == "Choose folder…" }, "Intake needs no Orca workspace")
+        p.titleField.stringValue = "Login crashes"
+        p.start()
+        XCTAssertEqual(started.map(\.mode), [.intake])
+        XCTAssertEqual(started.first?.itemTitle, "Login crashes")
+        XCTAssertTrue(p.performKeyEquivalent(with: key(20, "3", .command)))
+        XCTAssertEqual(p.model.mode, .item)
+        XCTAssertEqual(buttons(p).first { $0.title.hasPrefix("Create item") }?.isEnabled, true)
     }
 }

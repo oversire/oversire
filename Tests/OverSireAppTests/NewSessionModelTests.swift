@@ -1,3 +1,4 @@
+import OverSireCore
 import XCTest
 @testable import OverSireApp
 
@@ -90,6 +91,45 @@ final class NewSessionModelTests: XCTestCase {
         XCTAssertNil(m.blocker)
         m.phase = .failed("boom")
         XCTAssertTrue(m.canStart)
+    }
+
+    func testItemModesNeedNoWorkspaceAndATitle() {
+        var m = model(last: "ocral/f")
+        m.mode = .intake
+        XCTAssertEqual(m.blocker, "Type a title or a description.")
+        m.text = "Login crashes\nafter the redirect"
+        XCTAssertNil(m.blocker, "FRITZ has no Orca folder: Intake does not need one")
+        XCTAssertEqual(m.itemTitle, "Login crashes")
+        m.titleText = "  OAuth crash "
+        XCTAssertEqual(m.itemTitle, "OAuth crash")
+        m.text = ""
+        XCTAssertTrue(m.canStart, "a title alone is enough")
+        XCTAssertEqual(m.button, "Create intake")
+        m.mode = .item
+        XCTAssertEqual(m.button, "Create item")
+        XCTAssertEqual(m.footerNote, "")
+        m.mode = .session
+        XCTAssertEqual(m.button, "Start claude")
+        XCTAssertEqual(m.blocker, "Choose an Orca workspace folder for FRITZ.")
+    }
+
+    func testItemStateDefaultsToTodo() {
+        var c = choices
+        c[0].states = [StatusOption(id: "b", name: "Backlog", color: "#999", group: "backlog"),
+                       StatusOption(id: "t", name: "Todo", color: "#999", group: "unstarted")]
+        var m = NewSessionModel(choices: c, cfg: SessionConfig(), agent: "claude")
+        XCTAssertEqual(m.itemState, "t")
+        m.state = "b"
+        XCTAssertEqual(m.itemState, "b")
+    }
+
+    func testModeComesFromTheConfig() throws {
+        var cfg = SessionConfig()
+        cfg.mode = .item
+        XCTAssertEqual(NewSessionModel(choices: choices, cfg: cfg, agent: "claude").mode, .item)
+        let back = try JSONDecoder().decode(SessionConfig.self, from: JSONEncoder().encode(cfg))
+        XCTAssertEqual(back.mode, .item)
+        XCTAssertEqual(try JSONDecoder().decode(SessionConfig.self, from: Data(#"{"mode":"later"}"#.utf8)).mode, .session, "an unknown mode falls back")
     }
 
     func testTitle() {

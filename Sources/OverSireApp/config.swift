@@ -441,12 +441,13 @@ struct CaptureConfig: Codable, Equatable {
     }
 }
 
-// The New session panel. The shortcut defaults to ⌃⌥⌘N.
+// The New panel (session, intake or item). The shortcut defaults to ⌃⌥⌘N.
 struct SessionConfig: Codable, Equatable {
     var enabled = true
     var keyCode: UInt32 = 45            // N
     var modifiers: UInt32 = 0x1900      // control + option + command
     var intake = true                   // the last value of the check box
+    var mode = NewSessionModel.Mode.session  // the last mode of the panel
     var lastProject: String?            // ProjectRef.storeKey
     var maxBytes = 10 * 1024 * 1024     // the total file size of the direct route
 
@@ -458,6 +459,7 @@ struct SessionConfig: Codable, Equatable {
         keyCode = try c.decodeIfPresent(UInt32.self, forKey: .keyCode) ?? 45
         modifiers = try c.decodeIfPresent(UInt32.self, forKey: .modifiers) ?? 0x1900
         intake = try c.decodeIfPresent(Bool.self, forKey: .intake) ?? true
+        mode = (try? c.decodeIfPresent(NewSessionModel.Mode.self, forKey: .mode)) ?? .session
         lastProject = try c.decodeIfPresent(String.self, forKey: .lastProject)
         maxBytes = max(1024 * 1024, try c.decodeIfPresent(Int.self, forKey: .maxBytes) ?? 10 * 1024 * 1024)
     }

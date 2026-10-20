@@ -79,7 +79,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var captureHotKey: GlobalHotKey?
     var windowHotKey: GlobalHotKey?
     lazy var snap = SnapController(projects: { [weak self] in self?.projectStore.tracked ?? [] })
-    lazy var newSession = NewSessionController(projects: { [weak self] in self?.projectStore.tracked ?? [] })
+    lazy var newSession = NewSessionController(projects: { [weak self] in self?.projectStore.tracked ?? [] },
+                                               states: { [weak self] k in self?.projectStore.snapshots[k]?.statusOptions ?? [] })
     let workstreams = WorkstreamIndex()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
@@ -236,6 +237,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         snap.applyHotKeys()
         snap.restore()
         newSession.applyHotKey()
+        newSession.created = { [weak self] k in self?.projectStore.refresh([k], force: true) { _ in } }
         NotificationCenter.default.addObserver(forName: SnapStore.changed, object: snap.store, queue: .main) { [weak self] _ in self?.updateIcon() }
         NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: agentIndex, queue: .main) { [weak self] _ in
             self?.scanCheckouts()

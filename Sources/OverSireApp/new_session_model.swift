@@ -1,8 +1,9 @@
 import Foundation
+import OverSireCore
 import UniformTypeIdentifiers
 
-// ─── New session panel state ─────────────────────────────────────────────────
-// All state and rules of the panel, with no AppKit.
+// ─── New panel state ─────────────────────────────────────────────────────────
+// All state and rules of the panel, with no AppKit. It makes a session, an intake item or a work item.
 
 struct NewSessionModel: Equatable {
     struct Choice: Equatable {
@@ -10,6 +11,27 @@ struct NewSessionModel: Equatable {
         var name: String
         var store: String       // ProjectRef.storeKey
         var root: String?       // the Orca workspace folder
+        var states: [StatusOption] = []
+    }
+
+    enum Mode: String, Codable, CaseIterable {
+        case session, intake, item
+
+        var label: String {
+            switch self {
+            case .session: return "Session"
+            case .intake: return "Intake"
+            case .item: return "Item"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .session: return "apple.terminal"
+            case .intake: return "tray"
+            case .item: return "checkmark.square"
+            }
+        }
     }
 
     struct Attachment: Equatable {
@@ -39,9 +61,13 @@ struct NewSessionModel: Equatable {
     var query = ""
     var listOpen = false
     var highlight = 0
+    var mode: Mode
+    var titleText = ""
     var text = ""
     var files: [Attachment] = []
     var intake: Bool
+    var state: String?          // a status option id; nil: the todo state of the project
+    var priority = "none"
     var phase = Phase.edit
     var maxBytes: Int
     var agent: String
@@ -51,6 +77,7 @@ struct NewSessionModel: Equatable {
         lastUsed = cfg.lastProject
         selected = choices.first { $0.store == cfg.lastProject }?.store ?? choices.first?.store ?? ""
         intake = cfg.intake
+        mode = cfg.mode
         maxBytes = cfg.maxBytes
         self.agent = agent
     }
@@ -76,19 +103,51 @@ struct NewSessionModel: Equatable {
 
     var isStarting: Bool { if case .starting = phase { return true }; return false }
 
-    /// Why Start is off, for the hint and VoiceOver. Nil: Start is on.
+    var makesItem: Bool { mode != .session }
+
+    /// Why Start or Create is off, for the hint and VoiceOver. Nil: the button is on.
     var blocker: String? {
         guard let s = selection else { return "Track a project first." }
         if isStarting { return nil }
+        if makesItem {
+            return itemTitle.isEmpty ? "Type a title or a description." : nil
+        }
         if (s.root ?? "").isEmpty { return "Choose an Orca workspace folder for \(s.key)." }
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty { return "Type a prompt or attach a file." }
         if !intake && totalBytes > maxBytes { return "Files are over \(maxBytes / (1024 * 1024)) MB. Turn on intake to send them." }
         return nil
     }
 
+    /// The typed title, else the first line of the text. Empty when both are empty.
+    var itemTitle: String {
+        let t = titleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : title
+    }
+
+    /// The state that the Item mode sends: the picked one, else the first unstarted state, else the first todo state.
+    var itemState: String? {
+        let states = selection?.states ?? []
+        return state ?? (states.first { $0.group == "unstarted" } ?? states.first { $0.category == .todo })?.id
+    }
+
+    var button: String {
+        switch mode {
+        case .session: return "Start \(agent)"
+        case .intake: return "Create intake"
+        case .item: return "Create item"
+        }
+    }
+
     var canStart: Bool { !isStarting && blocker == nil }
 
     var intakeHint: String {
+        let key = selection?.key ?? "the project"
+        switch mode {
+        case .intake: return "The item goes to the \(key) intake for triage." + (files.isEmpty ? "" : " The files go on the item.") + " No session starts."
+        case .item: return "Makes a work item in \(key), past triage." + (files.isEmpty ? "" : " The files go on the item.") + " No session starts."
+        case .session: break
+        }
         switch (intake, files.isEmpty) {
         case (true, false): return "The prompt is the description. The files go on the item."
         case (true, true): return "Tracks this work. The prompt is the description."
@@ -97,7 +156,10 @@ struct NewSessionModel: Equatable {
         }
     }
 
-    var footerNote: String { intake ? "The agent gets the prompt and the item key." : "The prompt goes to the agent as typed." }
+    var footerNote: String {
+        guard mode == .session else { return "" }
+        return intake ? "The agent gets the prompt and the item key." : "The prompt goes to the agent as typed."
+    }
 
     /// The name of the next pasted image.
     var pasteName: String {

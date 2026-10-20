@@ -4,12 +4,14 @@ import OverSireCore
 // ─── New session start ───────────────────────────────────────────────────────
 // Intake on: an intake item with the files, then a terminal with a prompt that names the item.
 // Intake off: the files go to the Orca host, then a terminal with a prompt that lists their paths.
+// Intake and Item modes: only the item and its files. No terminal.
 
 enum SessionStartError: LocalizedError, Equatable {
     case noProject(String)
     case noRoot(String)
     case noRuntime
     case noIntake(String)
+    case noCreate(String)
     case badCommand(String)
     case hostFiles(String)
 
@@ -19,6 +21,7 @@ enum SessionStartError: LocalizedError, Equatable {
         case .noRoot(let k): return "Choose an Orca workspace folder for \(k) first."
         case .noRuntime: return "Add an agent runtime account in Settings › Accounts and sync."
         case .noIntake(let k): return "The tracker of \(k) cannot make intake items with files."
+        case .noCreate(let k): return "The tracker of \(k) cannot take files."
         case .badCommand(let e): return "The agent command is not valid: \(e)"
         case .hostFiles(let e): return "The files did not go to the Orca host: \(e)"
         }
@@ -65,6 +68,21 @@ final class SessionStarter {
         var text: String
         var files: [NewSessionModel.Attachment]
         var intake: Bool
+        var title: String? = nil
+        var state: String? = nil
+        var priority: String? = nil
+    }
+
+    /// The item of the Intake and Item modes.
+    struct Made: Equatable {
+        var item: ItemRef
+        var missing: [String]
+
+        func detail(files: Int) -> String {
+            let n = "\(files) file\(files == 1 ? "" : "s")"
+            if !missing.isEmpty { return "\(missing.count) of \(n) did not upload: \(missing.joined(separator: ", "))." }
+            return files == 0 ? "No session started." : "It holds \(n). No session started."
+        }
     }
 
     struct Result: Equatable {
@@ -108,6 +126,34 @@ final class SessionStarter {
         self.uploader = uploader
     }
 
+    /// Makes an intake item (`intake`) or a work item, then sends the files to it. No terminal opens.
+    func create(_ r: Request, intake: Bool, progress: @escaping (String) -> Void) async throws -> Made {
+        guard let p = project(r.project) else { throw SessionStartError.noProject(r.project) }
+        let key = p.key ?? r.project
+        let draft = ItemDraft(title: r.title ?? NewSessionModel.title(r.text), bodyMarkdown: r.text,
+                              status: intake ? nil : r.state, priority: intake || r.priority == "none" ? nil : r.priority)
+        let t = tracker(p)
+        let files = r.files.map { AttachmentUpload(name: $0.name, mimeType: $0.mimeType, data: $0.data) }
+        let up = t as? any AttachmentUploading
+        if !files.isEmpty && !(up?.capabilities.contains(.attachments) ?? false) { throw SessionStartError.noCreate(key) }
+        let item: ItemRef
+        if intake {
+            guard let it = t as? any IntakeCreating, it.capabilities.contains(.intakeCreate) else { throw SessionStartError.noIntake(key) }
+            progress("Creating intake…")
+            item = try await it.createIntake(draft, in: p).item
+        } else {
+            guard let t else { throw SessionStartError.noProject(key) }
+            progress("Creating item…")
+            item = try await t.create(draft, in: p)
+        }
+        var missing: [String] = []
+        if let up, !files.isEmpty {
+            progress("Sending \(files.count) file\(files.count == 1 ? "" : "s")…")
+            missing = await uploader.upload(files, to: item, with: up)
+        }
+        return Made(item: item, missing: missing)
+    }
+
     /// `progress` gets the label of each step. All checks come before the first change.
     func start(_ r: Request, progress: @escaping (String) -> Void) async throws -> Result {
         guard let p = project(r.project) else { throw SessionStartError.noProject(r.project) }
@@ -138,7 +184,7 @@ final class SessionStarter {
         let count = "\(r.files.count) file\(r.files.count == 1 ? "" : "s")"
         if let t = intake {
             progress("Creating item…")
-            let made = try await t.createIntake(ItemDraft(title: title, bodyMarkdown: r.text), in: p)
+            let made = try await t.createIntake(ItemDraft(title: r.title ?? title, bodyMarkdown: r.text), in: p)
             item = made.item
             if !r.files.isEmpty {
                 progress("Sending \(count)…")
