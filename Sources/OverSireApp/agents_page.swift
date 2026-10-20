@@ -211,6 +211,9 @@ final class AgentsPage: Page {
             head = s.reply.headline.isEmpty ? s.word : s.word + ": " + s.reply.headline
             headColor = old != nil ? Palette.dim : s.state == .unfinished || s.state == .stuck ? Palette.warn : Palette.fg
             meta = ([relativeAgo(s.at), s.cause] + (old.map { [$0] } ?? [])).joined(separator: " · ")
+        } else if let key, data.projectStore.isDone(key: key) {
+            head = "Item is done."
+            meta = "No AI status for a closed item"
         } else if live, let key {
             head = "No status yet."
             meta = job.on ? "Next status after \(Int(AGENTS.quietMinutes)) min idle, or press refresh" : data.agentIndex.screenText(key)
@@ -221,14 +224,14 @@ final class AgentsPage: Page {
             "worktree": worktree, "state": agent, "status": statusCell,
             "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
         ]
-        var trailing: [NSView] = []
-        if live, let key {
-            let r = ActionButton("", symbol: "arrow.clockwise", style: .link) { job.refresh(keys: [key]) }
-            r.setAccessibilityLabel("Refresh the status of \(key)")
-            r.toolTip = "Read the history and the screen of the session now"
-            r.isEnabled = !reading
-            trailing.append(r)
-        }
+        // Each row keeps the refresh slot, so that the columns align.
+        let canRead = live && key.map { !data.projectStore.isDone(key: $0) } == true
+        let r = ActionButton("", symbol: "arrow.clockwise", style: .link) { if let key { job.refresh(keys: [key]) } }
+        r.setAccessibilityLabel("Refresh the status of \(key ?? c.name)")
+        r.toolTip = "Read the history and the screen of the session now"
+        r.isEnabled = canRead && !reading
+        if !canRead { r.alphaValue = 0; r.setAccessibilityElement(false) }
+        var trailing: [NSView] = [r]
         let open = ActionButton("Open", style: .plain) { [weak self] in
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }

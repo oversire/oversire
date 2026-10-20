@@ -180,6 +180,13 @@ class Chiplet: Box {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    // Show `text` for a short time, then the old text again.
+    func flash(_ text: String) {
+        let old = label.stringValue
+        label.stringValue = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.label.stringValue = old }
+    }
+
     override func mouseUp(with event: NSEvent) { onClick?() }
     override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
     override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }

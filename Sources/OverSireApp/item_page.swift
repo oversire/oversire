@@ -136,7 +136,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func head(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> NSView {
         let project = Chiplet(snap.summary.title, symbol: "folder", color: Palette.acc) { [weak self] in self?.go(.project(snap.summary.identifier)) }
-        let keyLine = NSStackView(h: [NSTextField.text(item.key, size: 12, color: Palette.dim, mono: true), project, Spacer()], spacing: 8)
+        let copy = Chiplet(item.key, symbol: "doc.on.doc", color: Palette.dim, mono: true)
+        copy.toolTip = "Copy \(item.key)"
+        copy.setAccessibilityLabel("Copy \(item.key)")
+        copy.onClick = { [weak copy] in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(item.key, forType: .string)
+            copy?.flash("Copied")
+        }
+        let keyLine = NSStackView(h: [copy, project, Spacer()], spacing: 8)
         var chips: [NSView] = [statusChip(snap: snap, item: item), priorityChip(item)]
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
         if !item.assignees.isEmpty { chips.append(Chiplet(item.assignees.joined(separator: ", "), symbol: "person")) }

@@ -28,17 +28,24 @@ struct StatusCard {
         } else if let agent {
             trailing.append(agents.pill(k) ?? Pill(Tone(agent.phase), text: agent.label()))
         }
+        let closed = data.projectStore.isDone(key: k)
         if agent != nil {
-            let r = ActionButton("Refresh", symbol: "arrow.clockwise", style: .link) { job.refresh(keys: [k]) }
+            if !closed {
+                let r = ActionButton("Refresh", symbol: "arrow.clockwise", style: .link) { job.refresh(keys: [k]) }
             r.toolTip = "Read the history and the screen of the session now"
-            if reading { r.busy("Reading…") }
-            trailing.append(r)
+                if reading { r.busy("Reading…") }
+                trailing.append(r)
+            }
             trailing.append(ActionButton("Open in Orca", symbol: "terminal") { agents.reveal(k) })
             if agent?.phase == .failed { trailing.append(ActionButton("Dismiss") { agents.clearFailure(k) }) }
         }
         let c = Card(title: "Status", trailing: trailing, spacing: 10)
 
-        if agent == nil && s == nil {
+        if closed && s == nil {
+            c.add(NSStackView(h: [Glyph("checkmark.circle", color: Palette.dim, size: 13),
+                                  NSTextField.text("The item is done. OverSire reads no AI status for a closed item.", size: 12.5, color: Palette.dim, lines: 2),
+                                  Spacer()], spacing: 6))
+        } else if agent == nil && s == nil {
             c.add(NSStackView(h: [Glyph("moon.zzz", color: Palette.dim, size: 13),
                                   NSTextField.text("No session yet. Start it in Orca or add it to the queue.", size: 12.5, color: Palette.dim, lines: 2),
                                   Spacer()], spacing: 6))
