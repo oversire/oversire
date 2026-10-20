@@ -1,6 +1,7 @@
 import Cocoa
 import OverSireCore
 import Quartz
+import UniformTypeIdentifiers
 
 // ─── New session panel ───────────────────────────────────────────────────────
 // Pick a project, type or speak a prompt, attach files, press ⌘↩. The controller starts the session.
@@ -418,7 +419,20 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
             if c == "d" { flipVoice(); return true }
             if c == "o" { pickFiles(); return true }
         }
+        if (mods == .command || mods == .control) && e.charactersIgnoringModifiers?.lowercased() == "v" { return paste(control: mods == .control) }
         return super.performKeyEquivalent(with: e)
+    }
+
+    /// ⌘V and ⌃V put files and images in the list from any field. ⌃V also pastes text, as a text view reads it as page down.
+    func paste(control: Bool, from pb: NSPasteboard = .general) -> Bool {
+        switch PasteContent(pb) {
+        case .files(let urls): addFiles(urls)
+        case .image(let png): add([NewSessionModel.Attachment(name: model.pasteName, data: png, isImage: true)])
+        case .text:
+            guard control else { return false }
+            (firstResponder as? NSText)?.paste(nil)
+        }
+        return true
     }
 
     /// Esc closes the list, then the dictation, then Quick Look, then the panel.
@@ -690,21 +704,46 @@ final class SessionComboField: NSTextField {
     }
 }
 
+/// What a paste adds: files, one image, or text.
+enum PasteContent: Equatable {
+    case files([URL])
+    case image(Data)
+    case text
+
+    /// An image wins over text that only names it (a URL or an image file name), as browsers and chat apps copy.
+    init(_ pb: NSPasteboard) {
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            self = .files(urls)
+            return
+        }
+        guard pb.availableType(from: [.png, .tiff]) != nil, Self.namesImage(pb.string(forType: .string)),
+              let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
+              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { self = .text; return }
+        self = .image(png)
+    }
+
+    private static func namesImage(_ s: String?) -> Bool {
+        guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return true }
+        guard !s.contains(where: \.isNewline) else { return false }
+        if s.contains("://") { return true }
+        return UTType(filenameExtension: (s as NSString).pathExtension)?.conforms(to: .image) ?? false
+    }
+}
+
 /// Takes pasted and dropped files and images. Text pastes as text.
 final class SessionTextView: SnapTextView {
     var onFiles: (([URL]) -> Void)?
     var onImage: ((Data) -> Void)?
 
+    /// Keeps Edit › Paste on when the clipboard holds only an image or files.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { super.readablePasteboardTypes + [.png, .tiff, .fileURL] }
+
     override func paste(_ sender: Any?) {
-        let pb = NSPasteboard.general
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            return onFiles?(urls) ?? ()
+        switch PasteContent(.general) {
+        case .files(let urls): onFiles?(urls)
+        case .image(let png): onImage?(png)
+        case .text: super.paste(sender)
         }
-        if pb.string(forType: .string) == nil, let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
-           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
-            return onImage?(png) ?? ()
-        }
-        super.paste(sender)
     }
 
     override func performDragOperation(_ s: NSDraggingInfo) -> Bool {

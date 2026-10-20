@@ -89,4 +89,50 @@ final class NewSessionPanelTests: XCTestCase {
         send?.onClick?()
         XCTAssertEqual(started.last?.intake, true)
     }
+
+    private func board(_ fill: (NSPasteboard) -> Void) -> NSPasteboard {
+        let pb = NSPasteboard(name: .init("oversire.test.\(UUID().uuidString)"))
+        pb.clearContents()
+        fill(pb)
+        addTeardownBlock { pb.releaseGlobally() }
+        return pb
+    }
+
+    private var png: Data {
+        let img = NSImage(size: NSSize(width: 4, height: 4))
+        img.lockFocus(); NSColor.red.set(); NSRect(x: 0, y: 0, width: 4, height: 4).fill(); img.unlockFocus()
+        return NSBitmapImageRep(data: img.tiffRepresentation!)!.representation(using: .png, properties: [:])!
+    }
+
+    func testPasteContent() {
+        let shot = board { $0.setData(png, forType: .png) }
+        guard case .image = PasteContent(shot) else { return XCTFail("a screenshot is an image") }
+        let named = board { $0.setData(png, forType: .png); $0.setString("https://example.com/a.png", forType: .string) }
+        guard case .image = PasteContent(named) else { return XCTFail("a URL next to the image keeps the image") }
+        let file = board { $0.setData(png, forType: .png); $0.setString("Screenshot 2026-10-20 at 14.47.png", forType: .string) }
+        guard case .image = PasteContent(file) else { return XCTFail("an image file name keeps the image") }
+        let cells = board { $0.setData(png, forType: .png); $0.setString("total", forType: .string) }
+        XCTAssertEqual(PasteContent(cells), .text, "a spreadsheet copy pastes its text")
+        let lines = board { $0.setData(png, forType: .png); $0.setString("a\nb", forType: .string) }
+        XCTAssertEqual(PasteContent(lines), .text)
+        let url = URL(fileURLWithPath: "/tmp/a.log")
+        XCTAssertEqual(PasteContent(board { $0.writeObjects([url as NSURL]) }), .files([url]))
+        XCTAssertEqual(PasteContent(board { $0.setString("hi", forType: .string) }), .text)
+    }
+
+    func testPasteKeysAttachTheImageFromAnyField() {
+        let p = panel()
+        let shot = board { $0.setData(png, forType: .png) }
+        p.makeFirstResponder(p.comboField)
+        XCTAssertTrue(p.paste(control: false, from: shot))
+        XCTAssertTrue(p.paste(control: true, from: shot))
+        XCTAssertEqual(p.model.files.map(\.name), ["pasted-1.png", "pasted-2.png"])
+        XCTAssertTrue(p.model.files.allSatisfy(\.isImage))
+        XCTAssertFalse(p.paste(control: false, from: board { $0.setString("hi", forType: .string) }), "⌘V with text goes to Edit › Paste")
+    }
+
+    func testPasteMenuStaysOnForAnImageOnlyClipboard() {
+        let types = SessionTextView().readablePasteboardTypes
+        XCTAssertTrue(types.contains(.png) && types.contains(.tiff) && types.contains(.fileURL))
+    }
 }
