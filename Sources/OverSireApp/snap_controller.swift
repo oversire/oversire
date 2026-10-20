@@ -28,7 +28,7 @@ final class SnapController {
         store: store,
         project: { [weak self] k in self?.summary(k)?.ref },
         tracker: { ENV.tracker($0.workspace) },
-        terminal: { ENV.runtime as? SnapTerminal },
+        terminal: { ENV.runtime as? AgentTerminal },
         root: { [weak self] k in self?.summary(k).flatMap { PROJECTS_CFG.orcaRoot($0) } })
 
     init(store: SnapStore = SnapStore(), projects: @escaping () -> [ProjectSummary]) {

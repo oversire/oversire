@@ -5,12 +5,6 @@ import OverSireCore
 // One basket becomes one intake item with its files. The agent mode then opens an
 // agent terminal in the main checkout with a prompt that names the item.
 
-/// The terminal side of the agent runtime, as the sender needs it.
-protocol SnapTerminal {
-    func openTerminal(path: String, title: String, command: String, prompt: String) async throws -> SessionRef
-    func reveal(_ s: SessionRef) async throws
-}
-
 enum SnapSendError: LocalizedError, Equatable {
     case noProject(String)
     case noAttachments
@@ -43,21 +37,23 @@ final class SnapSender {
     private let renderer: SnapRenderer
     private let project: (String) -> ProjectRef?
     private let tracker: (ProjectRef) -> (any OverSireCore.Tracker)?
-    private let terminal: () -> SnapTerminal?
+    private let terminal: () -> AgentTerminal?
     private let root: (String) -> String?
-    static let retries = 3
+    private let uploader: AttachmentUploader
 
     init(store: SnapStore, renderer: SnapRenderer = SnapRenderer(),
          project: @escaping (String) -> ProjectRef?,
          tracker: @escaping (ProjectRef) -> (any OverSireCore.Tracker)?,
-         terminal: @escaping () -> SnapTerminal?,
-         root: @escaping (String) -> String?) {
+         terminal: @escaping () -> AgentTerminal?,
+         root: @escaping (String) -> String?,
+         uploader: AttachmentUploader = AttachmentUploader()) {
         self.store = store
         self.renderer = renderer
         self.project = project
         self.tracker = tracker
         self.terminal = terminal
         self.root = root
+        self.uploader = uploader
     }
 
     /// The tracker of the basket's project, when it can take the ticket. Else the error to show.
@@ -87,7 +83,7 @@ final class SnapSender {
     func send(_ b: SnapBasket, agent: Bool) async throws -> Result {
         let (p, t) = try target(b)
         // Check the agent side before the item exists, so a missing root does not leave a half ticket.
-        var launch: (SnapTerminal, String, String)?
+        var launch: (AgentTerminal, String, String)?
         if agent {
             guard let r = root(b.project), !r.isEmpty else { throw SnapSendError.noRoot(p.key ?? b.project) }
             guard let term = terminal() else { throw SnapSendError.noRuntime }
@@ -113,17 +109,8 @@ final class SnapSender {
         return result
     }
 
-    /// Uploads in order. A failed file gets up to `retries` more tries. Returns the names that still failed.
     func upload(_ files: [SnapFile], to item: ItemRef, with t: any Tracker) async -> [String] {
-        var left = files
-        for _ in 0...Self.retries where !left.isEmpty {
-            var failed: [SnapFile] = []
-            for f in left {
-                do { _ = try await t.attach(AttachmentUpload(name: f.name, mimeType: "image/png", data: f.data), to: item) } catch { failed.append(f) }
-            }
-            left = failed
-        }
-        return left.map(\.name)
+        await uploader.upload(files.map { AttachmentUpload(name: $0.name, mimeType: "image/png", data: $0.data) }, to: item, with: t)
     }
 
     /// Uploads the missing files of a partly sent basket again.

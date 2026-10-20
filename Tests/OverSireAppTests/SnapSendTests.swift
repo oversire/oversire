@@ -7,7 +7,7 @@ import XCTest
 @testable import OverSireApp
 
 final class SnapSendTests: XCTestCase {
-    private final class Terminal: SnapTerminal, @unchecked Sendable {
+    private final class Terminal: AgentTerminal, @unchecked Sendable {
         var opened: [(path: String, title: String, command: String, prompt: String)] = []
         var revealed: [SessionRef] = []
 
@@ -46,7 +46,7 @@ final class SnapSendTests: XCTestCase {
 
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }
 
-    private func sender(tracker t: (any Tracker)? = nil, terminal: SnapTerminal? = nil) -> SnapSender {
+    private func sender(tracker t: (any Tracker)? = nil, terminal: AgentTerminal? = nil) -> SnapSender {
         let tr: any Tracker = t ?? tracker
         let tm = terminal ?? term
         let ref = tracker.project

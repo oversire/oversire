@@ -421,6 +421,7 @@ struct CaptureConfig: Codable, Equatable {
     var pasteClipboard = true
     var aiTitle = true
     var snap = SnapConfig()
+    var session = SessionConfig()
 
     init() {}
 
@@ -432,6 +433,29 @@ struct CaptureConfig: Codable, Equatable {
         pasteClipboard = try c.decodeIfPresent(Bool.self, forKey: .pasteClipboard) ?? true
         aiTitle = try c.decodeIfPresent(Bool.self, forKey: .aiTitle) ?? true
         snap = try c.decodeIfPresent(SnapConfig.self, forKey: .snap) ?? SnapConfig()
+        session = try c.decodeIfPresent(SessionConfig.self, forKey: .session) ?? SessionConfig()
+    }
+}
+
+// The New session panel. The shortcut defaults to ⌃⌥⌘N.
+struct SessionConfig: Codable, Equatable {
+    var enabled = true
+    var keyCode: UInt32 = 45            // N
+    var modifiers: UInt32 = 0x1900      // control + option + command
+    var intake = true                   // the last value of the check box
+    var lastProject: String?            // ProjectRef.storeKey
+    var maxBytes = 10 * 1024 * 1024     // the total file size of the direct route
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        keyCode = try c.decodeIfPresent(UInt32.self, forKey: .keyCode) ?? 45
+        modifiers = try c.decodeIfPresent(UInt32.self, forKey: .modifiers) ?? 0x1900
+        intake = try c.decodeIfPresent(Bool.self, forKey: .intake) ?? true
+        lastProject = try c.decodeIfPresent(String.self, forKey: .lastProject)
+        maxBytes = max(1024 * 1024, try c.decodeIfPresent(Int.self, forKey: .maxBytes) ?? 10 * 1024 * 1024)
     }
 }
 
@@ -488,6 +512,8 @@ struct RuntimeConfig: Codable, Equatable {
     var prompt = RuntimeConfig.defaultPrompt
     var commands: [String: String] = [:]
     var snapPrompt = SnapTicket.defaultPrompt   // the prompt of a sent snap basket
+    var sessionIntakePrompt = SessionPrompt.intakeDefault
+    var sessionFilesPrompt = SessionPrompt.filesDefault
 
     init() {}
 
@@ -497,6 +523,8 @@ struct RuntimeConfig: Codable, Equatable {
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? RuntimeConfig.defaultPrompt
         commands = try c.decodeIfPresent([String: String].self, forKey: .commands) ?? [:]
         snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
+        sessionIntakePrompt = try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault
+        sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
     }
 
     func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: agent)) }

@@ -90,6 +90,12 @@ extension CaptureConfig {
     var shortcutLabel: String { shortcut.shortcutLabel }
 }
 
+extension SessionConfig {
+    var shortcut: KeyShortcut { KeyShortcut(keyCode: keyCode, modifiers: modifiers) }
+    var hasShortcut: Bool { shortcut.hasShortcut }
+    var shortcutLabel: String { shortcut.shortcutLabel }
+}
+
 // Click, then press the new shortcut. Esc cancels. It needs ⌘, ⌃ or ⌥.
 final class ShortcutField: NSButton {
     var onChange: ((UInt32, UInt32) -> Void)?
