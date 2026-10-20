@@ -50,16 +50,8 @@ struct StatusCard {
             noStatus(c)
         }
         c.add(chips())
-        if let s { c.add(NSTextField.text(s.read + (s.byAI ? " · by AI" : "") + " · \(trigger(s.trigger))", size: 11.5, color: Palette.dim, lines: 2)) }
+        if let s { c.add(NSTextField.text(s.read + (s.byAI ? " · by AI" : "") + " · " + s.cause, size: 11.5, color: Palette.dim, lines: 2)) }
         return c
-    }
-
-    private func trigger(_ t: SessionStatus.Trigger) -> String {
-        switch t {
-        case .turnEnd: return "at the turn end"
-        case .idle: return "after \(Int(AGENTS.quietMinutes)) min with the same screen"
-        case .manual: return "on Refresh"
-        }
     }
 
     private func body(_ c: Card, _ s: SessionStatus, reading: Bool) {

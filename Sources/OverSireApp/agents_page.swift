@@ -11,16 +11,16 @@ final class AgentsPage: Page {
     private var sending: Set<String> = []
     private var note: (Tone, String)?
     private var allWorktrees = false
+    private var expanded: Set<String> = UIShots.sessions ? ["uishots-card-3"] : []     // card ids with the status open
     private lazy var needsYou: NeedsYouCard = {
         let c = NeedsYouCard(page: self)
         c.inputDetail = { [weak self] key, a in self?.inputDetail(key, a) ?? NSView() }
         return c
     }()
-    private let table = ColumnLayout(id: "worktrees-3", columns: [
-        TableColumn(id: "worktree", title: "Worktree", width: 240, min: 120),
-        TableColumn(id: "repo", title: "Repo and branch", width: 150, min: 80, optional: true),
-        TableColumn(id: "state", title: "State", width: 180, min: 60),
-        TableColumn(id: "change", title: "Last screen change", width: 260, min: 80, optional: true),
+    private let table = ColumnLayout(id: "worktrees-4", columns: [
+        TableColumn(id: "worktree", title: "Worktree", width: 290, min: 140),
+        TableColumn(id: "state", title: "State", width: 150, min: 60),
+        TableColumn(id: "status", title: "Status", width: 360, min: 120, flexible: true),
         TableColumn(id: "terms", title: "Terms", width: 44, min: 36, optional: true),
         TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
     ])
@@ -32,6 +32,7 @@ final class AgentsPage: Page {
         let cfg = PROJECTS_CFG.orca
         var caption = cfg.environment.map { "Orca environment \($0)" } ?? "Orca on this Mac"
         caption += " · read every 15 s"
+        if data.statusJob.on { caption += " · status after \(Int(AGENTS.quietMinutes)) min idle" }
         if let e = idx.lastError { caption += " · last read failed: \(e)" }
         col.addFull(PageHeader("Sessions", caption: caption, actions: [
             NeedsYouCard.refreshButton(data),
@@ -167,49 +168,106 @@ final class AgentsPage: Page {
     private func cardRow(_ c: Workspace) -> NSView {
         let key = cardKey(c)
         let co = data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }
+        let job = data.statusJob
         let agent: NSView
-        var change: NSView = NSTextField.text("—", size: 12, color: Palette.dim)
+        var live = false
         if let key, let a = data.agentIndex.agent(key), a.card == c.id, let st = data.agentIndex.state(key) {
             agent = Pill(Tone(st), text: data.agentIndex.pillText(key) ?? st.label)
-            agent.toolTip = st.facts
-            var t = data.agentIndex.screenText(key)
-            if let s = data.statusJob.status(key) { t += " · " + s.word.lowercased() }
-            let f = NSTextField.text(t, size: 12, color: Palette.mut)
-            f.lineBreakMode = .byTruncatingTail
-            change = f
+            agent.toolTip = st.facts + " · " + data.agentIndex.screenText(key)
+            live = true
         } else if let key, let a = data.agentIndex.agent(key), a.card == c.id {
             agent = Pill(Tone(a.phase), text: a.label())
+            live = true
         } else if let g = c.agents.min(by: { $0.rank < $1.rank }) {
             agent = Pill(tone(g.phase))
         } else {
             agent = Chiplet("Shell only", symbol: "terminal")
         }
+        let status = live ? key.flatMap { job.status($0) } : nil
+        let reading = live && key.map { job.reading.contains($0.uppercased()) } == true
         let ci: NSView = key.flatMap { data.workstreams.stream($0)?.ci }.map { Glyph($0) as NSView } ?? NSTextField.text("—", color: Palette.dim)
+
         let title = key.flatMap { data.projectStore.item(key: $0)?.2.title }
         let name = title.map { NSTextField.text($0, size: 12.5) } ?? NSTextField.text(c.name, size: 12.5, mono: true)
         name.lineBreakMode = title == nil ? .byTruncatingMiddle : .byTruncatingTail
         name.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         name.toolTip = c.name
-        var worktree: [NSView] = [name]
-        if let key { worktree.insert(Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) }, at: 0) }
+        var top: [NSView] = [name]
+        if let key { top.insert(Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) }, at: 0) }
         let place = NSTextField.text([c.repo, co?.branch].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
-                                     size: 12, color: Palette.mut, mono: true)
+                                     size: 11.5, color: Palette.dim, mono: true)
         place.lineBreakMode = .byTruncatingMiddle
+        place.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        let worktree = NSStackView(v: [NSStackView(h: top, spacing: 6), place], spacing: 3)
+        worktree.alignment = .leading
+        worktree.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: worktree.widthAnchor).isActive = true }
+
+        var head = "—", meta = "", headColor = Palette.dim
+        if reading {
+            head = "Reading the last turn…"
+            meta = "Status requested"
+        } else if let s = status {
+            let old = job.outOfDate(s)
+            head = s.reply.headline.isEmpty ? s.word : s.word + ": " + s.reply.headline
+            headColor = old != nil ? Palette.dim : s.state == .unfinished || s.state == .stuck ? Palette.warn : Palette.fg
+            meta = ([relativeAgo(s.at), s.cause] + (old.map { [$0] } ?? [])).joined(separator: " · ")
+        } else if live, let key {
+            head = "No status yet."
+            meta = job.on ? "Next status after \(Int(AGENTS.quietMinutes)) min idle, or press refresh" : data.agentIndex.screenText(key)
+        }
+        let statusCell = TwoLine(head, meta, titleSize: 12.5, weight: .regular, titleColor: headColor)
+        statusCell.toolTip = head
         let cells: [String: NSView] = [
-            "worktree": NSStackView(h: worktree, spacing: 6), "repo": place,
-            "state": agent, "change": change, "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
+            "worktree": worktree, "state": agent, "status": statusCell,
+            "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
         ]
+        var trailing: [NSView] = []
+        if live, let key {
+            let r = ActionButton("", symbol: "arrow.clockwise", style: .link) { job.refresh(keys: [key]) }
+            r.setAccessibilityLabel("Refresh the status of \(key)")
+            r.toolTip = "Read the history and the screen of the session now"
+            r.isEnabled = !reading
+            trailing.append(r)
+        }
         let open = ActionButton("Open", style: .plain) { [weak self] in
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }
         open.setAccessibilityLabel(key.map { "Open the session of \($0)" } ?? "Open \(c.name) in Orca")
+        trailing.append(open)
+        let detail = status.flatMap { $0.reply.done.isEmpty && $0.reply.next.isEmpty ? nil : $0 }
+        let isOpen = detail != nil && expanded.contains(c.id)
         let label = "\(c.name), \(c.repo), \(c.liveTerminals) terminals" + (key.map { ", item \($0)" } ?? ", no item")
-        let row = TableRow(table, cells: cells, trailing: [open], height: 40, label: label) { [weak self] in
-            if let key { self?.go(.item(key, .overview)) } else { self?.data.agentIndex.reveal(card: c.id) }
+            + (status.map { ". \($0.word): \($0.reply.headline)" } ?? "")
+        let row = TableRow(table, cells: cells, trailing: trailing, height: 54, label: label) { [weak self] in
+            guard let self else { return }
+            if detail != nil {
+                if self.expanded.remove(c.id) == nil { self.expanded.insert(c.id) }
+                self.reload()
+            } else if let key { self.go(.item(key, .overview)) } else { self.data.agentIndex.reveal(card: c.id) }
         }
+        if let box = row.cells.boxes["worktree"] { worktree.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true }
+        if detail != nil { row.setAccessibilityExpanded(isOpen) }
         let hasAgent = key.flatMap { data.agentIndex.agent($0) } != nil
         commands.attach(row) { RowMenu.session(card: c, key: key, checkout: co, hasAgent: hasAgent, caps: $0) }
-        return row
+        guard isOpen, let s = detail else { return row }
+        return expandedRow(row, s)
+    }
+
+    // Done and "Now and next" under the row.
+    private func expandedRow(_ row: NSView, _ s: SessionStatus) -> NSView {
+        func list(_ title: String, _ items: [String]) -> NSView {
+            let v = NSStackView(v: [NSTextField.text(title.uppercased(), size: 11, weight: .semibold, color: Palette.dim)], spacing: 4)
+            if items.isEmpty { v.addFull(NSTextField.text("—", size: 12.5, color: Palette.dim)) }
+            for e in items { v.addFull(NSTextField.text("· " + e, size: 12.5, color: Palette.mut, lines: 3)) }
+            return v
+        }
+        let two = NSStackView(h: [list("Done", s.reply.done), list("Now and next", s.reply.next)], spacing: 20, align: .top)
+        two.distribution = .fillEqually
+        let pad = Padded(two, vertical: 6, side: 0)
+        pad.edgeInsets = NSEdgeInsets(top: 4, left: min(table.columns.first?.width ?? 290, 300) + 30, bottom: 14, right: 16)
+        let v = NSStackView(v: [row, pad], spacing: 0)
+        v.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
+        return v
     }
 
     private func tone(_ s: AgentSession.Phase) -> Tone {

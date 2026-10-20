@@ -43,6 +43,15 @@ struct SessionStatus: Codable, Equatable {
         }
     }
 
+    /// Why the job read the session, in words.
+    var cause: String {
+        switch trigger {
+        case .turnEnd: return "at the turn end"
+        case .idle: return "after \(Int(AGENTS.quietMinutes)) min with the same screen"
+        case .manual: return "on Refresh"
+        }
+    }
+
     /// The text that "Tell the agent" sends.
     var report: String {
         var lines = ["Manual check: \(passed) of \(reply.needsYou.count) pass."]
