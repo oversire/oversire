@@ -189,6 +189,8 @@ extension SettingsPage {
                 sw("Queue order", "Suggest an order for each lane.", AI_CFG.queueOrder) { AI_CFG.queueOrder = $0 },
                 sw("Intake agent", "Check intake items in an Orca terminal in plan mode. Needs Orca, not an AI key.", AI_CFG.intakeAgent) { AI_CFG.intakeAgent = $0 },
                 sw("Session summary", "Summarize the session on the item page.", AI_CFG.sessionSummary) { AI_CFG.sessionSummary = $0 },
+                sw("Item summary", "Summarize the long description of each open item that changed in the last 7 days. A new description gets a new summary.",
+                   AI_CFG.itemSummary) { AI_CFG.itemSummary = $0 },
             ]),
             card("CI", [
                 sw("Explain failures", "A short cause for a failed run that no session watches.", AI_CFG.ciExplain) { AI_CFG.ciExplain = $0 },

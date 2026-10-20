@@ -33,15 +33,17 @@ struct ItemSummary: Codable, Equatable {
     }
 }
 
-// AI summaries of long item descriptions. Only a click asks the AI. The cache keeps the newest summaries.
+// AI summaries of long item descriptions. `tick` asks the AI for open items, one at a time. The cache keeps the newest summaries.
 final class ItemSummaries {
     static let changed = Notification.Name("ItemSummariesChanged")
     static let minLength = 1_500
     static let keep = 200
+    static let recent: TimeInterval = 7 * 86400
 
     private var cache: [String: ItemSummary] = [:]
     private(set) var busy: Set<String> = []
     private(set) var errors: [String: String] = [:]
+    private var tried: [String: String] = [:]     // key → the hash of the last automatic try
     private let path: String
     private let ai: () -> AIClient?
 
@@ -83,6 +85,21 @@ final class ItemSummaries {
             }
             self.publish()
         }
+    }
+
+    /// Summarizes the newest due item: open, changed in the last 7 days, a long description without a summary of this text.
+    /// One try for each description, so a failure does not repeat.
+    func tick(_ items: [(item: Item, open: Bool)], now: Date = Date()) {
+        guard busy.isEmpty, hasEngine else { return }
+        let due = items.filter { e in
+            let body = (e.item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard e.open, ItemSummaries.offers(body), now.timeIntervalSince(e.item.activityAt) < ItemSummaries.recent else { return false }
+            let k = e.item.key.uppercased(), h = ItemSummary.hash(body)
+            return cache[k]?.hash != h && tried[k] != h
+        }
+        guard let next = due.max(by: { $0.item.activityAt < $1.item.activityAt })?.item else { return }
+        tried[next.key.uppercased()] = ItemSummary.hash((next.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+        summarize(next)
     }
 
     /// For `--uishots`: a summary without the AI.

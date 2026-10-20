@@ -266,6 +266,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let sums = data.itemSummaries
         let k = item.key.uppercased()
         var head: [NSView] = []
+        if AI_CFG.itemSummary, sums.hasEngine {
+            let auto = Chiplet("Auto", symbol: "sparkles", color: Palette.run)
+            auto.toolTip = "OverSire summarizes open items that changed in the last 7 days (Settings › AI)"
+            head.append(auto)
+        }
         if let summary { head.append(NSTextField.text(relativeTime(summary.at), size: 12, color: Palette.dim)) }
         if busy {
             head.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Summarizing…", size: 12, color: Palette.dim)], spacing: 5))

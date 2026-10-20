@@ -615,6 +615,7 @@ struct AIConfig: Codable, Equatable {
     var queueOrder = true
     var intakeAgent = true
     var sessionSummary = true
+    var itemSummary = true              // summarize the long descriptions of open items
     var ciExplain = true                // a short cause of a failed run that no agent watches
     var flaky = true                    // mark a run that failed, then passed on the same commit
     var digest = false                  // morning digest on Home
@@ -639,6 +640,7 @@ struct AIConfig: Codable, Equatable {
         queueOrder = try c.decodeIfPresent(Bool.self, forKey: .queueOrder) ?? true
         intakeAgent = try c.decodeIfPresent(Bool.self, forKey: .intakeAgent) ?? true
         sessionSummary = try c.decodeIfPresent(Bool.self, forKey: .sessionSummary) ?? true
+        itemSummary = try c.decodeIfPresent(Bool.self, forKey: .itemSummary) ?? true
         ciExplain = try c.decodeIfPresent(Bool.self, forKey: .ciExplain) ?? true
         flaky = try c.decodeIfPresent(Bool.self, forKey: .flaky) ?? true
         digest = try c.decodeIfPresent(Bool.self, forKey: .digest) ?? false

@@ -762,6 +762,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         queue.tick(workstreams: workstreams)
         statusJob.tick(workstreams: workstreams, store: projectStore)
         sessions.tick()
+        if AI_CFG.itemSummary {
+            itemSummaries.tick(projectStore.snapshots.values.flatMap { snap in
+                snap.items.map { ($0, snap.option($0.statusOptionId)?.category != .done) }
+            })
+        }
         if !firstLoad, ciAssist.digestDue() {
             let intake = projectStore.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }
             ciAssist.makeDigest(facts: CIAssist.digestFacts(runs: grouped, agents: Array(agentIndex.agents.values), queued: queue.count, intake: intake))
