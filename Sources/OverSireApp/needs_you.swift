@@ -377,3 +377,216 @@ final class NeedsYouCard: NSObject {
         tell(e, extra: "Failure: " + text)
     }
 }
+
+// One row of Needs you: one item, or one run or PR with no item. Home, its badge and the menu bar list them.
+struct NeedsYou: Equatable {
+    enum Kind: Int { case needsInput, blocked, usageLimit, stuck, notFinished, done, runFailed, review, mention }
+
+    // The chips over the list.
+    enum Filter: Int, CaseIterable {
+        case all, blocked, stuck, notFinished
+        var title: String { ["All", "Blocked", "Stuck", "Not finished"][rawValue] }
+        func has(_ k: Kind) -> Bool {
+            switch self {
+            case .all: return true
+            case .blocked: return k == .needsInput || k == .blocked
+            case .stuck: return k == .stuck || k == .usageLimit
+            case .notFinished: return k == .notFinished
+            }
+        }
+    }
+
+    // The action that shows on hover.
+    enum Act: Equatable {
+        case reply(String), checklist(String), nudge(String), ask(String), approve(String), rerun(repo: String, run: Run), open(String)
+        var title: String {
+            switch self {
+            case .reply: return "Reply"
+            case .checklist: return "Checklist"
+            case .nudge: return "Send nudge"
+            case .ask: return "Ask the agent"
+            case .approve: return "Approve"
+            case .rerun: return "Re-run failed"
+            case .open: return "Open PR"
+            }
+        }
+    }
+
+    let kind: Kind
+    let key: String
+    let reason: String
+    let at: Date
+    let route: Route
+    var act: Act?
+    var watched = false   // a session works on the failed run
+
+    /// The id holds the time, so a new event of the same item shows again after a snooze.
+    var id: String { "\(kind)|\(key)|\(Int(at.timeIntervalSince1970))" }
+
+    var tone: Tone {
+        switch kind {
+        case .needsInput: return Tone(SessionState.needsInput)
+        case .blocked: return Tone(SessionState.blocked)
+        case .usageLimit: return Tone(symbol: "hourglass.circle.fill", color: Palette.warn, word: "Usage limit")
+        case .stuck: return Tone(StatusReply.State.stuck)
+        case .notFinished: return Tone(StatusReply.State.unfinished)
+        case .done: return Tone(StatusReply.State.done)
+        case .runFailed: return .bad
+        case .review: return Tone(symbol: "eye.circle.fill", color: Palette.acc, word: "Review")
+        case .mention: return Tone(symbol: "at.circle.fill", color: Palette.acc, word: "Mention")
+        }
+    }
+
+    /// Kind first. A failure that a session watches comes after one that no session watches. Then the newest first.
+    static func ranked(_ list: [NeedsYou]) -> [NeedsYou] {
+        list.sorted { a, b in
+            if a.kind != b.kind { return a.kind.rawValue < b.kind.rawValue }
+            if a.watched != b.watched { return !a.watched }
+            return a.at > b.at
+        }
+    }
+
+    /// Ranked, with one row for each key: the row of the most urgent kind.
+    static func merged(_ list: [NeedsYou]) -> [NeedsYou] {
+        var seen = Set<String>()
+        return ranked(list).filter { seen.insert($0.key).inserted }
+    }
+
+    /// The rows of the AI statuses that wait for a decision.
+    static func checks(_ pending: [SessionStatus]) -> [NeedsYou] {
+        pending.compactMap { s in
+            let headline = s.reply.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch s.state {
+            case .stuck:
+                return NeedsYou(kind: .stuck, key: s.key, reason: headline.isEmpty ? "Looks stuck" : headline, at: s.at,
+                                route: .item(s.key, .overview), act: .nudge(s.id))
+            case .unfinished:
+                return NeedsYou(kind: .notFinished, key: s.key, reason: headline.isEmpty ? "Not finished" : headline, at: s.at,
+                                route: .item(s.key, .overview), act: .ask(s.id))
+            case .done:
+                return NeedsYou(kind: .done, key: s.key, reason: StatusJob.frees(s) ? "Looks done · approve to free the slot" : "Looks done",
+                                at: s.at, route: .item(s.key, .overview), act: .approve(s.id))
+            default: return nil
+            }
+        }
+    }
+
+    /// The steps of a Blocked on you status in a few words: the step, "2 manual checks", "3 steps for you".
+    static func steps(_ s: [StatusReply.Step]) -> String {
+        guard let first = s.first else { return "Blocked on you" }
+        if s.count == 1 { return first.text }
+        if Set(s.map(\.kind)).count == 1 { return "\(s.count) \(NeedsYouCard.kindLabel(first.kind).lowercased())s" }
+        return "\(s.count) steps for you"
+    }
+
+    /// A failed run counts when it is on a default branch or on a branch of one of the user's PRs.
+    static func counts(_ r: Run, repo: String, prs: [(String, [ChangeRequest])]) -> Bool {
+        DEFAULT_BRANCHES.contains(r.headBranch)
+            || (prs.first { $0.0 == repo }?.1.contains { $0.mine && $0.headRefName == r.headBranch } ?? false)
+    }
+
+    static func collect(_ data: AppData, snoozes: Snoozes = SNOOZES, now: Date = Date()) -> [NeedsYou] {
+        var out: [NeedsYou] = []
+        let agents = data.agentIndex
+        for (key, a) in agents.agents where agents.state(key) == .needsInput {
+            let ask = (a.message ?? "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
+            out.append(NeedsYou(kind: .needsInput, key: key, reason: ask.isEmpty ? "Waits for your input" : "Asks: " + ask, at: a.since,
+                                route: .item(key, .session), act: .reply(key)))
+        }
+        for e in data.statusJob.blocking {
+            out.append(NeedsYou(kind: .blocked, key: e.key, reason: steps(e.reply.needsYou), at: e.at, route: .item(e.key, .overview),
+                                act: .checklist(e.key)))
+        }
+        for l in agents.limits {
+            out.append(NeedsYou(kind: .usageLimit, key: l.key, reason: "Usage limit · resumes \(l.reset)",
+                                at: agents.watch(l.key)?.changedAt ?? now, route: .item(l.key, .session)))
+        }
+        out += checks(data.statusJob.pending)
+        let ws = data.workstreams
+        for (repo, r) in failingRuns(data.grouped) where counts(r, repo: repo, prs: data.prGrouped) {
+            let link = ws.link(runId: r.id)
+            let name = repo.split(separator: "/").last.map(String.init) ?? repo
+            out.append(NeedsYou(kind: .runFailed, key: link?.key ?? "\(name) #\(r.number)",
+                                reason: "\(r.workflowName ?? r.name) #\(r.number) failed · \(r.headBranch)", at: lastActivity(r),
+                                route: .run(repo: repo, id: r.id), act: .rerun(repo: repo, run: r),
+                                watched: link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false))
+        }
+        for (repo, prs) in data.prGrouped {
+            let name = repo.split(separator: "/").last.map(String.init) ?? repo
+            for p in prs where !p.mine && !p.isDraft {
+                out.append(NeedsYou(kind: .review, key: "\(name) #\(p.number)", reason: "Review: " + p.title,
+                                    at: parseISO(p.createdAt) ?? now, route: .prs, act: .open(p.url)))
+            }
+        }
+        let store = data.projectStore
+        for e in store.activity(limit: 300, project: nil) where e.change == .mention && now.timeIntervalSince(e.at) < 3 * 86400 {
+            guard let snap = store.snapshots[e.projectKey], let item = snap.items.first(where: { $0.id == e.itemId }) else { continue }
+            out.append(NeedsYou(kind: .mention, key: item.key, reason: "Mentions you: " + item.title, at: e.at, route: .item(item.key, .overview)))
+        }
+        return merged(out.filter { !snoozes.has($0.id, now: now) })
+    }
+}
+
+// The Needs you rows that the user put off, with the end time.
+final class Snoozes {
+    private var until: [String: Date] = [:]
+    private let path: String
+
+    init(path: String) {
+        self.path = path
+        if let d = FileManager.default.contents(atPath: path), let m = try? JSONDecoder().decode([String: Date].self, from: d) { until = m }
+    }
+
+    func has(_ id: String, now: Date = Date()) -> Bool { until[id].map { $0 > now } ?? false }
+
+    func snooze(_ id: String, for t: TimeInterval = 86400, now: Date = Date()) {
+        until = until.filter { $0.value > now }
+        until[id] = now.addingTimeInterval(t)
+        if let d = try? JSONEncoder().encode(until) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+    }
+}
+
+let SNOOZES = Snoozes(path: (CONFIG_DIR as NSString).appendingPathComponent("needs-you-snoozes.json"))
+
+// One line of Needs you: icon, key, reason and age. The action and Snooze show on hover. A click opens the summary.
+final class NeedsYouRow: Row {
+    init(_ n: NeedsYou, data: AppData, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
+        let tone = n.tone
+        let key = NSTextField.text(n.key, size: 11.5, color: Palette.mut, mono: true)
+        key.lineBreakMode = .byTruncatingTail
+        let reason = NSTextField.text(n.reason, size: 12.5)
+        reason.lineBreakMode = .byTruncatingTail
+        reason.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        reason.setContentHuggingPriority(.init(1), for: .horizontal)
+        let age = relativeTime(n.at)
+        super.init([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), key.fixedWidth(112), reason, Spacer(),
+                    NSTextField.text(age, size: 11.5, color: Palette.dim)],
+                   height: 36, label: "\(tone.word): \(n.key), \(n.reason), \(age)") { go(n.route) }
+        var actions: [NSView] = []
+        if let a = n.act {
+            actions.append(ActionButton(a.title, style: .primary) {
+                let job = data.statusJob
+                switch a {
+                case .reply(let k): go(.item(k, .session))
+                case .checklist(let k): go(.item(k, .overview))
+                case .nudge(let id), .approve(let id): job.approve(id)
+                case .ask(let id): job.ask(id)
+                case .rerun(let repo, let r): data.rerun(repo: repo, runs: [r], failedOnly: true)
+                case .open(let url): if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                }
+            })
+        }
+        let snooze = ActionButton("Snooze") { SNOOZES.snooze(n.id) }
+        snooze.toolTip = "Hide this row for one day"
+        actions.append(snooze)
+        actions.forEach { ($0 as? NSButton)?.controlSize = .small }
+        hoverViews = actions
+        if case .run(let repo, let id) = n.route, let commands,
+           let r = data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) {
+            let linked = data.workstreams.link(runId: id)?.key
+            commands.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, ignored: IGNORED.contains(r), caps: $0) }
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}

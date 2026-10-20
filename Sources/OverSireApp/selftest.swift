@@ -594,18 +594,18 @@ func runSelfTest() {
         check(WorkstreamIndex.repoName(remote: "https://github.com/oversire/oversire") == "oversire/oversire", "https remote")
     }
 
-    // Needs you: kind first, an unwatched failure before a watched one, then newest first.
+    // Needs you: kind first, an unwatched failure before a watched one, then newest first. One row for each key.
     do {
         let now = Date()
-        func n(_ k: NeedsYou.Kind, _ t: String, _ body: String = "", ago: Double) -> NeedsYou {
-            NeedsYou(kind: k, title: t, body: body, at: now.addingTimeInterval(-ago), route: .home)
+        func n(_ k: NeedsYou.Kind, _ key: String, watched: Bool = false, ago: Double) -> NeedsYou {
+            NeedsYou(kind: k, key: key, reason: "", at: now.addingTimeInterval(-ago), route: .home, watched: watched)
         }
-        let got = NeedsYou.ranked([
-            n(.intake, "intake", ago: 1), n(.review, "review", ago: 5),
-            n(.runFailed, "watched", "FRITZ-1 · the session watches it", ago: 1), n(.runFailed, "loose", "app · main · unlinked", ago: 50),
-            n(.agentWaiting, "old ask", ago: 600), n(.agentWaiting, "new ask", ago: 10), n(.aiCheck, "check", ago: 2),
-        ]).map(\.title)
-        check(got == ["new ask", "old ask", "check", "loose", "watched", "review", "intake"], "needs-you rank: \(got)")
+        let got = NeedsYou.merged([
+            n(.mention, "mention", ago: 1), n(.review, "review", ago: 5),
+            n(.runFailed, "watched", watched: true, ago: 1), n(.runFailed, "loose", ago: 50),
+            n(.needsInput, "old ask", ago: 600), n(.needsInput, "new ask", ago: 10), n(.stuck, "check", ago: 2), n(.stuck, "new ask", ago: 1),
+        ]).map(\.key)
+        check(got == ["new ask", "old ask", "check", "loose", "watched", "review", "mention"], "needs-you rank: \(got)")
     }
 
     // Queue: only the first entry with no hold starts, only with a free slot, and only when its condition holds.

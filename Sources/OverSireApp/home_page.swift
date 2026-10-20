@@ -2,224 +2,120 @@ import Cocoa
 import OverSireCore
 import OverSireAI
 
-// One thing that waits for the user. Home and the menu bar list them, most urgent first.
-struct NeedsYou: Equatable {
-    enum Kind: Int { case agentWaiting, aiCheck, runFailed, review, intake }
-    let kind: Kind
-    let title: String
-    let body: String
-    let at: Date
-    let route: Route
-    var keys: [String] = []   // the items of a grouped line
-    var tone: Tone {
-        switch kind {
-        case .agentWaiting: return .waiting
-        case .aiCheck: return .info
-        case .runFailed: return .bad
-        case .review: return Tone(symbol: "eye.circle.fill", color: Palette.acc, word: "Review")
-        case .intake: return .intake
+// A KPI tile on Home: a label, a value with a unit, a line of detail and an optional sparkline.
+// A nil detail hides its line.
+final class KPITile: Row {
+    init(_ label: String, value: String, unit: String = "", detail: [String?], tone: NSColor? = nil, ring: NSColor? = nil,
+         spark: [Double?] = [], onClick: (() -> Void)?) {
+        let head = NSTextField.text(label.uppercased(), size: 10.5, weight: .semibold, color: Palette.dim)
+        let v = NSMutableAttributedString(string: value, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 22, weight: .semibold),
+                                                                       .foregroundColor: tone ?? Palette.fg])
+        if !unit.isEmpty {
+            v.append(NSAttributedString(string: " " + unit, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.mut]))
         }
-    }
-
-    // Kind first. A linked failure comes after an unlinked one, because an agent watches it. Then newest first.
-    static func ranked(_ list: [NeedsYou]) -> [NeedsYou] {
-        list.sorted { a, b in
-            if a.kind != b.kind { return a.kind.rawValue < b.kind.rawValue }
-            let (wa, wb) = (a.body.contains("the session watches it"), b.body.contains("the session watches it"))
-            if wa != wb { return !wa }
-            return a.at > b.at
-        }
-    }
-
-    static func ==(a: NeedsYou, b: NeedsYou) -> Bool { a.kind == b.kind && a.title == b.title && a.route == b.route }
-
-    /// One line for each status, or one line for each state when two or more statuses have it.
-    static func checks(_ pending: [SessionStatus]) -> [NeedsYou] {
-        [StatusReply.State.done, .stuck, .unfinished].flatMap { v -> [NeedsYou] in
-            let list = pending.filter { $0.state == v }
-            let at = list.map(\.at).max() ?? .distantPast
-            let words: [StatusReply.State: String] = [.done: "look done", .stuck: "look stuck", .unfinished: "are not finished"]
-            if list.count > 1 {
-                return [NeedsYou(kind: .aiCheck, title: "AI: \(list.count) sessions \(words[v] ?? "")",
-                                 body: list.map(\.key).joined(separator: " · "), at: at, route: .agents, keys: list.map(\.key))]
-            }
-            return list.map { c in
-                let body = c.state == .done ? "Approve to start the next item in the queue."
-                    : c.state == .stuck ? "Approve a nudge, or stop it." : "Ask the agent to go on, or mark it as blocked on you."
-                return NeedsYou(kind: .aiCheck, title: "AI: the \(c.key) session: \(c.word.lowercased())", body: body, at: c.at, route: .agents)
-            }
-        }
-    }
-
-    static func collect(_ data: AppData) -> [NeedsYou] {
-        var out: [NeedsYou] = []
-        let ws = data.workstreams
-        for (key, a) in data.agentIndex.agents where a.phase == .waiting {
-            out.append(NeedsYou(kind: .agentWaiting, title: "\(key) asks a question",
-                                body: a.message ?? "The session waits for your answer.", at: a.since, route: .item(key, .overview)))
-        }
-        out += checks(data.statusJob.pending)
-        for e in data.statusJob.blocking {
-            let n = e.reply.needsYou.count
-            out.append(NeedsYou(kind: .agentWaiting, title: "\(e.key) is blocked on you",
-                                body: "\(n) step\(n == 1 ? "" : "s") for you · \(e.passed) pass", at: e.at, route: .agents))
-        }
-        for (repo, r) in failingRuns(data.grouped) {
-            let link = ws.link(runId: r.id)
-            let watched = link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false
-            let name = repo.split(separator: "/").last.map(String.init) ?? repo
-            let body = link.map { "\($0.key) · " + (watched ? "the session watches it" : "no session works on it") }
-                ?? "\(name) · \(r.headBranch) · unlinked"
-            out.append(NeedsYou(kind: .runFailed, title: "\(r.workflowName ?? r.name) #\(r.number) failed", body: body,
-                                at: lastActivity(r), route: .run(repo: repo, id: r.id)))
-        }
-        for (repo, prs) in data.prGrouped {
-            for p in prs where !p.mine {
-                let name = repo.split(separator: "/").last.map(String.init) ?? repo
-                out.append(NeedsYou(kind: .review, title: "Review requested: \(name) #\(p.number)", body: p.title,
-                                    at: parseISO(p.updatedAt) ?? Date.distantPast, route: .prs))
-            }
-        }
-        let pending = data.projectStore.snapshots.values.flatMap { s in (s.intake ?? []).map { (s.summary.identifier, $0) } }
-        if let newest = pending.max(by: { $0.1.createdAt < $1.1.createdAt }) {
-            out.append(NeedsYou(kind: .intake, title: "\(pending.count) intake item\(pending.count == 1 ? "" : "s") wait",
-                                body: "Newest: \(newest.0) · \(newest.1.name)", at: newest.1.createdAt, route: .intake(nil)))
-        }
-        return ranked(out)
-    }
-}
-
-// A row for one item of Needs you.
-final class NeedsYouRow: Row {
-    init(_ n: NeedsYou, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
-        let when = NSTextField.text(relativeTime(n.at), size: 11.5, color: Palette.dim)
-        let review: [NSView] = n.keys.isEmpty ? [] : [ActionButton("Review") { go(n.route) }]
-        super.init([Glyph(n.tone), TwoLine(n.title, n.body)] + review + [when], height: 46,
-                   label: "\(n.tone.word): \(n.title). \(n.body)") { go(n.route) }
-        if case .run(let repo, let id) = n.route, let commands,
-           let r = commands.data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) {
-            let linked = commands.data.workstreams.link(runId: id)?.key
-            commands.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, ignored: IGNORED.contains(r), caps: $0) }
-        }
+        let big = NSTextField(labelWithAttributedString: v)
+        var col: [NSView] = [head, big]
+        let line = detail.compactMap { $0 }.joined(separator: " · ")
+        if !line.isEmpty { col.append(NSTextField.text(line, size: 11.5, color: Palette.mut, lines: 2)) }
+        if spark.contains(where: { $0 != nil }) { col.append(Sparkline(spark)) }
+        let stack = NSStackView(v: col, spacing: 3)
+        col.forEach { $0.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor).isActive = true }
+        super.init([stack], height: 104, inset: 12, label: "\(label): \(value) \(unit). \(line)", onClick: onClick)
+        stack.alignment = .leading
+        self.stack.alignment = .top
+        if ring != nil { borderWidth = 2 }
+        restFill = Palette.panel; restBorder = ring ?? Palette.line; radius = 10
     }
     required init?(coder: NSCoder) { fatalError() }
 }
 
-// A running run on Home. The name gets the full width; the times go on their own line.
-final class HomeRunRow: Row {
-    init(repo: String, run r: Run, data: AppData, commands: RowCommander? = nil, go: @escaping (Route) -> Void) {
-        let tone = Tone(r)
-        let name = repo.split(separator: "/").last.map(String.init) ?? repo
-        let title = NSTextField.text("\(r.workflowName ?? r.name) #\(r.number)", size: 13, weight: .medium)
-        let link = data.workstreams.link(runId: r.id)?.key
-        let sub = NSTextField.text([name, link ?? r.headBranch].joined(separator: " · "), size: 11.5, color: Palette.dim)
-        for t in [title, sub] { t.setContentCompressionResistancePriority(.init(1), for: .horizontal) }
-        let total = r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? [])
-        let v = NSStackView(v: [title, sub, RunClock(r, total: total, inline: true)], spacing: 3)
-        v.setHuggingPriority(.init(1), for: .horizontal)
-        super.init([Glyph(tone), v], height: 46,
-                   label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name)") { go(.run(repo: repo, id: r.id)) }
-        stack.alignment = .top
-        itemActions(url: r.url, key: r.id, tracker: "GitHub")
-        commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: link, ignored: IGNORED.contains(r), caps: $0) }
+// A small line of rates from 0 to 1. A nil value makes a gap.
+final class Sparkline: NSView {
+    private let values: [Double?]
+
+    init(_ values: [Double?]) {
+        self.values = values
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 16).isActive = true
+        widthAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
+        setAccessibilityElement(false)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let w = bounds.width, h = bounds.height - 4
+        let line = NSBezierPath(); line.lineWidth = 1.5; line.lineJoinStyle = .round
+        var open = false
+        for (i, v) in values.enumerated() {
+            guard let v else { open = false; continue }
+            let pt = NSPoint(x: CGFloat(i) * w / CGFloat(max(1, values.count - 1)), y: 2 + CGFloat(v) * h)
+            if open { line.line(to: pt) } else { line.move(to: pt); open = true }
+        }
+        (values.compactMap { $0 }.min() ?? 1 < 0.8 ? Palette.bad : Palette.ok).setStroke()
+        line.stroke()
+    }
 }
 
-// A workstream on Home: item, checkout, agent, CI and PR in one card.
-final class WorkstreamCard: Row {
-    init(_ s: Workstream, status: ItemStatus?, go: @escaping (Route) -> Void) {
-        let title = NSTextField.text(s.item?.title ?? "Not in a tracked project", size: 13.5, weight: .semibold)
-        var chips: [NSView] = []
-        if let status { chips.append(StatusPill(status)) }
-        if let co = s.checkouts.first(where: { !$0.branch.isEmpty }) ?? s.checkouts.first {
-            chips.append(Chiplet((co.path as NSString).lastPathComponent, symbol: "folder", mono: true))
-            if !co.branch.isEmpty { chips.append(Chiplet(co.branch, symbol: "arrow.triangle.branch", mono: true)) }
-        }
-        if let r = s.latestRuns.first {
-            let t = s.ci ?? Tone(r.run)
-            chips.append(Chiplet("\(r.run.workflowName ?? r.run.name) #\(r.run.number) · \(t.word)", symbol: t.symbol, color: t.color))
-        } else {
-            chips.append(Chiplet("No CI yet"))
-        }
-        if let p = s.prs.first { chips.append(Chiplet("PR #\(p.pr.number) \(p.pr.isDraft ? "draft" : p.pr.state.lowercased())", symbol: "arrow.triangle.pull")) }
-        let chipRow = NSStackView(h: chips + [Spacer()], spacing: 6)
-        // In a narrow card the last chips drop out first. The state pill stays.
-        for (i, c) in chips.enumerated() where i > 0 { chipRow.setVisibilityPriority(.init(rawValue: 900 - Float(i) * 10), for: c) }
-        chipRow.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        chips.first?.setContentCompressionResistancePriority(.required, for: .horizontal)
-        title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        let head = NSStackView(h: [Chiplet(s.key, color: Palette.fg, mono: true), title, Spacer()], spacing: 8)
-        var col: [NSView] = [head, chipRow]
-        if let a = s.agent, let msg = a.message?.trimmingCharacters(in: .whitespacesAndNewlines), !msg.isEmpty {
-            let line = NSTextField.text((a.phase == .waiting ? "? " : "") + msg.replacingOccurrences(of: "\n", with: " "),
-                                        size: 11.5, color: a.phase == .waiting ? Palette.warn : Palette.termFg, mono: true)
-            let term = Box(fill: Palette.term, border: nil, radius: 6)
-            term.addSubview(line)
-            NSLayoutConstraint.activate([
-                line.leadingAnchor.constraint(equalTo: term.leadingAnchor, constant: 10),
-                line.trailingAnchor.constraint(lessThanOrEqualTo: term.trailingAnchor, constant: -10),
-                line.topAnchor.constraint(equalTo: term.topAnchor, constant: 6),
-                line.bottomAnchor.constraint(equalTo: term.bottomAnchor, constant: -6),
-            ])
-            col.append(term)
-        }
-        let v = NSStackView(v: col, spacing: 8)
-        super.init([v], height: 70, inset: 14, label: "\(s.key) \(s.item?.title ?? ""), " + chips.compactMap { $0.accessibilityLabel() }.joined(separator: ", ")) {
-            go(.item(s.key, .overview))
-        }
-        restFill = Palette.panel; restBorder = Palette.line; radius = 10
-        if let term = col.last as? Box, col.count == 3 { term.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true }
-        if let item = s.item { itemActions(url: item.url, key: s.key) }
+// Bars for each day of the week: items closed and PRs merged, side by side.
+final class WeekChart: NSView {
+    private let days: [Date]
+    private let series: [(values: [Int], color: NSColor)]
+
+    init(days: [Date], series: [(values: [Int], color: NSColor)], label: String) {
+        self.days = days
+        self.series = series
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 96).isActive = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel(label)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    // Waiting first, then failing CI, working, starting, the rest.
-    static func rank(_ s: Workstream) -> Int {
-        if s.agent?.phase == .waiting { return 0 }
-        if s.ci?.word == Tone.bad.word { return 1 }
-        switch s.agent?.phase {
-        case .working: return 2
-        case .starting: return 3
-        default: return 4
+    override func draw(_ dirtyRect: NSRect) {
+        let bottom: CGFloat = 16, top: CGFloat = 4
+        let h = bounds.height - bottom - top
+        let slot = bounds.width / CGFloat(max(1, days.count))
+        let peak = max(1, series.flatMap(\.values).max() ?? 1)
+        let bar = min(10, (slot - 8) / CGFloat(max(1, series.count)))
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: Palette.dim]
+        let f = DateFormatter(); f.dateFormat = "EEE"
+        Palette.line.setStroke()
+        let base = NSBezierPath(); base.move(to: NSPoint(x: 0, y: bottom)); base.line(to: NSPoint(x: bounds.width, y: bottom)); base.stroke()
+        for (i, d) in days.enumerated() {
+            let mid = slot * (CGFloat(i) + 0.5)
+            let s = NSAttributedString(string: f.string(from: d), attributes: attrs)
+            s.draw(at: NSPoint(x: mid - s.size().width / 2, y: 1))
+            let x0 = mid - bar * CGFloat(series.count) / 2
+            for (j, ser) in series.enumerated() where ser.values.indices.contains(i) && ser.values[i] > 0 {
+                let bh = max(2, CGFloat(ser.values[i]) / CGFloat(peak) * h)
+                ser.color.setFill()
+                NSBezierPath(roundedRect: NSRect(x: x0 + CGFloat(j) * bar, y: bottom, width: bar - 1, height: bh), xRadius: 1, yRadius: 1).fill()
+            }
         }
     }
 }
 
+// Home: KPI tiles, then Needs you, Moving now and This week.
 final class HomePage: Page {
+    private var filter = NeedsYou.Filter.all
+    private var all = false
+    static let shown = 5
+
     override func build(_ col: NSStackView) {
         pageBusy = data.loadingFirst
-        let runs = data.grouped.flatMap { g in g.1.map { (repo: g.0, run: $0) } }
-        let running = runs.filter { $0.run.status != "completed" }
-        let failing = failingRuns(data.grouped).map(\.run)
-        let agents = Array(data.agentIndex.agents.values)
-        let streams = data.workstreams.streams.values
-            .filter { s in (s.agent.map { $0.phase != .done && $0.phase != .failed } ?? false) || s.runs.contains { $0.run.status != "completed" } }
-            .sorted { (WorkstreamCard.rank($0), $0.key) < (WorkstreamCard.rank($1), $1.key) }
-        let intake = data.projectStore.snapshots.values.compactMap { s in s.intake.map { (s.summary.identifier, $0.count) } }
-            .filter { $0.1 > 0 }.sorted { $0.1 > $1.1 }
+        let now = Date()
+        let cal = Calendar.current
         let needs = NeedsYou.collect(data)
-
         let df = DateFormatter()
         df.dateFormat = "EEEE, MMM d"
-        col.addFull(PageHeader("Home", caption: "\(df.string(from: Date())) · \(streams.count) workstream\(streams.count == 1 ? "" : "s") · \(running.count) run\(running.count == 1 ? "" : "s") in progress"))
-
-        let checks = data.statusJob.pending.count
-        let attention = NeedsYouCard(page: self).count(data)
-        let linked = running.filter { data.workstreams.link(runId: $0.run.id) != nil }.count
-        var tiles: [NSView] = [
-            Tile("\(running.count)", "Running now · \(linked) linked", tone: .running) { [weak self] in self?.go(.runs(.running)) },
-            Tile("\(failing.count)", failing.isEmpty ? "Failing runs · all green" : "Failing runs", tone: failing.isEmpty ? .ok : .bad) { [weak self] in self?.go(.runs(.failed)) },
-            Tile("\(agents.count)", "Sessions · \(attention) need\(attention == 1 ? "s" : "") you", tone: .working, ring: attention > 0 ? Palette.intake : nil) { [weak self] in
-                self?.go(.agents)
-            },
-            Tile("\(data.queue.count)", "Queue · \(checks) status\(checks == 1 ? "" : "es") to act on", tone: .queued) { [weak self] in self?.go(.queue) },
-        ]
-        if data.has(.intake) {
-            tiles.append(Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),
-                              tone: .intake) { [weak self] in self?.go(.intake(nil)) })
-        }
-        col.addFull(Grid(tiles, columns: tiles.count))
+        let updated = data.firstLoad ? "loading" : "updated " + relativeTime(data.lastUpdate)
+        col.addFull(PageHeader("Home", caption: "\(df.string(from: now)) · \(updated)", actions: [
+            ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) },
+        ]))
+        col.addFull(CardGrid(tiles(needs, now: now, calendar: cal), minWidth: 150, gap: 10))
         if AI_CFG.digest, let d = data.ciAssist.digest, d.day == CIAssist.day(), !d.facts.isEmpty {
             let c = Card(title: "Morning digest", trailing: [ActionButton("Dismiss") { [weak self] in self?.data.ciAssist.dismissDigest() }])
             if let s = d.summary { c.add(NSTextField.text(s, size: 13, lines: 0)) }
@@ -227,52 +123,183 @@ final class HomePage: Page {
             col.addFull(c)
         }
 
-        let main = NSStackView(v: [], spacing: 10)
-        main.addFull(SectionTitle("Workstreams", count: streams.count))
-        if streams.isEmpty {
-            let c = Card()
-            c.add(EmptyNote("No session works now. Start an item from its page or from the queue.", symbol: "moon.zzz"))
-            main.addFull(c)
-        }
-        for s in streams.prefix(10) { main.addFull(WorkstreamCard(s, status: data.statusJob.item(s.key)) { [weak self] in self?.go($0) }) }
-        let next = data.queue.upNext(store: data.projectStore)
-        if !next.isEmpty {
-            let c = Card(title: "Up next", trailing: [ActionButton("Open queue") { [weak self] in self?.go(.queue) }])
-            for (i, e) in next.prefix(3).enumerated() {
-                let num = NSTextField.text("\(i + 1)", size: 12, color: Palette.dim, mono: true)
-                let key = NSTextField.text(e.key, size: 12, mono: true)
-                for f in [num, key] { f.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal) }
-                let title = NSTextField.text(e.title, size: 12.5)
-                title.setContentHuggingPriority(.init(1), for: .horizontal)
-                c.add(Row([num, key, title],
-                          height: 28, inset: 4, label: "\(i + 1). \(e.key) \(e.title)") { [weak self] in self?.go(.item(e.key, .overview)) })
-            }
-            main.addFull(c)
-        }
-
-        let aside = NSStackView(v: [], spacing: 10)
-        aside.addFull(SectionTitle("Needs you", count: needs.count))
-        let ny = ListCard()
-        for n in needs.prefix(8) { ny.add(NeedsYouRow(n, commands: commands) { [weak self] in self?.go($0) }) }
-        if needs.count > 8 {
-            ny.add(Row([NSTextField.text("\(needs.count - 8) more in Activity", size: 12, color: Palette.acc)], height: 34) { [weak self] in self?.go(.activity) })
-        }
-        if ny.isEmpty { ny.add(data.loadingFirst ? LoadingNote("Loading") : EmptyNote("Nothing waits for you.")) }
-        aside.addFull(ny)
-        aside.addFull(SectionTitle("Running now", count: running.count))
-        let rn = ListCard()
-        for r in running.prefix(8) { rn.add(HomeRunRow(repo: r.repo, run: r.run, data: data, commands: commands) { [weak self] in self?.go($0) }) }
-        if rn.isEmpty { rn.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("Nothing runs now.", symbol: "pause.circle")) }
-        aside.addFull(rn)
-
+        let main = NSStackView(v: [needsCard(needs)], spacing: 16)
+        let aside = NSStackView(v: [movingCard(), weekCard(now: now, calendar: cal)], spacing: 16)
         // A filler at the end keeps each card at its own height when the other column is taller.
         for s in [main, aside] {
+            s.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: s.widthAnchor).isActive = true }
             let fill = NSView()
             fill.setContentHuggingPriority(.init(1), for: .vertical)
             s.addArrangedSubview(fill)
         }
         let two = NSStackView(h: [main, aside], spacing: 16, align: .top)
         col.addFull(two)
-        aside.widthAnchor.constraint(equalTo: two.widthAnchor, multiplier: 0.4).isActive = true
+        aside.widthAnchor.constraint(equalTo: two.widthAnchor, multiplier: 0.38).isActive = true
+    }
+
+    // MARK: Tiles
+
+    private func tiles(_ needs: [NeedsYou], now: Date, calendar cal: Calendar) -> [NSView] {
+        func n(_ f: NeedsYou.Filter) -> Int { needs.filter { f.has($0.kind) }.count }
+        let parts = [(n(.blocked), "blocked"), (n(.stuck), "stuck"), (n(.notFinished), "not finished")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
+        var out: [NSView] = [
+            KPITile("Needs you", value: "\(needs.count)", detail: [needs.isEmpty ? "All clear" : parts.isEmpty ? nil : parts.joined(separator: " · ")],
+                    ring: needs.isEmpty ? nil : Palette.bad.withAlphaComponent(0.5)) { [weak self] in
+                self?.filter = .all; self?.all = true; self?.reload()
+            },
+        ]
+
+        let agents = data.agentIndex
+        let working = agents.agents.keys.filter { agents.state($0) == .working }.count
+        let q = data.queue
+        let used = q.lanes.reduce(0) { $0 + q.busy($1) }, slots = q.lanes.reduce(0) { $0 + AGENTS.slots($1.project) }
+        let limits = agents.limits
+        out.append(KPITile("Sessions", value: "\(working)", unit: "working", detail: [
+            slots > 0 ? "\(used) of \(slots) slots" : "\(agents.agents.count) open",
+            limits.isEmpty ? nil : "\(limits.count) at usage limit until \(limits[0].reset)",
+        ]) { [weak self] in self?.go(.work(.worktrees)) })
+
+        let failing = failingRuns(data.grouped).count
+        let running = data.grouped.reduce(0) { $0 + $1.1.filter { $0.status != "completed" }.count }
+        let pass = WorkStats.passRate(data.grouped.flatMap(\.1), now: now, calendar: cal)
+        out.append(KPITile("Runs", value: "\(failing)", unit: "failing", detail: ["\(running) running", pass.rate.map { "\(pct($0)) passed, 7 days" }],
+                           tone: failing > 0 ? Palette.bad : nil, spark: pass.daily) { [weak self] in self?.go(.runs(failing > 0 ? .failed : .all)) })
+
+        let open = data.prGrouped.reduce(0) { $0 + $1.1.count }
+        let rv = WorkStats.reviews(data.prGrouped.flatMap(\.1))
+        out.append(KPITile("Pull requests", value: "\(open)", unit: "open", detail: [
+            rv.count == 0 ? "No review waits" : "\(rv.count) wait for your review",
+            rv.oldest.map { "oldest " + AgentSession.minutes(now.timeIntervalSince($0)) },
+        ]) { [weak self] in self?.go(.prs) })
+
+        let mine = WorkPage.mine(data)
+        let todo = mine.filter { ($0.snap.option($0.item.statusOptionId)?.category ?? .todo) == .todo }.count
+        let closed = WorkStats.closed(data.projectStore.activity(limit: 2000, project: nil), mine: isMine, now: now, calendar: cal).reduce(0, +)
+        out.append(KPITile("My items", value: "\(mine.count - todo)", unit: "in progress",
+                           detail: ["\(todo) not started", "\(closed) closed this week"]) { [weak self] in self?.go(.work(.items)) })
+
+        if data.has(.intake) {
+            let all = ActivityFeed.intake(data)
+            let today = IntakeListPage.addedToday(all, now: now, calendar: cal)
+            let top = IntakeListPage.counts(all).prefix(2).map { "\($0.project) \($0.count)" }.joined(separator: " · ")
+            out.append(KPITile("Intake", value: "\(all.count)", detail: [top.isEmpty ? nil : top, today > 0 ? "+\(today) today" : nil],
+                               tone: Palette.intake) { [weak self] in self?.go(.intake(nil)) })
+        }
+        return out
+    }
+
+    private func isMine(_ e: ActivityEntry) -> Bool {
+        guard let snap = data.projectStore.snapshots[e.projectKey] else { return false }
+        return snap.items.first { $0.id == e.itemId }?.isMine(snap.me) ?? false
+    }
+
+    // MARK: Needs you
+
+    private func needsCard(_ needs: [NeedsYou]) -> NSView {
+        let card = ListCard()
+        let chips = NeedsYou.Filter.allCases.map { f -> NSView in
+            let c = needs.filter { f.has($0.kind) }.count
+            return ToggleChip("\(f.title) \(c)", on: filter == f) { [weak self] in self?.filter = f; self?.reload() }
+        }
+        let head = Row([NSTextField.text("Needs you", size: 13, weight: .semibold), Spacer()] + chips, height: 40)
+        head.restFill = Palette.raise
+        card.add(head)
+        let list = needs.filter { filter.has($0.kind) }
+        for n in all ? list : Array(list.prefix(HomePage.shown)) {
+            card.add(NeedsYouRow(n, data: data, commands: commands) { [weak self] in self?.go($0) })
+        }
+        if list.count > HomePage.shown {
+            let t = all ? "Show less" : "\(list.count - HomePage.shown) more · Open all"
+            card.add(Row([ActionButton(t, style: .link) { [weak self] in self?.all.toggle(); self?.reload() }, Spacer()], height: 34))
+        }
+        if list.isEmpty {
+            card.add(data.loadingFirst ? LoadingNote("Loading") : EmptyNote(filter == .all ? "Nothing waits for you." : "No row of this kind.",
+                                                                              symbol: "checkmark.circle"))
+        }
+        return card
+    }
+
+    // MARK: Moving now
+
+    private func movingCard() -> NSView {
+        let card = ListCard()
+        let head = Row([NSTextField.text("Moving now", size: 13, weight: .semibold), Spacer(),
+                        NSTextField.text("sessions and runs", size: 12, color: Palette.dim)], height: 40)
+        head.restFill = Palette.raise
+        card.add(head)
+        let agents = data.agentIndex
+        let working = agents.agents.filter { agents.state($0.key) == .working }.sorted { $0.value.since < $1.value.since }
+        var rows: [NSView] = working.map { k, a in
+            let tone = Tone(SessionState.working)
+            let title = data.projectStore.item(key: k)?.item.title ?? a.message ?? tone.word
+            return line(tone, k, title, AgentSession.minutes(Date().timeIntervalSince(a.since))) { [weak self] in self?.go(.item(k, .session)) }
+        }
+        for (repo, runs) in data.grouped {
+            for r in runs where r.status != "completed" {
+                let name = repo.split(separator: "/").last.map(String.init) ?? repo
+                let key = data.workstreams.link(runId: r.id)?.key ?? name
+                let since = parseISO(r.startedAt ?? r.createdAt) ?? Date()
+                rows.append(line(Tone(r), key, "\(r.workflowName ?? r.name) #\(r.number) · \(r.headBranch)",
+                                 AgentSession.minutes(Date().timeIntervalSince(since))) { [weak self] in self?.go(.run(repo: repo, id: r.id)) })
+            }
+        }
+        let max = 6
+        rows.prefix(max).forEach(card.add)
+        if rows.count > max {
+            card.add(Row([ActionButton("\(rows.count - max) more · Open runs", style: .link) { [weak self] in self?.go(.runs(.running)) }, Spacer()],
+                         height: 34))
+        }
+        if let next = data.queue.upNext(store: data.projectStore).first {
+            let t = NSTextField.text("Next: \(next.key) when a slot frees", size: 12.5, color: Palette.dim)
+            card.add(Row([Glyph("chevron.right.circle", color: Palette.dim, size: 12).fixedWidth(16), t, Spacer()], height: 36,
+                         label: "Next: \(next.key) when a slot frees") { [weak self] in self?.go(.work(.items)) })
+        }
+        if card.isEmpty || card.list.arrangedSubviews.count == 1 {
+            card.add(data.firstLoad ? LoadingNote("Loading") : EmptyNote("Nothing moves now.", symbol: "pause.circle"))
+        }
+        return card
+    }
+
+    private func line(_ tone: Tone, _ key: String, _ text: String, _ age: String, onClick: @escaping () -> Void) -> NSView {
+        let k = NSTextField.text(key, size: 11.5, color: Palette.mut, mono: true)
+        k.lineBreakMode = .byTruncatingTail
+        let t = NSTextField.text(text.replacingOccurrences(of: "\n", with: " "), size: 12.5)
+        t.lineBreakMode = .byTruncatingTail
+        t.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        t.setContentHuggingPriority(.init(1), for: .horizontal)
+        return Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), k.fixedWidth(112), t, Spacer(),
+                    NSTextField.text(age, size: 11.5, color: Palette.dim)],
+                   height: 36, label: "\(tone.word): \(key), \(text), \(age)", onClick: onClick)
+    }
+
+    // MARK: This week
+
+    private func weekCard(now: Date, calendar cal: Calendar) -> NSView {
+        let stats = data.stats
+        let days = WorkStats.week(now, calendar: cal)
+        let closed = WorkStats.closed(data.projectStore.activity(limit: 2000, project: nil), mine: isMine, now: now, calendar: cal)
+        let merged = stats.merged(repos: REPOS)
+        let hours = stats.sessionHours.reduce(0, +)
+        var series: [(values: [Int], color: NSColor)] = [(closed, Palette.acc)]
+        if let merged { series.append((merged, Palette.ok)) }
+        var words = ["\(closed.reduce(0, +)) items closed"]
+        if let merged { words.append("\(merged.reduce(0, +)) PRs merged") }
+        let c = Card(title: "This week", padding: 14, spacing: 8)
+        c.add(WeekChart(days: days, series: series, label: "Each day this week: " + words.joined(separator: ", ")))
+        func key(_ color: NSColor?, _ text: String, _ value: String) -> NSView {
+            var v: [NSView] = []
+            if let color {
+                let dot = Box(fill: color, border: nil, radius: 2)
+                NSLayoutConstraint.activate([dot.widthAnchor.constraint(equalToConstant: 8), dot.heightAnchor.constraint(equalToConstant: 8)])
+                v.append(dot)
+            }
+            v += [NSTextField.text(text, size: 11.5, color: Palette.mut), NSTextField.text(value, size: 11.5, weight: .semibold)]
+            return NSStackView(h: v, spacing: 5)
+        }
+        var legend = [key(Palette.acc, "Items closed", "\(closed.reduce(0, +))")]
+        if let merged { legend.append(key(Palette.ok, "PRs merged", "\(merged.reduce(0, +))")) }
+        c.add(NSStackView(h: legend + [Spacer()], spacing: 14))
+        c.add(NSStackView(h: [key(nil, "Session hours", hours < 10 ? String(format: "%.1fh", hours) : "\(Int(hours.rounded()))h"), Spacer()], spacing: 14))
+        return c
     }
 }

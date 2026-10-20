@@ -112,7 +112,7 @@ final class GlanceVC: NSViewController {
     // MARK: Tabs
 
     private func now(_ needs: [NeedsYou]) {
-        section("Needs you", count: needs.count, needs.prefix(5).map { n in NeedsYouRow(n, commands: commands) { [weak self] in self?.open($0) } },
+        section("Needs you", count: needs.count, needs.prefix(5).map { n in NeedsYouRow(n, data: data, commands: commands) { [weak self] in self?.open($0) } },
                 more: needs.count > 5 ? ("\(needs.count - 5) more on Home", .home) : nil, empty: "Nothing waits for you.")
         let running = data.grouped.flatMap { g in g.1.filter { $0.status != "completed" }.map { (g.0, $0) } }
             .sorted { ($0.1.createdAt) > ($1.1.createdAt) }

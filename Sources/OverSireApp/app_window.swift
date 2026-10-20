@@ -549,7 +549,7 @@ struct SidebarModel {
         }
 
         var out: [SidebarLine] = [
-            e(.home, "Home", "house"),
+            e(.home, "Home", "house", alert: NeedsYou.collect(data).count, tone: Palette.bad, what: "need you"),
             e(.mine, "My items", "person.crop.circle", badge: mine),
             e(.agents, "Sessions", "cpu", badge: agents.count, alert: waiting, tone: Palette.warn, what: "need input"),
             e(.queue, "Queue", "list.number", badge: plans),
