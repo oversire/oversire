@@ -266,6 +266,9 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         observers.append(NotificationCenter.default.addObserver(forName: AppWindow.changed, object: nil, queue: .main) { [weak self] n in
             self?.dataChanged(n)
         })
+        observers.append(NotificationCenter.default.addObserver(forName: NewSessionController.changed, object: nil, queue: .main) { [weak self] n in
+            self?.newSessionButton?.state = (n.object as? NewSessionController)?.isOpen == true ? .on : .off
+        })
         observers.append(NotificationCenter.default.addObserver(forName: BusyTracker.changed, object: data.busy, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.refreshButton?.show(self.data.busy)
@@ -378,9 +381,28 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private let refreshId = NSToolbarItem.Identifier("refresh")
     private let settingsId = NSToolbarItem.Identifier("settings")
     private let copyId = NSToolbarItem.Identifier("copy")
+    private let newSessionId = NSToolbarItem.Identifier("newSession")
+    private var newSessionButton: NSButton?
+
+    // apple.terminal with a small plus at the bottom right. SF Symbols has no such symbol.
+    private static let newSessionImage: NSImage = {
+        let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        let term = NSImage(systemSymbolName: "apple.terminal", accessibilityDescription: nil)!.withSymbolConfiguration(cfg)!
+        let plus = NSImage(systemSymbolName: "plus.circle.fill", accessibilityDescription: nil)!
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .bold))!
+        let size = NSSize(width: term.size.width + 4, height: term.size.height + 3)
+        let img = NSImage(size: size, flipped: false) { _ in
+            term.draw(in: NSRect(x: 0, y: 3, width: term.size.width, height: term.size.height))
+            plus.draw(in: NSRect(x: size.width - plus.size.width, y: 0, width: plus.size.width, height: plus.size.height))
+            return true
+        }
+        img.isTemplate = true
+        img.accessibilityDescription = "New session"
+        return img
+    }()
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .flexibleSpace, navId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, copyId, refreshId, settingsId]
+        [.toggleSidebar, .flexibleSpace, navId, newSessionId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, copyId, refreshId, settingsId]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
 
@@ -395,6 +417,18 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             g.label = "Back and forward"
             navItem = g
             return g
+        case newSessionId:
+            let i = NSToolbarItem(itemIdentifier: id)
+            let b = NSButton(image: Self.newSessionImage, target: self, action: #selector(openNewSession(_:)))
+            b.bezelStyle = .texturedRounded
+            b.setButtonType(.pushOnPushOff)
+            b.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            b.toolTip = "New session (⌃⌥⌘N)"
+            b.setAccessibilityLabel("New session, Control Option Command N")
+            newSessionButton = b
+            i.view = b
+            i.label = "New session"
+            return i
         case paletteId:
             let i = NSToolbarItem(itemIdentifier: id)
             let b = NSButton(title: "Search or jump to…  ⌘K", target: self, action: #selector(openPalette))
@@ -460,6 +494,11 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     @objc func toggleSidebarNow(_ sender: Any?) { split.toggleSidebar(sender) }
     func setSidebarWidth(_ w: CGFloat) { split.splitView.setPosition(w, ofDividerAt: 0) }
     @objc func openPalette() { CommandPalette.show(over: self) }
+    @objc func openNewSession(_ sender: NSButton) {
+        guard let s = (NSApp.delegate as? GHActionsBar)?.newSession else { return }
+        if s.isOpen { s.panel?.cancelOperation(nil) } else { s.show(near: sender) }
+        sender.state = s.isOpen ? .on : .off
+    }
     @objc func openSettings() { if case .settings = router.current { return }; router.go(.settings(.general)) }
     @objc func goTo(_ sender: NSMenuItem) {
         if let s = sender.representedObject as? String, let r = Route(path: s) { show(r) }

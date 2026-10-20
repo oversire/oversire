@@ -88,6 +88,24 @@ struct NewSessionModel: Equatable {
 
     var canStart: Bool { !isStarting && blocker == nil }
 
+    var intakeHint: String {
+        switch (intake, files.isEmpty) {
+        case (true, false): return "The prompt is the description. The files go on the item."
+        case (true, true): return "Tracks this work. The prompt is the description."
+        case (false, false): return "No item. The files go to the Orca host and the prompt gets their paths."
+        case (false, true): return "No item. Good for a question or a quick chat."
+        }
+    }
+
+    var footerNote: String { intake ? "The agent gets the prompt and the item key." : "The prompt goes to the agent as typed." }
+
+    /// The name of the next pasted image.
+    var pasteName: String {
+        var n = 1
+        while files.contains(where: { $0.name == "pasted-\(n).png" }) { n += 1 }
+        return "pasted-\(n).png"
+    }
+
     var title: String { Self.title(text) }
 
     var termName: String { Self.termName(agent: agent, text: text) }

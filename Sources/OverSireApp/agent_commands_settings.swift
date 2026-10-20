@@ -75,31 +75,43 @@ final class AgentCommandsCard: NSStackView {
         card.add(NSTextField.text("{name} workspace name (the item key) · {KEY} item key · {key} lowercase key · {title} item title. "
                                   + "OverSire quotes each value for the shell.", size: 11.5, color: Palette.dim, lines: 2))
 
-        card.add(Self.line())
-        let snapReset = ActionButton("Reset", style: .link) {
-            PROJECTS_CFG.runtime.snapPrompt = SnapTicket.defaultPrompt
-            saveConfig()
-            Self.changed()
-        }
-        snapReset.isEnabled = PROJECTS_CFG.runtime.snapPrompt != SnapTicket.defaultPrompt
-        snapReset.setAccessibilityLabel("Reset the snap basket prompt")
-        card.add(NSStackView(h: [NSTextField.text("Snap basket prompt", size: 12.5, weight: .semibold), Spacer(), snapReset], spacing: 8))
-        let prompt = SnapNoteView(placeholder: SnapTicket.defaultPrompt)
-        prompt.text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        prompt.string = PROJECTS_CFG.runtime.snapPrompt
-        prompt.text.setAccessibilityLabel("Snap basket prompt")
-        prompt.onChange = { t in
-            PROJECTS_CFG.runtime.snapPrompt = t.isEmpty ? SnapTicket.defaultPrompt : t
-            saveConfig()
-        }
-        prompt.heightAnchor.constraint(equalToConstant: 96).isActive = true
-        card.add(prompt)
-        card.add(NSTextField.text("The first message of the agent after Send. {key} ticket key · {item} item id · {intake} intake id · "
-                                  + "{count} shot count · {workspace} · {project} · {dir} folder of the images.", size: 11.5, color: Palette.dim, lines: 2))
+        promptEditor(card, "Snap basket prompt", value: PROJECTS_CFG.runtime.snapPrompt, initial: SnapTicket.defaultPrompt,
+                     help: "The first message of the agent after Send. {key} ticket key · {item} item id · {intake} intake id · "
+                         + "{count} shot count · {workspace} · {project} · {dir} folder of the images.") { PROJECTS_CFG.runtime.snapPrompt = $0 }
+        promptEditor(card, "New session prompt (intake)", value: PROJECTS_CFG.runtime.sessionIntakePrompt, initial: SessionPrompt.intakeDefault,
+                     help: "The first message of a new session with an intake item. {text} the prompt · {key} item key · {item} item id · "
+                         + "{intake} intake id · {workspace} · {project}. With no files, the lines with {item} drop.") { PROJECTS_CFG.runtime.sessionIntakePrompt = $0 }
+        promptEditor(card, "New session prompt (files)", value: PROJECTS_CFG.runtime.sessionFilesPrompt, initial: SessionPrompt.filesDefault,
+                     help: "The first message of a new session with files and no item. {text} the prompt · {paths} the file paths on the Orca host, "
+                         + "one on each line. With no files, the prompt goes as typed.") { PROJECTS_CFG.runtime.sessionFilesPrompt = $0 }
     }
     required init?(coder: NSCoder) { fatalError() }
 
     var example: Example { examples[min(Self.exampleIndex, examples.count - 1)] }
+
+    // A prompt template with Reset. An empty text gives the default again.
+    private func promptEditor(_ card: Card, _ title: String, value: String, initial: String, help: String, set: @escaping (String) -> Void) {
+        card.add(Self.line())
+        let reset = ActionButton("Reset", style: .link) {
+            set(initial)
+            saveConfig()
+            Self.changed()
+        }
+        reset.isEnabled = value != initial
+        reset.setAccessibilityLabel("Reset the \(title.lowercased())")
+        card.add(NSStackView(h: [NSTextField.text(title, size: 12.5, weight: .semibold), Spacer(), reset], spacing: 8))
+        let prompt = SnapNoteView(placeholder: initial)
+        prompt.text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        prompt.string = value
+        prompt.text.setAccessibilityLabel(title)
+        prompt.onChange = { t in
+            set(t.isEmpty ? initial : t)
+            saveConfig()
+        }
+        prompt.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        card.add(prompt)
+        card.add(NSTextField.text(help, size: 11.5, color: Palette.dim, lines: 2))
+    }
 
     private static func line() -> NSView {
         let l = Box(fill: Palette.line, border: nil, radius: 0)

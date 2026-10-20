@@ -118,4 +118,24 @@ final class NewSessionModelTests: XCTestCase {
         XCTAssertEqual(m.files.map(\.bytes), [4])
         XCTAssertEqual(m.totalBytes, 4)
     }
+
+    func testHintsFollowIntakeAndFiles() {
+        var m = model()
+        XCTAssertEqual(m.intakeHint, "Tracks this work. The prompt is the description.")
+        XCTAssertEqual(m.footerNote, "The agent gets the prompt and the item key.")
+        m.add([.init(name: "a.png", data: Data(count: 3))])
+        XCTAssertEqual(m.intakeHint, "The prompt is the description. The files go on the item.")
+        m.intake = false
+        XCTAssertEqual(m.intakeHint, "No item. The files go to the Orca host and the prompt gets their paths.")
+        XCTAssertEqual(m.footerNote, "The prompt goes to the agent as typed.")
+        m.files = []
+        XCTAssertEqual(m.intakeHint, "No item. Good for a question or a quick chat.")
+    }
+
+    func testPasteNameSkipsTakenNames() {
+        var m = model()
+        XCTAssertEqual(m.pasteName, "pasted-1.png")
+        m.add([.init(name: "pasted-1.png", data: Data(count: 1)), .init(name: "pasted-3.png", data: Data(count: 1))])
+        XCTAssertEqual(m.pasteName, "pasted-2.png")
+    }
 }

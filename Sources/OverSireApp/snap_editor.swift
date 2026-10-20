@@ -862,7 +862,7 @@ final class SnapNoteView: Box, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) { onChange?(text.string) }
 }
 
-final class SnapTextView: NSTextView {
+class SnapTextView: NSTextView {
     var placeholder = ""
     var onFocus: ((Bool) -> Void)?
 

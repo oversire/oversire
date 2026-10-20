@@ -41,6 +41,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private var glance: NSWindow?
     private var snapPanel: ShotEditorPanel?
     private var basketPanel: BasketPanel?
+    private var sessionWindow: NSWindow?
 
     init(dir: String, paths: [String]) {
         self.dir = dir
@@ -552,6 +553,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.basketPanel?.orderOut(nil)
                         self.basketPanel = UIShots.basketSample(String(p.dropFirst(7)), shooting: w)
                         if p == "basket:send", let panel = self.basketPanel { self.shootMenu(of: panel, name: "\(theme.rawValue)-basket-send-menu") }
+                    } else if p.hasPrefix("session:") {
+                        self.sessionWindow?.orderOut(nil)
+                        self.sessionWindow = UIShots.sessionSample(String(p.dropFirst(8)), shooting: w)
                     } else if p == "kit" {
                         self.glance = UIShots.kitSample()
                     } else if p.hasPrefix("palette:") {
@@ -563,7 +567,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil }
+                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                    self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
         run(steps, 0)
@@ -608,7 +613,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? glance?.windowNumber ?? QueuePage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber ?? QueuePage.windowNumber ?? CommandPalette.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")
@@ -645,6 +650,46 @@ extension UIShots {
         let p = ShotEditorPanel(model: m, image: img, projects: projects, near: nil, actions: .init())
         p.setFrame(NSRect(x: 60, y: 60, width: 1000, height: 600), display: true)
         p.present()
+        return p
+    }
+}
+
+// MARK: New session samples
+
+extension UIShots {
+    /// session:<frame>: the New session panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast.
+    static func sessionSample(_ frame: String, shooting w: AppWindow) -> NSWindow? {
+        let c = NewSessionController(projects: { [] })
+        let choices = [NewSessionModel.Choice(key: "OVERSIRE", name: "OverSire", store: "plane:ocral/OVERSIRE", root: NSHomeDirectory() + "/Projects/oversire"),
+                       NewSessionModel.Choice(key: "SLING", name: "Sling Platform", store: "plane:ocral/SLING", root: NSHomeDirectory() + "/Projects/sling"),
+                       NewSessionModel.Choice(key: "TREBI", name: "Trebi", store: "plane:ocral/TREBI", root: nil),
+                       NewSessionModel.Choice(key: "FRITZ", name: "Fritz", store: "plane:ocral/FRITZ", root: NSHomeDirectory() + "/notes")]
+        var cfg = SessionConfig()
+        cfg.lastProject = frame == "noworkspace" ? "plane:ocral/TREBI" : "plane:ocral/OVERSIRE"
+        cfg.intake = frame != "direct"
+        var m = NewSessionModel(choices: choices, cfg: cfg, agent: "claude")
+        if frame == "toast" {
+            let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:/x"), id: "t1")
+            let item = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"), id: "i1", key: "OVERSIRE-153", url: URL(string: "https://app.plane.so")!)
+            c.showToast(SessionStarter.Result(session: s, item: item, paths: [], missing: [], terminal: "claude-the-runs-page"),
+                        agent: "claude", root: choices[0].root ?? "", files: 2)
+            return c.toast
+        }
+        if frame == "list" { m.type("s") }
+        if ["files", "direct", "failed"].contains(frame) {
+            m.text = "The runs page is out of date after a re-run.\nFix the refresh and add a test."
+            if let view = w.window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                let png = rep.representation(using: .png, properties: [:]) ?? Data()
+                m.add([.init(name: "pasted-1.png", data: png, isImage: true), .init(name: "runs.png", data: png + Data([0]), isImage: true),
+                       .init(name: "sync.log", data: Data(repeating: 65, count: 48_000))])
+            }
+        }
+        if frame == "listening" { m.text = "Why is the sync slow"; m.phase = .listening }
+        if frame == "failed" { m.intake = false; m.phase = .failed(SessionStartError.hostFiles("runs.png did not arrive whole on the Orca host.").localizedDescription) }
+        let p = c.present(m, near: nil)
+        p.promptView.string = m.text
+        p.setPhase(m.phase, hostFiles: frame == "failed")
         return p
     }
 }

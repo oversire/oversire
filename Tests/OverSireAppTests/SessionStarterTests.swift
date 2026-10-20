@@ -147,4 +147,18 @@ final class SessionStarterTests: XCTestCase {
                                             files: true),
                        "hi\n\nThis request is intake item K-1.\nIts files: plane-cli wi attachment download i1 -w w -p K --dir .oversire/K-1")
     }
+
+    func testToastDetail() {
+        let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:/x"), id: "t1")
+        let item = ItemRef(project: tracker.project, id: "i1", key: "FAKE-9", url: URL(string: "https://x")!)
+        var r = SessionStarter.Result(session: s, item: item, paths: [], missing: [], terminal: "claude-go")
+        XCTAssertEqual(r.detail(files: 2), "Intake FAKE-9 holds 2 files. The prompt names it.")
+        XCTAssertEqual(r.detail(files: 0), "Intake FAKE-9 tracks this work. The prompt names it.")
+        r.missing = ["b.png"]
+        XCTAssertEqual(r.detail(files: 2), "1 of 2 files did not upload to FAKE-9: b.png.")
+        r = SessionStarter.Result(session: s, item: nil, paths: ["/tmp/a"], missing: [], terminal: "claude-go")
+        XCTAssertEqual(r.detail(files: 1), "1 file copied to the Orca host. The prompt has their paths.")
+        r.paths = []
+        XCTAssertEqual(r.detail(files: 0), "The prompt went as typed.")
+    }
 }

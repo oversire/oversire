@@ -2,6 +2,8 @@
 
 Snap Basket puts screenshots with marks and notes into one intake ticket. An agent can then read the ticket and the images, and find the cause in the code.
 
+To start an agent with a prompt and a few files in one step, use the [New session panel](new-session.md) (⌃⌥⌘N).
+
 ## Flow
 
 1. Press ⌃⌥⌘S in any app. The overlay opens on each display.

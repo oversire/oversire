@@ -7,6 +7,8 @@ extension SettingsPage {
     static let snapKeepDays = [7, 30, 90]
     static var captureError: String?
     static var snapError: String?
+    static var sessionError: String?
+    static let sessionLimits = [5, 10, 25]
 
     func general(_ b: NSStackView) {
         b.addFull(section(.appearance, [appearanceTheme(), FieldRow("Show OverSire in", note: "The window opens from both.", showIn())]))
@@ -116,6 +118,37 @@ extension SettingsPage {
         reload()
     }
 
+    private func applySession() {
+        saveConfig()
+        let ok = app?.newSession.applyHotKey() ?? true
+        Self.sessionError = ok ? nil : "macOS did not accept \(PROJECTS_CFG.capture.session.shortcutLabel). Another app may use it."
+        reload()
+    }
+
+    private func sessionRows() -> [NSView] {
+        let c = PROJECTS_CFG.capture.session
+        var rows: [NSView] = [
+            SwitchRow("New session from any app", note: "A global shortcut opens the New session panel.", on: c.enabled) { [weak self] in
+                PROJECTS_CFG.capture.session.enabled = $0
+                self?.applySession()
+            },
+            FieldRow("New session shortcut", shortcutControl(c.shortcut, label: "New session shortcut", enabled: c.enabled,
+                                                             recording: { [weak self] in self?.app?.newSession.suspendHotKey($0) },
+                                                             set: { [weak self] k in
+                PROJECTS_CFG.capture.session.keyCode = k.keyCode
+                PROJECTS_CFG.capture.session.modifiers = k.modifiers
+                self?.applySession()
+            }, tryIt: { [weak self] in self?.app?.newSession.show(near: nil) })),
+        ]
+        if let e = Self.sessionError { rows.append(Padded(Banner(.bad, title: e))) }
+        rows.append(SwitchRow("Create intake item by default", note: "The panel keeps the last choice.", on: c.intake) { PROJECTS_CFG.capture.session.intake = $0 })
+        let mb = c.maxBytes / (1024 * 1024)
+        rows.append(FieldRow("File limit without intake", note: "The total size that goes to the Orca host.",
+                             Segmented(Self.sessionLimits.map { "\($0) MB" }, selected: Self.sessionLimits.firstIndex(of: mb) ?? 1,
+                                       label: "File limit without intake") { i in PROJECTS_CFG.capture.session.maxBytes = Self.sessionLimits[i] * 1024 * 1024 }))
+        return rows
+    }
+
     private func capture() -> [NSView] {
         let c = PROJECTS_CFG.capture
         var rows: [NSView] = [
@@ -171,6 +204,7 @@ extension SettingsPage {
         rows.append(FieldRow("Keep history", Segmented(Self.snapKeepDays.map { "\($0) days" }, selected: Self.snapKeepDays.firstIndex(of: s.keepDays) ?? 1,
                                                        label: "Keep history") { i in PROJECTS_CFG.capture.snap.keepDays = Self.snapKeepDays[i] }))
         rows += snapHistory()
+        rows += sessionRows()
         return rows
     }
 
@@ -236,6 +270,8 @@ extension SettingsPage {
             FieldRow("Open the window", note: "From any app.", f),
             FieldRow("New item (quick capture)", note: "From any app. Change it in Quick capture and snap.",
                      NSTextField.text(PROJECTS_CFG.capture.enabled ? PROJECTS_CFG.capture.shortcutLabel : "Off", size: 12, color: Palette.mut, mono: true)),
+            FieldRow("New session", note: "From any app. Change it in Quick capture and snap.",
+                     NSTextField.text(PROJECTS_CFG.capture.session.enabled ? PROJECTS_CFG.capture.session.shortcutLabel : "Off", size: 12, color: Palette.mut, mono: true)),
             d,
         ]
     }

@@ -73,6 +73,16 @@ final class SessionStarter {
         var paths: [String]          // the host paths of the direct route
         var missing: [String]        // the files that did not upload after the retries
         var terminal: String         // the terminal title
+
+        /// The last line of the toast.
+        func detail(files: Int) -> String {
+            let n = "\(files) file\(files == 1 ? "" : "s")"
+            if let i = item {
+                if !missing.isEmpty { return "\(missing.count) of \(n) did not upload to \(i.key): \(missing.joined(separator: ", "))." }
+                return files == 0 ? "Intake \(i.key) tracks this work. The prompt names it." : "Intake \(i.key) holds \(n). The prompt names it."
+            }
+            return paths.isEmpty ? "The prompt went as typed." : "\(n) copied to the Orca host. The prompt has their paths."
+        }
     }
 
     typealias IntakeTracker = IntakeCreating & AttachmentUploading

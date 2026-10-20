@@ -820,6 +820,13 @@ func runSelfTest() {
         check(SnapTicket.title(b) == "Snap basket · 1 shot · The jobs list is empty.", "snap: ticket title")
     }
 
+    // New session: the shortcut and the prompt templates.
+    check(SessionConfig().shortcutLabel == "⌃⌥⌘N", "session: shortcut label \(SessionConfig().shortcutLabel)")
+    let intakePrompt = SessionPrompt.intake(SessionPrompt.intakeDefault, values: ["text": "Fix it", "key": "K-1", "item": "i1", "workspace": "w", "project": "K"], files: false)
+    check(intakePrompt == "Fix it\n\nThis request is intake item K-1.", "session: intake prompt without files \(intakePrompt)")
+    let filesPrompt = SessionPrompt.files(SessionPrompt.filesDefault, text: "Look", paths: ["/tmp/oversire/x/a.png"])
+    check(filesPrompt == "Look\n\nAttached files:\n/tmp/oversire/x/a.png", "session: files prompt \(filesPrompt)")
+
     print("SELFTEST OK — \(ins.count) insights, report \(md.count) chars")
 }
 
