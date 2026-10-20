@@ -196,7 +196,7 @@ func runSelfTest() {
     do {
         let snap = projectSnap([])
         let phases: [String: AgentSession.Phase] = ["ENG-3": .working, "ENG-4": .waiting]
-        let got = MyItemsPage.order([
+        let got = WorkPage.order([
             (projectItem("1", status: "s1"), snap, nil),
             (projectItem("2", status: "s2"), snap, nil),
             (projectItem("3", status: "s1"), snap, nil),

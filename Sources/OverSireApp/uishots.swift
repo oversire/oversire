@@ -572,6 +572,14 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         if let pill = UIShots.find(root, { ($0 as? StatusPill).map { text.isEmpty || $0.status.label.contains(text) } ?? false }) as? StatusPill {
                             pill.hover?.show()
                         } else { print("UISHOTS no status pill \(p)") }
+                    } else if p.hasPrefix("scroll:"), let root = w.window?.contentView {
+                        // scroll:<text>: the first row whose label has the text goes to the top.
+                        let text = String(p.dropFirst(7))
+                        if let row = UIShots.find(root, { ($0 as? Row)?.accessibilityLabel()?.contains(text) == true }),
+                           let clip = row.enclosingScrollView?.contentView {
+                            clip.scroll(to: NSPoint(x: 0, y: clip.convert(row.bounds, from: row).minY - 60))
+                            row.enclosingScrollView?.reflectScrolledClipView(clip)
+                        } else { print("UISHOTS no row \(p)") }
                     } else if p.hasPrefix("snap:") {
                         self.snapPanel?.close()
                         self.snapPanel = UIShots.snapSample(String(p.dropFirst(5)), shooting: w)

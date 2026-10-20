@@ -196,6 +196,14 @@ final class WorkQueue {
         save()
     }
 
+    /// Adds the item of a key to the lane of its project. False when no tracked project has the key.
+    @discardableResult
+    func add(key: String) -> Bool {
+        guard let f = store.item(key: key) else { return false }
+        add(f.item, snap: f.snap)
+        return true
+    }
+
     func remove(_ key: String) {
         for i in lanes.indices { lanes[i].entries.removeAll { $0.key == key.uppercased() } }
         save()

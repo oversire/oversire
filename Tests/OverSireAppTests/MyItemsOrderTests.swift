@@ -11,7 +11,7 @@ final class MyItemsOrderTests: XCTestCase {
                         statusOptions: options, items: [], fetchedAt: Date(), me: "ada")
     }
 
-    private func entry(_ n: Int, _ status: String, priority: String? = nil, ago: Double = 0, ciFails: Bool = false) -> MyItemsPage.Entry {
+    private func entry(_ n: Int, _ status: String, priority: String? = nil, ago: Double = 0, ciFails: Bool = false) -> WorkPage.Entry {
         let at = Date(timeIntervalSince1970: 1_700_000_000 - ago)
         let item = Item(id: "\(n)", key: "ENG-\(n)", title: "Item \(n)", url: "", statusOptionId: status,
                         fields: priority.map { ["Priority": $0] } ?? [:], assignees: ["ada"], labels: [], author: "ada",
@@ -30,14 +30,14 @@ final class MyItemsOrderTests: XCTestCase {
     }
 
     func testInProgressBeforeNotStarted() {
-        let g = MyItemsPage.groups([entry(1, "b"), entry(2, "t"), entry(3, "p")], status: status([:]))
+        let g = WorkPage.groups([entry(1, "b"), entry(2, "t"), entry(3, "p")], status: status([:]))
         XCTAssertEqual(g.map(\.title), ["In progress", "Not started"])
         XCTAssertEqual(g[0].lanes.flatMap(\.entries).map(\.item.key), ["ENG-3"])
         XCTAssertEqual(Set(g[1].lanes.flatMap(\.entries).map(\.item.key)), ["ENG-1", "ENG-2"])
     }
 
     func testPriorityLanes() {
-        let g = MyItemsPage.groups([entry(1, "p", priority: "Low"), entry(2, "p"), entry(3, "p", priority: "Urgent"),
+        let g = WorkPage.groups([entry(1, "p", priority: "Low"), entry(2, "p"), entry(3, "p", priority: "Urgent"),
                                     entry(4, "p", priority: "High"), entry(5, "p", priority: "None")], status: status([:]))
         XCTAssertEqual(g[0].lanes.map(\.priority), ["Urgent", "High", "Low", "No priority"])
         XCTAssertEqual(g[0].lanes.last?.entries.map(\.item.key), ["ENG-2", "ENG-5"])
@@ -46,12 +46,20 @@ final class MyItemsOrderTests: XCTestCase {
     func testNeedsYouFirstInALane() {
         let list = [entry(1, "p", ago: 0), entry(2, "p", ago: 10), entry(3, "p", ago: 20), entry(4, "p", ago: 30, ciFails: true),
                     entry(5, "p", ago: 40), entry(6, "p", ago: 50)]
-        let got = MyItemsPage.order(list, status: status(["ENG-6": 0, "ENG-5": 1, "ENG-3": 2, "ENG-2": 3])).map(\.item.key)
+        let got = WorkPage.order(list, status: status(["ENG-6": 0, "ENG-5": 1, "ENG-3": 2, "ENG-2": 3])).map(\.item.key)
         XCTAssertEqual(got, ["ENG-6", "ENG-5", "ENG-3", "ENG-4", "ENG-2", "ENG-1"])
     }
 
     func testNewestActivityLast() {
-        let got = MyItemsPage.order([entry(1, "t", ago: 100), entry(2, "t", ago: 5), entry(3, "t", ago: 50)], status: status([:]))
+        let got = WorkPage.order([entry(1, "t", ago: 100), entry(2, "t", ago: 5), entry(3, "t", ago: 50)], status: status([:]))
         XCTAssertEqual(got.map(\.item.key), ["ENG-2", "ENG-3", "ENG-1"])
+    }
+
+    func testQueuedItemOnlyInUpNext() {
+        let list = [entry(1, "p"), entry(2, "t"), entry(3, "t")]
+        let g = WorkPage.itemGroups(list, queued: { $0 == "ENG-2" }, status: status([:]))
+        let keys = g.flatMap { $0.lanes.flatMap(\.entries) }.map(\.item.key)
+        XCTAssertEqual(Set(keys), ["ENG-1", "ENG-3"])
+        XCTAssertEqual(WorkPage.itemGroups([entry(2, "t")], queued: { _ in true }, status: status([:])).map(\.title), [])
     }
 }

@@ -131,13 +131,13 @@ final class GlanceVC: NSViewController {
     }
 
     private func work() {
-        var mine: [MyItemsPage.Entry] = []
+        var mine: [WorkPage.Entry] = []
         for snap in data.projectStore.snapshots.values {
             for i in snap.rootItems where i.isMine(snap.me) && snap.option(i.statusOptionId)?.category != .done {
                 mine.append((i, snap, data.workstreams.stream(i.key)))
             }
         }
-        let ordered = MyItemsPage.order(mine, status: data.statusJob.item)
+        let ordered = WorkPage.order(mine, status: data.statusJob.item)
         section("My items", count: ordered.count, ordered.prefix(5).map { e in
             let status = e.snap.option(e.item.statusOptionId)?.name ?? "No status"
             let st = data.statusJob.item(e.item.key)

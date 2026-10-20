@@ -12,6 +12,8 @@ enum Route: Equatable {
         }
     }
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
+    // Lanes is the board of the queue lanes. It has no tab: the Up next group links to it.
+    enum WorkTab: String, CaseIterable { case items, worktrees, lanes }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
         case general, accounts, projects, agents, ai, notifications, logs
@@ -66,6 +68,7 @@ enum Route: Equatable {
     case home
     case inbox(InboxTab)
     case mine
+    case work(WorkTab)
     case agents
     case queue
     case runs(RunFilter)
@@ -82,6 +85,7 @@ enum Route: Equatable {
         case .home: return "home"
         case .inbox(let t): return t == .all ? "inbox" : "inbox/\(t.rawValue)"
         case .mine: return "mine"
+        case .work(let t): return t == .items ? "work" : "work/\(t.rawValue)"
         case .agents: return "sessions"
         case .queue: return "queue"
         case .runs(let f): return f == .all ? "runs" : "runs/\(f.rawValue)"
@@ -122,6 +126,7 @@ enum Route: Equatable {
         case "home": self = .home
         case "inbox": self = .inbox(rest.first.flatMap { InboxTab(rawValue: $0.lowercased()) } ?? .all)
         case "mine": self = .mine
+        case "work": self = .work(rest.first.flatMap { WorkTab(rawValue: $0.lowercased()) } ?? .items)
         case "sessions", "agents": self = .agents
         // The Plan page is now the Board view of the Queue.
         case "queue", "plan": self = .queue
@@ -161,6 +166,7 @@ enum Route: Equatable {
     var sidebarKey: String {
         switch self {
         case .inbox: return "inbox"
+        case .work: return "work"
         case .runs(let f): return f == .failed ? "runs/failed" : f == .unlinked ? "runs/unlinked" : "runs"
         case .run: return "runs"
         case .settings: return "settings"
@@ -187,6 +193,7 @@ enum Route: Equatable {
         case .home: return "Home"
         case .inbox: return "Inbox"
         case .mine: return "My items"
+        case .work: return "Work"
         case .agents: return "Sessions"
         case .queue: return "Queue"
         case .runs: return "Runs"
@@ -216,7 +223,7 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .inbox(.all), .inbox(.intake), .mine, .agents, .queue, .runs(.all), .runs(.unlinked),
+        .home, .inbox(.all), .inbox(.intake), .mine, .work(.items), .work(.worktrees), .work(.lanes), .agents, .queue, .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),

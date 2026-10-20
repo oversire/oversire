@@ -583,7 +583,9 @@ enum PageFactory {
         switch r {
         case .home: return HomePage(r, data: data, router: router)
         case .inbox: return InboxPage(r, data: data, router: router)
-        case .mine: return MyItemsPage(r, data: data, router: router)
+        case .mine, .work(.items): return WorkPage(r, data: data, router: router)
+        case .work(.worktrees): return AgentsPage(r, data: data, router: router)
+        case .work(.lanes): return QueuePage(r, data: data, router: router)
         case .project: return ProjectPage(r, data: data, router: router)
         case .projectSettings: return ProjectSettingsPage(r, data: data, router: router)
         case .item: return ItemPage(r, data: data, router: router)

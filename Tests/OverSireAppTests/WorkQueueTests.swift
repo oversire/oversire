@@ -94,4 +94,37 @@ final class WorkQueueTests: XCTestCase {
             XCTAssertEqual(q.count, 0)
         }
     }
+
+    func testAddByKeyAndStartNowWithoutWorkspace() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let ref = ProjectRef(workspace: "ocral", id: "p1")
+        let item = Item(id: "2", key: "OVERSIRE-2", title: "Two", url: "", statusOptionId: "t", fields: [:], assignees: [], labels: [],
+                        author: "ada", updatedBy: "ada", updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
+        let snap = ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "OVERSIRE", title: "OverSire", url: "", closed: false),
+                                   statusOptions: [], items: [item], fetchedAt: Date(), me: "ada")
+        let disk: [String: Any] = ["snapshots": [ref.storeKey: try JSONSerialization.jsonObject(with: JSONEncoder().encode(snap))],
+                                   "readActivity": [], "readItems": []]
+        try JSONSerialization.data(withJSONObject: disk).write(to: dir.appendingPathComponent("state.json"))
+
+        await MainActor.run {
+            let writes = StoreWrites(store: LocalStore(dir: dir))
+            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                        statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+            let q = WorkQueue(writes: writes, store: projects, agents: AgentIndex(writes: writes))
+            XCTAssertFalse(q.add(key: "OVERSIRE-9"), "no tracked item")
+            XCTAssertTrue(q.add(key: "oversire-2"))
+            XCTAssertTrue(q.contains("OVERSIRE-2"))
+            q.add(key: "OVERSIRE-2")
+            XCTAssertEqual(q.count, 1, "a second add does nothing")
+
+            let saved = PROJECTS_CFG.orca.roots[ref.storeKey]
+            PROJECTS_CFG.orca.roots[ref.storeKey] = nil
+            defer { PROJECTS_CFG.orca.roots[ref.storeKey] = saved }
+            q.start("OVERSIRE-2", project: ref.storeKey, anchor: nil)
+            XCTAssertTrue(q.contains("OVERSIRE-2"), "no workspace: the entry stays")
+            XCTAssertEqual(q.state(ref.storeKey)?.error, "Choose an Orca workspace for OVERSIRE: use Start now once.")
+        }
+    }
 }

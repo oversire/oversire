@@ -34,11 +34,13 @@ final class AgentsPage: Page {
         caption += " · read every 15 s"
         if data.statusJob.on { caption += " · status after \(Int(AGENTS.quietMinutes)) min idle" }
         if let e = idx.lastError { caption += " · last read failed: \(e)" }
-        col.addFull(PageHeader("Sessions", caption: caption, actions: [
+        let actions = [
             NeedsYouCard.refreshButton(data),
             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() },
-        ]))
+        ]
+        if inWork { WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, in: col) }
+        else { col.addFull(PageHeader("Sessions", caption: caption, actions: actions)) }
         if let note { col.addFull(Banner(note.0, title: note.1)) }
         if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty { runnerSessions(col, sessions) }
         guard idx.ready != nil else {
@@ -47,7 +49,7 @@ final class AgentsPage: Page {
             return
         }
 
-        if let c = needsYou.card() { col.addFull(c) }
+        if !inWork, let c = needsYou.card() { col.addFull(c) }
 
         let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
         let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
@@ -55,7 +57,7 @@ final class AgentsPage: Page {
             self?.allWorktrees = i == 1
             self?.reload()
         }
-        col.addFull(SectionTitle("Worktrees", action: filter))
+        if inWork { col.addFull(NSStackView(h: [Spacer(), filter], spacing: 0)) } else { col.addFull(SectionTitle("Worktrees", action: filter)) }
         let list = ListCard()
         list.add(TableHeader(table))
         for c in allWorktrees ? cards : active { list.add(cardRow(c)) }
@@ -157,11 +159,16 @@ final class AgentsPage: Page {
     /// A worktree with an item. A working agent without an item key does not count.
     static func isActive(_ c: Workspace, linked: Bool) -> Bool { linked }
 
-    private func cardKey(_ c: Workspace) -> String? {
+    static func cardKey(_ c: Workspace, data: AppData) -> String? {
         data.agentIndex.agents.first { $0.value.card == c.id }?.key
             ?? data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }?.key
             ?? WorkstreamIndex.key(in: c.name, known: Set(data.projectStore.tracked.map { $0.identifier.uppercased() }), whole: true)
     }
+
+    private func cardKey(_ c: Workspace) -> String? { Self.cardKey(c, data: data) }
+
+    // In Work › Worktrees the page has the Work header, and Home has the Needs you card.
+    private var inWork: Bool { if case .work = route { return true }; return false }
 
     private func cardRow(_ c: Workspace) -> NSView {
         let key = cardKey(c)
