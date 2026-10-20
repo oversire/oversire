@@ -37,6 +37,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The pinned packages need Swift 6.2 or later.
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.0.app
+
       - name: Compute version
         id: version
         run: |

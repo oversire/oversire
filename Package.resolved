@@ -1,13 +1,13 @@
 {
-  "originHash" : "b14ac697d4bc6170a112c3c5931cd54e17ed2b97e16fdfbd4be0610cf21f7c24",
+  "originHash" : "e70458150004a4055bef3b05c29870a196eb7b525da54662b7c3f9b85a6d1fe1",
   "pins" : [
     {
       "identity" : "agent-binder",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/oversire/agent-binder.git",
       "state" : {
-        "revision" : "9e051432d702a5da412c7556757ceb3282f06065",
-        "version" : "0.2.0"
+        "revision" : "5499b8bb2c62d2a0063cd613f50df663dacc6d39",
+        "version" : "0.2.1"
       }
     },
     {
