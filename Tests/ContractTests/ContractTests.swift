@@ -51,6 +51,7 @@ final class ContractTests: XCTestCase {
         "area-claim": roundTrip(AreaClaim.self),
         "area-candidates": roundTrip(AreaCandidates.self),
         "changed-paths": roundTrip(ChangedPaths.self),
+        "session-digest": roundTrip(SessionDigest.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
@@ -58,7 +59,7 @@ final class ContractTests: XCTestCase {
     static let versions: [String: Int] = [
         "refs.json": 1, "provider-event.json": 1, "actions.json": 1, "ai-task.json": 1, "account.json": 1,
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
-        "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1,
+        "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
@@ -164,5 +165,26 @@ final class ContractTests: XCTestCase {
             XCTAssertEqual(used, Set(t.inputs), name)
         }
         XCTAssertTrue(PromptFiles.all["draft"]!.contains("at most \(DraftSuggestion.maxTitle) characters"))
+    }
+
+    /// scripts/digest.py gives the digest of each transcript in fixtures/session-digest.
+    func testDigestScriptMatchesTheFixtures() throws {
+        let dir = Self.root.appendingPathComponent("fixtures/session-digest")
+        let script = Self.root.deletingLastPathComponent().appendingPathComponent("scripts/digest.py")
+        let cases = try FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("claude").path).filter { $0.hasSuffix(".jsonl") }
+        XCTAssertGreaterThanOrEqual(cases.count, 5)
+        for name in cases.sorted() {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            p.arguments = ["python3", "-I", script.path, dir.appendingPathComponent("claude/\(name)").path]
+            let out = Pipe()
+            p.standardOutput = out
+            try p.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            try XCTSkipIf(p.terminationStatus == 127, "no python3")
+            let want = try Data(contentsOf: dir.appendingPathComponent(name.replacingOccurrences(of: ".jsonl", with: ".json")))
+            XCTAssertEqual(String(decoding: try canonical(data), as: UTF8.self), String(decoding: try canonical(want), as: UTF8.self), name)
+        }
     }
 }

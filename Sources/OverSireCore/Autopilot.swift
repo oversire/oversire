@@ -146,8 +146,9 @@ public enum SessionOrder: Hashable, Sendable {
     case read(SessionRef, lines: Int)
     /// `permission` answers the PermissionPrompt of a runner session. Then `text` is empty.
     case send(SessionRef, text: String, permission: PermissionAnswer? = nil)
+    case history(SessionRef, budget: HistoryBudget? = nil)
 
-    public enum Op: String, Codable, Sendable, CaseIterable { case sessionStart, sessionStop, sessionRead, sessionSend }
+    public enum Op: String, Codable, Sendable, CaseIterable { case sessionStart, sessionStop, sessionRead, sessionSend, sessionHistory }
 
     public var op: Op {
         switch self {
@@ -155,13 +156,14 @@ public enum SessionOrder: Hashable, Sendable {
         case .stop: return .sessionStop
         case .read: return .sessionRead
         case .send: return .sessionSend
+        case .history: return .sessionHistory
         }
     }
 }
 
 extension SessionOrder: Codable {
     private enum CodingKeys: String, CodingKey { case op, payload }
-    private enum PayloadKeys: String, CodingKey { case session, lines, text, permission }
+    private enum PayloadKeys: String, CodingKey { case session, lines, text, permission, budget }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -176,6 +178,9 @@ extension SessionOrder: Codable {
             let p = try payload()
             self = .send(try p.decode(SessionRef.self, forKey: .session), text: try p.decode(String.self, forKey: .text),
                          permission: try p.decodeIfPresent(PermissionAnswer.self, forKey: .permission))
+        case .sessionHistory:
+            let p = try payload()
+            self = .history(try p.decode(SessionRef.self, forKey: .session), budget: try p.decodeIfPresent(HistoryBudget.self, forKey: .budget))
         }
     }
 
@@ -197,6 +202,10 @@ extension SessionOrder: Codable {
             try p.encode(s, forKey: .session)
             try p.encode(text, forKey: .text)
             try p.encodeIfPresent(permission, forKey: .permission)
+        case .history(let s, let budget):
+            var p = payload()
+            try p.encode(s, forKey: .session)
+            try p.encodeIfPresent(budget, forKey: .budget)
         }
     }
 }
@@ -234,11 +243,13 @@ public struct WorkOrderDraft: Hashable, Sendable, Codable {
 public struct WorkOrderResult: Hashable, Sendable, Codable {
     public var session: SessionRef?      // sessionStart
     public var lines: [String]?          // sessionRead
+    public var digest: SessionDigest?    // sessionHistory
     public var error: String?
 
-    public init(session: SessionRef? = nil, lines: [String]? = nil, error: String? = nil) {
+    public init(session: SessionRef? = nil, lines: [String]? = nil, digest: SessionDigest? = nil, error: String? = nil) {
         self.session = session
         self.lines = lines
+        self.digest = digest
         self.error = error
     }
 }

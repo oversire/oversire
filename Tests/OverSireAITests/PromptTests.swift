@@ -121,4 +121,19 @@ final class PromptTests: XCTestCase {
         XCTAssertThrowsError(try PromptTemplate(parsing: "no front matter"))
         XCTAssertThrowsError(try PromptTemplate(parsing: "---\ntaskKind: x\nversion: 1\n---\n<!-- system -->\nonly system\n"))
     }
+
+    func testParseStatusDropsTheOwnKey() throws {
+        let reply = """
+        ```json
+        {"state":"Blocked","headline":"Shipped. Test it.","done":["a","b","c","d","e"],"next":[],
+         "needsYou":[{"text":"Test Tell the agent","kind":"manual-check"},"Set the secret",""],"blockedBy":["oversire-153","OVERSIRE-12","x"]}
+        ```
+        """
+        let r = try XCTUnwrap(AgentPrompts.parseStatus(reply, key: "OVERSIRE-153"))
+        XCTAssertEqual(r.state, .blocked)
+        XCTAssertEqual(r.done.count, 4)
+        XCTAssertEqual(r.needsYou, [.init(text: "Test Tell the agent", kind: "manual-check"), .init(text: "Set the secret")])
+        XCTAssertEqual(r.blockedBy, ["OVERSIRE-12"])
+        XCTAssertNil(AgentPrompts.parseStatus(#"{"state":"maybe"}"#, key: "K-1"))
+    }
 }

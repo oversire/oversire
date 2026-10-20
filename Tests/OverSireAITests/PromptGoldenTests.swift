@@ -33,6 +33,15 @@ final class PromptGoldenTests: XCTestCase {
         ("session-end", .sessionEnd, AgentPrompts.sessionEndInput(key: "C-3", title: "Ship", status: "In Progress",
                                                                   message: "I can't do the check. Tell me the result.", turn: "⏺ Done.\nTell me.")),
         ("session-end-no-message", .sessionEnd, AgentPrompts.sessionEndInput(key: "C-4", title: "T", status: "Done", message: "", turn: "ok")),
+        ("status", .status, AgentPrompts.statusInput(
+            key: "D-5", title: "Retry", status: "In Progress", description: "Add a retry.",
+            digest: SessionDigest(harness: .claude, sessionId: "s1", source: .file, turns: 5,
+                                  earlier: [.init(prompt: "start\nnow", closing: "Read the code."), .init(prompt: "go", closing: "x", interrupted: true)],
+                                  last: [.init(prompt: "ship", text: "Shipped v2.", tools: 3), .init(prompt: "?", text: "Test it on the Mac.", tools: 0)]),
+            screen: "", state: "done", idleMinutes: 2, ci: "passed", pr: "#12 open", previous: "Ships the retry.")),
+        ("status-screen-only", .status, AgentPrompts.statusInput(
+            key: "D-6", title: "T", status: "Todo", description: "", digest: nil, screen: "⏺ Building…",
+            state: "working", idleMinutes: 11, ci: "none", pr: "none", previous: "")),
         ("order", .order, AgentPrompts.orderInput([QueueEntry(key: "P-1", title: "One", added: .distantPast),
                                                    QueueEntry(key: "P-2", title: "Two", added: .distantPast)],
                                                   bodies: ["P-1": String(repeating: "b", count: 700)])),

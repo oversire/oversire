@@ -21,6 +21,53 @@ public enum AgentPrompts {
                 context: ["key": key, "title": title, "status": status, "message": String(message.prefix(4000))])
     }
 
+    // MARK: Status
+
+    /// The facts of one session for the Status job. A nil `digest` means the screen is the only record.
+    /// `screen`: the live screen tail while the session works. `previous`: the last status headline.
+    public static func statusInput(key: String, title: String, status: String, description: String, digest: SessionDigest?,
+                                   screen: String, state: String, idleMinutes: Int, ci: String, pr: String,
+                                   previous: String) -> AIInput {
+        let flat = { (s: String) in s.replacingOccurrences(of: "\n", with: " ") }
+        var earlier = "(none)", last = "(no history: the screen only)", turns = "0"
+        if let d = digest {
+            let first = d.turns - d.earlier.count - d.last.count
+            if !d.earlier.isEmpty {
+                earlier = d.earlier.enumerated().map { i, t in
+                    "[turn \(first + i + 1)] \(flat(t.prompt)) → \(flat(t.closing))\(t.interrupted == true ? " (stopped)" : "")"
+                }.joined(separator: "\n")
+            }
+            if !d.last.isEmpty {
+                last = d.last.map { t in
+                    let stopped = t.interrupted == true ? ", stopped by the developer" : ""
+                    return "USER: \(t.prompt)\nAGENT (\(t.tools) tool calls\(stopped)):\n\(t.text)"
+                }.joined(separator: "\n\n---\n\n")
+            }
+            turns = "\(d.turns)"
+        }
+        return AIInput(text: "", context: [
+            "key": key, "title": title, "status": status, "description": String(description.prefix(8000)), "turns": turns,
+            "earlier": earlier, "last": last, "screen": String(screen.suffix(2000)), "state": state, "idle": "\(idleMinutes)",
+            "ci": ci, "pr": pr, "previous": previous,
+        ])
+    }
+
+    /// The status reply, or nil when the reply has no known state.
+    public static func parseStatus(_ text: String, key: String) -> StatusReply? {
+        guard let obj = replyObject(text), let raw = obj["state"] as? String,
+              let state = StatusReply.State(rawValue: raw.lowercased()) else { return nil }
+        let list = { (k: String, n: Int) in ((obj[k] as? [Any]) ?? []).compactMap { $0 as? String }.filter { !$0.isEmpty }.prefix(n).map { $0 } }
+        let steps = ((obj["needsYou"] as? [Any]) ?? []).prefix(8).compactMap { v -> StatusReply.Step? in
+            if let s = v as? String, !s.isEmpty { return StatusReply.Step(text: s, kind: "other") }
+            guard let d = v as? [String: Any], let t = d["text"] as? String, !t.isEmpty else { return nil }
+            return StatusReply.Step(text: t, kind: d["kind"] as? String ?? "other")
+        }
+        let own = key.uppercased()
+        let blockers = list("blockedBy", 8).map { $0.uppercased() }.filter { $0 != own && $0.contains("-") }
+        return StatusReply(state: state, headline: obj["headline"] as? String ?? "", done: list("done", 4), next: list("next", 3),
+                           needsYou: steps, blockedBy: blockers, nudge: obj["nudge"] as? String ?? "")
+    }
+
     // MARK: Queue order
 
     /// `vision`: the project vision. `blockers`: the open blocker keys of each entry.
