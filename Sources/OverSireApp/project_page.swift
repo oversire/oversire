@@ -203,18 +203,36 @@ final class ProjectPage: Page {
 final class MyItemsPage: Page {
     typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
     private let table = ColumnLayout(id: "mine", columns: ItemLine.columns(keyWidth: 120))
-    private let more = MoreRows()
+    private var more: [String: MoreRows] = [:]
     override var buildsLater: Bool { true }
 
-    static func order(_ list: [Entry]) -> [Entry] {
-        list.sorted { a, b in
-            let ra = a.stream.map(WorkstreamCard.rank) ?? 5, rb = b.stream.map(WorkstreamCard.rank) ?? 5
-            if ra != rb { return ra < rb }
-            let ca = (a.snap.option(a.item.statusOptionId)?.category ?? .todo).rank
-            let cb = (b.snap.option(b.item.statusOptionId)?.category ?? .todo).rank
-            if ca != cb { return ca < cb }
-            return a.item.activityAt > b.item.activityAt
+    typealias Lane = (priority: String, entries: [Entry])
+
+    /// In progress, then Not started. In each: priority lanes, Urgent first. In a lane: Needs input, Blocked on you,
+    /// Looks stuck or CI failing, Working, then the rest. Last: the newest activity.
+    static func groups(_ list: [Entry], status: (String) -> ItemStatus?) -> [(title: String, lanes: [Lane])] {
+        func attention(_ e: Entry) -> Int {
+            let a = status(e.item.key)?.attention ?? 4
+            return e.stream?.ci?.word == Tone.bad.word ? min(a, 2) : a
         }
+        func priority(_ e: Entry) -> Int {
+            StatusOption.priorities.firstIndex { $0.name == e.item.fields["Priority"] } ?? StatusOption.priorities.count - 1
+        }
+        let ranked = list.map { (e: $0, a: attention($0), p: priority($0)) }
+        let started = ranked.filter { ($0.e.snap.option($0.e.item.statusOptionId)?.category ?? .todo) != .todo }
+        let todo = ranked.filter { ($0.e.snap.option($0.e.item.statusOptionId)?.category ?? .todo) == .todo }
+        func lanes(_ g: [(e: Entry, a: Int, p: Int)]) -> [Lane] {
+            StatusOption.priorities.indices.compactMap { p in
+                let es = g.filter { $0.p == p }.sorted { ($0.a, $1.e.item.activityAt) < ($1.a, $0.e.item.activityAt) }.map(\.e)
+                let name = StatusOption.priorities[p].name
+                return es.isEmpty ? nil : (name == "None" ? "No priority" : name, es)
+            }
+        }
+        return [("In progress", lanes(started)), ("Not started", lanes(todo))].filter { !$0.lanes.isEmpty }
+    }
+
+    static func order(_ list: [Entry], status: (String) -> ItemStatus?) -> [Entry] {
+        groups(list, status: status).flatMap { $0.lanes.flatMap(\.entries) }
     }
 
     override func build(_ col: NSStackView) {
@@ -224,12 +242,25 @@ final class MyItemsPage: Page {
                 list.append((i, snap, data.workstreams.stream(i.key)))
             }
         }
-        let ordered = MyItemsPage.order(list)
-        col.addFull(PageHeader("My items", caption: "\(ordered.count) open items of yours in all projects. A session that needs input or failing CI comes first."))
+        let job = data.statusJob
+        let groups = MyItemsPage.groups(list, status: job.item)
+        col.addFull(PageHeader("My items", caption: "\(list.count) open items of yours in all projects. In progress first, then by priority. A session that needs you comes first in each priority."))
         let card = ListCard()
-        if !ordered.isEmpty { card.add(TableHeader(table)) }
-        card.add(ordered, more: more) { [weak self, table, commands] e in
-            ItemLine(e.item, snap: e.snap, stream: e.stream, status: self?.data.statusJob.item(e.item.key), layout: table, commands: commands) { self?.go($0) }
+        if !groups.isEmpty { card.add(TableHeader(table)) }
+        for g in groups {
+            let n = g.lanes.reduce(0) { $0 + $1.entries.count }
+            let head = Row([NSTextField.text(g.title, size: 12.5, weight: .semibold), NSTextField.text("\(n)", size: 12, color: Palette.dim), Spacer()], height: 32)
+            head.restFill = Palette.raise
+            card.add(head)
+            for lane in g.lanes {
+                card.add(Row([NSTextField.text(lane.priority.uppercased(), size: 10.5, weight: .semibold, color: Palette.dim),
+                              NSTextField.text("\(lane.entries.count)", size: 10.5, color: Palette.dim), Spacer()], height: 22, inset: 22))
+                let m = more[g.title + lane.priority] ?? MoreRows()
+                more[g.title + lane.priority] = m
+                card.add(lane.entries, more: m) { [weak self, table, commands] e in
+                    ItemLine(e.item, snap: e.snap, stream: e.stream, status: job.item(e.item.key), layout: table, commands: commands) { self?.go($0) }
+                }
+            }
         }
         pageBusy = data.projectsLoading
         if card.isEmpty { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }

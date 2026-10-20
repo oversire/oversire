@@ -192,21 +192,21 @@ func runSelfTest() {
         ProjectSnapshot(summary: summary("acme", wsUUID, "Board"), statusOptions: [todoOpt, doingOpt],
                         items: items, fetchedAt: Date(timeIntervalSince1970: 1_700_000_040), me: me)
     }
-    // My items: an agent that waits, then failing CI, then working, then the status order.
+    // My items: In progress first, then priority, then a session that needs you, then the newest activity.
     do {
         let snap = projectSnap([])
-        func stream(_ key: String, _ phase: AgentSession.Phase?) -> Workstream {
-            var s = Workstream(key: key)
-            s.agent = phase.map { AgentSession(phase: $0, since: Date()) }
-            return s
-        }
+        let phases: [String: AgentSession.Phase] = ["ENG-3": .working, "ENG-4": .waiting]
         let got = MyItemsPage.order([
             (projectItem("1", status: "s1"), snap, nil),
             (projectItem("2", status: "s2"), snap, nil),
-            (projectItem("3", status: "s1"), snap, stream("ENG-3", .working)),
-            (projectItem("4", status: "s1"), snap, stream("ENG-4", .waiting)),
-        ]).map(\.item.key)
-        check(got == ["ENG-4", "ENG-3", "ENG-2", "ENG-1"], "my items order: \(got)")
+            (projectItem("3", status: "s1"), snap, nil),
+            (projectItem("4", status: "s1"), snap, nil),
+            (projectItem("5", status: "s1", fields: ["Priority": "High"]), snap, nil),
+        ]) { k in
+            ItemStatus.resolve(status: nil, outOfDate: nil, state: nil, stateText: nil, agent: phases[k].map { AgentSession(phase: $0, since: Date()) },
+                               terminals: nil, screen: nil, idleNote: nil)
+        }.map(\.item.key)
+        check(got == ["ENG-2", "ENG-5", "ENG-4", "ENG-3", "ENG-1"], "my items order: \(got)")
     }
     check(ProjectStore.diff(nil, projectSnap([projectItem("a", status: "s1")])).isEmpty, "first snapshot is quiet")
     let before = projectSnap([projectItem("a", status: "s1", fields: ["Priority": "Low"], assignees: ["ada"])])

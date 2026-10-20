@@ -17,6 +17,7 @@ struct ItemStatus {
     var next: [String] = []
     var blockedBy: [String] = []
     var facts: [String] = []      // "Session done at 14:02", "1 terminal", "Read at the turn end"
+    var attention = 4             // 0 Needs input, 1 Blocked on you, 2 Looks stuck, 3 Working, 4 other
 
     /// The pill text with the AI mark: "Blocked on you ✦".
     var label: String { byAI ? text + " ✦" : text }
@@ -45,18 +46,21 @@ struct ItemStatus {
         if let n = terminals { facts.append("\(n) terminal\(n == 1 ? "" : "s")") }
         if let s = status, outOfDate == nil {
             let r = s.reply
+            let rank = state == .needsInput ? 0 : [.blocked: 1, .stuck: 2, .working: 3][s.state] ?? 4
             return ItemStatus(source: .ai, tone: Tone(s.state), text: s.word, byAI: s.byAI, at: s.at, headline: r.headline,
                               needsYou: r.needsYou.map(\.text), next: r.next, blockedBy: r.blockedBy,
-                              facts: facts + ["Read " + s.cause])
+                              facts: facts + ["Read " + s.cause], attention: rank)
         }
         if let st = state {
             let head = [screen.map { "The screen: \($0)." }, outOfDate].compactMap { $0 }.joined(separator: " ")
             return ItemStatus(source: .screen, tone: Tone(st), text: stateText ?? st.label, headline: head,
-                              facts: facts + (idleNote.map { [$0] } ?? []))
+                              facts: facts + (idleNote.map { [$0] } ?? []),
+                              attention: [.needsInput: 0, .blocked: 1, .working: 3, .longCommand: 3][st] ?? 4)
         }
         guard let a = agent else { return nil }
         return ItemStatus(source: .phase, tone: Tone(a.phase), text: a.label(now: now),
-                          headline: a.phase == .failed ? a.message ?? "" : "", facts: [])
+                          headline: a.phase == .failed ? a.message ?? "" : "", facts: [],
+                          attention: [.waiting: 0, .working: 3, .starting: 3][a.phase] ?? 4)
     }
 }
 
