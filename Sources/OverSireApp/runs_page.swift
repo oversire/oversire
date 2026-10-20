@@ -1,11 +1,32 @@
 import Cocoa
 import OverSireCore
 
-// One run in a page list: state, workflow and number, repo and branch, item link, time.
+// "org / repo" with the org color. The org text is dim.
+final class RepoLabel: NSStackView {
+    init(_ repo: String, size: CGFloat = 12) {
+        let (org, name) = RunsPage.split(repo)
+        var views: [NSView] = [Glyph("circle.fill", color: repoColor(org), size: 7)]
+        if !org.isEmpty { views += [NSTextField.text(org, size: size, color: Palette.dim), NSTextField.text("/", size: size, color: Palette.dim)] }
+        views.append(NSTextField.text(name, size: size, weight: .medium))
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 3
+        translatesAutoresizingMaskIntoConstraints = false
+        views.forEach(addArrangedSubview)
+        setCustomSpacing(6, after: views[0])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(repo)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// One run in a page list: state, workflow and number, repo, branch, item link, time.
 final class RunLine: TableRow {
     static let layout = ColumnLayout(id: "runs", columns: [
         TableColumn(id: "state", title: "", width: 16, min: 16),
         TableColumn(id: "run", title: "Run", width: 300, min: 160, flexible: true),
+        TableColumn(id: "repo", title: "Repo", width: 190, min: 110),
         TableColumn(id: "item", title: "Item", width: 112, min: 60),
         TableColumn(id: "when", title: "When", width: 90, min: 50, optional: true),
     ])
@@ -15,9 +36,10 @@ final class RunLine: TableRow {
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
         let live = r.status != "completed"
         let total = live ? r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []) : nil
-        let run: NSView = TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(name) · \(r.headBranch) · \(r.displayTitle)")
+        let run: NSView = TwoLine("\(r.workflowName ?? r.name) #\(r.number)", "\(r.headBranch) · \(r.displayTitle)")
         var cells: [String: NSView] = [
             "state": Glyph(tone),
+            "repo": RepoLabel(repo),
             "run": live ? NSStackView(v: [run, RunClock(r, total: total, parts: .bar, inline: true)], spacing: 3) : run,
         ]
         if let link = data.workstreams.link(runId: r.id) {
@@ -148,7 +170,9 @@ final class MiniBar: NSView {
 // All runs of the tracked repos, with filters. Linked runs show their item.
 final class RunsPage: Page {
     private static let latestKey = "runsLatestOnly"
+    private static let orgKey = "runsOrg"
     private var latestOnly = UserDefaults.standard.object(forKey: RunsPage.latestKey) as? Bool ?? true
+    private var org = UserDefaults.standard.string(forKey: RunsPage.orgKey)
     private let more = MoreRows()
     override var buildsLater: Bool { true }
 
@@ -164,6 +188,25 @@ final class RunsPage: Page {
         }
     }
 
+    /// "org/repo" to ("org", "repo"). A name without an org gives ("", name).
+    static func split(_ repo: String) -> (org: String, name: String) {
+        guard let i = repo.firstIndex(of: "/") else { return ("", repo) }
+        return (String(repo[..<i]), String(repo[repo.index(after: i)...]))
+    }
+
+    /// The orgs of the runs with their run counts, the most runs first.
+    static func orgs(_ repos: [String]) -> [(org: String, count: Int)] {
+        var n: [String: Int] = [:]
+        for r in repos { n[split(r).org, default: 0] += 1 }
+        return n.map { ($0.key, $0.value) }.sorted { ($1.count, $0.org.lowercased()) < ($0.count, $1.org.lowercased()) }
+    }
+
+    /// The runs of one org. A nil org or an org that has no runs gives all runs.
+    static func byOrg<T>(_ list: [T], org: String?, repo: (T) -> String) -> [T] {
+        guard let org, list.contains(where: { split(repo($0)).org == org }) else { return list }
+        return list.filter { split(repo($0)).org == org }
+    }
+
     override func build(_ col: NSStackView) {
         let ws = data.workstreams
         var all: [(repo: String, run: Run)] = []
@@ -171,6 +214,9 @@ final class RunsPage: Page {
             for r in latestOnly ? latestPerWorkflow(runs, acrossBranches: true) : runs { all.append((repo, r)) }
         }
         all.sort { newerActivity($0.run, $1.run) }
+        let orgs = RunsPage.orgs(all.map(\.repo))
+        let orgAll = all
+        all = RunsPage.byOrg(all, org: org, repo: \.repo)
         let filters = Route.RunFilter.allCases
         let counts = filters.map { f in all.filter { RunsPage.matches(f, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }.count }
         col.addFull(PageHeader("Runs", caption: "\(data.grouped.count) repos · updated \(relativeTime(data.lastUpdate)). A linked run shows its item.",
@@ -184,6 +230,18 @@ final class RunsPage: Page {
         let strip = TabStrip(filters.map { $0.rawValue.capitalized }, selected: filters.firstIndex(of: filter) ?? 0, counts: counts)
         strip.onSelect = { [weak self] i in self?.go(.runs(filters[i])) }
         col.addArrangedSubview(strip)
+        if orgs.count >= 2 {
+            let on = orgs.contains { $0.org == org } ? org : nil
+            var chips: [NSView] = [NSTextField.text("Org", size: 12, color: Palette.dim),
+                                   ToggleChip("All \(orgAll.count)", on: on == nil) { [weak self] in self?.pick(org: nil) }]
+            for o in orgs {
+                let name = o.org.isEmpty ? "No org" : o.org
+                chips.append(ToggleChip("\(name) \(o.count)", on: on == o.org, icon: Glyph("circle.fill", color: repoColor(o.org), size: 7)) { [weak self] in
+                    self?.pick(org: o.org)
+                })
+            }
+            col.addFull(NSStackView(h: chips + [Spacer()], spacing: 6))
+        }
         if filter == .unlinked {
             col.addFull(NSTextField.text("A run links to an item by its branch, commit or title. See Settings › Projects and repos › Linking and write-back for the rules.", size: 12, color: Palette.dim, lines: 2))
         }
@@ -193,6 +251,12 @@ final class RunsPage: Page {
         list.add(shown, more: more) { [weak self, data, commands] r in RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) } }
         if list.isEmpty { list.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)
+    }
+
+    private func pick(org o: String?) {
+        org = o
+        UserDefaults.standard.set(o, forKey: RunsPage.orgKey)
+        reload()
     }
 }
 
@@ -345,8 +409,9 @@ final class RunPage: Page {
         let title = "\(r.workflowName ?? r.name) #\(r.number)" + ((r.attempt ?? 1) > 1 ? " · attempt \(r.attempt!)" : "")
         col.addFull(NSStackView(h: [Glyph(tone, size: 26), PageHeader(title, caption: r.displayTitle, actions: actions)], spacing: 12, align: .top))
 
+        let rp = RunsPage.split(repo)
         var chips: [NSView] = [Pill(tone),
-                               Chiplet(repo, symbol: "shippingbox", mono: true),
+                               Chiplet(rp.org.isEmpty ? repo : "\(rp.org) / \(rp.name)", icon: Glyph("circle.fill", color: repoColor(rp.org), size: 7)),
                                Chiplet(r.headBranch, symbol: "arrow.triangle.branch", mono: true),
                                Chiplet(String(r.headSha.prefix(7)), mono: true),
                                Chiplet("\(r.event)\(r.actorLogin.map { " · \($0)" } ?? "")"),

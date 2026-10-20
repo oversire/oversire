@@ -204,8 +204,8 @@ class Chiplet: Box {
 
 // A chip that stays on or off. An "on" chip shows a check mark, so the state does not rely on color.
 final class ToggleChip: Chiplet {
-    init(_ text: String, on: Bool, enabled: Bool = true, _ flip: @escaping () -> Void) {
-        super.init(text, symbol: on ? "checkmark" : nil, color: !enabled ? Palette.dim : on ? Palette.fg : Palette.mut,
+    init(_ text: String, on: Bool, enabled: Bool = true, icon: NSView? = nil, _ flip: @escaping () -> Void) {
+        super.init(text, symbol: on && icon == nil ? "checkmark" : nil, icon: icon, color: !enabled ? Palette.dim : on ? Palette.fg : Palette.mut,
                    fill: on ? Palette.acc.withAlphaComponent(enabled ? 0.18 : 0.08) : Palette.raise, onClick: enabled ? flip : nil)
         if on { border = enabled ? Palette.acc : Palette.line }
         setAccessibilityRole(.checkBox)
