@@ -1,5 +1,6 @@
 import OverSireCore
 import XCTest
+import OverSireAI
 @testable import OverSireApp
 
 // Recorded Orca screens of real sessions (trimmed). `expect` is the state that a person gave each one.
@@ -79,23 +80,23 @@ final class SessionScreenTests: XCTestCase {
             let c = try load(name)
             guard c.state == "done" else { continue }
             let s = HarnessScreen(c.screen)
-            let r = SessionEnd.read(message: c.message, turn: s.lastTurn(), recap: s.recap, status: .progress)
+            let r = BlockedText.read(message: c.message, turn: s.lastTurn(), recap: s.recap, status: .progress)
             XCTAssertEqual(r != nil, c.expect == "blocked", "\(name): \(String(describing: r))")
         }
     }
 
     func testTheStepsOfTheBlockedSessions() throws {
         let m = try load("oversire-109")
-        let a = try XCTUnwrap(SessionEnd.read(message: m.message, turn: "", recap: nil, status: .progress))
+        let a = try XCTUnwrap(BlockedText.read(message: m.message, turn: "", recap: nil, status: .progress))
         XCTAssertEqual(a.steps.count, 7)
         XCTAssertEqual(a.steps.first?.text, "turning on the Screen Recording permission")
         XCTAssertEqual(a.steps.first?.kind, "manual-check")
 
-        let r = try XCTUnwrap(SessionEnd.read(message: try load("oversire-121").message, turn: "", recap: nil, status: .progress))
+        let r = try XCTUnwrap(BlockedText.read(message: try load("oversire-121").message, turn: "", recap: nil, status: .progress))
         XCTAssertEqual(r.steps.map(\.text), ["Connect, repair and disconnect with the real cloud.", "The AI Test button with a real key.",
                                              "The menu bar gear opens Settings in the window."])
 
-        let t = try XCTUnwrap(SessionEnd.read(message: try load("towertail-61").message, turn: "", recap: nil, status: .progress))
+        let t = try XCTUnwrap(BlockedText.read(message: try load("towertail-61").message, turn: "", recap: nil, status: .progress))
         XCTAssertEqual(t.steps.first?.kind, "secret")
         XCTAssertEqual(t.blockedBy, ["TOWERTAIL-76"])
     }
@@ -103,8 +104,8 @@ final class SessionScreenTests: XCTestCase {
     func testTheEndCheckWithoutAMessageReadsTheTurn() throws {
         let c = try load("towertail-61")
         let s = HarnessScreen(c.screen)
-        XCTAssertNotNil(SessionEnd.read(message: "", turn: s.lastTurn(), recap: s.recap, status: .progress))
-        XCTAssertNil(SessionEnd.read(message: "", turn: HarnessScreen(try load("trebi-422").screen).lastTurn(), recap: nil, status: .done))
+        XCTAssertNotNil(BlockedText.read(message: "", turn: s.lastTurn(), recap: s.recap, status: .progress))
+        XCTAssertNil(BlockedText.read(message: "", turn: HarnessScreen(try load("trebi-422").screen).lastTurn(), recap: nil, status: .done))
     }
 
     func testABackgroundShellHoldsTheSlot() throws {
@@ -115,19 +116,8 @@ final class SessionScreenTests: XCTestCase {
     }
 
     func testTheReportOfTheChecklist() {
-        var e = SessionEnd(id: "1", key: "A-1", message: "m", verdict: .blocked,
-                           steps: [.init(text: "one", kind: "manual-check"), .init(text: "two", kind: "secret")],
-                           followUpAt: nil, blockedBy: [], at: Date())
-        e.steps[1].ticked = true
+        let r = StatusReply(state: .blocked, headline: "", needsYou: [.init(text: "one", kind: "manual-check"), .init(text: "two", kind: "secret")])
+        let e = SessionStatus(id: "1", key: "A-1", reply: r, ticks: [false, true], at: Date(), trigger: .turnEnd, byAI: false, read: "")
         XCTAssertEqual(e.report, "Manual check: 1 of 2 pass.\n- [ ] one\n- [x] two")
-    }
-
-    func testTheEndReplyParse() throws {
-        let p = try XCTUnwrap(SessionEnd.parse(#"{"state":"blocked","steps":[{"text":"Set the token","kind":"secret"}],"followUpAt":"2026-11-02","blockedBy":["a-1"]}"#))
-        XCTAssertEqual(p.0, .blocked)
-        XCTAssertEqual(p.1.first?.kind, "secret")
-        XCTAssertNotNil(p.2)
-        XCTAssertEqual(p.3, ["A-1"])
-        XCTAssertNil(SessionEnd.parse("no"))
     }
 }

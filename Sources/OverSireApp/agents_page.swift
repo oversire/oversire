@@ -34,7 +34,7 @@ final class AgentsPage: Page {
         caption += " · read every 15 s"
         if let e = idx.lastError { caption += " · last read failed: \(e)" }
         col.addFull(PageHeader("Sessions", caption: caption, actions: [
-            NeedsYouCard.recheckButton(data),
+            NeedsYouCard.refreshButton(data),
             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() },
         ]))
@@ -173,9 +173,7 @@ final class AgentsPage: Page {
             agent = Pill(Tone(st), text: data.agentIndex.pillText(key) ?? st.label)
             agent.toolTip = st.facts
             var t = data.agentIndex.screenText(key)
-            if let j = data.aiChecks.checks.filter({ $0.key == key.uppercased() }).max(by: { $0.at < $1.at }) {
-                t += j.state == .retired ? " · \(j.verdict == .stuck ? "stuck " : "")check retired" : " · checked: \(j.verdict.word.lowercased())"
-            }
+            if let s = data.statusJob.status(key) { t += " · " + s.word.lowercased() }
             let f = NSTextField.text(t, size: 12, color: Palette.mut)
             f.lineBreakMode = .byTruncatingTail
             change = f
@@ -218,9 +216,9 @@ final class AgentsPage: Page {
         Tone(s == .waiting ? SessionState.needsInput : s == .working ? .working : .done)
     }
 
-    /// ⌘R: read the screens again and check each session again.
+    /// ⌘R: read each session again and write its status.
     func checkAgain() {
-        data.aiChecks.recheck(keys: data.aiChecks.recheckable)
+        data.statusJob.refresh(keys: data.statusJob.refreshable)
     }
 
     // The screen and a reply field under a Needs input row.

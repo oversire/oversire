@@ -1,6 +1,7 @@
 import OverSireCore
 import OverSireSync
 import XCTest
+import OverSireAI
 @testable import OverSireApp
 
 final class PlannerTests: XCTestCase {
@@ -110,12 +111,13 @@ final class PlannerTests: XCTestCase {
         XCTAssertEqual(b.next[2].areas, ["api"])
     }
 
-    func testApproveAllTakesThePendingDoneChecks() {
-        func j(_ id: String, _ v: Judgement.Verdict, _ s: Judgement.State = .pending) -> Judgement {
-            Judgement(id: id, key: "K-\(id)", verdict: v, evidence: [], action: "", nudge: nil, at: Date(), state: s)
+    func testApproveAllTakesTheDoneStatusesOfQuietSessions() {
+        func s(_ id: String, _ v: StatusReply.State, _ phase: SessionState? = .quiet) -> SessionStatus {
+            SessionStatus(id: id, key: "K-\(id)", reply: StatusReply(state: v, headline: ""), ticks: [], at: Date(), trigger: .idle,
+                          byAI: true, phase: phase, read: "")
         }
-        let checks = [j("1", .done), j("2", .stuck), j("3", .done, .approved), j("4", .done), j("5", .done, .held)]
-        XCTAssertEqual(AgentJudge.freeing(checks).map(\.id), ["1", "4"])
+        let list = [s("1", .done), s("2", .stuck), s("3", .done, .working), s("4", .done, nil), s("5", .unfinished)]
+        XCTAssertEqual(list.filter(StatusJob.frees).map(\.id), ["1", "4"])
     }
 
     func testReviewSentences() {

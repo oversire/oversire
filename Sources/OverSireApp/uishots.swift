@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 import OverSireSync
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
@@ -31,7 +32,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var ciAssist = CIAssist(path: UIShots.tmp + "/ci.json")
     lazy var itemSummaries = ItemSummaries(path: UIShots.tmp + "/summaries.json",
                                            ai: { UIShots.aiKey.map { AIClient(cfg: AI_CFG, key: $0) } })
-    lazy var aiChecks = AgentJudge(path: UIShots.tmp + "/checks.json", agents: agentIndex, queue: queue)
+    lazy var statusJob = StatusJob(path: UIShots.tmp + "/session-status.json", agents: agentIndex, queue: queue)
     let relay = LiveSync(secrets: SecretStore(service: "com.oversire.app.cloud"), cursors: CursorStore(url: nil))
     private let dir: String
     struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: ChangeRequest }
@@ -50,7 +51,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
         // Copies of the real files. A run never writes to ~/.config/oversire.
         for (src, name) in [(PROJECT_STATE_PATH, "state.json"), (PROJECT_ACTIVITY_PATH, "activity.jsonl"),
-                            (QUEUE_PATH, "queue.json"), (CHECKS_PATH, "checks.json"),
+                            (QUEUE_PATH, "queue.json"), (STATUS_PATH, "session-status.json"),
                             (REPO_CACHE_PATH, "repo-cache.json"), (PROJECT_CACHE_PATH, "plane-cache.json")] {
             try? FileManager.default.removeItem(atPath: tmp + "/" + name)
             try? FileManager.default.copyItem(atPath: src, toPath: tmp + "/" + name)
@@ -197,22 +198,32 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             cards.append(Workspace(id: card, repo: "oversire", path: "/Users/ada/src/oversire/.wt/\(key.lowercased())", name: key.lowercased(),
                                    comment: nil, liveTerminals: live, lastActivity: ago(since), agents: [a]))
             guard phase == .done, live > 0 else { continue }
+            let status = { (r: StatusReply, st: SessionState, at: Double) in
+                SessionStatus(id: "status-\(key)", key: key, reply: r, ticks: r.needsYou.map { _ in false }, at: ago(at), trigger: .turnEnd,
+                              byAI: true, phase: st, screen: w.fingerprint, message: a.messageHash, since: w.changedAt,
+                              read: "Read 3 turns, 9 closing messages and the description")
+            }
             if key == "OVERSIRE-109" {
-                guard let r = SessionEnd.read(message: blocked, turn: "", recap: nil, status: .progress, now: now) else { print("UISHOTS no steps"); continue }
-                var e = SessionEnd(id: "end-\(key)", key: key, message: a.messageHash, verdict: .blocked, steps: r.steps,
-                                   followUpAt: now.addingTimeInterval(86400 * 2), blockedBy: ["OVERSIRE-117"], at: ago(25))
-                for j in 0..<min(2, e.steps.count) { e.steps[j].ticked = true }
-                aiChecks.seed(e)
+                guard let r = BlockedText.read(message: blocked, turn: "", recap: nil, status: .progress, key: key) else { print("UISHOTS no steps"); continue }
+                var e = status(StatusReply(state: .blocked, headline: "Released in v1.3.9. The manual check on a real Mac is open.",
+                                           done: ["The capture code is merged.", "v1.3.9 is released."], needsYou: r.steps,
+                                           blockedBy: ["OVERSIRE-117"]), .blocked, 25)
+                for j in 0..<min(2, e.ticks.count) { e.ticks[j] = true }
+                statusJob.seed(e)
                 UIShots.expandBlocked = e.id
-            } else {
-                aiChecks.seed(SessionEnd(id: "end-\(key)", key: key, message: a.messageHash, verdict: .done, steps: [], followUpAt: nil, blockedBy: [], at: ago(since)))
+            } else if key == "OVERSIRE-91" {
+                statusJob.seed(status(StatusReply(state: .done, headline: "The Planner page is merged into main and all tests pass.",
+                                                  done: ["The Plan page shows the lanes.", "The tests pass."]), .done, 40))
             }
         }
         agentIndex.seed(cards: cards)
-        aiChecks.seed(Judgement(id: "uishots-quiet", key: "OVERSIRE-140", verdict: .stuck,
-                                evidence: ["The screen did not change for 12 min", "The last command failed: swift test (exit 1)"],
-                                action: "Sends the nudge to the session.", nudge: "The tests fail in AgentJudgeTests. Fix them, or tell me what blocks you.",
-                                at: ago(1), byAI: true, phase: .quiet, since: ago(13), pane: "p6", screen: "fp-OVERSIRE-140", ticking: false))
+        statusJob.seed(SessionStatus(id: "uishots-quiet", key: "OVERSIRE-140",
+                                     reply: StatusReply(state: .stuck, headline: "The tests fail in StatusJobTests and the agent does not go on.",
+                                                        done: ["The status job is written."], next: ["Fix the failing tests."],
+                                                        nudge: "The tests fail in StatusJobTests. Fix them, or tell me what blocks you."),
+                                     ticks: [], at: ago(1), trigger: .idle, byAI: true, phase: .quiet, screen: "fp-OVERSIRE-140",
+                                     message: agentIndex.agent("OVERSIRE-140")?.messageHash, since: ago(13),
+                                     read: "Read 3 turns, 6 closing messages, the screen and the description"))
         guard let found = projectStore.item(key: "OVERSIRE-137") else { print("UISHOTS no OVERSIRE project"); return }
         let snap = found.snap, pk = snap.summary.ref.storeKey
         AGENTS.slots[pk] = 7
@@ -480,8 +491,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedSummaries()
         seedSessions()
         // The heuristics only: a shot never calls the AI.
-        aiChecks.ai = { nil }
-        aiChecks.tick(workstreams: workstreams, store: projectStore)
+        statusJob.ai = { nil }
+        statusJob.tick(workstreams: workstreams, store: projectStore)
         let w = AppWindow(data: self)
         window = w
         w.window?.setFrameAutosaveName("")

@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import OverSireAI
 
 extension Tone {
     init(_ s: SessionState) {
@@ -15,7 +16,15 @@ extension Tone {
         }
     }
 
-    init(_ v: Judgement.Verdict) { self = v == .done ? .done : v == .stuck ? .warning : .working }
+    init(_ s: StatusReply.State) {
+        switch s {
+        case .working: self = .working
+        case .done: self = .done
+        case .unfinished: self = Tone(symbol: "circle.lefthalf.filled", color: Palette.warn, word: "Not finished")
+        case .blocked: self = Tone(SessionState.blocked)
+        case .stuck: self = .warning
+        }
+    }
 }
 
 extension AgentIndex {
@@ -60,7 +69,7 @@ extension AgentIndex {
     }
 }
 
-// The "Needs you" card of the Sessions page and the Inbox: AI checks, Needs input and Blocked on you.
+// The "Needs you" card of the Sessions page and the Inbox: statuses to act on, Needs input and Blocked on you.
 // The page keeps the card, so the open rows stay open after a rebuild.
 final class NeedsYouCard: NSObject {
     weak var page: Page?
@@ -82,31 +91,31 @@ final class NeedsYouCard: NSObject {
         d.agentIndex.agents.filter { d.agentIndex.state($0.key) == .needsInput }.sorted { $0.value.since < $1.value.since }.map { ($0.key, $0.value) }
     }
 
-    func count(_ d: AppData) -> Int { d.aiChecks.pending.count + waiting(d).count + d.aiChecks.blocking.count }
+    func count(_ d: AppData) -> Int { d.statusJob.pending.count + waiting(d).count + d.statusJob.blocking.count }
 
-    /// The "Check again" button. It shows "Checking N…" while a check runs.
-    static func recheckButton(_ d: AppData, keys: [String]? = nil) -> ActionButton {
-        let judge = d.aiChecks
-        let b = ActionButton("Check again", symbol: "arrow.clockwise") { judge.recheck(keys: keys ?? judge.recheckable) }
-        b.toolTip = "Read the screens now and check each session again (⌘R)"
-        if !judge.checking.isEmpty { b.busy("Checking \(judge.checking.count)…") }
+    /// The "Status for all" button. It shows "Reading N…" while a read runs.
+    static func refreshButton(_ d: AppData, title: String = "Status for all", keys: [String]? = nil) -> ActionButton {
+        let job = d.statusJob
+        let b = ActionButton(title, symbol: "arrow.clockwise") { job.refresh(keys: keys ?? job.refreshable) }
+        b.toolTip = "Read the history and the screen of each session now, and write its status (⌘R)"
+        if !job.reading.isEmpty { b.busy("Reading \(job.reading.count)…") }
         return b
     }
 
     func card() -> NSView? {
         guard let d = data else { return nil }
-        let judge = d.aiChecks
-        let checks = judge.pending
+        let job = d.statusJob
+        let checks = job.pending
         let asks = waiting(d)
-        let blocked = judge.blocking
+        let blocked = job.blocking
         let n = checks.count + asks.count + blocked.count
         guard n > 0 else { return nil }
         var trailing: [NSView] = []
-        let freeing = AgentJudge.freeing(checks)
+        let freeing = checks.filter(StatusJob.frees)
         if freeing.count >= 2 {
-            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") { judge.approve(all: freeing.map(\.id)) })
+            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") { job.approve(all: freeing.map(\.id)) })
         }
-        trailing.append(NeedsYouCard.recheckButton(d))
+        trailing.append(NeedsYouCard.refreshButton(d, title: "Refresh"))
         if !(page is InboxPage) { trailing.append(ActionButton("Open in Inbox", style: .link) { [weak self] in self?.page?.go(.inbox(.agents)) }) }
         let c = Card(title: "Needs you · \(n)", trailing: trailing, padding: 10, spacing: 2,
                      fill: Palette.panel, border: Palette.intake.withAlphaComponent(0.55))
@@ -155,8 +164,8 @@ final class NeedsYouCard: NSObject {
 
     private func checkedText(_ key: String) -> NSView {
         guard let d = data else { return NSView() }
-        if d.aiChecks.checking.contains(key.uppercased()) { return NSStackView(h: [Spinner(), NSTextField.text("Checking…", size: 11.5, color: Palette.dim)], spacing: 4) }
-        let t = d.aiChecks.checkedAt(key).map { "checked " + relativeAgo($0) } ?? ""
+        if d.statusJob.reading.contains(key.uppercased()) { return NSStackView(h: [Spinner(), NSTextField.text("Reading…", size: 11.5, color: Palette.dim)], spacing: 4) }
+        let t = d.statusJob.status(key).map { "read " + relativeAgo($0.at) } ?? ""
         return NSTextField.text(t, size: 11.5, color: Palette.dim)
     }
 
@@ -166,42 +175,55 @@ final class NeedsYouCard: NSObject {
         return v
     }
 
-    // MARK: AI checks
+    // MARK: Status
 
-    func checkLine(_ j: Judgement) -> NSView {
+    func checkLine(_ st: SessionStatus) -> NSView {
         guard let d = data else { return NSView() }
-        let judge = d.aiChecks
-        let open = expanded.contains(j.id)
-        let tone = Tone(j.verdict)
-        let word = NSTextField.text(j.verdict.word, size: 12.5, weight: .medium, color: tone.color)
+        let job = d.statusJob
+        let open = expanded.contains(st.id)
+        let tone = Tone(st.state)
+        let word = NSTextField.text(st.word, size: 12.5, weight: .medium, color: tone.color)
         word.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        let frees = AgentJudge.freeing([j]).count == 1
-        let pill = Chiplet(j.verdict == .done ? (frees ? "Free slot" : "Seen") : "Nudge", symbol: j.verdict == .done ? "square.dashed" : "text.bubble")
-        let menu: () -> [MenuAction] = { [weak self] in
-            [MenuAction("Check again") { judge.recheck(keys: [j.key]) },
-             MenuAction("Open session") { self?.page?.go(.item(j.key, .session)) },
-             MenuAction("Free the slot") { judge.release(j.id) }]
+        let frees = StatusJob.frees(st)
+        let pill: Chiplet
+        var buttons: [NSView]
+        switch st.state {
+        case .stuck:
+            pill = Chiplet("Nudge", symbol: "text.bubble")
+            buttons = [ActionButton("Send nudge", style: .primary) { job.approve(st.id) }, ActionButton("Hold") { job.hold(st.id) }]
+        case .unfinished:
+            pill = Chiplet("Not finished", symbol: "circle.lefthalf.filled")
+            buttons = [ActionButton("Ask the agent", style: .primary) { job.ask(st.id) }, ActionButton("Mark as blocked on you") { job.markBlocked(st.id) }]
+        default:
+            pill = Chiplet(frees ? "Free slot" : "Seen", symbol: "square.dashed")
+            buttons = [ActionButton("Approve", style: .primary) { job.approve(st.id) }, ActionButton("Hold") { job.hold(st.id) }]
         }
-        let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(j.key), word, titleField(j.key), checkedText(j.key), pill,
-                       ActionButton("Approve", style: .primary) { judge.approve(j.id) }, ActionButton("Hold") { judge.hold(j.id) },
-                       moreButton(j.key, menu)],
-                      height: 34, inset: 6, label: "\(j.key): \(j.verdict.word). \(j.action)") { [weak self] in self?.toggle(j.id) }
+        let menu: () -> [MenuAction] = { [weak self] in
+            [MenuAction("Refresh") { job.refresh(keys: [st.key]) },
+             MenuAction("Open session") { self?.page?.go(.item(st.key, .session)) },
+             MenuAction("Free the slot") { job.release(st.id) }]
+        }
+        let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(st.key), word, titleField(st.key), checkedText(st.key), pill]
+                      + buttons + [moreButton(st.key, menu)],
+                      height: 34, inset: 6, label: "\(st.key): \(st.word). \(st.reply.headline)") { [weak self] in self?.toggle(st.id) }
         row.menuItems = { menu().map(\.item) }
         guard open else { return row }
-        var facts = ["Checked \(relativeAgo(j.at))"]
-        if let s = j.since { facts.append("output same for \(Int(j.at.timeIntervalSince(s) / 60)) min") }
-        if let t = j.ticking { facts.append(t ? "spinner counter moves" : "spinner counter does not move") }
-        if j.byAI { facts.append("by AI") }
+        var facts = [st.read + " " + relativeAgo(st.at)]
+        if let s = st.since { facts.append("screen same for \(Int(st.at.timeIntervalSince(s) / 60)) min") }
+        if st.byAI { facts.append("by AI") }
         let detail = NSStackView(v: [NSStackView(h: [NSTextField.text(facts.joined(separator: " · "), size: 11.5, color: Palette.dim), Spacer(),
-                                                     ActionButton("Check again", symbol: "arrow.clockwise", style: .link) { judge.recheck(keys: [j.key]) }],
-                                                 spacing: 6)]
-                                 + j.evidence.map { e in
-                                     NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(e, size: 12, color: Palette.mut, lines: 3)],
-                                                 spacing: 6, align: .top)
-                                 }, spacing: 3)
+                                                     ActionButton("Refresh", symbol: "arrow.clockwise", style: .link) { job.refresh(keys: [st.key]) }],
+                                                 spacing: 6)], spacing: 3)
         detail.arrangedSubviews.first?.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true
-        detail.addFull(NSTextField.text(j.action, size: 12, color: Palette.dim, lines: 2))
-        if let n = j.nudge { detail.addFull(TermView(lines: [n], height: 44)) }
+        if !st.reply.headline.isEmpty { detail.addFull(NSTextField.text(st.reply.headline, size: 12.5, color: Palette.fg, lines: 3)) }
+        for (label, list) in [("Done", st.reply.done), ("Next", st.reply.next)] where !list.isEmpty {
+            detail.addFull(NSTextField.text(label, size: 11, weight: .semibold, color: Palette.dim))
+            for e in list {
+                detail.addFull(NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(e, size: 12, color: Palette.mut, lines: 3)],
+                                           spacing: 6, align: .top))
+            }
+        }
+        if st.state == .stuck, !st.reply.nudge.isEmpty { detail.addFull(TermView(lines: [st.reply.nudge], height: 44)) }
         return wrap(row, detail)
     }
 
@@ -258,10 +280,10 @@ final class NeedsYouCard: NSObject {
     }
 
     /// One chip for each kind, with its count: "Manual check · 7".
-    static func kindChips(_ e: SessionEnd) -> [NSView] {
+    static func kindChips(_ steps: [StatusReply.Step]) -> [NSView] {
         var order: [String] = []
         var counts: [String: Int] = [:]
-        for s in e.steps {
+        for s in steps {
             if counts[s.kind] == nil { order.append(s.kind) }
             counts[s.kind, default: 0] += 1
         }
@@ -271,51 +293,51 @@ final class NeedsYouCard: NSObject {
         }
     }
 
-    func blockedLine(_ e: SessionEnd) -> NSView {
+    func blockedLine(_ e: SessionStatus) -> NSView {
         guard let d = data else { return NSView() }
-        let judge = d.aiChecks
+        let job = d.statusJob
         let open = expanded.contains(e.id)
         let tone = Tone(SessionState.blocked)
+        let steps = e.reply.needsYou
         var cells: [NSView] = [Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(e.key),
                                NSTextField.text(tone.word, size: 12.5, weight: .medium, color: tone.color), titleField(e.key)]
-        cells += NeedsYouCard.kindChips(e)
-        if let b = e.blockedBy.first { cells.append(Chiplet("Blocked by \(b)", symbol: "link")) }
-        if let f = e.followUpAt {
-            let df = DateFormatter()
-            df.dateFormat = "MMM d HH:mm"
-            cells.append(Chiplet("Follow-up \(df.string(from: f))", symbol: "calendar"))
-        }
+        cells += NeedsYouCard.kindChips(steps)
+        if let b = e.reply.blockedBy.first { cells.append(Chiplet("Blocked by \(b)", symbol: "link")) }
         let since = d.agentIndex.agent(e.key)?.since ?? e.at
         cells.append(NSTextField.text(AgentSession.minutes(Date().timeIntervalSince(since)).replacingOccurrences(of: "m", with: " min"), size: 11.5,
                                       color: Palette.dim))
         let menu: () -> [MenuAction] = { [weak self] in
-            [MenuAction("Check again") { judge.recheck(keys: [e.key]) },
+            [MenuAction("Refresh") { job.refresh(keys: [e.key]) },
              MenuAction("Open session") { self?.page?.go(.item(e.key, .session)) },
-             MenuAction("Snooze 1 day") { judge.snooze(end: e.id) }]
+             MenuAction("Snooze 1 day") { job.snooze(e.id) }]
         }
         cells.append(moreButton(e.key, menu))
         let row = Row(cells, height: 34, inset: 6,
-                      label: "\(e.key): Blocked on you. \(e.steps.count) steps, \(e.passed) pass.") { [weak self] in self?.toggle(e.id) }
+                      label: "\(e.key): Blocked on you. \(steps.count) steps, \(e.passed) pass.") { [weak self] in self?.toggle(e.id) }
         row.menuItems = { menu().map(\.item) }
         guard open else { return row }
+        return wrap(row, needsYou(e))
+    }
 
+    /// The "Needs you" checklist of a blocked status, with Tell the agent, Report a failure and Snooze.
+    func needsYou(_ e: SessionStatus, session: Bool = true) -> NSView {
         let detail = NSStackView(v: [], spacing: 4)
-        if let a = d.agentIndex.agent(e.key), let first = a.message?.components(separatedBy: "\n").first, !first.isEmpty {
-            detail.addFull(NSTextField.text(SessionEnd.plain(first), size: 12, color: Palette.mut, lines: 2))
-        }
-        for (i, s) in e.steps.enumerated() {
+        guard let d = data else { return detail }
+        let job = d.statusJob
+        if !e.reply.headline.isEmpty { detail.addFull(NSTextField.text(e.reply.headline, size: 12, color: Palette.mut, lines: 2)) }
+        for (i, s) in e.reply.needsYou.enumerated() {
             let box = NSButton(checkboxWithTitle: s.text, target: self, action: #selector(ticked(_:)))
             box.identifier = NSUserInterfaceItemIdentifier(e.id)
             box.tag = i
-            box.state = s.ticked == true ? .on : .off
+            box.state = e.ticks.indices.contains(i) && e.ticks[i] ? .on : .off
             box.font = .systemFont(ofSize: 12.5)
             box.setAccessibilityLabel("\(NeedsYouCard.kindLabel(s.kind)): \(s.text)")
             detail.addFull(box)
         }
-        let tell = ActionButton("Tell the agent: \(e.passed) of \(e.steps.count) pass", style: .primary) { [weak self] in self?.tell(e) }
+        let tell = ActionButton("Tell the agent: \(e.passed) of \(e.reply.needsYou.count) pass", style: .primary) { [weak self] in self?.tell(e) }
         if sending.contains(e.id) { tell.busy("Sending…") }
-        var actions: [NSView] = [tell, ActionButton("Report a failure…") { [weak self] in self?.report(e) },
-                                 ActionButton("Open session") { [weak self] in self?.page?.go(.item(e.key, .session)) }]
+        var actions: [NSView] = [tell, ActionButton("Report a failure…") { [weak self] in self?.report(e) }]
+        if session { actions.append(ActionButton("Open session") { [weak self] in self?.page?.go(.item(e.key, .session)) }) }
         if let found = d.projectStore.item(key: e.key), let blockedOpt = found.snap.statusOptions.first(where: { $0.category == .blocked }),
            found.item.statusOptionId != blockedOpt.id {
             actions.append(ActionButton("Set Plane to Blocked") { [weak self] in
@@ -325,32 +347,32 @@ final class NeedsYouCard: NSObject {
                 }
             })
         }
-        actions.append(ActionButton("Snooze 1 day") { judge.snooze(end: e.id) })
+        actions.append(ActionButton("Snooze 1 day") { job.snooze(e.id) })
         actions.append(Spacer())
         detail.addFull(NSStackView(h: actions, spacing: 6))
         if let (t, n) = notes[e.id] { detail.addFull(NSTextField.text(n, size: 11.5, color: t.color)) }
         else if let told = e.told { detail.addFull(NSTextField.text("Sent \(relativeAgo(told)). The ticks stay on this Mac.", size: 11.5, color: Palette.dim)) }
         else { detail.addFull(NSTextField.text("The ticks stay on this Mac. The button sends the list to the session.", size: 11.5, color: Palette.dim)) }
-        return wrap(row, detail)
+        return detail
     }
 
     @objc private func ticked(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
-        data?.aiChecks.toggle(end: id, step: sender.tag)
+        data?.statusJob.toggle(id, step: sender.tag)
     }
 
-    private func tell(_ e: SessionEnd, extra: String = "") {
-        guard let judge = data?.aiChecks, !sending.contains(e.id) else { return }
+    private func tell(_ e: SessionStatus, extra: String = "") {
+        guard let job = data?.statusJob, !sending.contains(e.id) else { return }
         sending.insert(e.id)
         page?.reload()
-        judge.tell(end: e.id, extra: extra) { [weak self] err in
+        job.tell(e.id, extra: extra) { [weak self] err in
             self?.sending.remove(e.id)
             self?.notes[e.id] = err.map { (.bad, "Could not send to \(e.key): \($0.message)") } ?? (.ok, "Sent to the session of \(e.key).")
             self?.page?.reload()
         }
     }
 
-    private func report(_ e: SessionEnd) {
+    private func report(_ e: SessionStatus) {
         let a = NSAlert()
         a.messageText = "Report a failure to \(e.key)"
         a.informativeText = "Tell the agent what failed. OverSire sends it with the checklist."

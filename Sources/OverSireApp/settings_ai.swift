@@ -185,7 +185,7 @@ extension SettingsPage {
         v.identifier = SettingsAnchor.use.id
         v.addFull(CardGrid([
             card("Sessions", [
-                sw("Done and stuck checks", "Check a session that goes quiet. The queue can start the next item.", AI_CFG.agentChecks) { AI_CFG.agentChecks = $0 },
+                sw("Session status", "Read the history of a session at a turn end and after it goes quiet. Say where the work stands.", AI_CFG.agentChecks) { AI_CFG.agentChecks = $0 },
                 sw("Queue order", "Suggest an order for each lane.", AI_CFG.queueOrder) { AI_CFG.queueOrder = $0 },
                 sw("Intake agent", "Check intake items in an Orca terminal in plan mode. Needs Orca, not an AI key.", AI_CFG.intakeAgent) { AI_CFG.intakeAgent = $0 },
                 sw("Session summary", "Summarize the session on the item page.", AI_CFG.sessionSummary) { AI_CFG.sessionSummary = $0 },

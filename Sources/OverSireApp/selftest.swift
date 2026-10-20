@@ -638,28 +638,8 @@ func runSelfTest() {
         check(lane.pick(state: state, world: world()).entry == nil, "queue: empty lane")
     }
 
-    // AI checks: heuristics first, then the parse of the AI reply.
+    // Session status: the read order of the session states, the out of date rule, the blocked heuristics.
     do {
-        var s = AgentSignals(state: .quiet, phase: .working, quietMinutes: 4, tail: [], ci: nil, prOpen: false, status: .progress)
-        check(AgentJudge.heuristic(s, quietLimit: 10) == nil, "check: not quiet long enough")
-        s.quietMinutes = 15
-        s.tail = ["$ go test -run X", "FAIL", "$ go test -run X", "FAIL", "$ go test -run X"]
-        check(AgentJudge.heuristic(s, quietLimit: 10)?.0 == .stuck, "check: the same command three times is stuck")
-        s.tail = ["Waiting for review."]; s.ci = .ok; s.prOpen = true
-        check(AgentJudge.heuristic(s, quietLimit: 10)?.0 == .done, "check: open PR and green CI is done")
-        s.ci = nil; s.prOpen = false
-        check(AgentJudge.heuristic(s, quietLimit: 10) == nil, "check: unclear goes to AI")
-        let p = AgentJudge.parse("```json\n{\"verdict\":\"stuck\",\"evidence\":[\"a\",\"b\"],\"nudge\":\"Add a timeout\"}\n```")
-        check(p?.0 == .stuck && p?.1 == ["a", "b"] && p?.2 == "Add a timeout", "check: parse the AI reply")
-        check(AgentJudge.parse("no json") == nil, "check: a bad reply is nil")
-        check(AgentJudge.parse(#"{"verdict":"working","evidence":["a build runs"]}"#)?.0 == .working, "check: parse the working verdict")
-        var long = s
-        long.state = .longCommand; long.ci = .ok; long.prOpen = true; long.quietMinutes = 30
-        check(AgentJudge.heuristic(long, quietLimit: 10) == nil, "check: no check of a long command before 60 min")
-        long.quietMinutes = 61
-        check(AgentJudge.heuristic(long, quietLimit: 10) == nil, "check: a long command never looks done by heuristics")
-        s.state = .working
-        check(AgentJudge.heuristic(s, quietLimit: 10) == nil, "check: a working session gets no check")
         // The read order of the session states: one case for each row of the table.
         let q: TimeInterval = 600
         let rows: [(SessionFacts, SessionState)] = [
@@ -676,19 +656,10 @@ func runSelfTest() {
         ]
         for (f, want) in rows { check(f.state(quietAfter: q) == want, "state: \(f) is \(want), not \(f.state(quietAfter: q))") }
         check(SessionState.background.holdsSlot && !SessionState.blocked.holdsSlot && !SessionState.done.holdsSlot, "state: slots")
-        let at = Date()
-        let j = Judgement(id: "1", key: "A-1", verdict: .done, evidence: [], action: "", nudge: nil, at: at, phase: .quiet, screen: "f1")
-        var w = SessionWatch(at: at)
-        w.fingerprint = "f1"
-        check(AgentJudge.stale(j, state: .quiet, watch: w, at: at) == nil, "retire: same screen holds")
-        check(AgentJudge.stale(j, state: .done, watch: w, at: at)?.hasPrefix("Session done at") == true, "retire: session done")
-        w.fingerprint = "f2"
-        check(AgentJudge.stale(j, state: .quiet, watch: w, at: at)?.hasPrefix("New output at") == true, "retire: new output")
-        check(AgentJudge.stale(j, state: nil, watch: nil, at: at)?.hasPrefix("Session closed") == true, "retire: closed")
-        let ask = SessionEnd.read(message: "Done.\n\nI can't do the check:\n- a capture on 2 displays\n- a send to Orca", turn: "",
-                                  recap: nil, status: .progress)
+        let ask = BlockedText.read(message: "Done.\n\nI can't do the check:\n- a capture on 2 displays\n- a send to Orca", turn: "",
+                                   recap: nil, status: .progress)
         check(ask?.steps.map(\.text) == ["a capture on 2 displays", "a send to Orca"], "end: steps from the bullets \(String(describing: ask))")
-        check(SessionEnd.read(message: "Released v2. If you want, I can add a test.", turn: "", recap: nil, status: .progress) == nil,
+        check(BlockedText.read(message: "Released v2. If you want, I can add a test.", turn: "", recap: nil, status: .progress) == nil,
               "end: an offer is no block")
         // Session notes: transcript lines, the size cap, and the summary parse.
         let jsonl = [

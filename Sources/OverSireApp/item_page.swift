@@ -721,9 +721,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let a = stream?.agent {
             out.append(Event(source: .orca, text: "Session: \(a.label())" + (a.message.map { " · \($0)" } ?? ""), at: a.since))
         }
-        for j in data.aiChecks.checks where j.key == key {
-            let state = j.state == .retired ? "retired: " + (j.retired ?? "out of date") : j.state.rawValue
-            out.append(Event(source: .oversire, text: "AI check: \(j.verdict.word) · \(state)", at: j.at, body: j.evidence.joined(separator: "\n")))
+        for j in data.statusJob.statuses where j.key == key {
+            out.append(Event(source: .oversire, text: "Status: \(j.word) · \(j.reply.headline)", at: j.at,
+                             body: (j.reply.done + j.reply.next).joined(separator: "\n")))
         }
         return out.sorted { $0.at > $1.at }
     }

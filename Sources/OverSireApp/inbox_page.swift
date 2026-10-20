@@ -117,11 +117,11 @@ final class InboxFeed {
                                   at: a.since, unread: !read.contains(id), route: .item(key, .session),
                                   itemKey: key, itemURL: store.item(key: key)?.2.url))
         }
-        for c in data.aiChecks.checks.prefix(30) {
+        for c in data.statusJob.statuses.prefix(30) where c.byAI && c.state != .working {
             let id = "ai|" + c.id
-            out.append(InboxEntry(id: id, source: .ai, title: "AI check: \(c.key) · \(c.verdict.word)",
-                                  body: c.evidence.joined(separator: " · "), at: c.at,
-                                  unread: c.state == .pending && !read.contains(id), route: .agents, itemKey: c.key))
+            out.append(InboxEntry(id: id, source: .ai, title: "Status: \(c.key) · \(c.word)",
+                                  body: c.reply.headline, at: c.at,
+                                  unread: c.handled == .open && !read.contains(id), route: .agents, itemKey: c.key))
         }
         for (pk, snap) in store.snapshots {
             for i in snap.intake ?? [] {

@@ -24,3 +24,4 @@ AppIcon.iconset/
 # SwiftPM
 .build/
 .swiftpm/
+__pycache__/

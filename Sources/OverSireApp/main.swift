@@ -87,7 +87,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var planner = PlannerBook(writes: STORE_WRITES)
     lazy var plannerSignals = PlannerSignals(commands: ProcessRunner(), writes: STORE_WRITES)
     var signalTimer: Timer?
-    lazy var aiChecks = AgentJudge(path: CHECKS_PATH, agents: agentIndex, queue: queue)
+    lazy var statusJob = StatusJob(path: STATUS_PATH, agents: agentIndex, queue: queue)
     lazy var writeBack: PlaneWriteBack = {
         let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, trackers: ENV)
         w.onError = { log.error("\($0)") }
@@ -239,7 +239,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         agentIndex.startTimer()
-        for n in [WorkQueue.changed, AgentJudge.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
+        for n in [WorkQueue.changed, StatusJob.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
             }
@@ -760,7 +760,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func reloadList() {
         workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
         queue.tick(workstreams: workstreams)
-        aiChecks.tick(workstreams: workstreams, store: projectStore)
+        statusJob.tick(workstreams: workstreams, store: projectStore)
         sessions.tick()
         if !firstLoad, ciAssist.digestDue() {
             let intake = projectStore.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }

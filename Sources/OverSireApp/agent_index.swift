@@ -386,6 +386,19 @@ final class AgentIndex: NSObject {
         }
     }
 
+    /// The history of the session of the key, when the runtime can read it.
+    func history(_ key: String, budget: HistoryBudget = .standard, done: @escaping (Result<SessionDigest, ProviderError>) -> Void) {
+        guard let a = agent(key), let card = a.card, let ws = cards.first(where: { $0.id == card }),
+              let rt = runtime() as? any SessionHistoryReading else {
+            done(.failure(.unsupported(.sessionHistory)))
+            return
+        }
+        Task {
+            let r = await Result(awaiting: { try await rt.history(of: a, in: ws, budget: budget) })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
     func send(_ key: String, text: String, done: @escaping (ProviderError?) -> Void) {
         terminal(key) { rt, s in
             guard let s else { return ProviderError.vendor(code: "no_terminal", message: "The session terminal is closed") }

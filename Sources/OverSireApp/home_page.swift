@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 
 // One thing that waits for the user. Home and the menu bar list them, most urgent first.
 struct NeedsYou: Equatable {
@@ -32,19 +33,20 @@ struct NeedsYou: Equatable {
 
     static func ==(a: NeedsYou, b: NeedsYou) -> Bool { a.kind == b.kind && a.title == b.title && a.route == b.route }
 
-    /// One line for each check, or one line for each verdict when two or more checks have it.
-    static func checks(_ pending: [Judgement]) -> [NeedsYou] {
-        [Judgement.Verdict.done, .stuck].flatMap { v -> [NeedsYou] in
-            let list = pending.filter { $0.verdict == v }
+    /// One line for each status, or one line for each state when two or more statuses have it.
+    static func checks(_ pending: [SessionStatus]) -> [NeedsYou] {
+        [StatusReply.State.done, .stuck, .unfinished].flatMap { v -> [NeedsYou] in
+            let list = pending.filter { $0.state == v }
             let at = list.map(\.at).max() ?? .distantPast
+            let words: [StatusReply.State: String] = [.done: "look done", .stuck: "look stuck", .unfinished: "are not finished"]
             if list.count > 1 {
-                return [NeedsYou(kind: .aiCheck, title: "AI: \(list.count) sessions \(v == .done ? "look done" : "look stuck")",
+                return [NeedsYou(kind: .aiCheck, title: "AI: \(list.count) sessions \(words[v] ?? "")",
                                  body: list.map(\.key).joined(separator: " · "), at: at, route: .agents, keys: list.map(\.key))]
             }
             return list.map { c in
-                NeedsYou(kind: .aiCheck, title: "AI: the \(c.key) session \(c.verdict.word.lowercased())",
-                         body: c.verdict == .done ? "Approve to start the next item in the queue." : "Approve a nudge, or stop it.",
-                         at: c.at, route: .agents)
+                let body = c.state == .done ? "Approve to start the next item in the queue."
+                    : c.state == .stuck ? "Approve a nudge, or stop it." : "Ask the agent to go on, or mark it as blocked on you."
+                return NeedsYou(kind: .aiCheck, title: "AI: the \(c.key) session: \(c.word.lowercased())", body: body, at: c.at, route: .agents)
             }
         }
     }
@@ -56,10 +58,11 @@ struct NeedsYou: Equatable {
             out.append(NeedsYou(kind: .agentWaiting, title: "\(key) asks a question",
                                 body: a.message ?? "The session waits for your answer.", at: a.since, route: .item(key, .overview)))
         }
-        out += checks(data.aiChecks.pending)
-        for e in data.aiChecks.blocking {
+        out += checks(data.statusJob.pending)
+        for e in data.statusJob.blocking {
+            let n = e.reply.needsYou.count
             out.append(NeedsYou(kind: .agentWaiting, title: "\(e.key) is blocked on you",
-                                body: "\(e.steps.count) step\(e.steps.count == 1 ? "" : "s") for you · \(e.passed) pass", at: e.at, route: .agents))
+                                body: "\(n) step\(n == 1 ? "" : "s") for you · \(e.passed) pass", at: e.at, route: .agents))
         }
         for (repo, r) in failingRuns(data.grouped) {
             let link = ws.link(runId: r.id)
@@ -201,7 +204,7 @@ final class HomePage: Page {
         df.dateFormat = "EEEE, MMM d"
         col.addFull(PageHeader("Home", caption: "\(df.string(from: Date())) · \(streams.count) workstream\(streams.count == 1 ? "" : "s") · \(running.count) run\(running.count == 1 ? "" : "s") in progress"))
 
-        let checks = data.aiChecks.pending.count
+        let checks = data.statusJob.pending.count
         let attention = NeedsYouCard(page: self).count(data)
         let linked = running.filter { data.workstreams.link(runId: $0.run.id) != nil }.count
         var tiles: [NSView] = [
@@ -210,7 +213,7 @@ final class HomePage: Page {
             Tile("\(agents.count)", "Sessions · \(attention) need\(attention == 1 ? "s" : "") you", tone: .working, ring: attention > 0 ? Palette.intake : nil) { [weak self] in
                 self?.go(.agents)
             },
-            Tile("\(data.queue.count)", "Queue · \(checks) AI check\(checks == 1 ? "" : "s")", tone: .queued) { [weak self] in self?.go(.queue) },
+            Tile("\(data.queue.count)", "Queue · \(checks) status\(checks == 1 ? "" : "es") to act on", tone: .queued) { [weak self] in self?.go(.queue) },
         ]
         if data.has(.intake) {
             tiles.append(Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),

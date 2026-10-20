@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import OverSireAI
 
 // The queue: a link to the sessions that need you, then one card per lane. The Board view shows Running, Up next, Waits and Held.
 // A card that shares an area with a card that runs at the same time gets a red border and a ▲ line.
@@ -242,8 +243,8 @@ final class QueuePage: Page {
         var badge: NSView? = idx.agent(c.key).map { Pill(Tone($0.phase), text: $0.label()) }
         if let st = idx.state(c.key) {
             var views: [NSView] = [Pill(Tone(st), text: idx.pillText(c.key) ?? st.label)]
-            if let j = data.aiChecks.pending.first(where: { $0.key == c.key.uppercased() }) {
-                views.append(NSTextField.text(j.verdict.word, size: 11.5, weight: .medium, color: Tone(j.verdict).color))
+            if let j = data.statusJob.pending.first(where: { $0.key == c.key.uppercased() }) {
+                views.append(NSTextField.text(j.word, size: 11.5, weight: .medium, color: Tone(j.state).color))
             }
             badge = NSStackView(h: views, spacing: 6)
         }
@@ -426,7 +427,7 @@ final class QueuePage: Page {
         asked.insert(tag)
         ordering.insert(lane.project)
         let vision = data.projectStore.tracked.first { $0.ref.storeKey == lane.project }.flatMap { data.memory.vision(of: $0.ref)?.text }
-        data.aiChecks.suggestOrder(lane, store: data.projectStore, vision: vision, blockers: blockers) { [weak self] s in
+        suggestOrder(lane, store: data.projectStore, vision: vision, blockers: blockers) { [weak self] s in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.ordering.remove(lane.project)
@@ -435,6 +436,18 @@ final class QueuePage: Page {
             }
         }
         return nil
+    }
+
+    /// `vision`: the project vision. `blockers`: the open blocker keys of each entry.
+    private func suggestOrder(_ lane: QueueLane, store: ProjectStore, vision: String?, blockers: [String: [String]],
+                              done: @escaping ((order: [String], reason: String)?) -> Void) {
+        guard AI_CFG.queueOrder, lane.entries.count > 1, let ai = AIClient.current else { done(nil); return }
+        var bodies: [String: String] = [:]
+        for e in lane.entries { bodies[e.key] = store.item(key: e.key)?.item.body }
+        let input = AgentPrompts.orderInput(lane.entries, bodies: bodies, vision: vision, blockers: blockers)
+        ai.run(.order, input, id: "order:\(lane.id)") { r in
+            if case .success(let t) = r { done(AgentPrompts.parseOrder(t, keys: lane.entries.map(\.key))) } else { done(nil) }
+        }
     }
 
     // Open items with no agent, not in the queue, by project.

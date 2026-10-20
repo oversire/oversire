@@ -16,7 +16,7 @@ protocol AppData: AnyObject {
     var areas: ItemAreaBook { get }
     var suggestions: SuggestionBook { get }
     var planner: PlannerBook { get }
-    var aiChecks: AgentJudge { get }
+    var statusJob: StatusJob { get }
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }
     var ciAssist: CIAssist { get }
