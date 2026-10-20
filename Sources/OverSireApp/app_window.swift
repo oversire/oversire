@@ -531,7 +531,6 @@ struct SidebarModel {
         let failing = failingRuns(data.grouped).count
         let agents = data.agentIndex.agents.values
         let waiting = agents.filter { $0.phase == .waiting }.count
-        let unread = store.unreadCount()
         let mine = store.snapshots.values.reduce(0) { n, s in
             n + s.rootItems.filter { $0.isMine(s.me) && s.option($0.statusOptionId)?.category != .done }.count
         }
@@ -550,7 +549,6 @@ struct SidebarModel {
 
         var out: [SidebarLine] = [
             e(.home, "Home", "house"),
-            e(.inbox(.all), "Inbox", "tray", badge: unread + intake, alert: intake, tone: Palette.intake, what: "intake"),
             e(.mine, "My items", "person.crop.circle", badge: mine),
             e(.agents, "Sessions", "cpu", badge: agents.count, alert: waiting, tone: Palette.warn, what: "need input"),
             e(.queue, "Queue", "list.number", badge: plans),
@@ -558,6 +556,8 @@ struct SidebarModel {
             e(.prs, "Pull requests", "arrow.triangle.pull", badge: prs),
             e(.insights, "Insights", "chart.bar"),
         ]
+        // Intake needs a tracker with intake.
+        if data.has(.intake) { out.insert(e(.intake(nil), "Intake", "tray.and.arrow.down", badge: intake, alert: intake, tone: Palette.intake, what: "wait for triage"), at: 1) }
         let projects = PROJECTS_CFG.sorted(store.tracked).filter { !PROJECTS_CFG.local($0.identifier).hidden }
         if !projects.isEmpty {
             out.append(.header("Projects"))
@@ -571,6 +571,7 @@ struct SidebarModel {
             }
         }
         out.append(.header("Views"))
+        out.append(e(.activity, "Activity", "clock.arrow.circlepath"))
         out.append(e(.runs(.failed), "Failing runs", "xmark.octagon", badge: failing))
         out.append(e(.runs(.unlinked), "Unlinked runs", "link.badge.plus"))
         return out
@@ -582,7 +583,8 @@ enum PageFactory {
     static func make(_ r: Route, data: AppData, router: Router) -> Page {
         switch r {
         case .home: return HomePage(r, data: data, router: router)
-        case .inbox: return InboxPage(r, data: data, router: router)
+        case .intake: return IntakeListPage(r, data: data, router: router)
+        case .activity: return ActivityPage(r, data: data, router: router)
         case .mine, .work(.items): return WorkPage(r, data: data, router: router)
         case .work(.worktrees): return AgentsPage(r, data: data, router: router)
         case .work(.lanes): return QueuePage(r, data: data, router: router)

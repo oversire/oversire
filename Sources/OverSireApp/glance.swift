@@ -113,7 +113,7 @@ final class GlanceVC: NSViewController {
 
     private func now(_ needs: [NeedsYou]) {
         section("Needs you", count: needs.count, needs.prefix(5).map { n in NeedsYouRow(n, commands: commands) { [weak self] in self?.open($0) } },
-                more: needs.count > 5 ? ("\(needs.count - 5) more in the inbox", .inbox(.all)) : nil, empty: "Nothing waits for you.")
+                more: needs.count > 5 ? ("\(needs.count - 5) more on Home", .home) : nil, empty: "Nothing waits for you.")
         let running = data.grouped.flatMap { g in g.1.filter { $0.status != "completed" }.map { (g.0, $0) } }
             .sorted { ($0.1.createdAt) > ($1.1.createdAt) }
         section("Running", count: running.count, running.prefix(6).map { runRow($0.0, $0.1) }, empty: "No run is in progress.")
@@ -166,7 +166,7 @@ final class GlanceVC: NSViewController {
         let intake = data.projectStore.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }
         let row = Row([Glyph(Tone.intake), TwoLine("Intake", intake == 0 ? "No item waits for triage." : "\(intake) item\(intake == 1 ? "" : "s") wait for triage."),
                        Spacer(), Glyph("chevron.right", color: Palette.dim, size: 11)],
-                      height: 40, label: "Intake, \(intake) items wait") { [weak self] in self?.open(.inbox(.intake)) }
+                      height: 40, label: "Intake, \(intake) items wait") { [weak self] in self?.open(.intake(nil)) }
         section("Intake", count: nil, [row], empty: "")
     }
 

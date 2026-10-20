@@ -83,7 +83,7 @@ struct NeedsYou: Equatable {
         let pending = data.projectStore.snapshots.values.flatMap { s in (s.intake ?? []).map { (s.summary.identifier, $0) } }
         if let newest = pending.max(by: { $0.1.createdAt < $1.1.createdAt }) {
             out.append(NeedsYou(kind: .intake, title: "\(pending.count) intake item\(pending.count == 1 ? "" : "s") wait",
-                                body: "Newest: \(newest.0) · \(newest.1.name)", at: newest.1.createdAt, route: .inbox(.intake)))
+                                body: "Newest: \(newest.0) · \(newest.1.name)", at: newest.1.createdAt, route: .intake(nil)))
         }
         return ranked(out)
     }
@@ -217,7 +217,7 @@ final class HomePage: Page {
         ]
         if data.has(.intake) {
             tiles.append(Tile("\(intake.reduce(0) { $0 + $1.1 })", intake.isEmpty ? "Intake to triage" : intake.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · "),
-                              tone: .intake) { [weak self] in self?.go(.inbox(.intake)) })
+                              tone: .intake) { [weak self] in self?.go(.intake(nil)) })
         }
         col.addFull(Grid(tiles, columns: tiles.count))
         if AI_CFG.digest, let d = data.ciAssist.digest, d.day == CIAssist.day(), !d.facts.isEmpty {
@@ -255,7 +255,7 @@ final class HomePage: Page {
         let ny = ListCard()
         for n in needs.prefix(8) { ny.add(NeedsYouRow(n, commands: commands) { [weak self] in self?.go($0) }) }
         if needs.count > 8 {
-            ny.add(Row([NSTextField.text("\(needs.count - 8) more in the inbox", size: 12, color: Palette.acc)], height: 34) { [weak self] in self?.go(.inbox(.all)) })
+            ny.add(Row([NSTextField.text("\(needs.count - 8) more in Activity", size: 12, color: Palette.acc)], height: 34) { [weak self] in self?.go(.activity) })
         }
         if ny.isEmpty { ny.add(data.loadingFirst ? LoadingNote("Loading") : EmptyNote("Nothing waits for you.")) }
         aside.addFull(ny)

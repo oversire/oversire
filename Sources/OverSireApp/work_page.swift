@@ -114,9 +114,13 @@ final class WorkPage: Page {
         let q = data.queue
         let entries = q.lanes.flatMap { l in l.entries.map { (l, $0) } }
         guard !entries.isEmpty else { return }
+        // The Planner plan changes show on the lane board.
+        let plans = hasCloud ? data.suggestions.openPlans().count : 0
         head(card, "Up next", count: entries.count, trailing: [
             NSTextField.text("Starts in this order when a slot frees", size: 12, color: Palette.dim),
-            ActionButton("Lane board", style: .link) { [weak self] in self?.go(.work(.lanes)) },
+            ActionButton(plans > 0 ? "Lane board · \(plans) plan change\(plans == 1 ? "" : "s")" : "Lane board", style: .link) { [weak self] in
+                self?.go(.work(.lanes))
+            },
         ])
         let world = q.world(workstreams: data.workstreams)
         for lane in q.lanes {

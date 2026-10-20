@@ -538,10 +538,10 @@ func runSelfTest() {
         try? fm.removeItem(atPath: home)
     }
     let router = Router()
-    router.go(.inbox(.all)); router.go(.inbox(.intake)); router.go(.runs(.all))
-    check(router.backStack == [.home, .inbox(.intake)], "a tab change replaces the history entry")
+    router.go(.intake(nil)); router.go(.intake("SLING")); router.go(.runs(.all))
+    check(router.backStack == [.home, .intake("SLING")], "a tab change replaces the history entry")
     router.back()
-    check(router.current == .inbox(.intake) && router.canGoForward, "back goes to the page before")
+    check(router.current == .intake("SLING") && router.canGoForward, "back goes to the page before")
     router.forward()
     check(router.current == .runs(.all) && !router.canGoForward, "forward returns")
     router.back(); router.go(.agents)

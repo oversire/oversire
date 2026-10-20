@@ -109,14 +109,11 @@ final class RowMenuTests: XCTestCase {
         XCTAssertEqual(bare.titles, ["Copy worktree path", "Show in Finder", "Open in Terminal"])
     }
 
-    func testInboxMenu() {
-        let e = InboxEntry(id: "a1", source: .plane, title: "t", body: "b", at: Date(), unread: true, route: .item("SLING-7", .overview),
-                           url: "https://plane/SLING-7", itemKey: "SLING-7", itemURL: "https://plane/SLING-7")
-        let m = RowMenu.inbox(e, projectKey: "SLING", canTriage: true)
-        XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Mark as read", "Copy ID", "Copy link", "Only this project"])
-        var read = e
-        read.unread = false
-        XCTAssertEqual(RowMenu.inbox(read, projectKey: nil, canTriage: false).command("Mark as unread"), .markRead(entryId: "a1", read: false))
+    func testActivityMenuHasNoReadState() {
+        let e = FeedEntry(id: "a1", source: .plane, title: "t", body: "b", at: Date(), route: .item("SLING-7", .overview),
+                          url: "https://plane/SLING-7", itemKey: "SLING-7", itemURL: "https://plane/SLING-7")
+        let m = RowMenu.activity(e, projectKey: "SLING", canTriage: true)
+        XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Copy ID", "Copy link", "Only this project"])
     }
 
     func testSidebarMenu() {

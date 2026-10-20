@@ -124,7 +124,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         func go(_ r: Route) -> () -> Void { { [weak owner] in owner?.show(r) } }
         var out: [Entry] = []
         let pages: [(Route, String, String)] = [
-            (.home, "Home", "house"), (.inbox(.all), "Inbox", "tray"), (.inbox(.intake), "Inbox › Intake", "tray.and.arrow.down"),
+            (.home, "Home", "house"), (.intake(nil), "Intake", "tray.and.arrow.down"), (.activity, "Activity", "clock.arrow.circlepath"),
             (.mine, "My items", "person.crop.circle"), (.agents, "Sessions", "cpu"), (.queue, "Queue", "list.number"),
             (.runs(.all), "Runs", "play.circle"), (.runs(.failed), "Runs › Failed", "xmark.octagon"),
             (.runs(.unlinked), "Runs › Unlinked", "link.badge.plus"), (.prs, "Pull requests", "arrow.triangle.pull"),

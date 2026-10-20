@@ -106,7 +106,6 @@ final class NeedsYouCard: NSObject {
             trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") { job.approve(all: freeing.map(\.id)) })
         }
         trailing.append(NeedsYouCard.refreshButton(d, title: "Refresh"))
-        if !(page is InboxPage) { trailing.append(ActionButton("Open in Inbox", style: .link) { [weak self] in self?.page?.go(.inbox(.agents)) }) }
         let c = Card(title: "Needs you · \(n)", trailing: trailing, padding: 10, spacing: 2,
                      fill: Palette.panel, border: Palette.intake.withAlphaComponent(0.55))
         var rows: [NSView] = checks.map(checkLine) + asks.map { inputLine($0.0, $0.1) } + blocked.map(blockedLine)

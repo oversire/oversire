@@ -109,7 +109,7 @@ extension Page {
                               dismiss: { [weak self] in book.dismiss(s.id, by: device); done?(); self?.reload() })
     }
 
-    /// The plan change as a card, for the Inbox.
+    /// The plan change as a card.
     func planCard(_ s: Suggestion, draft: PlanDraft) -> NSView {
         let c = Card(fill: Palette.intake.withAlphaComponent(0.06), border: Palette.intake.withAlphaComponent(0.55))
         let lane = data.queue.lanes.first { $0.project == s.lane }

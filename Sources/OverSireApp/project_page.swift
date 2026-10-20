@@ -117,7 +117,7 @@ final class ProjectPage: Page {
 
         var actions: [NSView] = []
         if let n = snap.intake?.count, n > 0 {
-            actions.append(ActionButton("\(n) intake", symbol: "tray.and.arrow.down") { [weak self] in self?.go(.inbox(.intake)) })
+            actions.append(ActionButton("\(n) intake", symbol: "tray.and.arrow.down") { [weak self] in self?.go(.intake(self?.projectKey)) })
         }
         let seg = NSSegmentedControl(labels: ["List", "Board"], trackingMode: .selectOne, target: self, action: #selector(layoutChanged(_:)))
         seg.selectedSegment = board ? 1 : 0

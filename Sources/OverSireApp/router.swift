@@ -3,14 +3,6 @@ import OverSireCore
 
 // One place in the window. The path is the deep link: oversire://<path>.
 enum Route: Equatable {
-    enum InboxTab: String, CaseIterable {
-        case all, mentions, runs, agents, intake, suggestions
-
-        /// The tabs that the accounts support. Intake needs a tracker with intake. Suggestions need a cloud account.
-        static func visible(_ has: (Capability) -> Bool, cloud: Bool = false) -> [InboxTab] {
-            allCases.filter { ($0 != .intake || has(.intake)) && ($0 != .suggestions || cloud) }
-        }
-    }
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     // Lanes is the board of the queue lanes. It has no tab: the Up next group links to it.
     enum WorkTab: String, CaseIterable { case items, worktrees, lanes }
@@ -66,7 +58,8 @@ enum Route: Equatable {
     }
 
     case home
-    case inbox(InboxTab)
+    case intake(String?)            // project identifier, nil for all
+    case activity
     case mine
     case work(WorkTab)
     case agents
@@ -83,7 +76,8 @@ enum Route: Equatable {
     var path: String {
         switch self {
         case .home: return "home"
-        case .inbox(let t): return t == .all ? "inbox" : "inbox/\(t.rawValue)"
+        case .intake(let p): return p.map { "intake/\($0)" } ?? "intake"
+        case .activity: return "activity"
         case .mine: return "mine"
         case .work(let t): return t == .items ? "work" : "work/\(t.rawValue)"
         case .agents: return "sessions"
@@ -124,7 +118,10 @@ enum Route: Equatable {
         let rest = Array(parts.dropFirst())
         switch head {
         case "home": self = .home
-        case "inbox": self = .inbox(rest.first.flatMap { InboxTab(rawValue: $0.lowercased()) } ?? .all)
+        // The Inbox is now Intake, Activity and the Needs you list of Home.
+        case "inbox": self = rest.first?.lowercased() == "intake" ? .intake(nil) : .home
+        case "intake": self = .intake(rest.first?.uppercased())
+        case "activity": self = .activity
         case "mine": self = .mine
         case "work": self = .work(rest.first.flatMap { WorkTab(rawValue: $0.lowercased()) } ?? .items)
         case "sessions", "agents": self = .agents
@@ -165,7 +162,7 @@ enum Route: Equatable {
     // The sidebar entry that shows as selected for this route.
     var sidebarKey: String {
         switch self {
-        case .inbox: return "inbox"
+        case .intake: return "intake"
         case .work: return "work"
         case .runs(let f): return f == .failed ? "runs/failed" : f == .unlinked ? "runs/unlinked" : "runs"
         case .run: return "runs"
@@ -179,7 +176,7 @@ enum Route: Equatable {
     // Same page, other tab or filter: the window updates the page in place.
     func samePage(_ other: Route) -> Bool {
         switch (self, other) {
-        case (.inbox, .inbox), (.runs, .runs), (.settings, .settings): return true
+        case (.intake, .intake), (.runs, .runs), (.settings, .settings): return true
         case (.item(let a, _), .item(let b, _)): return a == b
         case (.run(let a, let x), .run(let b, let y)): return a == b && x == y
         case (.project(let a), .project(let b)): return a == b
@@ -191,7 +188,8 @@ enum Route: Equatable {
     var title: String {
         switch self {
         case .home: return "Home"
-        case .inbox: return "Inbox"
+        case .intake: return "Intake"
+        case .activity: return "Activity"
         case .mine: return "My items"
         case .work: return "Work"
         case .agents: return "Sessions"
@@ -223,7 +221,7 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .inbox(.all), .inbox(.intake), .mine, .work(.items), .work(.worktrees), .work(.lanes), .agents, .queue, .runs(.all), .runs(.unlinked),
+        .home, .intake(nil), .intake("SLING"), .activity, .mine, .work(.items), .work(.worktrees), .work(.lanes), .agents, .queue, .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),

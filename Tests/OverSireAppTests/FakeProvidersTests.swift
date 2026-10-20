@@ -36,13 +36,6 @@ final class FakeProvidersTests: XCTestCase {
         XCTAssertEqual(tip, "Intake is off for this project, or OverSire cannot read it")
     }
 
-    func testIntakeTabNeedsTheCapability() {
-        XCTAssertFalse(Route.InboxTab.visible { _ in false }.contains(.intake))
-        XCTAssertTrue(Route.InboxTab.visible { $0 == .intake }.contains(.intake))
-        XCTAssertEqual(Route.InboxTab.visible { _ in false }.count, Route.InboxTab.allCases.count - 2)
-        XCTAssertTrue(Route.InboxTab.visible({ _ in false }, cloud: true).contains(.suggestions), "suggestions need a cloud account")
-    }
-
     func testKeysUseTheTrackerFormats() {
         let hash = KeyFormat(pattern: "#([0-9]+)\\b")
         XCTAssertEqual(WorkstreamIndex.key(in: "fix #42 now", known: [], formats: [hash]), "42")

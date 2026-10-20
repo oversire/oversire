@@ -21,7 +21,6 @@ enum RowCommand: Equatable {
     case merge(repo: String, number: Int)
     case revealCard(String)
     case sendInput(key: String)
-    case markRead(entryId: String, read: Bool)
     case triage(entryId: String)
     case onlyProject(String)
     case refreshProject(String)
@@ -147,11 +146,10 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func inbox(_ e: InboxEntry, projectKey: String?, canTriage: Bool, tracker: String = "Plane") -> [MenuEntry] {
+    static func activity(_ e: FeedEntry, projectKey: String?, canTriage: Bool, tracker: String = "Plane") -> [MenuEntry] {
         var out: [MenuEntry] = []
         if e.route != nil || e.intake != nil { out.append(.action("Open", e.route.map { .open($0) } ?? .openURL(e.url ?? ""))) }
         if let u = e.itemURL ?? e.url { out.append(.action(e.source == .run ? "Open on GitHub" : "Open in \(tracker)", .openURL(u))) }
-        if e.intake == nil { out.append(.action(e.unread ? "Mark as read" : "Mark as unread", .markRead(entryId: e.id, read: e.unread))) }
         out.append(.separator)
         if let k = e.itemKey { out.append(.action("Copy ID", .copy(k))) }
         if let u = e.itemURL ?? e.url { out.append(.action("Copy link", .copy(u))) }
@@ -253,7 +251,7 @@ final class RowCommander {
         case .refreshProject(let k): store.refresh([k], force: true) { _ in }
         case .useTrackerIcon(let k): editLocal(k) { $0.icon = .tracker }
         case .hideProject(let k): editLocal(k) { $0.hidden = true }
-        case .markRead, .triage, .onlyProject: break
+        case .triage, .onlyProject: break
         }
     }
 
