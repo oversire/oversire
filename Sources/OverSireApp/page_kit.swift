@@ -491,7 +491,8 @@ final class TabStrip: NSStackView {
                 .foregroundColor: on ? Palette.fg : Palette.mut])
             b.setAccessibilityRole(.radioButton)
             b.setAccessibilityValue(on ? 1 : 0)
-            let wrap = NSStackView(v: [b, Box(fill: on ? Palette.acc : .clear, border: nil, radius: 1)], spacing: 6, align: .centerX)
+            let wrap = TabCell(v: [b, Box(fill: on ? Palette.acc : .clear, border: nil, radius: 1)], spacing: 6, align: .centerX)
+            wrap.onTap = { [weak self] in self?.onSelect?(i) }
             let line = wrap.arrangedSubviews[1]
             line.heightAnchor.constraint(equalToConstant: 2).isActive = true
             line.widthAnchor.constraint(equalTo: wrap.widthAnchor).isActive = true
@@ -525,6 +526,17 @@ final class TabStrip: NSStackView {
             w.makeFirstResponder(self.buttons[self.selected])
         }
     }
+}
+
+// The full tab takes the click, padding and line too. The button only gives focus and Space.
+private final class TabCell: NSStackView {
+    var onTap: (() -> Void)?
+    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onTap?() }
+    }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 }
 
 // Page title line: big title, a small caption, then actions on the right.
