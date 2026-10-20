@@ -11,7 +11,7 @@ let package = Package(
     ],
     // The AgentBinder product only: it has no dependencies.
     dependencies: [
-        .package(path: "../agent-binder"),
+        .package(url: "https://github.com/oversire/agent-binder.git", from: "0.2.0"),
     ],
     targets: [
         .target(name: "OverSireCore"),
