@@ -200,6 +200,30 @@ enum RelayFailure: Error, CustomStringConvertible {
     }
 }
 
+/// Sends the answers of the question board through the hub. 409: no open question with the id. 410: the prompt expired.
+struct RelayAnswers: RunnerAnswerSending {
+    let api: @Sendable () -> RelayAPI
+
+    func send(session: String, answer: RunnerAnswer) async throws -> AnswerResult {
+        let api = api()
+        return try Self.map(await Task.detached { api.answer(session: session, question: answer) }.value)
+    }
+
+    func send(session: String, permission: PermissionAnswer) async throws -> AnswerResult {
+        let api = api()
+        return try Self.map(await Task.detached { api.answer(session: session, permission: permission.id, allow: permission.allow) }.value)
+    }
+
+    static func map(_ r: Result<RelayAPI.OK, RelayFailure>) throws -> AnswerResult {
+        switch r {
+        case .success: return .sent
+        case .failure(.http(409)): return .alreadyAnswered
+        case .failure(.http(404)), .failure(.http(410)): return .gone
+        case .failure(let e): throw ProviderError.transport(e.description)
+        }
+    }
+}
+
 // Blocking calls: use them off the main thread.
 struct RelayAPI {
     let base: String
@@ -239,9 +263,14 @@ struct RelayAPI {
     func runnerCode() -> Result<PairingCode, RelayFailure> { send("POST", "/v1/pairing") }
     /// The hub sends the answer to the runner as a work order.
     func answer(session: String, permission: String, allow: Bool) -> Result<OK, RelayFailure> {
-        let id = session.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) ?? session
-        return send("POST", "/v1/runner-sessions/\(id)/permission", body: ["permission": permission, "allow": allow])
+        send("POST", "/v1/runner-sessions/\(Self.pathID(session))/permission", body: ["permission": permission, "allow": allow])
     }
+    /// The hub sends the answer to the runner as a work order. It waits 60 min for an offline runner.
+    func answer(session: String, question: RunnerAnswer) -> Result<OK, RelayFailure> {
+        let body = (try? JSONEncoder().encode(question)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return send("POST", "/v1/runner-sessions/\(Self.pathID(session))/answer", body: body)
+    }
+    static func pathID(_ id: String) -> String { id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) ?? id }
 
     func discover() -> Discovery? {
         guard case .success(let d) = send("GET", "/", as: Discovery.self), CLOUD_APPS.contains(d.app) else { return nil }
