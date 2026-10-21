@@ -49,6 +49,29 @@ final class RuntimeOrcaTests: XCTestCase {
         XCTAssertTrue(r.passed, r.description)
     }
 
+    func testRemoveWorkspace() async throws {
+        orca.on("worktree ps", #"""
+            {"ok":true,"result":{"worktrees":[
+             {"worktreeId":"r1::/w","repo":"w","path":"/w","isMainWorktree":true,"branch":"refs/heads/main","agents":[]},
+             {"worktreeId":"r1::/w/.wt/a","repo":"w","path":"/w/.wt/a","branch":"refs/heads/a","agents":[]},
+             {"worktreeId":"r2::/f::workspace:u1","repo":"f","path":"/f","branch":"","agents":[]}]}}
+            """#)
+        orca.on("worktree rm", #"{"ok":true,"result":{"warnings":["Branch a was kept."]}}"#)
+        let ws = try await rt.workspaces()
+        XCTAssertEqual(ws.map(\.kind), [.main, .worktree, .folder])
+        XCTAssertEqual(ws.map(\.branch), ["main", "a", ""])
+        let r = try await rt.remove(ws[1], force: false, runHooks: true)
+        XCTAssertEqual(r.warning, "Branch a was kept.")
+        XCTAssertEqual(orca.args("worktree rm").first, ["worktree", "rm", "--worktree", "id:r1::/w/.wt/a", "--run-hooks", "--json", "--environment", "mbp"])
+        _ = try await rt.remove(ws[2], force: true, runHooks: false)
+        XCTAssertEqual(orca.args("worktree rm").last?.prefix(5), ["worktree", "rm", "--worktree", "id:r2::/f::workspace:u1", "--force"])
+        do {
+            _ = try await rt.remove(ws[0], force: true, runHooks: false)
+            XCTFail("the main checkout must not go")
+        } catch {}
+        XCTAssertEqual(orca.args("worktree rm").count, 2)
+    }
+
     func testParse() throws {
         XCTAssertThrowsError(try OrcaRuntime.parse(Data(#"{"ok":false,"error":{"code":"runtime_unavailable","message":"no server"}}"#.utf8),
                                                    stderr: "", command: "worktree ps")) {

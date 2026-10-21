@@ -44,6 +44,7 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let sessionTail: Capability = "sessionTail"
     public static let reveal: Capability = "reveal"
     public static let hostFiles: Capability = "hostFiles"
+    public static let removeWorkspace: Capability = "removeWorkspace"
     public static let sessionHistory: Capability = "sessionHistory"
     public static let questions: Capability = "questions"
     public static let cloudDispatch: Capability = "cloudDispatch"

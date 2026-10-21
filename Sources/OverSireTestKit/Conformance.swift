@@ -61,6 +61,7 @@ public enum ProviderConformance {
         (.sessionTail, "SessionIO", { $0 is any SessionIO }),
         (.reveal, "Revealing", { $0 is any Revealing }),
         (.hostFiles, "HostFileWriting", { $0 is any HostFileWriting }),
+        (.removeWorkspace, "WorkspaceRemoving", { $0 is any WorkspaceRemoving }),
         (.sessionHistory, "SessionHistoryReading", { $0 is any SessionHistoryReading }),
         (.questions, "QuestionChannel", { $0 is any QuestionChannel }),
         (.projectSettings, "ProjectSettingsReading", { $0 is any ProjectSettingsReading }),

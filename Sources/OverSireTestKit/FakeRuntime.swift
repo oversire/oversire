@@ -3,7 +3,7 @@ import OverSireCore
 
 /// An in-memory agent runtime. A launch makes a workspace with one session. A send adds lines to the session.
 /// Host files stay in memory.
-public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWriting, SessionHistoryReading, @unchecked Sendable {
+public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWriting, SessionHistoryReading, WorkspaceRemoving, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -18,7 +18,7 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     private var writes = 0
     private var histories: [String: SessionDigest] = [:]
 
-    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory]) {
+    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory, .removeWorkspace]) {
         base = FakeProvider(id: "fake-runtime", account: account, capabilities: capabilities)
     }
 
@@ -46,6 +46,20 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
         try base.locked {
             guard cards.contains(where: { $0.id == w.id }) else { throw ProviderError.notFound }
             return terminals[w.id] ?? []
+        }
+    }
+
+    /// Adds a workspace, for tests of the cleanup.
+    public func add(_ w: Workspace) { base.lockedValue { cards.append(w) } }
+
+    public func remove(_ w: Workspace, force: Bool, runHooks: Bool) async throws -> WorkspaceRemoval {
+        guard capabilities.contains(.removeWorkspace) else { throw ProviderError.unsupported(.removeWorkspace) }
+        return try base.locked {
+            guard let i = cards.firstIndex(where: { $0.id == w.id }) else { throw ProviderError.notFound }
+            guard cards[i].kind != .main else { throw ProviderError.vendor(code: "main_worktree", message: "main checkout") }
+            cards.remove(at: i)
+            terminals[w.id] = nil
+            return WorkspaceRemoval()
         }
     }
 

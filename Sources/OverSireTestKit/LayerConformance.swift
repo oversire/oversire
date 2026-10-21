@@ -214,6 +214,13 @@ public enum RuntimeConformance {
         if let io = rt as? any SessionIO {
             _ = await r.step("close", { try await io.close(s) })
         }
+        if let rm = rt as? any WorkspaceRemoving, let ws = try? await rt.workspaces(), let card = ws.first(where: { $0.id == l.card }) {
+            r.expect(card.kind != .main, "the launch card \(l.card) is a main checkout")
+            _ = await r.step("remove", { try await rm.remove(card, force: true, runHooks: false) })
+            if let after = await r.step("workspaces after remove", { try await rt.workspaces() }) {
+                r.expect(!after.contains { $0.id == l.card }, "workspaces still lists the removed card \(l.card)")
+            }
+        }
         return r
     }
 }

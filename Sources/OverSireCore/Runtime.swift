@@ -41,6 +41,9 @@ public struct AgentSession: Hashable, Sendable {
 
 /// A runtime workspace (an Orca card: a worktree with its sessions).
 public struct Workspace: Hashable, Sendable {
+    /// worktree: a git worktree of its own. folder: a card on a shared folder. main: the main checkout of a repo.
+    public enum Kind: Hashable, Sendable { case worktree, folder, main }
+
     public let id: String
     public let repo: String
     public let path: String
@@ -49,9 +52,11 @@ public struct Workspace: Hashable, Sendable {
     public let liveTerminals: Int
     public let lastActivity: Date
     public let agents: [AgentSession]
+    public var kind: Kind = .worktree
+    public var branch = ""
 
     public init(id: String, repo: String, path: String, name: String, comment: String?, liveTerminals: Int,
-                lastActivity: Date, agents: [AgentSession]) {
+                lastActivity: Date, agents: [AgentSession], kind: Kind = .worktree, branch: String = "") {
         self.id = id
         self.repo = repo
         self.path = path
@@ -60,7 +65,12 @@ public struct Workspace: Hashable, Sendable {
         self.liveTerminals = liveTerminals
         self.lastActivity = lastActivity
         self.agents = agents
+        self.kind = kind
+        self.branch = branch
     }
+
+    /// An agent works or waits for input in the workspace.
+    public var hasLiveAgent: Bool { agents.contains { $0.phase == .working || $0.phase == .waiting || $0.phase == .starting } }
 }
 
 public struct RuntimeRepo: Hashable, Sendable {
@@ -192,4 +202,18 @@ public protocol HostFileWriting: AgentRuntime {
     /// `dir` is a host folder, for example /tmp/oversire/<session-id>. `progress` gives (bytes sent, total bytes).
     func writeFiles(_ files: [HostFile], workspacePath: String, dir: String,
                     progress: @escaping @Sendable (Int, Int) -> Void) async throws -> [String]
+}
+
+/// What a removal did. `warning` is a note of the runtime, for example a kept branch.
+public struct WorkspaceRemoval: Hashable, Sendable {
+    public let warning: String?
+
+    public init(warning: String? = nil) { self.warning = warning }
+}
+
+/// Removes a workspace. A worktree goes from the runtime and from git. A folder card closes, and the folder stays.
+/// The main checkout of a repo cannot be removed.
+public protocol WorkspaceRemoving: AgentRuntime {
+    /// `force` removes a worktree with changes. `runHooks` runs the archive hooks of the repo; a failed hook stops the removal.
+    func remove(_ w: Workspace, force: Bool, runHooks: Bool) async throws -> WorkspaceRemoval
 }

@@ -52,8 +52,9 @@ final class FakeConformanceTests: XCTestCase {
         let mute = ProviderConformance.capabilities(FakeRuntime(capabilities: []))
         XCTAssertEqual(Set(mute.problems), ["SessionIO needs the capability sessionInput", "SessionIO needs the capability sessionTail",
                                             "Revealing needs the capability reveal", "HostFileWriting needs the capability hostFiles",
-                                            "SessionHistoryReading needs the capability sessionHistory"])
-        let tailOnly = ProviderConformance.capabilities(FakeRuntime(capabilities: [.sessionTail, .reveal, .hostFiles, .sessionHistory]))
+                                            "SessionHistoryReading needs the capability sessionHistory",
+                                            "WorkspaceRemoving needs the capability removeWorkspace"])
+        let tailOnly = ProviderConformance.capabilities(FakeRuntime(capabilities: [.sessionTail, .reveal, .hostFiles, .sessionHistory, .removeWorkspace]))
         XCTAssertTrue(tailOnly.passed, "one SessionIO capability is enough: \(tailOnly)")
 
         // A fake that accepts any token.

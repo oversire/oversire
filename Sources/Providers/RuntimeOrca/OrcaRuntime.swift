@@ -3,14 +3,14 @@ import OverSireCore
 
 /// Orca terminals through the Orca CLI. Each call has an argument array and --json.
 /// With an environment, --environment sends the command to the paired Orca server.
-public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHistoryReading, QuestionChannel, @unchecked Sendable {
+public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHistoryReading, QuestionChannel, WorkspaceRemoving, @unchecked Sendable {
     public static let defaultPath = "/Applications/Orca.app/Contents/Resources/bin/orca"
 
     public let id: ProviderID = .orca
     public let account: AccountID
     public let exe: String
     public let environment: String?
-    public var capabilities: Set<Capability> { [.remoteEnvironments, .sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory, .questions] }
+    public var capabilities: Set<Capability> { [.remoteEnvironments, .sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory, .questions, .removeWorkspace] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 3600) }
 
     let commands: any CommandRunner
@@ -100,8 +100,14 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHisto
             return Workspace(id: id, repo: repo, path: w["path"] as? String ?? "",
                              name: w["displayName"] as? String ?? "", comment: w["comment"] as? String,
                              liveTerminals: w["liveTerminalCount"] as? Int ?? 0, lastActivity: date(w["lastActivityAt"]),
-                             agents: agents)
+                             agents: agents, kind: kind(w, id: id),
+                             branch: (w["branch"] as? String ?? "").replacingOccurrences(of: "refs/heads/", with: ""))
         }
+    }
+
+    static func kind(_ w: [String: Any], id: String) -> Workspace.Kind {
+        if w["isMainWorktree"] as? Bool == true { return .main }
+        return id.contains("::workspace:") ? .folder : .worktree
     }
 
     public func sessions(_ w: WorkspaceRef) async throws -> [RuntimeSession] {
@@ -213,6 +219,17 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHisto
     public func reveal(_ s: SessionRef) async throws {
         _ = try await run(["terminal", "switch", "--terminal", s.id])
         _ = try await commands.run("/usr/bin/open", ["-a", "Orca"], stdin: nil, timeout: .seconds(10))
+    }
+
+    // MARK: WorkspaceRemoving
+
+    /// `orca worktree rm`. Orca stops the terminals. For a folder card it keeps the folder.
+    public func remove(_ w: Workspace, force: Bool, runHooks: Bool) async throws -> WorkspaceRemoval {
+        guard w.kind != .main else { throw ProviderError.vendor(code: "main_worktree", message: "OverSire does not remove the main checkout of a repo") }
+        let r = try await run(["worktree", "rm", "--worktree", "id:" + w.id] + (force ? ["--force"] : []) + (runHooks ? ["--run-hooks"] : []),
+                              timeout: .seconds(120))
+        let warnings = (r["warnings"] as? [String] ?? []) + [r["warning"] as? String].compactMap { $0 }
+        return WorkspaceRemoval(warning: warnings.isEmpty ? nil : warnings.joined(separator: " "))
     }
 
     // MARK: Process
