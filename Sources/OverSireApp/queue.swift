@@ -335,7 +335,7 @@ final class WorkQueue {
                 let byLabel = !label.isEmpty && item.labels.contains { $0.lowercased() == label }
                 let byBot = !bot.isEmpty && item.assignees.contains { $0.lowercased() == bot }
                 guard byLabel || byBot, agents.agent(item.key) == nil,
-                      snap.option(item.statusOptionId)?.category != .done else { continue }
+                      !snap.isClosed(item.statusOptionId) else { continue }
                 add(item, snap: snap, source: byLabel ? .label : .assignee)
             }
         }

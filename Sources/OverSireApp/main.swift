@@ -806,7 +806,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         sessions.tick()
         if AI_CFG.itemSummary {
             itemSummaries.tick(projectStore.snapshots.values.flatMap { snap in
-                snap.items.map { ($0, snap.option($0.statusOptionId)?.category != .done) }
+                snap.items.map { ($0, !snap.isFinished($0)) }
             })
         }
         if !firstLoad, ciAssist.digestDue() {

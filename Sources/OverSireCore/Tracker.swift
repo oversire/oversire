@@ -223,13 +223,15 @@ public struct ProjectSnapshot: Codable, Sendable {
     public static let priorityFieldId = "priority"
 
     public let summary: ProjectSummary
-    public var statusOptions: [StatusOption]
+    public var statusOptions: [StatusOption] { didSet { openBelow = countOpenBelow() } }
     public let items: [Item]
     public let fetchedAt: Date
     public var fields: [ProjectField] = []
     public var me: String? = nil     // display name of the token owner
     public var meId: String? = nil
-    public var index: [ItemStub]? = nil
+    public var index: [ItemStub]? = nil { didSet { openBelow = countOpenBelow() } }
+    /// Item id → number of sub-items at all levels that are not closed.
+    private var openBelow: [String: Int] = [:]
     public var intake: [IntakeItem]? = nil   // pending intake items; nil when the project has no intake
 
     public init(summary: ProjectSummary, statusOptions: [StatusOption], items: [Item], fetchedAt: Date,
@@ -244,6 +246,7 @@ public struct ProjectSnapshot: Codable, Sendable {
         self.meId = meId
         self.index = index
         self.intake = intake
+        openBelow = countOpenBelow()
     }
 
     private enum CodingKeys: String, CodingKey { case summary, statusOptions, items, fetchedAt, fields, me, meId, index, intake }
@@ -265,7 +268,49 @@ public struct ProjectSnapshot: Codable, Sendable {
     public var statusFieldId: String? { statusOptions.isEmpty ? nil : ProjectSnapshot.statusFieldId }
 
     // The number on a folded header.
-    public func notDoneCount(_ list: [Item]) -> Int { list.filter { option($0.statusOptionId)?.category != .done }.count }
+    public func notDoneCount(_ list: [Item]) -> Int { list.filter { !isFinished($0) }.count }
+
+    /// The state is in the completed or cancelled group (or a status that the user set to Done).
+    public func isClosed(_ stateId: String?) -> Bool { option(stateId)?.category == .done }
+
+    /// Sub-items at all levels that are not closed. Counts also the sub-items that are not loaded.
+    public func openSubItems(of id: String) -> Int { openBelow[id] ?? 0 }
+
+    /// The item is closed, and all its sub-items at all levels are closed.
+    public func isFinished(_ item: Item) -> Bool { isClosed(item.statusOptionId) && openSubItems(of: item.id) == 0 }
+
+    /// Closed in the tracker, but some sub-items are open. OverSire counts it as not finished.
+    public func isDoneWithOpenSubItems(_ item: Item) -> Bool { isClosed(item.statusOptionId) && openSubItems(of: item.id) > 0 }
+
+    /// The parent is open and has sub-items, and all of them are finished.
+    public func canCloseParent(_ item: Item) -> Bool {
+        guard !isClosed(item.statusOptionId), openSubItems(of: item.id) == 0 else { return false }
+        return progress(of: item.id).total > 0
+    }
+
+    private func countOpenBelow() -> [String: Int] {
+        var state: [String: String?] = [:]
+        var kids: [String: [String]] = [:]
+        func add(_ id: String, _ parent: String?, _ st: String?) {
+            guard state[id] == nil else { return }
+            state[id] = st
+            if let parent { kids[parent, default: []].append(id) }
+        }
+        items.forEach { add($0.id, $0.parentId, $0.statusOptionId) }
+        index?.forEach { add($0.id, $0.parentId, $0.stateId) }
+        var out: [String: Int] = [:]
+        var path: Set<String> = []
+        func count(_ id: String) -> Int {
+            if let n = out[id] { return n }
+            guard path.insert(id).inserted else { return 0 }   // a cycle in bad data
+            let n = (kids[id] ?? []).reduce(0) { $0 + count($1) + (isClosed(state[$1] ?? nil) ? 0 : 1) }
+            path.remove(id)
+            out[id] = n
+            return n
+        }
+        kids.keys.forEach { _ = count($0) }
+        return out.filter { $0.value > 0 }
+    }
 
     public func counts(_ list: [Item]) -> [StatusCategory: Int] {
         var c: [StatusCategory: Int] = [:]
@@ -293,7 +338,9 @@ public struct ProjectSnapshot: Codable, Sendable {
     public func progress(of id: String) -> (done: Int, total: Int) {
         let states = index.map { $0.filter { $0.parentId == id }.map(\.stateId) }
             ?? items.filter { $0.parentId == id }.map(\.statusOptionId)
-        return (states.filter { option($0)?.category == .done }.count, states.count)
+        let ids = index.map { $0.filter { $0.parentId == id }.map(\.id) } ?? items.filter { $0.parentId == id }.map(\.id)
+        let done = zip(ids, states).filter { isClosed($0.1) && openSubItems(of: $0.0) == 0 }.count
+        return (done, states.count)
     }
 
     // Parent first, up to the root.
@@ -324,15 +371,16 @@ public struct ProjectSnapshot: Codable, Sendable {
         return out
     }
 
-    /// The order in a status group: Done items by the last change, newest first. Other items as `sorted`.
+    /// The order in a status group: finished items by the last change, newest first. Other items as `sorted`.
     public func groupSorted(_ list: [Item]) -> [Item] {
-        let done = list.filter { option($0.statusOptionId)?.category == .done }.sorted { $0.updatedAt > $1.updatedAt }
-        return sorted(list.filter { option($0.statusOptionId)?.category != .done }) + done
+        let done = list.filter(isFinished).sorted { $0.updatedAt > $1.updatedAt }
+        return sorted(list.filter { !isFinished($0) }) + done
     }
 
-    /// A Done item hides when it did not change for `afterDays` days. 0 never hides, -1 always hides.
+    /// A finished item hides when it did not change for `afterDays` days. 0 never hides, -1 always hides.
+    /// A Done item with open sub-items never hides.
     public func isHiddenDone(_ item: Item, afterDays days: Int, now: Date = Date()) -> Bool {
-        guard days != 0, option(item.statusOptionId)?.category == .done else { return false }
+        guard days != 0, isFinished(item) else { return false }
         return days < 0 || now.timeIntervalSince(item.updatedAt) > Double(days) * 86400
     }
 

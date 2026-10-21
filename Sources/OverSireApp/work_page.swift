@@ -51,7 +51,7 @@ final class WorkPage: Page {
     /// The open root items of the user in all projects.
     static func mine(_ data: AppData) -> [Entry] {
         data.projectStore.snapshots.values.flatMap { snap in
-            snap.rootItems.filter { $0.isMine(snap.me) && snap.option($0.statusOptionId)?.category != .done }
+            snap.rootItems.filter { $0.isMine(snap.me) && !snap.isFinished($0) }
                 .map { ($0, snap, data.workstreams.stream($0.key)) }
         }
     }

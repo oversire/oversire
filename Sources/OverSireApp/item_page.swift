@@ -564,8 +564,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     /// In progress and Not started in priority lanes, as on Work. Done has no lanes, the newest change first.
     static func subGroups(_ kids: [Item], snap: ProjectSnapshot, status: (String) -> ItemStatus?) -> [(title: String, lanes: [WorkPage.Lane])] {
-        let done = kids.filter { snap.option($0.statusOptionId)?.category == .done }
-        let open = kids.filter { snap.option($0.statusOptionId)?.category != .done }.map { ($0, snap, nil as Workstream?) }
+        let done = kids.filter(snap.isFinished)
+        let open = kids.filter { !snap.isFinished($0) }.map { ($0, snap, nil as Workstream?) }
         var out = WorkPage.groups(open, status: status)
         if !done.isEmpty { out.append(("Done", [("", done.sorted { $0.updatedAt > $1.updatedAt }.map { ($0, snap, nil) })])) }
         return out

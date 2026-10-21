@@ -576,7 +576,7 @@ struct SidebarModel {
         let agents = data.agentIndex.agents.values
         let waiting = agents.filter { $0.phase == .waiting }.count
         let mine = store.snapshots.values.reduce(0) { n, s in
-            n + s.rootItems.filter { $0.isMine(s.me) && s.option($0.statusOptionId)?.category != .done }.count
+            n + s.rootItems.filter { $0.isMine(s.me) && !s.isFinished($0) }.count
         }
         let prs = data.prGrouped.reduce(0) { $0 + $1.1.count }
         let intake = store.snapshots.values.reduce(0) { $0 + ($1.intake?.count ?? 0) }

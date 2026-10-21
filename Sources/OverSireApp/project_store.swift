@@ -471,9 +471,10 @@ final class ProjectStore {
         return nil
     }
 
+    /// Finished: closed, and all sub-items closed. A Done blocker with open sub-items still blocks.
     func isDone(key: String) -> Bool {
         guard let (_, snap, item) = item(key: key) else { return false }
-        return snap.option(item.statusOptionId)?.category == .done
+        return snap.isFinished(item)
     }
 
     /// The open blocker keys of an item, from the relation cache.

@@ -76,6 +76,41 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertFalse(s.isHiddenDone(open, afterDays: -1, now: now), "only Done items hide")
     }
 
+    func testFinishedRule() {
+        let cancelled = StatusOption(id: "s6", name: "Cancelled", color: "GREY", group: "cancelled")
+        let completed = StatusOption(id: "s7", name: "Shipped", color: "GREEN", group: "completed")
+        var s = snap([item("p", status: "s7"), item("c1", status: "s6", parent: "p"), item("c2", status: "s7", parent: "p"),
+                      item("g1", status: "s1", parent: "c2"), item("g2", status: "s7", parent: "c2"),
+                      item("q", status: "s1"), item("q1", status: "s7", parent: "q"), item("lone", status: "s6")],
+                     [todo, doing, done, cancelled, completed])
+        XCTAssertEqual(s.openSubItems(of: "p"), 1, "the open grandchild counts")
+        XCTAssertEqual(s.openSubItems(of: "c2"), 1)
+        XCTAssertFalse(s.isFinished(s.items[0]), "a Done parent with an open grandchild is not finished")
+        XCTAssertTrue(s.isDoneWithOpenSubItems(s.items[0]))
+        XCTAssertTrue(s.isFinished(s.items[1]), "cancelled counts as closed")
+        XCTAssertTrue(s.isFinished(s.items[7]), "no sub-items")
+        XCTAssertFalse(s.isFinished(s.items[5]), "an open item is not finished")
+        XCTAssertTrue(s.canCloseParent(s.items[5]), "all sub-items finished, parent open")
+        XCTAssertFalse(s.canCloseParent(s.items[7]), "no sub-items: no hint")
+        XCTAssertTrue(s.progress(of: "p") == (1, 2), "c2 is closed but not finished")
+        XCTAssertEqual(s.notDoneCount(s.rootItems), 2, "p stays in the open count")
+        XCTAssertFalse(s.isHiddenDone(s.items[0], afterDays: -1), "Hide Done does not hide p")
+        XCTAssertEqual(s.groupSorted(s.rootItems).map(\.id), ["q", "p", "lone"])
+
+        s.index = [ItemStub(id: "p", parentId: nil, stateId: "s7", activityAt: nil),
+                   ItemStub(id: "c3", parentId: "p", stateId: "s1", activityAt: nil)]
+        XCTAssertEqual(s.openSubItems(of: "p"), 2, "a sub-item in the index only counts")
+        s.statusOptions[0].localCategory = .done
+        XCTAssertEqual(s.openSubItems(of: "p"), 0, "a status set to Done counts as closed")
+        XCTAssertTrue(s.isFinished(s.items[0]))
+    }
+
+    func testFinishedRuleSurvivesACycle() {
+        let s = snap([item("a", status: "s5", parent: "b"), item("b", status: "s1", parent: "a")], [todo, done])
+        XCTAssertEqual(s.openSubItems(of: "a"), 1)
+        XCTAssertFalse(s.isFinished(s.items[0]))
+    }
+
     func testSnapshotKeepsOneItemPerId() {
         let t0 = Date(timeIntervalSince1970: 1_700_000_000)
         let s = snap([item("1", status: "s1", at: t0), item("2", status: "s1"), item("1", status: "s5", parent: "2", at: t0 + 60),

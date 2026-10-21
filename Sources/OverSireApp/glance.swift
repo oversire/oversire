@@ -133,7 +133,7 @@ final class GlanceVC: NSViewController {
     private func work() {
         var mine: [WorkPage.Entry] = []
         for snap in data.projectStore.snapshots.values {
-            for i in snap.rootItems where i.isMine(snap.me) && snap.option(i.statusOptionId)?.category != .done {
+            for i in snap.rootItems where i.isMine(snap.me) && !snap.isFinished(i) {
                 mine.append((i, snap, data.workstreams.stream(i.key)))
             }
         }
