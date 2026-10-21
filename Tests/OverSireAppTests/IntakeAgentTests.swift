@@ -130,3 +130,49 @@ final class IntakeAgentTests: XCTestCase {
         XCTAssertFalse(IntakeAgent.vague(String(repeating: "word ", count: 30)))
     }
 }
+
+final class AcceptAndQueueTests: XCTestCase {
+    private let project = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE")
+    private let item = IntakeItem(id: "in1", workItemId: "w1", name: "labels drop", priority: nil, createdAt: Date(), author: nil, source: nil)
+
+    private func ref(_ n: Int) -> ItemRef {
+        ItemRef(project: project, id: "w\(n)", key: "OVERSIRE-\(n)", url: URL(string: "https://plane.example/OVERSIRE-\(n)")!)
+    }
+
+    func testQueueAddsTheLabelOnceAndKeepsTheOthers() {
+        let plain = IntakeAgent.queued(IntakeEdit(), label: "L-agent", keep: ["L2"])
+        XCTAssertEqual(plain.patch.labels, ["L2", "L-agent"])
+        XCTAssertEqual(IntakeAgent.queued(plain, label: "L-agent", keep: ["L2"]).patch.labels, ["L2", "L-agent"], "no second label")
+        XCTAssertTrue(IntakeEdit().isEmpty, "Accept with no Enhance run writes no label")
+    }
+
+    func testOnlyCheckedRelationsAndNoCycle() throws {
+        let agent = IntakeAgent(store: ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                                    statePath: NSTemporaryDirectory() + "/q-\(UUID()).json", activityPath: NSTemporaryDirectory() + "/q-\(UUID()).jsonl"),
+                                memory: ProjectMemory(writes: StoreWrites(store: LocalStore(dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))),
+                                questions: QuestionHub(agents: AgentIndex(writes: nil), writes: StoreWrites(store: LocalStore(dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))))
+        let res = EnhanceResult(verdict: .clear, description: "", relations: [
+            .init(kind: "blocked_by", key: "OVERSIRE-3", reason: ""), .init(kind: "blocks", key: "OVERSIRE-4", reason: ""),
+            .init(kind: "relates_to", key: "OVERSIRE-5", reason: "")])
+        let run = IntakeAgent.Run(worker: OrcaWorker(dispatch: "d", task: "t", terminal: nil), session: nil, item: ref(9), original: "x", since: Date())
+        let items = ["OVERSIRE-3": ref(3), "OVERSIRE-4": ref(4), "OVERSIRE-5": ref(5)]
+        // OVERSIRE-3 waits for OVERSIRE-9 already: 9 blocked by 3 makes a cycle.
+        let graph = BlockGraph(["OVERSIRE-3": [ItemRelation(kind: .blockedBy, item: ref(9))]])
+        agent.toggle(item, .description)
+        agent.toggle(item, .relation("OVERSIRE-5"))
+        let e = agent.edit(item, res, run: run, labels: [], keep: [], items: items, graph: graph)
+        XCTAssertEqual(e.relations, [ItemRelation(kind: .blocks, item: ref(4))])
+        XCTAssertNil(e.patch.labels)
+    }
+
+    func testBlockedItemIsNotUpNext() {
+        var lane = QueueLane(project: "ocral/p1", identifier: "OVERSIRE")
+        lane.entries = ["OVERSIRE-1", "OVERSIRE-2"].map { QueueEntry(key: $0, title: $0, added: Date(), source: .you) }
+        let world = QueueWorld(busy: { _ in 0 }, slots: { _ in 1 }, ciPassed: { _ in true }, done: { _ in false }, now: Date(),
+                               blockers: { $0 == "OVERSIRE-1" ? ["OVERSIRE-7"] : [] })
+        let pick = lane.pick(state: nil, world: world)
+        XCTAssertEqual(pick.next, "OVERSIRE-2")
+        XCTAssertEqual(pick.entry?.key, "OVERSIRE-2")
+        XCTAssertEqual(pick.holds["OVERSIRE-1"].map(QueueBoard.note), "⏸ Waits for OVERSIRE-7")
+    }
+}

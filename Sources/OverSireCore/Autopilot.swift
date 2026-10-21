@@ -466,7 +466,8 @@ public struct MemoryEntry: StoreRecord {
 
 /// What happens on accept. The target is the subject of the suggestion.
 public enum Proposal: Hashable, Sendable {
-    case itemPatch(ItemPatch)
+    /// `relations`: the relations of the subject to add on accept.
+    case itemPatch(ItemPatch, relations: [ItemRelation] = [])
     case changeAction(ChangeAction)
     case runAction(RunAction)
     case workOrder(WorkOrderDraft)
@@ -477,12 +478,13 @@ public enum Proposal: Hashable, Sendable {
 }
 
 extension Proposal: Codable {
-    private enum CodingKeys: String, CodingKey { case type, patch, action, order, memory, plan }
+    private enum CodingKeys: String, CodingKey { case type, patch, relations, action, order, memory, plan }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(String.self, forKey: .type) {
-        case "itemPatch": self = .itemPatch(try c.decode(ItemPatch.self, forKey: .patch))
+        case "itemPatch":
+            self = .itemPatch(try c.decode(ItemPatch.self, forKey: .patch), relations: try c.decodeIfPresent([ItemRelation].self, forKey: .relations) ?? [])
         case "changeAction": self = .changeAction(try c.decode(ChangeAction.self, forKey: .action))
         case "runAction": self = .runAction(try c.decode(RunAction.self, forKey: .action))
         case "workOrder": self = .workOrder(try c.decode(WorkOrderDraft.self, forKey: .order))
@@ -497,9 +499,10 @@ extension Proposal: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .unknown: break
-        case .itemPatch(let p):
+        case .itemPatch(let p, let relations):
             try c.encode("itemPatch", forKey: .type)
             try c.encode(p, forKey: .patch)
+            if !relations.isEmpty { try c.encode(relations, forKey: .relations) }
         case .changeAction(let a):
             try c.encode("changeAction", forKey: .type)
             try c.encode(a, forKey: .action)

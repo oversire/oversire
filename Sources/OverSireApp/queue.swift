@@ -191,7 +191,9 @@ final class WorkQueue {
         if !lanes.contains(where: { $0.project == pk }) {
             lanes.append(QueueLane(project: pk, identifier: snap.summary.identifier))
         }
-        lanes[lanes.firstIndex { $0.project == pk }!].entries.append(QueueEntry(key: key, title: item.title, added: Date(), source: source))
+        let li = lanes.firstIndex { $0.project == pk }!
+        let at = LaneOrder.insert(item.fields["Priority"], into: lanes[li].entries.map(\.key)) { [store] in store.item(key: $0)?.item.fields["Priority"] }
+        lanes[li].entries.insert(QueueEntry(key: key, title: item.title, added: Date(), source: source), at: at)
         seen.insert(key)
         save()
     }

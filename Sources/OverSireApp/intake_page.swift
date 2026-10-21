@@ -56,7 +56,7 @@ final class IntakeListPage: Page {
         col.addArrangedSubview(strip)
         if let note { col.addFull(Banner(.info, title: note)) }
         if !shown.isEmpty {
-            col.addFull(NSTextField.text("Keys on a focused line: 1 accept · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
+            col.addFull(NSTextField.text("Keys on a focused line: 1 accept · Q accept and queue · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
                                          size: 12, color: Palette.dim, lines: 2))
             col.addFull(NSStackView(h: [Glyph("sparkles", color: Palette.acc, size: 11), NSTextField.text(
                 "Enhance: an agent reads the code, asks you what the code cannot tell, and writes a new description. You check what goes to Plane.",
@@ -80,6 +80,7 @@ final class IntakeListPage: Page {
                 actions.append(ActionButton("Enhance", symbol: "sparkles", style: .primary) { agent.start(projectKey: pk, item: item) })
             }
             actions.append(ActionButton("Accept  1") { [weak self] in self?.triage(pk, item, .accept) })
+            actions.append(ActionButton("Accept and queue  Q") { [weak self] in self?.queue(pk, item) })
             actions.append(ActionButton("Duplicate  2") { IntakeWindow.show(projectKey: pk, workItemId: item.workItemId) })
             actions.append(ActionButton("Decline  3") { [weak self] in self?.triage(pk, item, .decline) })
             actions.append(ActionButton("Snooze  H") { [weak self] in self?.triage(pk, item, .snooze(until: Date().addingTimeInterval(86400))) })
@@ -91,6 +92,7 @@ final class IntakeListPage: Page {
         r.onKey = { [weak self] c in
             switch c {
             case "1": self?.triage(pk, item, .accept)
+            case "q": self?.queue(pk, item)
             case "2": IntakeWindow.show(projectKey: pk, workItemId: item.workItemId)
             case "3": self?.triage(pk, item, .decline)
             case "h": self?.triage(pk, item, .snooze(until: Date().addingTimeInterval(86400)))
@@ -111,6 +113,18 @@ final class IntakeListPage: Page {
         v.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 10, right: 0)
         v.alignment = .centerX
         return v
+    }
+
+    // Accepts the item and adds the start label. Checked Enhance changes go with it.
+    private func queue(_ pk: String, _ item: IntakeItem) {
+        busy.insert(item.id)
+        reload()
+        data.intakeAgent.apply(projectKey: pk, item: item, accept: true, queue: true) { [weak self] err in
+            guard let self else { return }
+            self.busy.remove(item.id)
+            self.note = err
+            self.reload()
+        }
     }
 
     private func triage(_ pk: String, _ item: IntakeItem, _ action: IntakeAction) {

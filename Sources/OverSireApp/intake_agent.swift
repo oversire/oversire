@@ -224,8 +224,11 @@ final class IntakeAgent {
         if picks[item.id, default: []].remove(p) == nil { picks[item.id, default: []].insert(p) }
     }
 
-    /// The checked properties as one edit. Label names and relation keys that the project does not know drop.
-    func edit(_ item: IntakeItem, _ result: EnhanceResult, run: Run, labels: [StatusOption], keep: [String], items: [String: ItemRef]) -> IntakeEdit {
+    /// The checked properties as one edit. Label names and relation keys that the project does not know drop,
+    /// and so does a relation that makes a cycle in `graph`.
+    func edit(_ item: IntakeItem, _ result: EnhanceResult, run: Run, labels: [StatusOption], keep: [String], items: [String: ItemRef],
+              graph: BlockGraph = BlockGraph()) -> IntakeEdit {
+        var graph = graph
         var patch = ItemPatch()
         if isChecked(item, .description) { patch.bodyMarkdown = result.description(keeping: run.original) }
         if let p = result.priority, isChecked(item, .priority) { patch.priority = p }
@@ -235,9 +238,18 @@ final class IntakeAgent {
         if !add.isEmpty { patch.labels = keep + add.filter { !keep.contains($0) } }
         let relations = result.relations.filter { isChecked(item, .relation($0.key)) }.compactMap { r -> ItemRelation? in
             guard let kind = r.relationKind, let ref = items[r.key.uppercased()] else { return nil }
-            return ItemRelation(kind: kind, item: ref)
+            let rel = ItemRelation(kind: kind, item: ref)
+            return graph.add(run.item.key, rel) ? rel : nil
         }
         return IntakeEdit(patch: patch, relations: relations)
+    }
+
+    /// The edit with the start label next to the labels that the item keeps.
+    static func queued(_ edit: IntakeEdit, label id: String, keep: [String]) -> IntakeEdit {
+        var e = edit
+        let base = e.patch.labels ?? keep
+        e.patch.labels = base.contains(id) ? base : base + [id]
+        return e
     }
 
     /// The checked duplicate, else nil.
@@ -247,25 +259,44 @@ final class IntakeAgent {
     }
 
     // Writes the checked properties. With `accept`, also accepts the item, or marks it as a duplicate when that is checked.
-    func apply(projectKey: String, item: IntakeItem, accept: Bool, done: @escaping (Bool) -> Void) {
-        guard case .ready(let result, let run) = states[item.id], let snap = store.snapshots[projectKey],
-              let tracker = ENV.tracker(snap.summary.ref.workspace) else { done(false); return }
+    // With `queue`, also adds the start label, so the item joins the lane of its project. It needs no Enhance run.
+    func apply(projectKey: String, item: IntakeItem, accept: Bool, queue: Bool = false, done: @escaping (_ error: String?) -> Void) {
+        var ready: (EnhanceResult, Run)?
+        if case .ready(let result, let run) = states[item.id] { ready = (result, run) }
+        guard ready != nil || queue, let snap = store.snapshots[projectKey],
+              let tracker = ENV.tracker(snap.summary.ref.workspace) else { done("The project is not loaded."); return }
         let known = Dictionary(snap.items.compactMap { $0.ref(in: snap.summary.ref) }.map { ($0.key.uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        let graph = BlockGraph(store.relations.byKey)
+        let startLabel = AGENTS.startLabel
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
             guard let self else { return }
             Task {
-                let labels = (try? await (tracker as? any LabelManaging)?.labels(snap.summary.ref)) ?? []
+                let labeler = tracker as? any LabelManaging
+                var labels = (try? await labeler?.labels(snap.summary.ref)) ?? []
                 let keep = (try? r.get())?.labels.compactMap { n in labels.first { $0.name == n }?.id } ?? []
-                let edit = self.edit(item, result, run: run, labels: labels, keep: keep, items: known)
-                let dup = self.duplicate(item, result, items: known)
+                var edit = ready.map { self.edit(item, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph) } ?? IntakeEdit()
+                let dup = ready.flatMap { self.duplicate(item, $0.0, items: known) }
+                if queue, dup == nil, !startLabel.isEmpty {
+                    var id = labels.first { $0.name.caseInsensitiveCompare(startLabel) == .orderedSame }?.id
+                    if id == nil, let made = try? await labeler?.createLabel(startLabel, color: "#3B82F6", in: snap.summary.ref) {
+                        id = made
+                        labels.append(StatusOption(id: made, name: startLabel, color: "#3B82F6"))
+                    }
+                    guard let id else {
+                        await MainActor.run { done("Could not find or make the label \"\(startLabel)\" in the project.") }
+                        return
+                    }
+                    edit = Self.queued(edit, label: id, keep: keep)
+                }
                 await MainActor.run {
+                    let failed = { (what: String) in done(self.store.lastError ?? "Plane did not take \(what).") }
                     let after: (Bool) -> Void = { ok in
-                        guard ok else { done(false); return }
-                        if let rt = self.host() { Task { try? await rt.releaseWorker(run.worker) } }
-                        guard accept else { self.set(item.id, .applied(accepted: false)); done(true); return }
+                        guard ok else { failed("the changes"); return }
+                        if let run = ready?.1, let rt = self.host() { Task { try? await rt.releaseWorker(run.worker) } }
+                        guard accept else { self.set(item.id, .applied(accepted: false)); done(nil); return }
                         self.store.triage(projectKey: projectKey, item: item, action: dup.map { .duplicate(of: $0.id) } ?? .accept) { ok in
-                            self.set(item.id, .applied(accepted: ok))
-                            done(ok)
+                            if ready != nil { self.set(item.id, .applied(accepted: ok)) }
+                            ok ? done(nil) : failed("the accept")
                         }
                     }
                     if edit.isEmpty { after(true) } else { self.store.triage(projectKey: projectKey, item: item, action: .update(edit), done: after) }
@@ -346,12 +377,9 @@ final class IntakePanel: Card {
         case .ready(let res, let run):
             review(res, run)
             add(NSStackView(h: [
-                ActionButton("Accept", style: .primary) {
-                    agent.apply(projectKey: projectKey, item: item, accept: true) { ok in after(ok ? nil : "Plane did not take the changes or the accept.") }
-                },
-                ActionButton("Write to the item") {
-                    agent.apply(projectKey: projectKey, item: item, accept: false) { ok in after(ok ? nil : "Plane did not take the changes.") }
-                },
+                ActionButton("Accept", style: .primary) { agent.apply(projectKey: projectKey, item: item, accept: true, done: after) },
+                ActionButton("Accept and queue") { agent.apply(projectKey: projectKey, item: item, accept: true, queue: true, done: after) },
+                ActionButton("Write to the item") { agent.apply(projectKey: projectKey, item: item, accept: false, done: after) },
                 open,
                 ActionButton("Discard") { agent.discard(item) },
             ], spacing: 6))
