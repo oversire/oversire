@@ -36,60 +36,100 @@ final class QueuePage: Page {
         DispatchQueue.main.async { [weak self] in self?.reload() }
     }
 
-    override func build(_ col: NSStackView) {
-        let mode = Segmented(AIMode.allCases.map(\.label), selected: AIMode.allCases.firstIndex(of: AGENTS.aiMode) ?? 0, label: "AI checks") { [weak self] i in
-            AGENTS.aiMode = AIMode.allCases[i]
-            saveConfig()
-            self?.reload()
-        }
-        let view = Segmented(["Board", "List"], selected: board ? 0 : 1, label: "Queue view") { [weak self] i in
-            self?.board = i == 0
-            self?.reload()
-        }
-        let add = ActionButton("Add", symbol: "plus")
-        add.onClick = { [weak self, weak add] in if let add { self?.addMenu(add) } }
-        add.setAccessibilityLabel("Add to the queue")
-        col.addFull(PageHeader("Lane board", caption: "Items start in Orca, in order, when a slot frees.", actions: [
-            ToggleChip("Auto start", on: AGENTS.autoStart) { [weak self] in AGENTS.autoStart.toggle(); saveConfig(); self?.reload() },
-            NSTextField.text("AI checks", size: 12, color: Palette.dim), mode, view, add,
-        ]))
-        let text: String
-        switch AGENTS.aiMode {
-        case .auto: text = "AI checks quiet sessions. A \"looks done\" check frees the slot. A \"looks stuck\" check asks you."
-        case .ask: text = "AI checks quiet sessions and asks you before it acts."
-        case .off: text = "AI checks are off. The queue moves when a session ends."
-        }
-        col.addFull(NSStackView(h: [NSTextField.text(text, size: 12, color: Palette.dim, lines: 2), Spacer(),
-                                    ActionButton("AI features", style: .link) { [weak self] in self?.go(.settings(.ai)) }], spacing: 8))
+    override var watches: DataDomains { [.queue, .agents, .projects, .relations, .planner, .summaries, .questions, .config] }
+
+    override func sections() -> [PageSection]? {
+        let mode = AGENTS.aiMode, board = board, auto = AGENTS.autoStart
+        var rows: [PageRow] = [
+            PageRow("header", mode.label, board, auto) { [weak self] in
+                let modes = Segmented(AIMode.allCases.map(\.label), selected: AIMode.allCases.firstIndex(of: mode) ?? 0, label: "AI checks") { i in
+                    AGENTS.aiMode = AIMode.allCases[i]
+                    saveConfig()
+                    self?.reload()
+                }
+                let view = Segmented(["Board", "List"], selected: board ? 0 : 1, label: "Queue view") { i in
+                    self?.board = i == 0
+                    self?.reload()
+                }
+                let add = ActionButton("Add", symbol: "plus")
+                add.onClick = { [weak add] in if let add { self?.addMenu(add) } }
+                add.setAccessibilityLabel("Add to the queue")
+                return PageHeader("Lane board", caption: "Items start in Orca, in order, when a slot frees.", actions: [
+                    ToggleChip("Auto start", on: auto) { AGENTS.autoStart.toggle(); saveConfig(); self?.reload() },
+                    NSTextField.text("AI checks", size: 12, color: Palette.dim), modes, view, add,
+                ])
+            },
+            PageRow("mode", mode.label) { [weak self] in
+                let text: String
+                switch mode {
+                case .auto: text = "AI checks quiet sessions. A \"looks done\" check frees the slot. A \"looks stuck\" check asks you."
+                case .ask: text = "AI checks quiet sessions and asks you before it acts."
+                case .off: text = "AI checks are off. The queue moves when a session ends."
+                }
+                return NSStackView(h: [NSTextField.text(text, size: 12, color: Palette.dim, lines: 2), Spacer(),
+                                       ActionButton("AI features", style: .link) { self?.go(.settings(.ai)) }], spacing: 8)
+            },
+        ]
         if data.agentIndex.ready == nil {
-            col.addFull(Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
-                               actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.agents)) }]))
+            rows.append(PageRow("orca", 0) { [weak self] in
+                Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
+                       actions: [ActionButton("Runtime settings") { self?.go(.settings(.agents)) }])
+            })
         }
-        needsYou(col)
+        // The checks moved to Work › Worktrees. One line links there.
+        let n = NeedsYouCard(page: self).count(data)
+        if n > 0 {
+            rows.append(PageRow("needs", n) { [weak self] in
+                let tone = Tone(SessionState.needsInput)
+                let link = ActionButton("\(n) \(n == 1 ? "session needs" : "sessions need") you · Worktrees", style: .link) { self?.go(.work(.worktrees)) }
+                return NSStackView(h: [Glyph(tone.symbol, color: tone.color, size: 12), link, Spacer()], spacing: 6)
+            })
+        }
 
         let q = data.queue
         var held = hasCloud || UIShots.cloud == true ? (cloudAIRecords?.orders.filter { $0.state == .held } ?? []) : []
         held.sort { $0.createdAt < $1.createdAt }
         if q.lanes.isEmpty {
-            col.addFull(EmptyNote("The queue is empty. Add items here, or from an item page.", symbol: "list.bullet"))
+            rows.append(PageRow("empty", 0) { EmptyNote("The queue is empty. Add items here, or from an item page.", symbol: "list.bullet") })
         }
         for lane in q.lanes {
             let prefix = lane.identifier.uppercased() + "-"
             let mine = held.filter { $0.itemKey?.uppercased().hasPrefix(prefix) == true }
             held.removeAll { o in mine.contains { $0.id == o.id } }
-            col.addFull(laneCard(lane, held: mine))
+            rows.append(PageRow("lane." + lane.project, hash: laneHash(lane, held: mine)) { [weak self] in self?.laneCard(lane, held: mine) ?? NSView() })
         }
-        if !held.isEmpty { col.addFull(heldCard(held)) }
-        col.addFull(planeNote())
+        if !held.isEmpty {
+            let left = held
+            rows.append(PageRow("held", left.map { "\($0.id)|\(String(describing: $0.hold))|\($0.itemKey ?? "")" }) { [weak self] in
+                self?.heldCard(left) ?? NSView()
+            })
+        }
+        rows.append(PageRow("plane", AGENTS.startLabel, AGENTS.botUser) { [weak self] in self?.planeNote() ?? NSView() })
+        return [PageSection("queue", rows: rows)]
     }
 
-    // The checks moved to Work › Worktrees. One line links there.
-    private func needsYou(_ col: NSStackView) {
-        let n = NeedsYouCard(page: self).count(data)
-        guard n > 0 else { return }
-        let tone = Tone(SessionState.needsInput)
-        let link = ActionButton("\(n) \(n == 1 ? "session needs" : "sessions need") you · Worktrees", style: .link) { [weak self] in self?.go(.work(.worktrees)) }
-        col.addFull(NSStackView(h: [Glyph(tone.symbol, color: tone.color, size: 12), link, Spacer()], spacing: 6))
+    // The inputs of a lane card.
+    private func laneHash(_ lane: QueueLane, held: [WorkOrder]) -> Int {
+        let q = data.queue
+        let plan = hasCloud ? data.suggestions.openPlan(lane: lane.project) : nil
+        let suggestion = orderSuggestion(lane)
+        let pick = lane.pick(state: q.state(lane.project), world: q.world(workstreams: nil))
+        let running = q.running(lane)
+        let book = q.areaBook()
+        let keys = lane.entries.map(\.key) + running
+        let store = data.projectStore, job = data.statusJob
+        let items: [String] = keys.map { k in
+            let title = store.item(key: k)?.item.title ?? ""
+            let label = job.item(k)?.label ?? ""
+            return "\(k)|\(title)|\(label)|\(String(describing: book?.areas(key: k) ?? []))|\(data.planner.kind(k, project: lane.project))"
+        }
+        let parts: [AnyHashable] = [
+            String(describing: lane), String(describing: q.state(lane.project)), AGENTS.slots(lane.project), q.busy(lane),
+            PROJECTS_CFG.orca.roots[lane.project] ?? "", String(describing: plan), updated.contains(lane.project), after.contains(lane.project),
+            ordering.contains(lane.project), suggestion?.order ?? [], suggestion?.reason ?? "", String(describing: pick),
+            held.map { "\($0.id)|\(String(describing: $0.hold))" }, board, narrow, items,
+        ]
+        return PageRow.hash(parts)
     }
 
     // MARK: Lanes

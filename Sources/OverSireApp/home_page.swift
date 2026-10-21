@@ -104,48 +104,67 @@ final class HomePage: Page {
     private var all = false
     static let shown = 5
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.runs, .prs, .agents, .queue, .projects, .intake, .questions, .summaries, .stats, .config] }
+
+    override func sections() -> [PageSection]? {
         pageBusy = data.loadingFirst
         let now = Date()
         let cal = Calendar.current
         let needs = NeedsYou.collect(data)
         let df = DateFormatter()
         df.dateFormat = "EEEE, MMM d"
-        let updated = data.firstLoad ? "loading" : "updated " + relativeTime(data.lastUpdate)
-        col.addFull(PageHeader("Home", caption: "\(df.string(from: now)) · \(updated)", actions: [
-            ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) },
-        ]))
-        col.addFull(CardGrid(tiles(needs, now: now, calendar: cal), minWidth: 150, gap: 10))
+        let day = df.string(from: now), loading = data.firstLoad, data = data
+        var rows: [PageRow] = [
+            PageRow("header", day, loading) {
+                PageHeader("Home", updated: { data.lastUpdate }, caption: { "\(day) · " + (loading ? "loading" : "updated \($0)") }, actions: [
+                    ActionButton("Refresh", symbol: "arrow.clockwise") { data.refresh(force: true, completion: nil) },
+                ])
+            },
+        ]
+        let tiles = tiles(needs, now: now, calendar: cal)
+        rows.append(PageRow("tiles", hash: PageRow.hash(tiles.map(\.hash))) { CardGrid(tiles.map { $0.make() }, minWidth: 150, gap: 10) })
         if AI_CFG.digest, let d = data.ciAssist.digest, d.day == CIAssist.day(), !d.facts.isEmpty {
-            let c = Card(title: "Morning digest", trailing: [ActionButton("Dismiss") { [weak self] in self?.data.ciAssist.dismissDigest() }])
-            if let s = d.summary { c.add(NSTextField.text(s, size: 13, lines: 0)) }
-            for f in d.facts { c.add(NSTextField.text("• " + f, size: 12.5, color: d.summary == nil ? Palette.fg : Palette.mut, lines: 0)) }
-            col.addFull(c)
+            rows.append(PageRow("digest", d.day, d.summary, d.facts) {
+                let c = Card(title: "Morning digest", trailing: [ActionButton("Dismiss") { data.ciAssist.dismissDigest() }])
+                if let s = d.summary { c.add(NSTextField.text(s, size: 13, lines: 0)) }
+                for f in d.facts { c.add(NSTextField.text("• " + f, size: 12.5, color: d.summary == nil ? Palette.fg : Palette.mut, lines: 0)) }
+                return c
+            })
         }
-
-        let main = NSStackView(v: [needsCard(needs)], spacing: 16)
-        let aside = NSStackView(v: [movingCard(), weekCard(now: now, calendar: cal)], spacing: 16)
-        // A filler at the end keeps each card at its own height when the other column is taller.
-        for s in [main, aside] {
-            s.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: s.widthAnchor).isActive = true }
-            let fill = NSView()
-            fill.setContentHuggingPriority(.init(1), for: .vertical)
-            s.addArrangedSubview(fill)
-        }
-        let two = NSStackView(h: [main, aside], spacing: 16, align: .top)
-        col.addFull(two)
-        aside.widthAnchor.constraint(equalTo: two.widthAnchor, multiplier: 0.38).isActive = true
+        let needsRows = needsRows(needs), movingRows = movingRows()
+        let week = weekRow(now: now, calendar: cal)
+        var h = Hasher()
+        for r in needsRows + movingRows + [week] { h.combine(r.id); h.combine(r.hash) }
+        rows.append(PageRow("columns", hash: h.finalize(), update: { ($0 as? HomeColumns)?.apply(needsRows, movingRows, week) }) {
+            let c = HomeColumns()
+            c.apply(needsRows, movingRows, week, mark: false)
+            return c
+        })
+        return [PageSection("home", rows: rows)]
     }
 
     // MARK: Tiles
 
-    private func tiles(_ needs: [NeedsYou], now: Date, calendar cal: Calendar) -> [NSView] {
+    /// A tile and the values that it shows.
+    private struct TileSpec {
+        let hash: Int
+        let make: () -> NSView
+        init(_ parts: AnyHashable..., make: @escaping () -> NSView) {
+            hash = PageRow.hash(parts)
+            self.make = make
+        }
+    }
+
+    private func tiles(_ needs: [NeedsYou], now: Date, calendar cal: Calendar) -> [TileSpec] {
         func n(_ f: NeedsYou.Filter) -> Int { needs.filter { f.has($0.kind) }.count }
         let parts = [(n(.blocked), "blocked"), (n(.stuck), "stuck"), (n(.notFinished), "not finished")].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
-        var out: [NSView] = [
-            KPITile("Needs you", value: "\(needs.count)", detail: [needs.isEmpty ? "All clear" : parts.isEmpty ? nil : parts.joined(separator: " · ")],
-                    ring: needs.isEmpty ? nil : Palette.bad.withAlphaComponent(0.5)) { [weak self] in
-                self?.filter = .all; self?.all = true; self?.reload()
+        let needDetail = needs.isEmpty ? "All clear" : parts.isEmpty ? nil : parts.joined(separator: " · ")
+        let needCount = needs.count
+        var out: [TileSpec] = [
+            TileSpec(needCount, needDetail) { [weak self] in
+                KPITile("Needs you", value: "\(needCount)", detail: [needDetail], ring: needCount == 0 ? nil : Palette.bad.withAlphaComponent(0.5)) {
+                    self?.filter = .all; self?.all = true; self?.reload()
+                }
             },
         ]
 
@@ -154,36 +173,50 @@ final class HomePage: Page {
         let q = data.queue
         let used = q.lanes.reduce(0) { $0 + q.busy($1) }, slots = q.lanes.reduce(0) { $0 + AGENTS.slots($1.project) }
         let limits = agents.limits
-        out.append(KPITile("Sessions", value: "\(working)", unit: "working", detail: [
-            slots > 0 ? "\(used) of \(slots) slots" : "\(agents.agents.count) open",
-            limits.isEmpty ? nil : "\(limits.count) at usage limit until \(limits[0].reset)",
-        ]) { [weak self] in self?.go(.work(.worktrees)) })
+        let sessionDetail = [slots > 0 ? "\(used) of \(slots) slots" : "\(agents.agents.count) open",
+                             limits.isEmpty ? nil : "\(limits.count) at usage limit until \(limits[0].reset)"]
+        out.append(TileSpec(working, sessionDetail) { [weak self] in
+            KPITile("Sessions", value: "\(working)", unit: "working", detail: sessionDetail) { self?.go(.work(.worktrees)) }
+        })
 
         let failing = failingRuns(data.grouped).count
         let running = data.grouped.reduce(0) { $0 + $1.1.filter { $0.status != "completed" }.count }
         let pass = WorkStats.passRate(data.grouped.flatMap(\.1), now: now, calendar: cal)
-        out.append(KPITile("Runs", value: "\(failing)", unit: "failing", detail: ["\(running) running", pass.rate.map { "\(pct($0)) passed, 7 days" }],
-                           tone: failing > 0 ? Palette.bad : nil, spark: pass.daily) { [weak self] in self?.go(.runs(failing > 0 ? .failed : .all)) })
+        let runDetail = ["\(running) running", pass.rate.map { "\(pct($0)) passed, 7 days" }]
+        out.append(TileSpec(failing, runDetail, pass.daily) { [weak self] in
+            KPITile("Runs", value: "\(failing)", unit: "failing", detail: runDetail, tone: failing > 0 ? Palette.bad : nil, spark: pass.daily) {
+                self?.go(.runs(failing > 0 ? .failed : .all))
+            }
+        })
 
         let open = data.prGrouped.reduce(0) { $0 + $1.1.count }
         let rv = WorkStats.reviews(data.prGrouped.flatMap(\.1))
-        out.append(KPITile("Pull requests", value: "\(open)", unit: "open", detail: [
-            rv.count == 0 ? "No review waits" : "\(rv.count) wait for your review",
-            rv.oldest.map { "oldest " + AgentSession.minutes(now.timeIntervalSince($0)) },
-        ]) { [weak self] in self?.go(.prs) })
+        let prDetail = [rv.count == 0 ? "No review waits" : "\(rv.count) wait for your review",
+                        rv.oldest.map { "oldest " + AgentSession.minutes(now.timeIntervalSince($0)) }]
+        out.append(TileSpec(open, prDetail) { [weak self] in
+            KPITile("Pull requests", value: "\(open)", unit: "open", detail: prDetail) { self?.go(.prs) }
+        })
 
         let mine = WorkPage.mine(data)
         let todo = mine.filter { ($0.snap.option($0.item.statusOptionId)?.category ?? .todo) == .todo }.count
         let closed = WorkStats.closed(data.projectStore.activity(limit: 2000, project: nil), mine: isMine, now: now, calendar: cal).reduce(0, +)
-        out.append(KPITile("My items", value: "\(mine.count - todo)", unit: "in progress",
-                           detail: ["\(todo) not started", "\(closed) closed this week"]) { [weak self] in self?.go(.work(.items)) })
+        let progress = mine.count - todo
+        out.append(TileSpec(progress, todo, closed) { [weak self] in
+            KPITile("My items", value: "\(progress)", unit: "in progress", detail: ["\(todo) not started", "\(closed) closed this week"]) {
+                self?.go(.work(.items))
+            }
+        })
 
         if data.has(.intake) {
             let all = ActivityFeed.intake(data)
             let today = IntakeListPage.addedToday(all, now: now, calendar: cal)
             let top = IntakeListPage.counts(all).prefix(2).map { "\($0.project) \($0.count)" }.joined(separator: " · ")
-            out.append(KPITile("Intake", value: "\(all.count)", detail: [top.isEmpty ? nil : top, today > 0 ? "+\(today) today" : nil],
-                               tone: Palette.intake) { [weak self] in self?.go(.intake(nil)) })
+            let count = all.count
+            out.append(TileSpec(count, top, today) { [weak self] in
+                KPITile("Intake", value: "\(count)", detail: [top.isEmpty ? nil : top, today > 0 ? "+\(today) today" : nil], tone: Palette.intake) {
+                    self?.go(.intake(nil))
+                }
+            })
         }
         return out
     }
@@ -195,84 +228,108 @@ final class HomePage: Page {
 
     // MARK: Needs you
 
-    private func needsCard(_ needs: [NeedsYou]) -> NSView {
-        let card = ListCard()
-        let chips = NeedsYou.Filter.allCases.map { f -> NSView in
-            let c = needs.filter { f.has($0.kind) }.count
-            return ToggleChip("\(f.title) \(c)", on: filter == f) { [weak self] in self?.filter = f; self?.reload() }
-        }
-        let head = Row([NSTextField.text("Needs you", size: 13, weight: .semibold), Spacer()] + chips, height: 40)
-        head.restFill = Palette.raise
-        card.add(head)
+    private func needsRows(_ needs: [NeedsYou]) -> [PageRow] {
+        let counts = NeedsYou.Filter.allCases.map { f in needs.filter { f.has($0.kind) }.count }
+        let filter = filter, data = data, commands = commands
+        var rows = [PageRow("head", filter.rawValue, counts) { [weak self] in
+            let chips = NeedsYou.Filter.allCases.map { f -> NSView in
+                ToggleChip("\(f.title) \(counts[f.rawValue])", on: filter == f) { self?.filter = f; self?.reload() }
+            }
+            let head = Row([NSTextField.text("Needs you", size: 13, weight: .semibold), Spacer()] + chips, height: 40)
+            head.restFill = Palette.raise
+            return head
+        }]
         let list = needs.filter { filter.has($0.kind) }
         for n in all ? list : Array(list.prefix(HomePage.shown)) {
-            card.add(NeedsYouRow(n, data: data, commands: commands) { [weak self] in self?.go($0) })
+            rows.append(PageRow(n.id, hash: n.rowHash) { [weak self] in NeedsYouRow(n, data: data, commands: commands) { self?.go($0) } })
         }
         if list.count > HomePage.shown {
             let t = all ? "Show less" : "\(list.count - HomePage.shown) more · Open all"
-            card.add(Row([ActionButton(t, style: .link) { [weak self] in self?.all.toggle(); self?.reload() }, Spacer()], height: 34))
+            rows.append(PageRow("more", t) { [weak self] in Row([ActionButton(t, style: .link) { self?.all.toggle(); self?.reload() }, Spacer()], height: 34) })
         }
         if list.isEmpty {
-            card.add(data.loadingFirst ? LoadingNote("Loading") : EmptyNote(filter == .all ? "Nothing waits for you." : "No row of this kind.",
-                                                                              symbol: "checkmark.circle"))
+            let loading = data.loadingFirst
+            rows.append(PageRow(loading ? "loading" : "empty", filter.rawValue) {
+                loading ? LoadingNote("Loading") : EmptyNote(filter == .all ? "Nothing waits for you." : "No row of this kind.", symbol: "checkmark.circle")
+            })
         }
-        return card
+        return rows
     }
 
     // MARK: Moving now
 
-    private func movingCard() -> NSView {
-        let card = ListCard()
-        let head = Row([NSTextField.text("Moving now", size: 13, weight: .semibold), Spacer(),
-                        NSTextField.text("sessions and runs", size: 12, color: Palette.dim)], height: 40)
-        head.restFill = Palette.raise
-        card.add(head)
+    private func movingRows() -> [PageRow] {
+        var rows = [PageRow("head", 0) {
+            let head = Row([NSTextField.text("Moving now", size: 13, weight: .semibold), Spacer(),
+                            NSTextField.text("sessions and runs", size: 12, color: Palette.dim)], height: 40)
+            head.restFill = Palette.raise
+            return head
+        }]
         let agents = data.agentIndex
         let working = agents.agents.filter { agents.state($0.key) == .working }.sorted { $0.value.since < $1.value.since }
-        var rows: [NSView] = working.map { k, a in
+        var lines: [PageRow] = working.map { k, a in
             let tone = Tone(SessionState.working)
             let title = data.projectStore.item(key: k)?.item.title ?? a.message ?? tone.word
-            return line(tone, k, title, AgentSession.minutes(Date().timeIntervalSince(a.since))) { [weak self] in self?.go(.item(k, .session)) }
+            return PageRow("agent." + k, title, a.since) { [weak self] in
+                HomePage.line(tone, k, title, since: a.since) { self?.go(.item(k, .session)) }
+            }
         }
         for (repo, runs) in data.grouped {
             for r in runs where r.status != "completed" {
                 let name = repo.split(separator: "/").last.map(String.init) ?? repo
                 let key = data.workstreams.link(runId: r.id)?.key ?? name
                 let since = parseISO(r.startedAt ?? r.createdAt) ?? Date()
-                rows.append(line(Tone(r), key, "\(r.workflowName ?? r.name) #\(r.number) · \(r.headBranch)",
-                                 AgentSession.minutes(Date().timeIntervalSince(since))) { [weak self] in self?.go(.run(repo: repo, id: r.id)) })
+                let tone = Tone(r), text = "\(r.workflowName ?? r.name) #\(r.number) · \(r.headBranch)"
+                lines.append(PageRow("run." + repo + "#" + r.id, tone.word, key, text, since) { [weak self] in
+                    HomePage.line(tone, key, text, since: since) { self?.go(.run(repo: repo, id: r.id)) }
+                })
             }
         }
         let max = 6
-        rows.prefix(max).forEach(card.add)
-        if rows.count > max {
-            card.add(Row([ActionButton("\(rows.count - max) more · Open runs", style: .link) { [weak self] in self?.go(.runs(.running)) }, Spacer()],
-                         height: 34))
+        rows += lines.prefix(max)
+        if lines.count > max {
+            let left = lines.count - max
+            rows.append(PageRow("more", left) { [weak self] in
+                Row([ActionButton("\(left) more · Open runs", style: .link) { self?.go(.runs(.running)) }, Spacer()], height: 34)
+            })
         }
         if let next = data.queue.upNext(store: data.projectStore).first {
-            let t = NSTextField.text("Next: \(next.key) when a slot frees", size: 12.5, color: Palette.dim)
-            card.add(Row([Glyph("chevron.right.circle", color: Palette.dim, size: 12).fixedWidth(16), t, Spacer()], height: 36,
-                         label: "Next: \(next.key) when a slot frees") { [weak self] in self?.go(.work(.items)) })
+            let key = next.key
+            rows.append(PageRow("next", key) { [weak self] in
+                let t = NSTextField.text("Next: \(key) when a slot frees", size: 12.5, color: Palette.dim)
+                return Row([Glyph("chevron.right.circle", color: Palette.dim, size: 12).fixedWidth(16), t, Spacer()], height: 36,
+                           label: "Next: \(key) when a slot frees") { self?.go(.work(.items)) }
+            })
         }
-        if card.isEmpty || card.list.arrangedSubviews.count == 1 {
-            card.add(data.firstLoad ? LoadingNote("Loading") : EmptyNote("Nothing moves now.", symbol: "pause.circle"))
+        if rows.count == 1 {
+            let loading = data.firstLoad
+            rows.append(PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading") : EmptyNote("Nothing moves now.", symbol: "pause.circle") })
         }
-        return card
+        return rows
     }
 
-    private func line(_ tone: Tone, _ key: String, _ text: String, _ age: String, onClick: @escaping () -> Void) -> NSView {
+    private static func line(_ tone: Tone, _ key: String, _ text: String, since: Date, onClick: @escaping () -> Void) -> NSView {
         let k = NSTextField.text(key, size: 11.5, color: Palette.mut, mono: true)
         k.lineBreakMode = .byTruncatingTail
         let t = NSTextField.text(text.replacingOccurrences(of: "\n", with: " "), size: 12.5)
         t.lineBreakMode = .byTruncatingTail
         t.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         t.setContentHuggingPriority(.init(1), for: .horizontal)
-        return Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), k.fixedWidth(112), t, Spacer(),
-                    NSTextField.text(age, size: 11.5, color: Palette.dim)],
+        let age = AgentSession.minutes(Date().timeIntervalSince(since))
+        return Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), k.fixedWidth(112), t, Spacer(), RelativeTimeLabel.since(since)],
                    height: 36, label: "\(tone.word): \(key), \(text), \(age)", onClick: onClick)
     }
 
     // MARK: This week
+
+    private func weekRow(now: Date, calendar cal: Calendar) -> PageRow {
+        let closed = WorkStats.closed(data.projectStore.activity(limit: 2000, project: nil), mine: isMine, now: now, calendar: cal)
+        let merged = data.stats.merged(repos: REPOS)
+        let hours = data.stats.sessionHours.reduce(0, +)
+        return PageRow("week", closed, merged, Int(hours * 10), cal.startOfDay(for: now)) { [weak self] in
+            self?.weekCard(now: now, calendar: cal) ?? NSView()
+        }
+    }
 
     private func weekCard(now: Date, calendar cal: Calendar) -> NSView {
         let stats = data.stats
@@ -301,5 +358,43 @@ final class HomePage: Page {
         c.add(NSStackView(h: legend + [Spacer()], spacing: 14))
         c.add(NSStackView(h: [key(nil, "Session hours", hours < 10 ? String(format: "%.1fh", hours) : "\(Int(hours.rounded()))h"), Spacer()], spacing: 14))
         return c
+    }
+}
+
+/// The two columns of Home: Needs you at the left, Moving now and This week at the right. Each card keeps its rows.
+final class HomeColumns: NSStackView {
+    private let needs = ListCard()
+    private let moving = ListCard()
+    private let week = NSStackView(v: [], spacing: 0)
+    private var weekHash: Int?
+
+    init() {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .top
+        spacing = 16
+        translatesAutoresizingMaskIntoConstraints = false
+        let main = NSStackView(v: [needs], spacing: 16)
+        let aside = NSStackView(v: [moving, week], spacing: 16)
+        // A filler at the end keeps each card at its own height when the other column is taller.
+        for s in [main, aside] {
+            s.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: s.widthAnchor).isActive = true }
+            let fill = NSView()
+            fill.setContentHuggingPriority(.init(1), for: .vertical)
+            s.addArrangedSubview(fill)
+        }
+        addArrangedSubview(main)
+        addArrangedSubview(aside)
+        aside.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.38).isActive = true
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    func apply(_ needsRows: [PageRow], _ movingRows: [PageRow], _ weekRow: PageRow, mark: Bool = true) {
+        needs.apply(needsRows, mark: mark)
+        moving.apply(movingRows, mark: mark)
+        guard weekRow.hash != weekHash else { return }
+        weekHash = weekRow.hash
+        week.clear()
+        week.addFull(weekRow.make())
     }
 }

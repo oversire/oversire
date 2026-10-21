@@ -55,7 +55,7 @@ final class ProjectStore {
         tracker: { [weak self] in self?.trackers.tracker($0.project.workspace) as? any RelationManaging },
         ref: { [weak self] key in self?.item(key: key).flatMap { $0.item.ref(in: $0.snap.summary.ref) } })
     var relayIsLive: () -> Bool = { false }
-    var onChange: (() -> Void)?
+    var onChange: ((DataChange) -> Void)?
     var busy: BusyTracker?
     var hold = false   // `--uishots` loading mode: fetches never end
 
@@ -101,7 +101,7 @@ final class ProjectStore {
         let todo = keys.filter { force || !refreshing.contains($0) }
         guard !todo.isEmpty else { done(true); return }
         for k in todo { refreshing.insert(k) }
-        publish()
+        publish(force ? DataChange(.projects, projects: Set(todo), origin: .user) : nil)
         let jobs = tracked.filter { todo.contains($0.ref.storeKey) }.map { p in
             (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey])
         }
@@ -142,15 +142,19 @@ final class ProjectStore {
                 for k in todo { self.refreshing.remove(k) }
                 self.lastError = error
                 var changed = Set<String>()
+                var projects = force ? Set(todo) : []
                 for snap in fresh {
-                    let old = Dictionary((self.snapshots[snap.summary.ref.storeKey]?.items ?? []).map { ($0.id, $0.activityAt) },
+                    let key = snap.summary.ref.storeKey
+                    let old = Dictionary((self.snapshots[key]?.items ?? []).map { ($0.id, $0.activityAt) },
                                          uniquingKeysWith: { a, _ in a })
                     changed.formUnion(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
+                    let before = self.snapshots[key].map(ProjectStore.digest)
                     self.absorb(snap)
+                    if before != self.snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
                 }
                 self.save()
                 self.relations.refresh(changed: changed)
-                self.publish()
+                self.publish(projects.isEmpty ? nil : DataChange([.projects, .intake], projects: projects, origin: force ? .user : .poll))
                 done(!failed)
             }
         }
@@ -195,7 +199,7 @@ final class ProjectStore {
                     entries = []
                 }
                 waiters.forEach { $0(entries) }
-                self.publish()
+                self.publish(DataChange(.projects, projects: [projectKey]))
             }
         }
     }
@@ -219,21 +223,21 @@ final class ProjectStore {
     }
 
     func markRead(itemId: String) {
-        readItems.insert(itemId)
+        guard readItems.insert(itemId).inserted else { return }
         save()
-        publish()
+        publish(DataChange(.projects, origin: .user))
     }
 
     func markActivityRead(_ id: String) {
-        readActivity.insert(id)
+        guard readActivity.insert(id).inserted else { return }
         save()
-        publish()
+        publish(DataChange(.projects, origin: .user))
     }
 
     func markActivityUnread(_ id: String) {
-        readActivity.remove(id)
+        guard readActivity.remove(id) != nil else { return }
         save()
-        publish()
+        publish(DataChange(.projects, origin: .user))
     }
 
     func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
@@ -344,7 +348,7 @@ final class ProjectStore {
     /// For `--uishots`: a changed copy of a snapshot. The next refresh replaces it.
     func seed(_ snap: ProjectSnapshot) {
         snapshots[snap.summary.ref.storeKey] = snap
-        publish()
+        publish(DataChange(.projects, projects: [snap.summary.ref.storeKey]))
     }
 
     // `done(created, message)`.
@@ -582,7 +586,7 @@ final class ProjectStore {
     // Applies changed status categories to the snapshots in memory.
     func applyLocalSettings() {
         snapshots = snapshots.mapValues { ProjectStore.localized($0) }
-        publish()
+        publish(DataChange(.projects, origin: .user))
     }
 
     private func absorb(_ snap: ProjectSnapshot) {
@@ -662,9 +666,19 @@ final class ProjectStore {
         try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)
     }
 
-    private func publish() {
-        onChange?()
+    /// A nil change tells the store observers only. The pages get no update.
+    private func publish(_ c: DataChange?) {
+        if let c { onChange?(c) }
         NotificationCenter.default.post(name: ProjectStore.changed, object: self)
+    }
+
+    /// The bytes of a snapshot without its fetch time, to find a fetch that changed nothing.
+    static func digest(_ s: ProjectSnapshot) -> Data {
+        let e = JSONEncoder()
+        e.outputFormatting = .sortedKeys
+        let bare = ProjectSnapshot(summary: s.summary, statusOptions: s.statusOptions, items: s.items, fetchedAt: .distantPast,
+                                   fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake)
+        return (try? e.encode(bare)) ?? Data()
     }
 }
 

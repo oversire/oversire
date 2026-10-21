@@ -485,7 +485,18 @@ class Row: Box {
 
 // Title above a subtitle. Use as the main column of a row.
 final class TwoLine: NSStackView {
-    init(_ title: String, _ subtitle: String?, titleSize: CGFloat = 13, weight: NSFont.Weight = .medium,
+    convenience init(_ title: String, _ subtitle: String?, titleSize: CGFloat = 13, weight: NSFont.Weight = .medium,
+                     titleColor: NSColor = Palette.fg, lines: Int = 1) {
+        let sub = subtitle.flatMap { $0.isEmpty ? nil : NSTextField.text($0, size: 11.5, color: Palette.dim) }
+        self.init(title, subView: sub, titleSize: titleSize, weight: weight, titleColor: titleColor, lines: lines)
+    }
+
+    /// A subtitle with a time in it. `subtitle` gets the relative time, for example "2m ago".
+    convenience init(_ title: String, time: Date?, titleSize: CGFloat = 13, subtitle: @escaping (String) -> String) {
+        self.init(title, subView: RelativeTimeLabel({ time }, format: subtitle), titleSize: titleSize)
+    }
+
+    init(_ title: String, subView: NSView?, titleSize: CGFloat = 13, weight: NSFont.Weight = .medium,
          titleColor: NSColor = Palette.fg, lines: Int = 1) {
         super.init(frame: .zero)
         orientation = .vertical
@@ -493,7 +504,7 @@ final class TwoLine: NSStackView {
         spacing = 2
         translatesAutoresizingMaskIntoConstraints = false
         addArrangedSubview(NSTextField.text(title, size: titleSize, weight: weight, color: titleColor, lines: lines))
-        if let subtitle, !subtitle.isEmpty { addArrangedSubview(NSTextField.text(subtitle, size: 11.5, color: Palette.dim)) }
+        if let subView { addArrangedSubview(subView) }
         setContentHuggingPriority(.init(1), for: .horizontal)
         setContentCompressionResistancePriority(.init(1), for: .horizontal)
     }
@@ -621,14 +632,23 @@ private final class TabCell: NSStackView {
 
 // Page title line: big title, a small caption, then actions on the right.
 final class PageHeader: NSStackView {
-    init(_ title: String, caption: String? = nil, actions: [NSView] = []) {
+    convenience init(_ title: String, caption: String? = nil, actions: [NSView] = []) {
+        self.init(title, captionView: caption.map { NSTextField.text($0, size: 12, color: Palette.dim, lines: 2) }, actions: actions)
+    }
+
+    /// A caption with a time in it, for example "updated 2m ago". The text stays current with no new build.
+    convenience init(_ title: String, updated: @escaping () -> Date?, caption: @escaping (String) -> String, actions: [NSView] = []) {
+        self.init(title, captionView: RelativeTimeLabel(updated, size: 12, lines: 2, format: caption), actions: actions)
+    }
+
+    init(_ title: String, captionView: NSView?, actions: [NSView] = []) {
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .centerY
         spacing = 8
         translatesAutoresizingMaskIntoConstraints = false
         let t = NSStackView(v: [NSTextField.text(title, size: 20, weight: .semibold, lines: 2)], spacing: 2)
-        if let caption { t.addArrangedSubview(NSTextField.text(caption, size: 12, color: Palette.dim, lines: 2)) }
+        if let captionView { t.addArrangedSubview(captionView) }
         t.setContentHuggingPriority(.init(1), for: .horizontal)
         addArrangedSubview(t)
         addArrangedSubview(Spacer())
@@ -783,6 +803,7 @@ final class PageScroll: NSScrollView {
     // Builds into a new column and swaps it in. One swap is much cheaper than removing each old view from the stack.
     // `fills`: the column fills the visible height, and the view with the lowest vertical hugging takes the free height.
     func rebuild(fills: Bool = false, _ build: (NSStackView) -> Void) {
+        reconciler = nil
         let y = contentView.bounds.origin.y
         let inner = PageScroll.kept(in: column).map { ($0.identifier, $0.contentView.bounds.origin.y) }
         let next = PageScroll.makeColumn()
@@ -815,6 +836,38 @@ final class PageScroll: NSScrollView {
             s.contentView.scroll(to: NSPoint(x: 0, y: min(y, max(0, doc.frame.height - s.contentView.bounds.height))))
             s.reflectScrolledClipView(s.contentView)
         }
+    }
+
+    private var reconciler: RowReconciler?
+
+    /// Keeps the views with the same id, updates the rows whose hash changed, inserts and removes the others. No column swap.
+    /// The first visible row keeps its place on screen.
+    @discardableResult
+    func apply(_ sections: [PageSection], fills: Bool = false, mark: Bool = true) -> RowReconciler.Result {
+        let r: RowReconciler
+        if let rec = reconciler { r = rec } else {
+            column.clear()
+            r = RowReconciler(column)
+            reconciler = r
+            if fills {
+                column.distribution = .fill
+                column.setHuggingPriority(.init(1), for: .vertical)
+            }
+        }
+        var rows = PageSection.flatten(sections)
+        if fills {
+            // Takes the rest when the table is short. A view with hugging 1 and no fit (SidePane) wins over it.
+            rows.append(PageRow("rest", hash: 0, full: false) {
+                let rest = NSView()
+                rest.translatesAutoresizingMaskIntoConstraints = false
+                rest.setContentHuggingPriority(.init(2), for: .vertical)
+                rest.setContentCompressionResistancePriority(.init(1), for: .vertical)
+                return rest
+            })
+        }
+        self.fills = fills
+        fillHeight.forEach { $0.isActive = fills }
+        return r.apply(rows, mark: mark)
     }
 
     // The inner scroll views that keep their position over a rebuild. Their identifier names them.
@@ -859,11 +912,16 @@ final class EmptyNote: NSStackView {
 // A list of rows with a line between them.
 protocol RowList: AnyObject {
     var list: NSStackView { get }
+    /// Keeps the rows of `apply` in place.
+    var reconciler: RowReconciler { get }
     func add(_ v: NSView)
+    /// Runs after `apply`.
+    func didApply()
 }
 
 extension RowList {
     var isEmpty: Bool { list.arrangedSubviews.isEmpty }
+    func didApply() {}
 
     // Adds the first rows of a long list, and a "Show more" row for the rest. Each row costs layout time.
     func add<T>(_ items: [T], more: MoreRows, _ make: @escaping (T) -> NSView) { add(items, more: more, from: 0, make) }
@@ -889,6 +947,7 @@ extension RowList {
 // A list in a card: rows with a line between them.
 final class ListCard: Box, RowList {
     let list: NSStackView
+    private(set) lazy var reconciler = RowReconciler(list, separators: true)
 
     init() {
         list = NSStackView(v: [], spacing: 0)
@@ -987,11 +1046,11 @@ final class Grid: NSStackView {
 }
 
 // ─── Settings controls ───────────────────────────────────────────────────────
-// Each control saves the config and posts AppWindow.changed after a change.
+// Each control saves the config and posts a config change after a change.
 
 func settingsChanged() {
     saveConfig()
-    NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+    ChangeBus.shared.post(.config())
 }
 
 // A segmented control for one choice of a few.
@@ -1202,6 +1261,8 @@ final class HealthBar: NSStackView {
 final class StickyListCard: Box, RowList {
     let scroll: NSScrollView = OverlayScroll()
     let list = NSStackView(v: [], spacing: 0)
+    private(set) lazy var reconciler = RowReconciler(list, separators: true)
+    private var pinnedHashes: [Int] = []
     private var groups: [(head: NSView, pinned: NSView, top: NSLayoutConstraint)] = []
     private var observer: Any?
 
@@ -1282,8 +1343,23 @@ final class StickyListCard: Box, RowList {
     func addGroup(_ make: () -> NSView) {
         let head = make()
         add(head)
+        pin(head, copy: make())
+    }
+
+    // The pinned copies of the group rows of `apply`. They change only when a group header changes.
+    func didApply() {
+        let now = reconciler.groups
+        let same = now.count == groups.count && zip(now, groups).allSatisfy { $0.view === $1.head } && now.map(\.hash) == pinnedHashes
+        guard !same else { return }
+        groups.forEach { $0.pinned.removeFromSuperview() }
+        groups = []
+        for g in now { pin(g.view, copy: g.make()) }
+        pinnedHashes = now.map(\.hash)
+        needsLayout = true
+    }
+
+    private func pin(_ head: NSView, copy content: NSView) {
         let pinned = Box(fill: (head as? Row)?.restFill ?? Palette.side, border: nil, radius: 0)
-        let content = make()
         content.translatesAutoresizingMaskIntoConstraints = false
         pinned.addSubview(content)
         let line = Box(fill: Palette.line, border: nil, radius: 0)
@@ -1338,12 +1414,22 @@ extension StickyListCard {
 
     // A group row: a title and a count. It stays at the top while its rows scroll.
     func addGroup(_ title: String, count: Int, lead: @escaping () -> [NSView] = { [] }, trailing: @escaping () -> [NSView] = { [] }) {
-        addGroup {
-            let head = Row(lead() + [NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()]
-                           + trailing(), height: 32, label: "\(title), \(count)")
-            head.restFill = Palette.raise
-            return head
-        }
+        addGroup { StickyListCard.groupHead(title, count: count, lead: lead, trailing: trailing) }
+    }
+
+    static func groupHead(_ title: String, count: Int, lead: () -> [NSView] = { [] }, trailing: () -> [NSView] = { [] }) -> Row {
+        let head = Row(lead() + [NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()]
+                       + trailing(), height: 32, label: "\(title), \(count)")
+        head.restFill = Palette.raise
+        return head
+    }
+
+    /// The group row of `apply`. Its hash is the title and the count, plus `extra` for the views of `lead` and `trailing`.
+    static func group(_ id: String, _ title: String, count: Int, extra: AnyHashable = 0, lead: @escaping () -> [NSView] = { [] },
+                      trailing: @escaping () -> [NSView] = { [] }) -> PageRow {
+        var r = PageRow("group." + id, title, count, extra) { StickyListCard.groupHead(title, count: count, lead: lead, trailing: trailing) }
+        r.group = true
+        return r
     }
 }
 

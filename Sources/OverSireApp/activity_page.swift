@@ -32,6 +32,12 @@ struct FeedEntry {
     var projectKey: String? = nil     // "SLING"
     var intakeKey: String? = nil      // "SLING-102"; nil while the number loads
 
+    /// Changes when the line must update.
+    var rowHash: Int {
+        PageRow.hash([id, source.rawValue, title, body, at, route.map { String(describing: $0) }, url, intake?.item.id, activityId,
+                      groupedIds, itemKey, itemURL, projectKey, intakeKey])
+    }
+
     /// The ID cell of an intake line. "SLING-–" while the number loads: never the work item UUID.
     var shownID: String { intakeKey ?? "\(projectKey ?? "")-–" }
     /// The item of a Plane change, also when the item is gone.
@@ -172,7 +178,7 @@ final class FeedLine: TableRow {
             "source": Chiplet(e.source.rawValue, color: e.source.color),
             "id": Chiplet(e.shownID, color: e.intakeKey == nil ? Palette.dim : Palette.intake),
             "title": badge.map { NSStackView(h: [title, $0], spacing: 8) } ?? title,
-            "when": NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim),
+            "when": RelativeTimeLabel(e.at),
         ]
         super.init(layout, cells: cells, height: 48, label: "\(e.intakeKey.map { $0 + " " } ?? "")\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
     }
@@ -194,7 +200,9 @@ final class ActivityPage: Page {
     private let more = MoreRows()
     override var buildsLater: Bool { true }
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.projects, .runs, .agents, .intake, .summaries, .questions, .config] }
+
+    override func sections() -> [PageSection]? {
         pageBusy = data.loadingFirst
         let all = ActivityFeed.entries(data)
         commands.intercept = { [weak self] c in
@@ -202,14 +210,26 @@ final class ActivityPage: Page {
             self.filter.projects = [k]
             return true
         }
-        col.addFull(PageHeader("Activity", caption: "Plane, GitHub, Orca and AI in one feed. The newest is first."))
-        col.addArrangedSubview(filterBar(all))
+        let header = PageRow("header", 0) { PageHeader("Activity", caption: "Plane, GitHub, Orca and AI in one feed. The newest is first.") }
+        let bar = filterBarRow(all)
         let shown = all.filter(filter.pass)
-        let list = StickyListCard.table(shown.isEmpty ? nil : FeedLine.layout)
-        list.add(shown, more: more) { [unowned self] in self.row($0) }
-        if list.isEmpty, data.loadingFirst { list.add(LoadingNote("Loading the activity")) }
-        if list.isEmpty { list.add(EmptyNote(filter.isOn ? "No entry matches the filters." : "No activity yet.")) }
-        col.addFull(list)
+        var rows = PageRow.limited(shown, more: more, reload: { [weak self] in self?.reload() }) { [weak self] e in
+            PageRow(e.id, hash: e.rowHash) { self?.row(e) ?? NSView() }
+        }
+        if rows.isEmpty {
+            let loading = data.loadingFirst, on = filter.isOn
+            rows = [PageRow(loading ? "loading" : "empty", on) {
+                loading ? LoadingNote("Loading the activity") : EmptyNote(on ? "No entry matches the filters." : "No activity yet.")
+            }]
+        }
+        let table = shown.isEmpty ? nil : FeedLine.layout
+        let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }
+        return [PageSection("top", rows: [header, bar]), PageSection("feed", rows: [list])]
+    }
+
+    private func filterBarRow(_ all: [FeedEntry]) -> PageRow {
+        let counts = ActivityPage.counts(all) { ($0.projectKey ?? FeedFilter.noProject) + "|" + $0.source.rawValue }
+        return PageRow("filters", filter.projects, filter.sources, counts, full: false) { [weak self] in self?.filterBar(all) ?? NSView() }
     }
 
     // The Project and Source chips. A menu value shows its count with the other filter on.

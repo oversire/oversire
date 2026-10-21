@@ -273,7 +273,7 @@ final class RowCommander {
         PROJECTS_CFG.setLocal(key, l)
         saveConfig()
         Task { await PROJECT_ICONS.sync(key) }
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        ChangeBus.shared.post(.config())
     }
 
     private func fail(_ title: String, _ detail: String, anchor: NSView?) {

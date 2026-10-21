@@ -75,9 +75,13 @@ final class LiveSync {
             guard state != oldValue else { return }
             log.info("Cloud: \(String(describing: self.state), privacy: .public)")
             sink?.relayStateChanged()
+            bus.post(DataChange(.connection, origin: .event))
         }
     }
     private(set) var lastEventAt: Date?
+    /// The last burst of events. The window footer shows one ring for it.
+    private(set) var lastBurstAt: Date?
+    var bus: ChangeBus = .shared
     /// The last poll that succeeded. The footer shows it.
     private(set) var lastPoll: Date?
     /// Repos without a webhook. They poll at the normal interval while the cloud is live.
@@ -284,6 +288,10 @@ final class LiveSync {
         buffer = []
         resyncs = []
         fullResync = false
+        if full || !events.isEmpty {
+            lastBurstAt = Date()
+            bus.post(DataChange(.connection, origin: .event))
+        }
         if full {
             log.info("Cloud log gap, full refresh")
             sink.relayFullRefresh { _ in }

@@ -23,6 +23,7 @@ public struct LogArea: RawRepresentable, Hashable, Sendable, Codable, Expressibl
     public static let sessions: LogArea = "sessions"
     public static let sync: LogArea = "sync"
     public static let runner: LogArea = "runner"
+    public static let ui: LogArea = "ui"
 }
 
 public struct LogEntry: Codable, Hashable, Sendable {

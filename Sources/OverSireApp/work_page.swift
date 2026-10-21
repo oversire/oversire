@@ -68,89 +68,113 @@ final class WorkPage: Page {
     }
 
     /// The page title, the caption, the actions and the tabs. The Worktrees tab uses it too.
-    static func header(_ page: Page, tab: Route.WorkTab, caption: String, actions: [NSView], trailing: [NSView] = [], in col: NSStackView) {
+    /// `extra` holds the values of `actions` and `trailing`.
+    static func header(_ page: Page, tab: Route.WorkTab, caption: String, extra: AnyHashable = 0, actions: @escaping () -> [NSView],
+                       trailing: @escaping () -> [NSView] = { [] }) -> [PageRow] {
         let data = page.data
         let worktrees = data.agentIndex.cards.filter { AgentsPage.cardKey($0, data: data) != nil }.count
+        let mine = mine(data).count
         let tabs: [Route.WorkTab] = [.items, .worktrees]
-        let strip = TabStrip(["Items", "Worktrees"], selected: tabs.firstIndex(of: tab) ?? 0, counts: [mine(data).count, worktrees])
-        strip.onSelect = { [weak page] i in page?.go(.work(tabs[i])) }
-        col.addFull(PageHeader("Work", caption: caption, actions: actions))
-        col.addFull(NSStackView(h: [strip, Spacer()] + trailing, spacing: 8))
+        return [
+            PageRow("header", caption, extra) { PageHeader("Work", caption: caption, actions: actions()) },
+            PageRow("tabs", tab.rawValue, mine, worktrees, extra) { [weak page] in
+                let strip = TabStrip(["Items", "Worktrees"], selected: tabs.firstIndex(of: tab) ?? 0, counts: [mine, worktrees])
+                strip.onSelect = { i in page?.go(.work(tabs[i])) }
+                return NSStackView(h: [strip, Spacer()] + trailing(), spacing: 8)
+            },
+        ]
     }
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.projects, .agents, .runs, .queue, .summaries, .planner, .config] }
+
+    override func sections() -> [PageSection]? {
         let q = data.queue
         let used = q.lanes.reduce(0) { $0 + q.busy($1) }
         let slots = q.lanes.reduce(0) { $0 + AGENTS.slots($1.project) }
         let list = WorkPage.mine(data)
         var caption = "\(list.count) open items of yours"
         if slots > 0 { caption += " · \(used) of \(slots) session slots used" }
-        let auto = ToggleChip("Auto start", on: AGENTS.autoStart) { [weak self] in AGENTS.autoStart.toggle(); saveConfig(); self?.reload() }
-        WorkPage.header(self, tab: .items, caption: caption, actions: [auto], in: col)
+        let on = AGENTS.autoStart
+        let top = WorkPage.header(self, tab: .items, caption: caption, extra: on, actions: { [weak self] in
+            [ToggleChip("Auto start", on: on) { AGENTS.autoStart.toggle(); saveConfig(); self?.reload() }]
+        })
 
         let job = data.statusJob
         let groups = WorkPage.itemGroups(list, queued: q.contains, status: job.item)
-        let card = StickyListCard.table(table)
-        if let g = groups.first(where: { $0.title == "In progress" }) { group(card, g, queue: false) }
-        upNext(card)
-        if let g = groups.first(where: { $0.title == "Not started" }) { group(card, g, queue: true) }
-        doneGroup(card)
+        var rows: [PageRow] = []
+        if let g = groups.first(where: { $0.title == "In progress" }) { rows += group(g, queue: false) }
+        rows += upNext()
+        if let g = groups.first(where: { $0.title == "Not started" }) { rows += group(g, queue: true) }
+        rows += doneGroup()
         pageBusy = data.projectsLoading
-        if card.isEmpty { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }
-        col.addFull(card)
+        if rows.isEmpty {
+            let loading = data.projectsLoading
+            rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.") }]
+        }
+        let table = table
+        return [PageSection("top", rows: top), PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
     // One group with a label row for each priority. `queue`: the rows show "＋ Queue" on hover.
-    private func group(_ card: StickyListCard, _ g: (title: String, lanes: [Lane]), queue: Bool) {
+    private func group(_ g: (title: String, lanes: [Lane]), queue: Bool) -> [PageRow] {
         let job = data.statusJob
-        card.addGroup(g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })
+        var rows = [StickyListCard.group(g.title, g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })]
         for lane in g.lanes {
-            card.add(WorkPage.laneRow(lane))
+            rows.append(PageRow("lane.\(g.title).\(lane.priority)", lane.entries.count) { WorkPage.laneRow(lane) })
             let m = more[g.title + lane.priority] ?? MoreRows()
             more[g.title + lane.priority] = m
-            card.add(lane.entries, more: m) { [weak self, table, commands] e in
-                let row = ItemLine(e.item, snap: e.snap, stream: e.stream, status: job.item(e.item.key), layout: table, commands: commands) { self?.go($0) }
-                if queue {
-                    let add = ActionButton("Queue", symbol: "plus") { [weak self] in self?.data.queue.add(e.item, snap: e.snap); self?.reload() }
-                    add.setAccessibilityLabel("Add \(e.item.key) to the queue")
-                    row.hoverViews = [add]
+            rows += PageRow.limited(lane.entries, more: m, reload: { [weak self] in self?.reload() }) { [weak self, table, commands] e in
+                let st = job.item(e.item.key)
+                return PageRow(e.item.key, hash: PageRow.hash([ItemLine.hash(e.item, snap: e.snap, stream: e.stream, status: st), queue])) {
+                    let row = ItemLine(e.item, snap: e.snap, stream: e.stream, status: st, layout: table, commands: commands) { self?.go($0) }
+                    if queue {
+                        let add = ActionButton("Queue", symbol: "plus") { self?.data.queue.add(e.item, snap: e.snap); self?.reload() }
+                        add.setAccessibilityLabel("Add \(e.item.key) to the queue")
+                        row.hoverViews = [add]
+                    }
+                    return row
                 }
-                return row
-            }
+            }.map { r in r.id == "more" ? PageRow("more.\(g.title).\(lane.priority)", hash: r.hash, make: r.make) : r }
         }
+        return rows
     }
 
     // Finished items. A row with cleanup left shows the "Done · cleanup" chip. The cleanup actions are on the item page.
-    private func doneGroup(_ card: StickyListCard) {
+    private func doneGroup() -> [PageRow] {
         let list = WorkPage.done(data)
-        guard !list.isEmpty else { return }
+        guard !list.isEmpty else { return [] }
         let job = data.statusJob
-        let left = list.filter { !data.cleaner.lines($0.item.key, data: data).isEmpty }.count
-        card.addGroup("Done", count: list.count) { [
-            NSTextField.text(left > 0 ? "\(left) with cleanup left" : "Finished in the last \(max(1, PROJECTS_CFG.hideDoneAfterDays)) day\(PROJECTS_CFG.hideDoneAfterDays > 1 ? "s" : "")",
-                             size: 12, color: Palette.dim),
-        ] }
+        let cleanups = Dictionary(list.map { ($0.item.key, data.cleaner.lines($0.item.key, data: data)) }, uniquingKeysWith: { a, _ in a })
+        let left = cleanups.values.filter { !$0.isEmpty }.count
+        let days = max(1, PROJECTS_CFG.hideDoneAfterDays)
+        let note = left > 0 ? "\(left) with cleanup left" : "Finished in the last \(days) day\(days > 1 ? "s" : "")"
+        var rows = [StickyListCard.group("done", "Done", count: list.count, extra: note) {
+            [NSTextField.text(note, size: 12, color: Palette.dim)]
+        }]
         let m = more["Done"] ?? MoreRows()
         more["Done"] = m
-        card.add(list, more: m) { [weak self, table, commands] e in
-            ItemLine(e.item, snap: e.snap, stream: e.stream, status: job.item(e.item.key), layout: table, commands: commands,
-                     cleanup: self.map { $0.data.cleaner.lines(e.item.key, data: $0.data) } ?? []) { self?.go($0) }
-        }
+        rows += PageRow.limited(list, more: m, reload: { [weak self] in self?.reload() }) { [weak self, table, commands] e in
+            let st = job.item(e.item.key), cleanup = cleanups[e.item.key] ?? []
+            return PageRow("done." + e.item.key, hash: ItemLine.hash(e.item, snap: e.snap, stream: e.stream, status: st, cleanup: cleanup)) {
+                ItemLine(e.item, snap: e.snap, stream: e.stream, status: st, layout: table, commands: commands, cleanup: cleanup) { self?.go($0) }
+            }
+        }.map { r in r.id == "more" ? PageRow("more.done", hash: r.hash, make: r.make) : r }
+        return rows
     }
 
     // The queue: each lane in start order, with why an entry waits. ↑ ↓, Start now and ✕ show on hover.
-    private func upNext(_ card: StickyListCard) {
+    private func upNext() -> [PageRow] {
         let q = data.queue
         let entries = q.lanes.flatMap { l in l.entries.map { (l, $0) } }
-        guard !entries.isEmpty else { return }
+        guard !entries.isEmpty else { return [] }
         // The Planner plan changes show on the lane board.
         let plans = hasCloud ? data.suggestions.openPlans().count : 0
-        card.addGroup("Up next", count: entries.count) { [
+        var rows = [StickyListCard.group("upnext", "Up next", count: entries.count, extra: plans) { [] } trailing: { [weak self] in [
             NSTextField.text("Starts in this order when a slot frees", size: 12, color: Palette.dim),
-            ActionButton(plans > 0 ? "Lane board · \(plans) plan change\(plans == 1 ? "" : "s")" : "Lane board", style: .link) { [weak self] in
+            ActionButton(plans > 0 ? "Lane board · \(plans) plan change\(plans == 1 ? "" : "s")" : "Lane board", style: .link) {
                 self?.go(.work(.lanes))
             },
-        ] }
+        ] }]
         let world = q.world(workstreams: data.workstreams)
         for lane in q.lanes {
             let pick = lane.pick(state: q.state(lane.project), world: world)
@@ -159,17 +183,22 @@ final class WorkPage: Page {
                 if let h = pick.holds[e.key] { why = QueueBoard.note(h) }
                 else if e.condition != .slot { why = "🕑 " + e.condition.label }
                 else { why = pick.next == e.key ? "✓ Starts next" : "Queued" }
-                let title = NSTextField.text(data.projectStore.item(key: e.key)?.item.title ?? e.title, size: 12.5)
-                title.lineBreakMode = .byTruncatingTail
-                title.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-                let row = Row([NSTextField.text("\(i + 1)", size: 12, weight: .semibold, color: Palette.dim, mono: true).fixedWidth(16),
-                               NSTextField.text(e.key, size: 12, color: Palette.dim, mono: true).fixedWidth(120), title, Spacer(),
-                               Chiplet(why, color: pick.holds[e.key] == nil ? Palette.mut : Palette.warn)],
-                              height: 36, label: "Up next \(i + 1) in \(lane.identifier): \(e.key), \(why)") { [weak self] in self?.go(.item(e.key, .overview)) }
-                row.hoverViews = actions(e.key, lane: lane, at: i)
-                card.add(row)
+                let text = data.projectStore.item(key: e.key)?.item.title ?? e.title
+                let held = pick.holds[e.key] != nil, count = lane.entries.count
+                rows.append(PageRow("queue." + e.key, i, why, text, held, count, lane.identifier) { [weak self] in
+                    let title = NSTextField.text(text, size: 12.5)
+                    title.lineBreakMode = .byTruncatingTail
+                    title.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+                    let row = Row([NSTextField.text("\(i + 1)", size: 12, weight: .semibold, color: Palette.dim, mono: true).fixedWidth(16),
+                                   NSTextField.text(e.key, size: 12, color: Palette.dim, mono: true).fixedWidth(120), title, Spacer(),
+                                   Chiplet(why, color: held ? Palette.warn : Palette.mut)],
+                                  height: 36, label: "Up next \(i + 1) in \(lane.identifier): \(e.key), \(why)") { self?.go(.item(e.key, .overview)) }
+                    row.hoverViews = self?.actions(e.key, lane: lane, at: i) ?? []
+                    return row
+                })
             }
         }
+        return rows
     }
 
     private func actions(_ key: String, lane: QueueLane, at n: Int) -> [NSView] {

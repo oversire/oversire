@@ -26,6 +26,9 @@ enum SidebarLine: Equatable {
 final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSource, NSMenuDelegate {
     var onPick: ((Route) -> Void)?
     var commander: RowCommander?
+    /// The connection line at the bottom.
+    let live = LiveLine()
+    var onLive: (() -> Void)? { get { live.onClick } set { live.onClick = newValue } }
     private let table = NSTableView()
     private var lines: [SidebarLine] = []
     private var selectedKey = "home"
@@ -53,11 +56,15 @@ final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSou
         table.menu?.delegate = self
         scroll.documentView = table
         root.addSubview(scroll)
+        root.addSubview(live)
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 4),
-            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: live.topAnchor),
+            live.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            live.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            live.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
         NotificationCenter.default.addObserver(forName: ProjectIconStore.changed, object: nil, queue: .main) { [weak self] _ in
@@ -67,13 +74,26 @@ final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSou
         }
     }
 
+    /// Reloads only the rows that changed. A new or removed line reloads the table.
     func set(_ new: [SidebarLine], selected: String) {
         selectedKey = selected
         if new != lines {
+            let changed = SidebarVC.changedRows(lines, new)
             lines = new
-            table.reloadData()
+            if let changed {
+                table.reloadData(forRowIndexes: changed, columnIndexes: [0])
+            } else {
+                table.reloadData()
+            }
         }
         select(selected)
+    }
+
+    /// The rows whose line changed, or nil when the lines are not the same list of keys.
+    static func changedRows(_ old: [SidebarLine], _ new: [SidebarLine]) -> IndexSet? {
+        func key(_ l: SidebarLine) -> String { if case .entry(let e) = l { return e.key }; if case .header(let t) = l { return "# " + t }; return "" }
+        guard old.count == new.count, zip(old, new).allSatisfy({ key($0) == key($1) }) else { return nil }
+        return IndexSet(zip(old, new).enumerated().filter { $0.element.0 != $0.element.1 }.map(\.offset))
     }
 
     func select(_ key: String) {
@@ -212,4 +232,198 @@ final class SidebarCell: NSTableCellView {
         setAccessibilityLabel(e.title + (e.badgeLabel.map { ", " + $0 } ?? ""))
     }
     required init?(coder: NSCoder) { fatalError() }
+}
+
+/// What the live line shows: the cloud state and the last burst of events. Pure, for the tests.
+struct LiveLineModel: Equatable {
+    enum Mark: Equatable { case connected, connecting, disconnected, polling }
+
+    var state: LiveSync.State
+    var lastBurst: Date?
+    var pollEvery: TimeInterval = POLL_NORMAL
+
+    /// How long "just now" shows after a burst.
+    static let pingTime: TimeInterval = 4
+
+    var mark: Mark {
+        switch state {
+        case .live: return .connected
+        case .connecting: return .connecting
+        case .error: return .disconnected
+        case .off: return .polling
+        }
+    }
+
+    var title: String {
+        switch state {
+        case .live: return "Connected"
+        case .connecting: return "Connecting…"
+        case .error: return "Disconnected"
+        case .off: return "Polling"
+        }
+    }
+
+    /// The dim text after the title.
+    var detail: String? {
+        switch state {
+        case .connecting: return "polling meanwhile"
+        case .error: return "polling every \(Int(pollEvery)) s"
+        default: return nil
+        }
+    }
+
+    func justNow(at now: Date) -> Bool { lastBurst.map { now.timeIntervalSince($0) < Self.pingTime && now >= $0 } ?? false }
+
+    var tooltip: String {
+        if case .error(let m) = state { return "Cloud error: \(m)" }
+        return lastBurst.map { "Last event \(relativeTime($0))" } ?? (state == .off ? "No cloud. OverSire polls GitHub and the trackers." : "No events yet")
+    }
+}
+
+/// The connection line at the bottom of the window sidebar. One ring for each burst of events, never a count.
+final class LiveLine: Box {
+    var onClick: (() -> Void)?
+    private(set) var model = LiveLineModel(state: .off)
+    private let markView = LiveMark()
+    private let title = NSTextField.text("", size: 11.5, color: Palette.mut)
+    private let detail = NSTextField.text("", size: 11.5, color: Palette.dim)
+    private let ping = NSTextField.text("just now", size: 11, color: Palette.dim)
+    private let now: () -> Date
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
+
+    init(now: @escaping () -> Date = Date.init, schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter) {
+        self.now = now
+        self.schedule = schedule
+        super.init(fill: Palette.side, border: nil, radius: 0)
+        let line = Box(fill: Palette.line, border: nil, radius: 0)
+        ping.alphaValue = 0.7
+        ping.isHidden = true
+        detail.lineBreakMode = .byTruncatingTail
+        let row = NSStackView(h: [markView, title, detail, Spacer(), ping], spacing: 6)
+        addSubview(line)
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            line.leadingAnchor.constraint(equalTo: leadingAnchor), line.trailingAnchor.constraint(equalTo: trailingAnchor),
+            line.topAnchor.constraint(equalTo: topAnchor), line.heightAnchor.constraint(equalToConstant: 1),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 0.5),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        render()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ relay: LiveSync) { set(LiveLineModel(state: relay.state, lastBurst: relay.lastBurstAt)) }
+
+    func set(_ m: LiveLineModel) {
+        let burst = m.lastBurst != nil && m.lastBurst != model.lastBurst && m.justNow(at: now())
+        model = m
+        render()
+        guard burst else { return }
+        if !RowReconciler.reduceMotion { markView.ring() }
+        let at = m.lastBurst
+        schedule(LiveLineModel.pingTime) { [weak self] in
+            guard let self, self.model.lastBurst == at else { return }
+            self.render()
+        }
+    }
+
+    /// True while "just now" shows.
+    var showsPing: Bool { !ping.isHidden }
+
+    private func render() {
+        markView.mark = model.mark
+        title.stringValue = model.title
+        detail.stringValue = model.detail.map { "· " + $0 } ?? ""
+        detail.isHidden = model.detail == nil
+        ping.isHidden = !model.justNow(at: now())
+        toolTip = model.tooltip
+        setAccessibilityLabel(model.title)
+        setAccessibilityHelp("Opens the Activity page")
+    }
+
+    var text: String { [title.stringValue, detail.isHidden ? nil : detail.stringValue].compactMap { $0 }.joined(separator: " ") }
+
+    override func mouseUp(with event: NSEvent) { onClick?() }
+    override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}
+
+/// The mark of the live line: a filled circle, a hollow circle or a triangle with "!".
+final class LiveMark: NSView {
+    var mark: LiveLineModel.Mark = .polling { didSet { needsDisplay = true } }
+    private let size: CGFloat = 9
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: 12), heightAnchor.constraint(equalToConstant: 12)])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = NSRect(x: (bounds.width - size) / 2, y: (bounds.height - size) / 2, width: size, height: size)
+        switch mark {
+        case .connected:
+            Palette.ok.setFill()
+            NSBezierPath(ovalIn: r).fill()
+        case .connecting:
+            Palette.dim.setStroke()
+            let p = NSBezierPath(ovalIn: r.insetBy(dx: 0.75, dy: 0.75))
+            p.lineWidth = 1.5
+            p.stroke()
+        case .polling:
+            Palette.dim.setFill()
+            NSBezierPath(ovalIn: r).fill()
+        case .disconnected:
+            let t = NSRect(x: (bounds.width - 11) / 2, y: (bounds.height - 10) / 2, width: 11, height: 10)
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: t.midX, y: t.maxY))
+            p.line(to: NSPoint(x: t.maxX, y: t.minY))
+            p.line(to: NSPoint(x: t.minX, y: t.minY))
+            p.close()
+            Palette.bad.setFill()
+            p.fill()
+            let bang = NSAttributedString(string: "!", attributes: [.font: NSFont.systemFont(ofSize: 7.5, weight: .heavy), .foregroundColor: NSColor.white])
+            let s = bang.size()
+            bang.draw(at: NSPoint(x: t.midX - s.width / 2, y: t.minY - 0.5))
+        }
+    }
+
+    /// One ring that grows out of the mark and fades.
+    func ring() {
+        guard let layer else { return }
+        let ring = CAShapeLayer()
+        let r = NSRect(x: (bounds.width - size) / 2, y: (bounds.height - size) / 2, width: size, height: size)
+        ring.frame = bounds
+        ring.path = CGPath(ellipseIn: r, transform: nil)
+        ring.fillColor = nil
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            ring.strokeColor = (mark == .disconnected ? Palette.bad : mark == .connected ? Palette.ok : Palette.dim).cgColor
+        }
+        ring.lineWidth = 1.5
+        ring.opacity = 0
+        layer.masksToBounds = false
+        layer.addSublayer(ring)
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 1
+        grow.toValue = 2.4
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.9
+        fade.toValue = 0
+        let g = CAAnimationGroup()
+        g.animations = [grow, fade]
+        g.duration = 1.2
+        g.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        ring.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        ring.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { ring.removeFromSuperlayer() }
+        ring.add(g, forKey: "ring")
+        CATransaction.commit()
+    }
 }

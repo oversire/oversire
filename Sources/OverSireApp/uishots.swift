@@ -10,6 +10,7 @@ import RuntimeOrca
 // Plane state is a copy; re-run, write-back and agent starts do nothing here.
 final class UIShots: NSObject, AppData, NSApplicationDelegate {
     var grouped: [(String, [Run])] = []
+    let bus = ChangeBus.shared
     var prGrouped: [(String, [ChangeRequest])] = []
     var lastUpdate = Date()
     var firstLoad = true
@@ -583,9 +584,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         wb.onError = { print("UISHOTS writeback error \($0)") }
                         wb.sync(keys.compactMap { self.workstreams.streams[$0] })
                     }
-                    NotificationCenter.default.post(name: AppWindow.changed, object: self)
+                    self.bus.post(DataChange(.all))
                 }
-                NotificationCenter.default.post(name: AppWindow.changed, object: self)
+                self.bus.post(DataChange(.all))
                 completion?()
             }
         }

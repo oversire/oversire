@@ -427,6 +427,9 @@ struct NeedsYou: Equatable {
     /// The id holds the time, so a new event of the same item shows again after a snooze.
     var id: String { "\(kind)|\(key)|\(Int(at.timeIntervalSince1970))" }
 
+    /// Changes when the row must update.
+    var rowHash: Int { PageRow.hash([id, reason, String(describing: route), act.map { String(describing: $0) }, watched]) }
+
     var tone: Tone {
         switch kind {
         case .question: return .question
@@ -577,7 +580,7 @@ final class Snoozes {
         until = until.filter { $0.value > now }
         until[id] = now.addingTimeInterval(t)
         if let d = try? JSONEncoder().encode(until) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        ChangeBus.shared.post(DataChange(.questions, origin: .user))
     }
 }
 
@@ -595,7 +598,7 @@ final class NeedsYouRow: Row {
         reason.setContentHuggingPriority(.init(1), for: .horizontal)
         let age = relativeTime(n.at)
         super.init([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), key.fixedWidth(112), reason, Spacer(),
-                    NSTextField.text(age, size: 11.5, color: Palette.dim)],
+                    RelativeTimeLabel(n.at)],
                    height: 36, label: "\(tone.word): \(n.key), \(n.reason), \(age)") { go(n.route) }
         var actions: [NSView] = []
         if let a = n.act {

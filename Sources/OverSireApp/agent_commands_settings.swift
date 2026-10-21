@@ -147,7 +147,7 @@ final class AgentCommandsCard: NSStackView {
         Self.changed()
     }
 
-    static func changed() { NotificationCenter.default.post(name: AppWindow.changed, object: nil) }
+    static func changed() { ChangeBus.shared.post(.config()) }
 }
 
 // One agent: name, tags, the template, flag toggles, the resolved command and the checks.

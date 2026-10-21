@@ -774,16 +774,23 @@ func runSelfTest() {
         let legacy = "<p>x</p><p>Cat Eye block ▾ (Cat Eye updates this part)</p><p>old</p><p>Cat Eye block ▴</p>"
         check(OverSireBlock.current(legacy) == "</p><p>old</p><p>", "block: reads the Cat Eye markers")
         check(OverSireBlock.merge(legacy, block: "<p>new</p>") == "<p>x</p>" + OverSireBlock.wrap("<p>new</p>"), "block: replaces the Cat Eye block")
-        // A relay event that changes a run changes the fingerprint; the same poll result does not.
+        // A relay event that changes a run names its repo; the same poll result names none.
         func fr(_ status: String, _ c: String?) -> Run {
             Run(id: "9", name: "ci", displayTitle: "t", status: status, conclusion: c, headBranch: "fritz-1/x", headSha: "s", event: "push",
                 url: "u/9", updatedAt: "", createdAt: "", startedAt: nil, number: 9, workflowName: "ci", actorLogin: nil)
         }
-        let fpA = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: [:], snapshots: [], lanes: [])
-        let fpB = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: [:], snapshots: [], lanes: [])
-        let fpC = DataFingerprint(runs: [("o/r", [fr("completed", "failure")])], prs: [], agents: [:], snapshots: [], lanes: [])
-        let fpD = DataFingerprint(runs: [("o/r", [fr("in_progress", nil)])], prs: [], agents: ["FRITZ-1": AgentSession(phase: .waiting, since: .distantPast)], snapshots: [], lanes: [])
-        check(fpA == fpB && fpA != fpC && fpA != fpD, "fingerprint: same poll same value; run or agent change differs")
+        let same = RunDiff.repos([("o/r", [fr("in_progress", nil)])], [("o/r", [fr("in_progress", nil)])])
+        let moved = RunDiff.repos([("o/r", [fr("in_progress", nil)]), ("o/s", [])], [("o/r", [fr("completed", "failure")]), ("o/s", [])])
+        check(same.isEmpty && moved == ["o/r"], "run diff: same poll names no repo; a changed run names its repo")
+        // One burst of changes gives one delivery.
+        var later: [() -> Void] = []
+        let bus = ChangeBus(schedule: { _, f in later.append(f) })
+        var got: [DataChange] = []
+        let obs = bus.observe { got.append($0) }
+        for i in 0..<20 { bus.post(DataChange(.runs, repos: ["o/r\(i % 2)"], origin: .event)) }
+        later.forEach { $0() }
+        check(got.count == 1 && got[0].repos == ["o/r0", "o/r1"] && bus.sent == 1, "bus: 20 events in one burst give one delivery")
+        _ = obs
         var ws1 = Workstream(key: "FRITZ-1")
         ws1.checkouts = [Checkout(path: "/w", repo: "o/r", branch: "fritz-1/x", head: "s", key: "FRITZ-1", cardId: nil)]
         check(WorkstreamIndex.match(repo: "o/r", run: fr("completed", "failure"), checkouts: ws1.checkouts, prs: [], known: ["FRITZ"], rules: LinkRules()) != nil,

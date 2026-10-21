@@ -16,11 +16,16 @@ final class PRsPage: Page {
         TableColumn(id: "actions", title: "", width: 170, min: 90),
     ])
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.prs, .runs, .agents, .projects, .config] }
+
+    override func sections() -> [PageSection]? {
         let all = data.prGrouped.flatMap { g in g.1.map { (repo: g.0, pr: $0) } }
             .sorted { a, b in a.pr.mine != b.pr.mine ? !a.pr.mine : a.pr.updatedAt > b.pr.updatedAt }
-        col.addFull(PageHeader("Pull requests", caption: "Review requests and my open PRs. A PR links to its item by branch, or by the key in the title or body.",
-                               actions: [ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) }]))
+        let data = data
+        let header = PageRow("header", 0) {
+            PageHeader("Pull requests", caption: "Review requests and my open PRs. A PR links to its item by branch, or by the key in the title or body.",
+                       actions: [ActionButton("Refresh", symbol: "arrow.clockwise") { data.refresh(force: true, completion: nil) }])
+        }
         commands.intercept = { [weak self] c in
             switch c {
             case .approve(let repo, let n):
@@ -32,20 +37,22 @@ final class PRsPage: Page {
             return true
         }
         guard !all.isEmpty else {
-            let card = ListCard()
-            card.add(data.firstLoad ? LoadingNote("Loading pull requests")
-                     : EmptyNote("No review waits for you, and you have no open pull request. OverSire reads the repos of Settings › Projects and repos with the gh CLI.",
-                                 symbol: "arrow.triangle.pull"))
-            col.addFull(card)
-            return
+            let loading = data.firstLoad
+            let note = PageRow(loading ? "loading" : "empty", 0) {
+                loading ? LoadingNote("Loading pull requests")
+                    : EmptyNote("No review waits for you, and you have no open pull request. OverSire reads the repos of Settings › Projects and repos with the gh CLI.",
+                                symbol: "arrow.triangle.pull")
+            }
+            return [PageSection("top", rows: [header]), PageSection("prs", rows: [PageRow.list("plain", rows: [note]) { ListCard() }])]
         }
         let reviews = all.filter { !$0.pr.mine }, mine = all.filter { $0.pr.mine }
-        let card = StickyListCard.table(table)
-        for (title, list) in [("Review requests", reviews), ("My pull requests", mine)] where !list.isEmpty {
-            card.addGroup(title, count: list.count)
-            for e in list { card.add(row(e.repo, e.pr)) }
+        var rows: [PageRow] = []
+        for (id, title, list) in [("reviews", "Review requests", reviews), ("mine", "My pull requests", mine)] where !list.isEmpty {
+            rows.append(StickyListCard.group(id, title, count: list.count))
+            rows += list.map { row($0.repo, $0.pr) }
         }
-        col.addFull(card)
+        let table = table
+        return [PageSection("top", rows: [header]), PageSection("prs", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
     private func linkedKey(_ repo: String, _ p: ChangeRequest) -> String? {
@@ -61,15 +68,25 @@ final class PRsPage: Page {
         return Tone(runs[0])
     }
 
-    private func row(_ repo: String, _ p: ChangeRequest) -> NSView {
+    private func row(_ repo: String, _ p: ChangeRequest) -> PageRow {
+        let id = "\(repo)#\(p.number)"
+        let key = linkedKey(repo, p), ci = checks(repo, p)
+        return PageRow(id, p, key, ci?.word, ci?.symbol, busy[id], errors[id]) { [weak self] in
+            self?.rowView(repo, p) ?? NSView()
+        }
+    }
+
+    private func rowView(_ repo: String, _ p: ChangeRequest) -> NSView {
         let id = "\(repo)#\(p.number)"
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
         let kind = Chiplet(p.mine ? "Mine" : "Review", color: p.mine ? Palette.mut : Palette.acc)
         let state = p.isDraft ? "Draft" : (p.reviewDecision.map { $0.replacingOccurrences(of: "_", with: " ").capitalized } ?? "Open")
-        var sub = "\(name) #\(p.number) · \(p.headRefName) · +\(p.additions) −\(p.deletions) · \(relativeTime(parseISO(p.updatedAt) ?? Date()))"
-        if !p.mine { sub = "@\(p.author.login) · " + sub }
-        if let e = errors[id] { sub += " · " + e }
-        var cells: [String: NSView] = ["kind": kind, "title": TwoLine(p.title, sub), "state": Chiplet(state)]
+        var head = "\(name) #\(p.number) · \(p.headRefName) · +\(p.additions) −\(p.deletions)"
+        if !p.mine { head = "@\(p.author.login) · " + head }
+        let tail = errors[id].map { " · " + $0 } ?? ""
+        let updated = parseISO(p.updatedAt) ?? Date()
+        let sub = head + " · " + relativeTime(updated) + tail
+        var cells: [String: NSView] = ["kind": kind, "title": TwoLine(p.title, time: updated) { head + " · " + $0 + tail }, "state": Chiplet(state)]
         if let key = linkedKey(repo, p) {
             cells["item"] = Chiplet(key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(key, .overview)) }
         } else {

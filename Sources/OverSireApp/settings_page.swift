@@ -21,7 +21,7 @@ final class SwitchRow: Row {
     @objc private func changed(_ sw: NSSwitch) {
         flip(sw.state == .on)
         saveConfig()
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        ChangeBus.shared.post(.config())
     }
 }
 
@@ -55,6 +55,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
 
     override var isEditing: Bool { super.isEditing || promptDirty }
+    override var watches: DataDomains { [.config, .connection] }
 
     override func build(_ col: NSStackView) {
         col.addFull(PageHeader("Settings", caption: "OverSire saves each change at once to \((CONFIG_PATH as NSString).abbreviatingWithTildeInPath)."))

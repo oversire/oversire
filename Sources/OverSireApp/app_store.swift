@@ -50,7 +50,6 @@ final class StoreWrites: @unchecked Sendable {
             for await c in await synced.remoteChanges() {
                 await MainActor.run {
                     NotificationCenter.default.post(name: Self.remoteChanged, object: self, userInfo: ["collection": c.collection])
-                    NotificationCenter.default.post(name: AppWindow.changed, object: nil)
                 }
             }
         }

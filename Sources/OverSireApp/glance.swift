@@ -9,6 +9,7 @@ final class GlanceVC: NSViewController {
     }
 
     static let size = NSSize(width: 420, height: 560)
+    static let watches: DataDomains = [.runs, .prs, .agents, .questions, .queue, .projects, .intake, .summaries, .planner, .config]
     static var tab = Tab.now
 
     private let data: AppData
@@ -16,8 +17,7 @@ final class GlanceVC: NSViewController {
     private let body = NSStackView(v: [], spacing: 10)
     private let head = NSStackView(h: [], spacing: 8)
     private let foot = NSStackView(h: [], spacing: 8)
-    private var observer: Any?
-    private var fingerprint: DataFingerprint?
+    private var observation: ChangeBus.Observation?
     private var needsCount = 0
     private lazy var commands = RowCommander(data: data, go: open)
 
@@ -27,8 +27,6 @@ final class GlanceVC: NSViewController {
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
-
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
 
     override func loadView() {
         let root = Box(fill: Palette.bg, border: nil, radius: 0)
@@ -58,12 +56,9 @@ final class GlanceVC: NSViewController {
         view = root
         preferredContentSize = GlanceVC.size
         rebuild()
-        observer = NotificationCenter.default.addObserver(forName: AppWindow.changed, object: nil, queue: .main) { [weak self] n in
-            guard let self else { return }
-            let fp = DataFingerprint(self.data)
-            if n.userInfo?[AppWindow.pollKey] != nil, fp == self.fingerprint { return }
-            self.fingerprint = fp
-            self.rebuild()
+        observation = data.bus.observe { [weak self] c in
+            guard c.touches(GlanceVC.watches, repos: nil, projects: nil, items: nil) else { return }
+            self?.rebuild()
         }
     }
 

@@ -48,7 +48,7 @@ final class RunLine: TableRow {
             cells["item"] = NSTextField.text("—", color: Palette.dim)
         }
         let when = live ? "running" : relativeTime(lastActivity(r))
-        cells["when"] = live ? RunClock(r, total: total, parts: .times) : NSTextField.text(when, size: 11.5, color: Palette.dim)
+        cells["when"] = live ? RunClock(r, total: total, parts: .times) : RelativeTimeLabel(lastActivity(r))
         super.init(RunLine.layout, cells: cells, height: 46,
                    label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name), branch \(r.headBranch), \(when)") {
             go(.run(repo: repo, id: r.id))
@@ -58,6 +58,16 @@ final class RunLine: TableRow {
         commands?.attach(self) { RowMenu.run(repo: repo, run: r, linkedKey: linked, ignored: IGNORED.contains(r), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The row of a run list. Its hash holds only what the row shows.
+    static func row(repo: String, run r: Run, data: AppData, commands: RowCommander?, go: @escaping (Route) -> Void) -> PageRow {
+        let live = r.status != "completed"
+        let total = live ? r.estimatedTotal(history: data.grouped.first { $0.0 == repo }?.1 ?? []).map { Int($0 / 10) } : nil
+        return PageRow(repo + "#" + r.id, r.status, r.conclusion, r.number, r.workflowName ?? r.name, r.headBranch, r.displayTitle,
+                       r.updatedAt, r.startedAt, total, data.workstreams.link(runId: r.id)?.key, IGNORED.contains(r)) {
+            RunLine(repo: repo, run: r, data: data, commands: commands, go: go)
+        }
+    }
 }
 
 // The live time of a running run: the time passed, the time left and a short bar.
@@ -208,7 +218,9 @@ final class RunsPage: Page {
         return list.filter { split(repo($0)).org == org }
     }
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.runs, .agents, .projects, .config] }
+
+    override func sections() -> [PageSection]? {
         let ws = data.workstreams
         var all: [(repo: String, run: Run)] = []
         for (repo, runs) in data.grouped {
@@ -220,37 +232,55 @@ final class RunsPage: Page {
         all = RunsPage.byOrg(all, org: org, repo: \.repo)
         let filters = Route.RunFilter.allCases
         let counts = filters.map { f in all.filter { RunsPage.matches(f, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }.count }
-        col.addFull(PageHeader("Runs", caption: "\(data.grouped.count) repos · updated \(relativeTime(data.lastUpdate)). A linked run shows its item.",
-                               actions: [ToggleChip("Latest per workflow", on: latestOnly) { [weak self] in
-                                   guard let self else { return }
-                                   self.latestOnly.toggle()
-                                   UserDefaults.standard.set(self.latestOnly, forKey: RunsPage.latestKey)
-                                   self.reload()
-                               },
-                               ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) }]))
-        let strip = TabStrip(filters.map { $0.rawValue.capitalized }, selected: filters.firstIndex(of: filter) ?? 0, counts: counts)
-        strip.onSelect = { [weak self] i in self?.go(.runs(filters[i])) }
-        col.addArrangedSubview(strip)
+        let repos = data.grouped.count, latest = latestOnly, data = data
+        var top: [PageRow] = [
+            PageRow("header", repos, latest) {
+                PageHeader("Runs", updated: { data.lastUpdate }, caption: { "\(repos) repos · updated \($0). A linked run shows its item." },
+                           actions: [ToggleChip("Latest per workflow", on: latest) { [weak self] in
+                               guard let self else { return }
+                               self.latestOnly.toggle()
+                               UserDefaults.standard.set(self.latestOnly, forKey: RunsPage.latestKey)
+                               self.reload()
+                           },
+                           ActionButton("Refresh", symbol: "arrow.clockwise") { data.refresh(force: true, completion: nil) }])
+            },
+            PageRow("strip", filter.rawValue, counts, full: false) { [weak self, filter] in
+                let strip = TabStrip(filters.map { $0.rawValue.capitalized }, selected: filters.firstIndex(of: filter) ?? 0, counts: counts)
+                strip.onSelect = { i in self?.go(.runs(filters[i])) }
+                return strip
+            },
+        ]
         if orgs.count >= 2 {
             let on = orgs.contains { $0.org == org } ? org : nil
-            var chips: [NSView] = [NSTextField.text("Org", size: 12, color: Palette.dim),
-                                   ToggleChip("All \(orgAll.count)", on: on == nil) { [weak self] in self?.pick(org: nil) }]
-            for o in orgs {
-                let name = o.org.isEmpty ? "No org" : o.org
-                chips.append(ToggleChip("\(name) \(o.count)", on: on == o.org, icon: Glyph("circle.fill", color: repoColor(o.org), size: 7)) { [weak self] in
-                    self?.pick(org: o.org)
-                })
-            }
-            col.addFull(NSStackView(h: chips + [Spacer()], spacing: 6))
+            let total = orgAll.count
+            top.append(PageRow("orgs", orgs.map { "\($0.org) \($0.count)" }, on, total) { [weak self] in
+                var chips: [NSView] = [NSTextField.text("Org", size: 12, color: Palette.dim),
+                                       ToggleChip("All \(total)", on: on == nil) { self?.pick(org: nil) }]
+                for o in orgs {
+                    let name = o.org.isEmpty ? "No org" : o.org
+                    chips.append(ToggleChip("\(name) \(o.count)", on: on == o.org, icon: Glyph("circle.fill", color: repoColor(o.org), size: 7)) {
+                        self?.pick(org: o.org)
+                    })
+                }
+                return NSStackView(h: chips + [Spacer()], spacing: 6)
+            })
         }
         if filter == .unlinked {
-            col.addFull(NSTextField.text("A run links to an item by its branch, commit or title. See Settings › Projects and repos › Linking and write-back for the rules.", size: 12, color: Palette.dim, lines: 2))
+            top.append(PageRow("unlinked", 0) {
+                NSTextField.text("A run links to an item by its branch, commit or title. See Settings › Projects and repos › Linking and write-back for the rules.", size: 12, color: Palette.dim, lines: 2)
+            })
         }
         let shown = all.filter { RunsPage.matches(filter, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }
-        let list = StickyListCard.table(shown.isEmpty ? nil : RunLine.layout)
-        list.add(shown, more: more) { [weak self, data, commands] r in RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) } }
-        if list.isEmpty { list.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
-        col.addFull(list)
+        var rows = PageRow.limited(shown, more: more, reload: { [weak self] in self?.reload() }) { [weak self, commands] r in
+            RunLine.row(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) }
+        }
+        if rows.isEmpty {
+            let loading = data.firstLoad
+            rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed") }]
+        }
+        let table = shown.isEmpty ? nil : RunLine.layout
+        let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }
+        return [PageSection("top", rows: top), PageSection("runs", rows: [list])]
     }
 
     private func pick(org o: String?) {

@@ -352,7 +352,7 @@ final class WorkQueue {
         savedSeen = seen
     }
 
-    // Writes only the lanes, lane states and trigger keys that changed.
+    // Writes only the lanes, lane states and trigger keys that changed. Posts a change only when one was written.
     private func save() {
         lanes.removeAll { l in l.entries.isEmpty && states[l.project].map { $0.lastStarted == nil && $0.error == nil } ?? true }
         let now = Dictionary(lanes.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -362,10 +362,11 @@ final class WorkQueue {
         for (id, st) in states where savedStates[id] != st { writes.put(st) }
         for id in savedStates.keys where states[id] == nil { writes.delete(QueueLaneState.self, id: id) }
         for key in seen.subtracting(savedSeen) { writes.put(QueueTrigger(key: key, at: Date())) }
+        let changed = saved != now || savedStates != states || savedSeen != seen
         saved = now
         savedStates = states
         savedSeen = seen
-        publish()
+        if changed { publish() }
     }
 
     private func publish() { NotificationCenter.default.post(name: WorkQueue.changed, object: self) }

@@ -224,7 +224,7 @@ extension SettingsPage {
         saveConfig()
         app?.relay.update()
         app?.updatePolling()
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        ChangeBus.shared.post(.config())
     }
 
     // MARK: Actions

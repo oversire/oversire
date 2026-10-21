@@ -34,6 +34,7 @@ struct LogListModel {
         case .sessions: return "Sessions"
         case .sync: return "Sync"
         case .runner: return "Runner"
+        case .ui: return "UI"
         default: return a.rawValue.capitalized
         }
     }

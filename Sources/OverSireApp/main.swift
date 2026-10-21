@@ -29,6 +29,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var lastPRRefresh = Date.distantPast
     var grouped: [(String, [Run])] = []
     var prGrouped: [(String, [ChangeRequest])] = []
+    let bus = ChangeBus.shared
+    // The runs and PRs of the last post. A refresh posts only the repos that differ.
+    private var postedRuns: [(String, [Run])] = []
+    private var postedPRs: [(String, [ChangeRequest])] = []
     var lastFetch = Date()
     /// A poll with no change also means the data is current.
     var lastUpdate: Date { max(lastFetch, relay.lastPoll ?? .distantPast) }
@@ -62,9 +66,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                              statePath: PROJECT_STATE_PATH, activityPath: PROJECT_ACTIVITY_PATH)
         s.relayIsLive = { [weak self] in self?.relay.state == .live }
         s.busy = busy
-        s.onChange = { [weak self] in
+        s.onChange = { [weak self] c in
             self?.updateIcon()
-            self?.reloadList()
+            self?.reloadList(c)
         }
         return s
     }()
@@ -232,7 +236,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self.startQuestions()
             for w in ENV.trackerIds where self.projectCatalog.projects(of: w).isEmpty { self.projectCatalog.refresh(w, force: true) }
             self.applyProjectSelection()
-            NotificationCenter.default.post(name: AppWindow.changed, object: self)
+            self.bus.post(DataChange(.all, origin: .user))
         }
         cloudSetup.trackedWorkspaces = { [weak self] in self?.trackedPlaneWorkspaces() ?? [] }
         let resolved = projectCatalog.resolve(PROJECTS_CFG)
@@ -252,22 +256,26 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: agentIndex, queue: .main) { [weak self] _ in
             if let self { self.stats.sample(working: self.agentIndex.agents.keys.filter { self.agentIndex.state($0) == .working }.count) }
             self?.scanCheckouts()
-            self?.reloadList()
+            self?.reloadList(DataChange(.agents, origin: .event))
             self?.updateIcon()
         }
-        NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { _ in
-            NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { [weak self] _ in
+            self?.reloadList(DataChange(.agents, origin: .event))
         }
         agentIndex.startTimer()
         startQuestions()
         NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
-            self?.reloadList()
+            self?.reloadList(DataChange(.questions, origin: .event))
             self?.updateIcon()
-            NotificationCenter.default.post(name: AppWindow.changed, object: self)
         }
-        for n in [WorkQueue.changed, WorkStats.changed, StatusJob.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
+        let sources: [(Notification.Name, DataDomains)] = [
+            (WorkQueue.changed, .queue), (WorkStats.changed, .stats), (StatusJob.changed, .summaries), (IntakeAgent.changed, .intake),
+            (SessionNotes.changed, .agents), (CIAssist.changed, .runs), (ItemAreaBook.changed, .planner), (SuggestionBook.changed, .planner),
+            (PlannerBook.changed, .planner), (ItemSummaries.changed, .summaries),
+        ]
+        for (n, d) in sources {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
-                NotificationCenter.default.post(name: AppWindow.changed, object: self)
+                self?.bus.post(DataChange(d, origin: .event))
             }
         }
         NotificationCenter.default.addObserver(forName: ProjectStore.changed, object: projectStore, queue: .main) { [weak self] _ in
@@ -279,7 +287,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.queue.tick(workstreams: self.workstreams)
-            NotificationCenter.default.post(name: AppWindow.changed, object: self)
+            self.bus.post(DataChange(.relations, origin: .event))
         }
         NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: projectCatalog, queue: .main) { [weak self] _ in
             guard let self = self, !self.projectCatalog.refreshing else { return }
@@ -516,10 +524,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     self.stats.refreshMerged()
                 }
                 self.lastFetch = Date()
+                let first = self.firstLoad
                 self.firstLoad = false
                 self.refreshInFlight = false
                 self.updateIcon()
-                self.reloadList()
+                self.reloadList(first ? DataChange(.all) : nil, origin: force ? .user : .poll)
                 self.updatePolling()
                 completion?()
                 let pending = self.pendingCompletion
@@ -542,7 +551,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // Refreshes only the given repos and merges them into the current data.
     // `done` gets false if a run fetch failed, so the relay does not ack those events.
-    func refreshRepos(_ repos: [String], includePRs: Bool, completedRuns: [(String, String)],
+    func refreshRepos(_ repos: [String], includePRs: Bool, completedRuns: [(String, String)], origin: DataChange.Origin = .event,
                       done: @escaping (Bool) -> Void) {
         guard !refreshInFlight else {
             var p = pendingPartial ?? (Set<String>(), false, [], [])
@@ -574,7 +583,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.lastFetch = Date()
                 self.refreshInFlight = false
                 self.updateIcon()
-                self.reloadList()
+                self.reloadList(origin: origin)
                 self.updatePolling()
                 done(ok)
                 let pending = self.pendingCompletion
@@ -778,7 +787,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 }
                 // GitHub queues the new attempt a moment after the request.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    self.refreshRepos([repo], includePRs: false, completedRuns: []) { _ in }
+                    self.refreshRepos([repo], includePRs: false, completedRuns: [], origin: .user) { _ in }
                 }
             }
         }
@@ -788,7 +797,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         IGNORED.set(runs, ignored: ignored)
         updateIcon()
         (popover.contentViewController as? TabVC)?.rebuildContent()
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        bus.post(DataChange(.runs, origin: .user))
     }
 
     // Git branch and HEAD of the worktrees. At most once a minute, or on demand.
@@ -796,12 +805,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         guard force || workstreams.scanAge > 60 else { return }
         let known = Set(projectStore.tracked.map { $0.identifier.uppercased() })
         workstreams.scan(cards: agentIndex.cards, roots: Array(PROJECTS_CFG.orca.roots.values), known: known) { [weak self] in
-            self?.reloadList()
+            self?.reloadList(DataChange(.agents))
             guard let self else { return }
             self.cleaner.refresh(self) { [weak self] in
                 guard let self else { return }
                 self.cleaner.sweep(self)
-                self.reloadList()
+                self.reloadList(DataChange(.agents))
             }
         }
     }
@@ -809,7 +818,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     // The popover PRs tab lists review requests only.
     var reviewPRs: [(String, [ChangeRequest])] { prGrouped.map { ($0.0, $0.1.filter { !$0.mine }) } }
 
-    func reloadList() {
+    /// Rebuilds the derived state and posts what changed: `change` plus the repos whose runs or PRs differ.
+    func reloadList(_ change: DataChange? = nil, origin: DataChange.Origin = .poll) {
         workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
         queue.tick(workstreams: workstreams)
         statusJob.tick(workstreams: workstreams, store: projectStore)
@@ -824,7 +834,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             ciAssist.makeDigest(facts: CIAssist.digestFacts(runs: grouped, agents: Array(agentIndex.agents.values), queued: queue.count, intake: intake))
         }
         writeBack.sync(Array(workstreams.streams.values))
-        NotificationCenter.default.post(name: AppWindow.changed, object: self, userInfo: [AppWindow.pollKey: true])
+        var c = change ?? DataChange([], origin: origin)
+        let runs = RunDiff.repos(postedRuns, grouped), prs = RunDiff.repos(postedPRs, prGrouped)
+        postedRuns = grouped
+        postedPRs = prGrouped
+        if !runs.isEmpty { c.merge(DataChange(.runs, repos: runs, origin: origin)) }
+        if !prs.isEmpty { c.merge(DataChange(.prs, repos: prs, origin: origin)) }
+        if !c.domains.isEmpty { bus.post(c) }
         guard popover.isShown, let vc = popover.contentViewController as? TabVC else { return }
         vc.update(grouped: grouped, prGrouped: reviewPRs, updated: lastUpdate, loading: firstLoad)
     }

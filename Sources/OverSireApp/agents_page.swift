@@ -15,38 +15,54 @@ final class AgentsPage: Page {
         TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
     ])
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.agents, .projects, .runs, .questions, .summaries, .config] }
+
+    override func sections() -> [PageSection]? {
         let idx = data.agentIndex
         let cfg = PROJECTS_CFG.orca
         var caption = cfg.environment.map { "Orca environment \($0)" } ?? "Orca on this Mac"
         caption += " · read every 15 s"
         if data.statusJob.on { caption += " · status after \(Int(AGENTS.quietMinutes)) min idle" }
         if let e = idx.lastError { caption += " · last read failed: \(e)" }
-        let actions = [
-            NeedsYouCard.refreshButton(data),
-            ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
-            ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() },
-        ]
+        let data = data
         let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
         let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
-        var trailing: [NSView] = []
-        if idx.ready != nil {
-            trailing = [Segmented(["With item \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
+        let ready = idx.ready != nil, all = allWorktrees
+        let top = WorkPage.header(self, tab: .worktrees, caption: caption, extra: [ready, all, active.count, cards.count] as [AnyHashable], actions: {
+            [NeedsYouCard.refreshButton(data),
+             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
+             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() }]
+        }, trailing: { [weak self] in
+            guard ready else { return [] }
+            return [Segmented(["With item \(active.count)", "All \(cards.count)"], selected: all ? 1 : 0, label: "Worktrees") { i in
                 self?.allWorktrees = i == 1
                 self?.reload()
             }]
-        }
-        WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, trailing: trailing, in: col)
+        })
+        var out = [PageSection("top", rows: top)]
         let hub = data.questions
-        for e in hub.open where e.question.session.workspace.account.provider == RunnerQuestions.provider { col.addFull(hub.card(e)) }
-        if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty { runnerSessions(col, sessions) }
-        guard idx.ready != nil else {
-            col.addFull(Banner(.idle, title: "Orca is off or not installed.", body: "Turn on Orca to see sessions and worktrees here.",
-                               actions: [ActionButton("Runtime settings") { [weak self] in self?.go(.settings(.agents)) }]))
-            return
+        let asks = hub.open.filter { $0.question.session.workspace.account.provider == RunnerQuestions.provider }
+        if !asks.isEmpty {
+            out.append(PageSection("asks", rows: asks.map { e in PageRow("q." + e.id.rawValue, String(describing: e)) { hub.card(e) } }))
+        }
+        if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty {
+            let list = sessions.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(30)
+            let rows = list.map { s in
+                PageRow(s.id, s.state.rawValue, s.item?.key, s.agent, s.repo, s.error, s.summary, s.updatedAt,
+                        s.item.flatMap { data.questions.line(key: $0.key) }) { [weak self] in self?.runnerRow(s) ?? NSView() }
+            }
+            out.append(PageSection("runners", header: PageRow("title", sessions.count) { SectionTitle("Runner sessions", count: sessions.count) },
+                                   rows: [PageRow.list("list", rows: rows) { ListCard() }]))
+        }
+        guard ready else {
+            out.append(PageSection("off", rows: [PageRow("banner", 0) { [weak self] in
+                Banner(.idle, title: "Orca is off or not installed.", body: "Turn on Orca to see sessions and worktrees here.",
+                       actions: [ActionButton("Runtime settings") { self?.go(.settings(.agents)) }])
+            }]))
+            return out
         }
 
-        let shown = allWorktrees ? cards : active
+        let shown = all ? cards : active
         let lines = Dictionary(uniqueKeysWithValues: shown.compactMap { c in
             cardKey(c).flatMap { data.cleaner.line(card: c, key: $0, data: data) }.map { (c.id, $0) }
         })
@@ -55,9 +71,11 @@ final class AgentsPage: Page {
         let rest = shown.filter { lines[$0.id] == nil }
         if !safe.isEmpty {
             let n = safe.count
-            col.addFull(Banner(.ok, title: "\(n) worktree\(n == 1 ? " is" : "s are") finished and safe to remove.",
-                               body: "The items are finished, the branches are merged or have no own commits, and no agent is live.",
-                               actions: [ActionButton("Remove \(n) worktree\(n == 1 ? "" : "s")…", symbol: "trash") { [weak self] in self?.removeAll(safe) }]))
+            out.append(PageSection("safe", rows: [PageRow("banner", safe.map(\.id)) { [weak self] in
+                Banner(.ok, title: "\(n) worktree\(n == 1 ? " is" : "s are") finished and safe to remove.",
+                       body: "The items are finished, the branches are merged or have no own commits, and no agent is live.",
+                       actions: [ActionButton("Remove \(n) worktree\(n == 1 ? "" : "s")…", symbol: "trash") { self?.removeAll(safe) }])
+            }]))
         }
         commands.intercept = { [weak self] c in
             guard case .removeWorktree(let id) = c else { return false }
@@ -67,29 +85,27 @@ final class AgentsPage: Page {
             return true
         }
 
-        let list = StickyListCard.table(table)
+        var rows: [PageRow] = []
         let grouped = !safe.isEmpty || !unsafe.isEmpty
         for (title, group) in [("Finished", safe), ("Done, but not safe to remove", unsafe), ("In progress", rest)] where !group.isEmpty {
-            if grouped { list.addGroup(title, count: group.count) }
-            for c in group { list.add(cardRow(c, cleanup: lines[c.id])) }
+            if grouped { rows.append(StickyListCard.group(title, title, count: group.count)) }
+            rows += group.map { cardRow($0, cleanup: lines[$0.id]) }
         }
         if cards.isEmpty {
-            list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed"))
-        } else if !allWorktrees, active.count < cards.count {
+            let failed = idx.lastError != nil
+            rows.append(PageRow("empty", failed) { EmptyNote(failed ? "OverSire could not read Orca." : "Orca has no worktrees.", symbol: "circle.dashed") })
+        } else if !all, active.count < cards.count {
             let n = cards.count - active.count
-            list.add(Row([ActionButton("\(n) \(n == 1 ? "worktree has" : "worktrees have") no item · Show all", style: .link) { [weak self] in
-                self?.allWorktrees = true
-                self?.reload()
-            }, Spacer()], height: 32, label: "Show all worktrees"))
+            rows.append(PageRow("more", n) { [weak self] in
+                Row([ActionButton("\(n) \(n == 1 ? "worktree has" : "worktrees have") no item · Show all", style: .link) {
+                    self?.allWorktrees = true
+                    self?.reload()
+                }, Spacer()], height: 32, label: "Show all worktrees")
+            })
         }
-        col.addFull(list)
-    }
-
-    private func runnerSessions(_ col: NSStackView, _ sessions: [RunnerSession]) {
-        col.addFull(SectionTitle("Runner sessions", count: sessions.count))
-        let list = ListCard()
-        for s in sessions.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(30) { list.add(runnerRow(s)) }
-        col.addFull(list)
+        let table = table
+        out.append(PageSection("worktrees", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }]))
+        return out
     }
 
     private func runnerTitle(_ s: RunnerSession) -> String {
@@ -108,7 +124,7 @@ final class AgentsPage: Page {
         text.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         let label = "\(runnerTitle(s)), \(s.agent), \(tone.word)" + (note.isEmpty ? "" : ": \(note)") + ", \(relativeTime(s.updatedAt))"
         return Row([Pill(tone), fixed(name, 124), fixed(Chiplet(s.agent, symbol: "terminal", mono: true), 100), text, Spacer(),
-                    NSTextField.text(relativeTime(s.updatedAt), size: 11.5, color: Palette.dim)], height: 36, label: label)
+                    RelativeTimeLabel(s.updatedAt)], height: 36, label: label)
     }
 
     private func fixed(_ v: NSView, _ w: CGFloat) -> NSView {
@@ -183,7 +199,22 @@ final class AgentsPage: Page {
         reload()
     }
 
-    private func cardRow(_ c: Workspace, cleanup: CleanupLine? = nil) -> NSView {
+    // The row of a worktree. Its hash holds the inputs of `cardView`.
+    private func cardRow(_ c: Workspace, cleanup: CleanupLine? = nil) -> PageRow {
+        let key = cardKey(c)
+        let job = data.statusJob
+        let co = data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }
+        let st = key.flatMap { job.status($0) }
+        let parts: [AnyHashable?] = [c, key, co?.branch, key.flatMap { data.agentIndex.agent($0) }, key.flatMap { job.item($0)?.label },
+                                     key.flatMap { job.item($0)?.tone.word }, st?.reply, st?.at, st.flatMap { job.outOfDate($0) },
+                                     key.map { job.reading.contains($0.uppercased()) }, key.flatMap { data.workstreams.stream($0)?.ci?.word },
+                                     key.flatMap { data.projectStore.item(key: $0)?.2.title }, key.flatMap { data.questions.line(key: $0) },
+                                     key.map { data.projectStore.isDone(key: $0) }, job.on, expanded.contains(c.id),
+                                     cleanup.map { [$0.kind, $0.safe, $0.removable, $0.detail] as [AnyHashable] }, key.map { data.cleaner.running.contains($0.uppercased()) }]
+        return PageRow(c.id, hash: PageRow.hash(parts.map { $0 ?? AnyHashable(0) })) { [weak self] in self?.cardView(c, cleanup: cleanup) ?? NSView() }
+    }
+
+    private func cardView(_ c: Workspace, cleanup: CleanupLine?) -> NSView {
         let key = cardKey(c)
         let co = data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }
         let job = data.statusJob
@@ -217,6 +248,7 @@ final class AgentsPage: Page {
         worktree.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: worktree.widthAnchor).isActive = true }
 
         var head = "—", meta = "", headColor = Palette.dim
+        var metaAt: Date?, metaTail = ""
         let asks = key.flatMap { data.questions.line(key: $0) }
         if let asks {
             head = asks
@@ -231,6 +263,8 @@ final class AgentsPage: Page {
             head = s.reply.headline.isEmpty || old != nil ? s.word + (s.reply.headline.isEmpty ? "" : ": " + s.reply.headline) : s.reply.headline
             headColor = old != nil ? Palette.dim : s.state == .unfinished || s.state == .stuck ? Palette.warn : Palette.fg
             meta = ([relativeAgo(s.at), s.cause] + (old.map { [$0] } ?? [])).joined(separator: " · ")
+            metaAt = s.at
+            metaTail = ([s.cause] + (old.map { [$0] } ?? [])).joined(separator: " · ")
         } else if let key, data.projectStore.isDone(key: key) {
             head = "Item is done."
             meta = "No AI status for a closed item"
@@ -242,9 +276,12 @@ final class AgentsPage: Page {
             let ok = l.safe && l.removable
             head = ok ? "Finished. Safe to remove." : l.kind == .session ? "Done. An agent is live." : "Done. Not safe to remove."
             meta = l.detail
+            metaAt = nil
             headColor = ok ? Palette.ok : Palette.warn
         }
-        let statusCell = TwoLine(head, meta, titleSize: 12.5, weight: .regular, titleColor: headColor)
+        let sub: NSView = metaAt.map { at in RelativeTimeLabel({ at }, text: relativeAgo) { [$0, metaTail].joined(separator: " · ") } }
+            ?? NSTextField.text(meta, size: 11.5, color: Palette.dim)
+        let statusCell = TwoLine(head, subView: meta.isEmpty ? nil : sub, titleSize: 12.5, weight: .regular, titleColor: headColor)
         statusCell.toolTip = head
         let cells: [String: NSView] = [
             "worktree": worktree, "state": agent, "status": statusCell,

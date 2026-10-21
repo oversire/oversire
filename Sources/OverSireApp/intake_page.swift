@@ -20,7 +20,9 @@ final class IntakeListPage: Page {
         list.filter { calendar.isDate($0.at, inSameDayAs: now) }.count
     }
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.projects, .intake, .questions, .config] }
+
+    override func sections() -> [PageSection]? {
         pageBusy = data.loadingFirst
         for (pk, snap) in data.projectStore.snapshots where !(snap.intake ?? []).isEmpty {
             data.projectStore.loadIntakeKeys(projectKey: pk) { [weak self] in self?.reload() }
@@ -40,33 +42,53 @@ final class IntakeListPage: Page {
         }
         let agent = data.intakeAgent
         let open = shown.compactMap(\.intake).filter { agent.state($0.item) == nil }
-        var actions: [NSView] = []
-        if agent.available, !open.isEmpty {
-            let b = ActionButton("Enhance all", symbol: "sparkles", style: .primary) { [weak self] in
-                open.forEach { agent.start(projectKey: $0.projectKey, item: $0.item) }
-                self?.reload()
-            }
-            b.setAccessibilityLabel("Enhance all \(open.count) items")
-            actions.append(b)
-        }
+        let canEnhance = agent.available && !open.isEmpty
         let today = IntakeListPage.addedToday(all)
-        col.addFull(PageHeader("Intake", caption: "\(all.count) items wait for triage" + (today > 0 ? " · +\(today) today" : ""), actions: actions))
-        let strip = TabStrip(["All"] + counts.map(\.project), selected: selected, counts: [all.count] + counts.map(\.count))
-        strip.onSelect = { [weak self] i in self?.go(.intake(tabs[i])) }
-        col.addArrangedSubview(strip)
-        if let note { col.addFull(Banner(.info, title: note)) }
+        let caption = "\(all.count) items wait for triage" + (today > 0 ? " · +\(today) today" : "")
+        var top: [PageRow] = [
+            PageRow("header", caption, canEnhance ? open.count : -1) { [weak self] in
+                var actions: [NSView] = []
+                if canEnhance {
+                    let b = ActionButton("Enhance all", symbol: "sparkles", style: .primary) {
+                        open.forEach { agent.start(projectKey: $0.projectKey, item: $0.item) }
+                        self?.reload()
+                    }
+                    b.setAccessibilityLabel("Enhance all \(open.count) items")
+                    actions.append(b)
+                }
+                return PageHeader("Intake", caption: caption, actions: actions)
+            },
+            PageRow("strip", selected, counts.map { "\($0.project) \($0.count)" }, all.count, full: false) { [weak self] in
+                let strip = TabStrip(["All"] + counts.map(\.project), selected: selected, counts: [all.count] + counts.map(\.count))
+                strip.onSelect = { i in self?.go(.intake(tabs[i])) }
+                return strip
+            },
+        ]
+        if let note { top.append(PageRow("note", note) { Banner(.info, title: note) }) }
         if !shown.isEmpty {
-            col.addFull(NSTextField.text("Keys on a focused line: 1 accept · Q accept and queue · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
-                                         size: 12, color: Palette.dim, lines: 2))
-            col.addFull(NSStackView(h: [Glyph("sparkles", color: Palette.acc, size: 11), NSTextField.text(
-                "Enhance: an agent reads the code, asks you what the code cannot tell, and writes a new description. You check what goes to Plane.",
-                size: 12, color: Palette.dim, lines: 2)], spacing: 6))
+            top.append(PageRow("keys", 0) {
+                NSTextField.text("Keys on a focused line: 1 accept · Q accept and queue · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
+                                 size: 12, color: Palette.dim, lines: 2)
+            })
+            top.append(PageRow("enhance", 0) {
+                NSStackView(h: [Glyph("sparkles", color: Palette.acc, size: 11), NSTextField.text(
+                    "Enhance: an agent reads the code, asks you what the code cannot tell, and writes a new description. You check what goes to Plane.",
+                    size: 12, color: Palette.dim, lines: 2)], spacing: 6)
+            })
         }
-        let list = StickyListCard.table(shown.isEmpty ? nil : FeedLine.intakeLayout)
-        list.add(shown, more: more) { [unowned self] in self.row($0) }
-        if list.isEmpty, data.loadingFirst { list.add(LoadingNote("Loading the intake")) }
-        if list.isEmpty { list.add(EmptyNote("No intake waits for triage.")) }
-        col.addFull(list)
+        var rows = PageRow.limited(shown, more: more, reload: { [weak self] in self?.reload() }) { [weak self] e in
+            let state = e.intake.flatMap { agent.state($0.item) }.map { String(describing: $0) }
+            return PageRow(e.id, e.rowHash, state, e.intake.map { self?.busy.contains($0.item.id) ?? false }, agent.available) {
+                self?.row(e) ?? NSView()
+            }
+        }
+        if rows.isEmpty {
+            let loading = data.loadingFirst
+            rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading the intake") : EmptyNote("No intake waits for triage.") }]
+        }
+        let table = shown.isEmpty ? nil : FeedLine.intakeLayout
+        let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }
+        return [PageSection("top", rows: top), PageSection("intake", rows: [list])]
     }
 
     private func row(_ e: FeedEntry) -> NSView {

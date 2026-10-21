@@ -169,6 +169,8 @@ final class ProjectSettingsPage: Page {
     private var local: ProjectLocalSettings { PROJECTS_CFG.local(key) }
 
     override var fillsHeight: Bool { project != nil }
+    override var watches: DataDomains { [.config, .projects] }
+    override var shownProjects: Set<String>? { project.map { [$0.ref.storeKey] } }
     override var isEditing: Bool { super.isEditing || !draft.isEmpty || visionDraft != nil }
 
     override func viewDidLoad() {
@@ -256,7 +258,7 @@ final class ProjectSettingsPage: Page {
         change(&l)
         PROJECTS_CFG.setLocal(key, l)
         saveConfig()
-        NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        ChangeBus.shared.post(.config())
         reload()
     }
 

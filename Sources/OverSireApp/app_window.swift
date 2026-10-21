@@ -31,6 +31,8 @@ protocol AppData: AnyObject {
     var projectCatalog: ProjectCatalog { get }
     /// Nil in tests: only the app writes logs.
     var logs: LogStore? { get }
+    /// The changes of the data. Pages and windows observe it.
+    var bus: ChangeBus { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func refresh(force: Bool, completion: (() -> Void)?)
@@ -43,45 +45,8 @@ extension AppData {
     var openProblems: [Problem] { LOGS_CFG.menuMark ? logs?.problems.open ?? [] : [] }
 }
 
-// A hash of the data that pages show. A poll or event that changes none of it does not rebuild the page.
-struct DataFingerprint: Equatable {
-    let value: Int
-
-    init(runs: [(String, [Run])], prs: [(String, [ChangeRequest])], agents: [String: AgentSession], snapshots: [ProjectSnapshot], lanes: [QueueLane], laneStates: [String: QueueLaneState] = [:], streams: [Workstream] = []) {
-        var h = Hasher()
-        for (repo, rs) in runs {
-            h.combine(repo)
-            for r in rs { h.combine(r.id); h.combine(r.status); h.combine(r.conclusion); h.combine(r.attempt); h.combine(r.updatedAt) }
-        }
-        for (repo, ps) in prs {
-            h.combine(repo)
-            for p in ps { h.combine(p.number); h.combine(p.state); h.combine(p.updatedAt); h.combine(p.reviewDecision) }
-        }
-        for (k, a) in agents.sorted(by: { $0.key < $1.key }) {
-            h.combine(k); h.combine("\(a.phase)"); h.combine(a.since); h.combine(a.card); h.combine(a.message)
-        }
-        for s in snapshots.sorted(by: { $0.summary.ref.storeKey < $1.summary.ref.storeKey }) {
-            h.combine(s.summary.ref.storeKey); h.combine(s.items); h.combine(s.intake)
-        }
-        for l in lanes {
-            h.combine(l.project); h.combine(laneStates[l.project]?.error); h.combine(laneStates[l.project]?.lastStarted)
-            for e in l.entries { h.combine(e.key); h.combine(e.condition) }
-        }
-        for s in streams.sorted(by: { $0.key < $1.key }) {
-            h.combine(s.key)
-            for c in s.checkouts { h.combine(c.path); h.combine(c.branch) }
-            for r in s.runs { h.combine(r.run.id) }
-        }
-        value = h.finalize()
-    }
-
-    init(_ d: AppData) {
-        self.init(runs: d.grouped, prs: d.prGrouped, agents: d.agentIndex.agents, snapshots: Array(d.projectStore.snapshots.values), lanes: d.queue.lanes, laneStates: d.queue.states,
-                  streams: Array(d.workstreams.streams.values))
-    }
-}
-
-// One page of the window. A page builds its views from the data, and builds again on each change.
+// One page of the window. A page gives its rows from the data. A change updates only the rows that changed.
+// Pages that override `sections()` update in place. The others (settings) build all views again.
 class Page: NSViewController {
     let data: AppData
     let router: Router
@@ -127,14 +92,21 @@ class Page: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        reload()
+        reload(reason: "open")
     }
 
-    // False while the page waits in the window cache. A reload then only marks the page stale.
+    // False while the page waits in the window cache. A change then only marks the page stale.
     private(set) var isShown = true
     private(set) var stale = false
-    private(set) var builtAt = Date.distantPast
     private var built = false
+    // The fingerprint of the last build. A change with the same fingerprint does not build.
+    private var builtPrint: Int?
+
+    /// The builds of this page, and why the last one ran. The self-test and the tests read them.
+    private(set) var buildCount = 0
+    private(set) var lastBuildReason: String?
+    /// The rows that the last build changed.
+    private(set) var lastResult: RowReconciler.Result?
 
     // A table page: the page does not scroll. Its title and tabs stay at the top, and the table takes the free height.
     var fillsHeight: Bool { false }
@@ -143,27 +115,75 @@ class Page: NSViewController {
     var buildsLater: Bool { false }
     static var deferBuilds = true
 
+    // MARK: What the page shows
+
+    /// The data that this page shows. A change outside it does not touch the page.
+    var watches: DataDomains { DataDomains.all.subtracting([.logs, .connection]) }
+    /// The repos, store keys and item keys that the page shows. Nil: all of them.
+    var shownRepos: Set<String>? { nil }
+    var shownProjects: Set<String>? { nil }
+    var shownItems: Set<String>? { nil }
+
+    /// The rows of the page. Nil: the page builds all its views in `build(_:)`.
+    func sections() -> [PageSection]? { nil }
+
+    /// A hash of only the data that this page shows. The page builds when it changes. Nil: no hash, each change builds.
+    func fingerprint() -> Int? { sections().map(PageSection.fingerprint) }
+
+    /// Called by the window for each coalesced change.
+    func receive(_ c: DataChange) {
+        guard c.touches(watches, repos: shownRepos, projects: shownProjects, items: shownItems) else { return }
+        guard isShown, isViewLoaded else { stale = true; return }
+        let forced = c.domains.contains(.config) && c.origin == .user
+        let rows = sections()
+        if !forced, let rows, PageSection.fingerprint(rows) == builtPrint { return }
+        if !forced, rows == nil, watches.isSubset(of: .config) { return }
+        reload(reason: "data: " + c.reason, rows: rows)
+    }
+
+    // MARK: Builds
+
     // A new tab or filter of the same page.
     func show(_ r: Route) {
         let tabChanged = r != route
         route = r
-        reload()
+        reload(reason: "route")
         if tabChanged { scroll.toTop() }
     }
 
-    func reload() {
+    func reload() { reload(reason: "page") }
+
+    func reload(reason: String) { reload(reason: reason, rows: nil) }
+
+    private func reload(reason: String, rows given: [PageSection]?) {
         guard isShown else { stale = true; return }
         if !built, buildsLater, Self.deferBuilds {
             built = true
-            builtAt = Date()
-            scroll.rebuild { skeleton($0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in self?.reload() }
+            if sections() == nil { scroll.rebuild { skeleton($0) } } else { scroll.apply(skeletonRows(), fills: false, mark: false) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in self?.reload(reason: reason) }
             return
         }
         built = true
         stale = false
-        builtAt = Date()
-        scroll.rebuild(fills: fillsHeight) { build($0) }
+        buildCount += 1
+        lastBuildReason = reason
+        let start = Date()
+        if let rows = given ?? sections() {
+            builtPrint = PageSection.fingerprint(rows)
+            lastResult = scroll.apply(rows, fills: fillsHeight)
+        } else {
+            builtPrint = nil
+            lastResult = nil
+            scroll.rebuild(fills: fillsHeight) { build($0) }
+        }
+        logBuild(reason, ms: Int(Date().timeIntervalSince(start) * 1000))
+    }
+
+    private func logBuild(_ reason: String, ms: Int) {
+        let rows = lastResult.map { " · \($0.changed) rows changed, \($0.kept) kept" } ?? " · full build"
+        var e = LogEntry(level: .ok, area: .ui, job: "Page build", subject: route.title, message: reason + rows, ms: ms)
+        e.verbose = true
+        APP_LOG.write(e)
     }
 
     // One build for many async answers that come close together, for example account probes.
@@ -172,15 +192,17 @@ class Page: NSViewController {
         reloadQueued = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.reloadQueued = false
-            self?.reload()
+            self?.reload(reason: "page")
         }
     }
     private var reloadQueued = false
 
-    // The window shows the page again. It builds when the data changed, or the relative times are a minute old.
+    // The window shows the page again. It builds only when its data changed while it waited.
     func attach() {
         isShown = true
-        if stale || -builtAt.timeIntervalSinceNow > 60 { reload() }
+        guard stale else { return }
+        if let rows = sections(), PageSection.fingerprint(rows) == builtPrint { stale = false; return }
+        reload(reason: "attach stale")
     }
 
     func detach() { isShown = false }
@@ -194,7 +216,12 @@ class Page: NSViewController {
         col.addFull(LoadingNote("Loading \(route.title)", height: 240))
     }
 
-    // Subclasses add their views to the page column.
+    private func skeletonRows() -> [PageSection] {
+        [PageSection("skeleton", rows: [PageRow("header", route.title) { [route] in PageHeader(route.title, caption: "Loading…") },
+                                        PageRow("loading", route.title) { [route] in LoadingNote("Loading \(route.title)", height: 240) }])]
+    }
+
+    // Pages with no `sections()` add their views to the page column.
     func build(_ col: NSStackView) {}
 
     // Pages that edit text return true, so a data change waits.
@@ -211,9 +238,6 @@ class Page: NSViewController {
 
 // The desktop window: sidebar, toolbar with back and forward, and the page.
 final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
-    static let changed = Notification.Name("AppDataChanged")
-    static let pollKey = "poll"   // userInfo key: the change comes from a poll and can be the same data
-
     let data: AppData
     let router = Router()
     private let split = NSSplitViewController()
@@ -226,12 +250,17 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private var navItem: NSToolbarItemGroup?
     private var refreshButton: RefreshButton?
     private var changedWhileHidden = false
-    private var pendingReload = false
-    private var reloadScheduled = false
-    private var forceNext = false
-    private var fingerprint: DataFingerprint?
-    private var builtAt = Date.distantPast
+    // The change that waits for the gate or for the window to show.
+    private var held: DataChange?
+    /// Holds page updates while the person scrolls, clicks, uses a menu or edits.
+    let gate = UpdateGate()
+    let pill = HeldUpdatesPill()
+    private var busObservation: ChangeBus.Observation?
     private var observers: [Any] = []
+    private var monitor: Any?
+    private var wheelEnd: DispatchWorkItem?
+    private var holdCheck: Timer?
+    private var popovers = Set<ObjectIdentifier>()
     private let makePage: (Route, AppData, Router) -> Page
 
     init(data: AppData, makePage: @escaping (Route, AppData, Router) -> Page = PageFactory.make) {
@@ -251,6 +280,11 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         win.delegate = self
 
         host.view = Box(fill: Palette.bg, border: nil, radius: 0)
+        host.view.addSubview(pill)
+        NSLayoutConstraint.activate([
+            pill.centerXAnchor.constraint(equalTo: host.view.centerXAnchor),
+            pill.topAnchor.constraint(equalTo: host.view.safeAreaLayoutGuide.topAnchor, constant: 10),
+        ])
         let side = NSSplitViewItem(sidebarWithViewController: sidebar)
         side.minimumThickness = 200
         side.maximumThickness = 320
@@ -275,10 +309,14 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
 
         sidebar.onPick = { [weak self] r in if self?.router.current != r { self?.router.go(r) } }
         sidebar.commander = RowCommander(data: data) { [weak self] in self?.router.go($0) }
+        sidebar.onLive = { [weak self] in self?.router.go(.activity) }
         router.onChange = { [weak self] r in self?.display(r) }
-        observers.append(NotificationCenter.default.addObserver(forName: AppWindow.changed, object: nil, queue: .main) { [weak self] n in
-            self?.dataChanged(n)
-        })
+        busObservation = data.bus.observe { [weak self] c in self?.dataChanged(c) }
+        gate.onHeldChange = { [weak self] on in
+            self?.pill.set(held: on)
+            self?.watchHold(on)
+        }
+        pill.onShow = { [weak self] in self?.gate.flushNow() }
         observers.append(NotificationCenter.default.addObserver(forName: NewSessionController.changed, object: nil, queue: .main) { [weak self] n in
             self?.newSessionButton?.state = (n.object as? NewSessionController)?.isOpen == true ? .on : .off
         })
@@ -289,10 +327,17 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         observers.append(NotificationCenter.default.addObserver(forName: Updater.changed, object: data.updater, queue: .main) { [weak self] _ in
             self?.syncUpdateItem()
         })
+        installSignals()
         display(router.current)
         syncUpdateItem()
+        sidebar.live.show(data.relay)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    deinit {
+        monitor.map(NSEvent.removeMonitor)
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
 
     var isVisible: Bool { window?.isVisible == true }
 
@@ -317,6 +362,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     // MARK: Pages
 
     private func display(_ r: Route) {
+        // A route change never waits. The held change is in the new build, or marks the old page stale.
+        if held != nil, let page, !page.route.samePage(r) { page.markStale() }
+        held = nil
+        gate.flushNow()
         if let page, page.route.samePage(r) {
             page.show(r)
         } else {
@@ -330,7 +379,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             if cache.count > Self.cacheSize { cache.removeLast(cache.count - Self.cacheSize) }
             host.addChild(p)
             p.view.translatesAutoresizingMaskIntoConstraints = false
-            host.view.addSubview(p.view)
+            host.view.addSubview(p.view, positioned: .below, relativeTo: pill)
             NSLayoutConstraint.activate([
                 p.view.leadingAnchor.constraint(equalTo: host.view.leadingAnchor),
                 p.view.trailingAnchor.constraint(equalTo: host.view.trailingAnchor),
@@ -348,33 +397,22 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         reloadSidebar()
     }
 
-    // Many sources post a change in one burst: a relay event, the agent poll, Plane. Build once for the burst.
-    // A change from a poll builds only when the data is different, or the relative times are a minute old.
-    private func dataChanged(_ note: Notification) {
-        guard isVisible else { return }
-        if note.userInfo?[AppWindow.pollKey] == nil { forceNext = true }
-        guard !reloadScheduled else { return }
-        reloadScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self else { return }
-            self.reloadScheduled = false
-            let fp = DataFingerprint(self.data)
-            guard self.forceNext || fp != self.fingerprint || -self.builtAt.timeIntervalSinceNow > 60 else { return }
-            self.forceNext = false
-            self.fingerprint = fp
-            self.builtAt = Date()
-            // A window behind other windows builds when it shows again. A build blocks the main thread and the menu bar panel.
-            guard self.isOnScreen else {
-                self.changedWhileHidden = true
-                self.cache.forEach { $0.markStale() }
-                return
-            }
-            self.reloadSidebar()
-            self.cache.forEach { if $0 !== self.page { $0.markStale() } }
-            guard let page = self.page else { return }
-            if page.isEditing { self.pendingReload = true; return }
-            page.reload()
-        }
+    // The bus gives one change for each burst. Pages that do not show the changed data drop it.
+    // The shown page updates through the gate, so it does not change under the cursor.
+    private func dataChanged(_ c: DataChange) {
+        if c.domains.contains(.connection) { sidebar.live.show(data.relay) }
+        for p in cache where p !== page { p.receive(c) }
+        if held == nil { held = c } else { held?.merge(c) }
+        // A window behind other windows builds when it shows again. A build blocks the main thread and the menu bar panel.
+        guard isOnScreen else { changedWhileHidden = true; return }
+        reloadSidebar()
+        gate.submit { [weak self] in self?.applyHeld() }
+    }
+
+    private func applyHeld() {
+        guard let c = held else { return }
+        held = nil
+        page?.receive(c)
     }
 
     private var isOnScreen: Bool { isVisible && window?.occlusionState.contains(.visible) == true }
@@ -383,13 +421,71 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         guard changedWhileHidden, isOnScreen else { return }
         changedWhileHidden = false
         reloadSidebar()
-        page?.attach()
+        gate.submit { [weak self] in self?.applyHeld() }
     }
 
     func windowDidUpdate(_ notification: Notification) {
-        guard pendingReload, let page, !page.isEditing else { return }
-        pendingReload = false
-        page.reload()
+        if page?.isEditing == true { gate.begin(.editing) } else { gate.end(.editing) }
+    }
+
+    // MARK: Update gate
+
+    // The signals that hold a page update: a scroll, a mouse press, a menu, a sheet or popover, text editing.
+    private func installSignals() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp]) { [weak self] e in
+            self?.signal(e)
+            return e
+        }
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.gate.begin(.menu)
+        })
+        observers.append(nc.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            // A menu takes the mouse up of the press that opened it.
+            self?.gate.end(.mouse)
+            self?.gate.end(.menu)
+        })
+        observers.append(nc.addObserver(forName: NSWindow.willBeginSheetNotification, object: window, queue: .main) { [weak self] _ in
+            self?.gate.begin(.sheet)
+        })
+        observers.append(nc.addObserver(forName: NSWindow.didEndSheetNotification, object: window, queue: .main) { [weak self] _ in
+            self?.gate.end(.sheet)
+        })
+        observers.append(nc.addObserver(forName: NSPopover.didShowNotification, object: nil, queue: .main) { [weak self] n in
+            guard let self, let p = n.object as? NSPopover, p.contentViewController?.view.window?.parent === self.window else { return }
+            self.popovers.insert(ObjectIdentifier(p))
+            self.gate.begin(.sheet)
+        })
+        observers.append(nc.addObserver(forName: NSPopover.didCloseNotification, object: nil, queue: .main) { [weak self] n in
+            guard let self, let p = n.object as? NSPopover, self.popovers.remove(ObjectIdentifier(p)) != nil, self.popovers.isEmpty else { return }
+            self.gate.end(.sheet)
+        })
+    }
+
+    private func signal(_ e: NSEvent) {
+        guard e.window === window else { return }
+        switch e.type {
+        case .scrollWheel:
+            // A wheel has no end event. The scroll ends 0.3 s after the last wheel event, momentum included.
+            gate.begin(.scroll)
+            wheelEnd?.cancel()
+            let w = DispatchWorkItem { [weak self] in self?.gate.end(.scroll) }
+            wheelEnd = w
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)
+        case .leftMouseDown, .rightMouseDown: gate.begin(.mouse)
+        case .leftMouseUp, .rightMouseUp: gate.end(.mouse)
+        default: break
+        }
+    }
+
+    // While an update waits, a lost mouse up must not hold it for ever.
+    private func watchHold(_ on: Bool) {
+        holdCheck?.invalidate()
+        holdCheck = nil
+        guard on else { return }
+        holdCheck = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            if NSEvent.pressedMouseButtons == 0 { self?.gate.end(.mouse) }
+        }
     }
 
     func reloadSidebar() {

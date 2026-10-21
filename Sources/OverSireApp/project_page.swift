@@ -23,7 +23,7 @@ final class ItemLine: TableRow {
             "status": StatusGlyph.item(item, snap: snap).sized(16),
             "key": NSTextField.text(item.key, size: 11.5, color: Palette.dim, mono: true),
             "title": NSTextField.text(item.title, size: 13),
-            "updated": NSTextField.text(relativeTime(item.activityAt), size: 11.5, color: Palette.dim),
+            "updated": RelativeTimeLabel(item.activityAt),
         ]
         let prog = snap.progress(of: item.id)
         if prog.total > 0 {
@@ -56,6 +56,13 @@ final class ItemLine: TableRow {
         c.toolTip = "Done. \(cleanup.count) thing\(cleanup.count == 1 ? "" : "s") to clean up: \(kinds.joined(separator: ", "))"
         c.setAccessibilityLabel(c.toolTip!)
         return c
+    }
+
+    /// The values that an item line shows.
+    static func hash(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?, cleanup: [CleanupLine] = []) -> Int {
+        let prog = snap.progress(of: item.id)
+        return PageRow.hash([item, snap.option(item.statusOptionId), prog.done, prog.total, status?.label, status?.tone.word, status?.tip,
+                             stream?.ci?.word, snap.isDoneWithOpenSubItems(item), snap.openSubItems(of: item.id), cleanup.map(\.kind.noun)])
     }
 }
 
@@ -95,6 +102,13 @@ final class BoardCard: Row {
         commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The values that an item line shows.
+    static func hash(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?) -> Int {
+        let prog = snap.progress(of: item.id)
+        return PageRow.hash([item, snap.option(item.statusOptionId), prog.done, prog.total, status?.label, status?.tone.word, status?.tip,
+                             stream?.ci?.word])
+    }
 }
 
 // Items of one project: a list grouped by status, or a board.
