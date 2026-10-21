@@ -83,6 +83,8 @@ struct CleanupRecord: Codable, Equatable {
 
 final class Cleaner {
     static let changed = Notification.Name("CleanerChanged")
+    /// The item key of a change, when the change is for one item.
+    static let keyInfo = "key"
     private static let logKey = "cleanupLog"
 
     private(set) var facts = CleanupFacts()
@@ -301,7 +303,7 @@ final class Cleaner {
         let k = key.uppercased()
         guard !running.contains(k) else { done?(["A cleanup of \(k) is running."]); return }
         running.insert(k)
-        NotificationCenter.default.post(name: Self.changed, object: self)
+        NotificationCenter.default.post(name: Self.changed, object: self, userInfo: [Self.keyInfo: k])
         let finishedAt = Self.finished(k, data: data)?.item.updatedAt
         let hooks = AGENTS.cleanup.runHooks
         let facts = self.facts
@@ -340,9 +342,10 @@ final class Cleaner {
                 self.records = Array(self.records.prefix(50))
                 if let d = try? JSONEncoder().encode(self.records) { self.defaults.set(d, forKey: Self.logKey) }
                 if !errors.isEmpty { log.warning("Cleanup of \(k, privacy: .public): \(errors.joined(separator: "; "), privacy: .public)") }
-                NotificationCenter.default.post(name: Self.changed, object: self)
                 data.agentIndex.poll()
-                (data as? GHActionsBar)?.scanCheckouts(force: true)
+                // One change for the item, after the new scan and facts.
+                let post = { NotificationCenter.default.post(name: Self.changed, object: self, userInfo: [Self.keyInfo: k]) }
+                if let app = data as? GHActionsBar { app.scanCheckouts(force: true, done: post) } else { post() }
                 done?(errors)
             }
         }

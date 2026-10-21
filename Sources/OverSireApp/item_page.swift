@@ -44,7 +44,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var asking = false
     private var sending = false
     private var pendingComment: String?
-    private var questionCards: [QuestionCard] = []
+    private var questionCards: [QuestionID: QuestionCard] = [:]
     private lazy var needsYou = NeedsYouCard(page: self)
 
     override var pageWidth: CGFloat { 960 }
@@ -79,54 +79,76 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     override var isEditing: Bool {
         super.isEditing || !(replyField?.stringValue.isEmpty ?? true) || !(commentField?.stringValue.isEmpty ?? true) || !(askField?.stringValue.isEmpty ?? true)
-            || questionCards.contains { $0.isTyping }
+            || questionCards.values.contains { $0.isTyping }
     }
 
-    override func build(_ col: NSStackView) {
+    // The fetches of the page run here, not in `sections()`: the window calls `sections()` for each change.
+    override func reload(reason: String) {
+        if let (_, _, item) = data.projectStore.item(key: key) {
+            loadData(item: item, stream: data.workstreams.stream(key))
+            if tab == .overview, data.projectStore.relations.supports(item.key) { data.projectStore.relations.load([item.key]) }
+        } else {
+            pageBusy = data.projectsLoading
+        }
+        super.reload(reason: reason)
+    }
+
+    // Each row hash holds only what the row shows. A change updates only the rows whose data changed.
+    override func sections() -> [PageSection]? {
         let store = data.projectStore
         guard let (pk, snap, item) = store.item(key: key) else {
-            col.addFull(PageHeader(key, caption: "Work item"))
-            pageBusy = data.projectsLoading
-            if data.projectsLoading {
-                let c = ListCard()
-                c.add(LoadingNote("Loading \(key)"))
-                col.addFull(c)
-            } else {
-                col.addFull(EmptyNote("OverSire has no item \(key). It may be in a project that OverSire does not track, or it was deleted.",
-                                      symbol: "questionmark.square.dashed"))
-            }
-            return
+            let k = key, loading = data.projectsLoading
+            return [PageSection("missing", rows: [
+                PageRow("header", k) { PageHeader(k, caption: "Work item") },
+                PageRow("body", k, loading) {
+                    guard loading else {
+                        return EmptyNote("OverSire has no item \(k). It may be in a project that OverSire does not track, or it was deleted.",
+                                         symbol: "questionmark.square.dashed")
+                    }
+                    let c = ListCard()
+                    c.add(LoadingNote("Loading \(k)"))
+                    return c
+                },
+            ])]
         }
         let stream = data.workstreams.stream(key)
-        loadData(item: item, stream: stream)
-
-        let main = NSStackView(v: [], spacing: 14)
-        main.addFull(head(snap: snap, item: item, stream: stream))
-        if let note { main.addFull(Banner(note.0, title: note.1)) }
-        if snap.isDoneWithOpenSubItems(item) { main.addFull(openSubItemsBanner(snap: snap, item: item)) }
-        let prog = snap.progress(of: item.id)
-        let tabs = Route.ItemTab.allCases
-        let asks = data.questions.count(key: key)
-        var sub = TabStrip.Tab(title: "Sub-items")
-        if prog.total > 0 {
-            let warn = snap.isDoneWithOpenSubItems(item)
-            sub.lead = [ProgressRing(done: prog.done, total: prog.total).sized(14)]
-            if warn { sub.trail = [Glyph("exclamationmark.triangle.fill", color: Palette.warn, size: 11)] }
-            sub.label = "Sub-items, \(prog.done) of \(prog.total) done" + (warn ? ", Done with open sub-items" : "")
-        }
-        let sessionTab = TabStrip.Tab(title: "Session", count: asks > 0 ? asks : nil,
-                                   label: asks > 0 ? "Session, \(asks) question\(asks == 1 ? "" : "s")" : nil)
-        let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview"), sessionTab, sub, TabStrip.Tab(title: "Activity")],
-                             selected: tabs.firstIndex(of: tab) ?? 0)
-        strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
-        main.addArrangedSubview(strip)
+        var top = [headRow(snap: snap, item: item)]
+        if let note { top.append(PageRow("note", "\(note.0)", note.1) { Banner(note.0, title: note.1) }) }
+        if snap.isDoneWithOpenSubItems(item) { top.append(openSubItemsRow(snap: snap, item: item)) }
+        top.append(tabsRow(snap: snap, item: item))
+        let rows: [PageRow]
         switch tab {
-        case .overview: overview(main, pk: pk, snap: snap, item: item, stream: stream)
-        case .session: session(main, stream: stream)
-        case .subitems: subItems(main, snap: snap, item: item, progress: prog)
-        case .activity: activity(main, item: item, stream: stream)
+        case .overview: rows = overview(pk: pk, snap: snap, item: item, stream: stream)
+        case .session: rows = session(stream: stream)
+        case .subitems: rows = subItems(snap: snap, item: item)
+        case .activity: rows = activity(item: item, stream: stream)
         }
-        col.addFull(main)
+        return [PageSection("top", rows: top), PageSection(tab.rawValue, rows: rows)]
+    }
+
+    // A hash part for values that are not Hashable.
+    private static func sig(_ parts: Any?...) -> String { parts.map { String(describing: $0) }.joined(separator: "|") }
+
+    private func tabsRow(snap: ProjectSnapshot, item: Item) -> PageRow {
+        let prog = snap.progress(of: item.id)
+        let warn = snap.isDoneWithOpenSubItems(item)
+        let asks = data.questions.count(key: key)
+        let tab = self.tab
+        return PageRow("tabs", tab, prog.done, prog.total, warn, asks) { [unowned self] in
+            let tabs = Route.ItemTab.allCases
+            var sub = TabStrip.Tab(title: "Sub-items")
+            if prog.total > 0 {
+                sub.lead = [ProgressRing(done: prog.done, total: prog.total).sized(14)]
+                if warn { sub.trail = [Glyph("exclamationmark.triangle.fill", color: Palette.warn, size: 11)] }
+                sub.label = "Sub-items, \(prog.done) of \(prog.total) done" + (warn ? ", Done with open sub-items" : "")
+            }
+            let sessionTab = TabStrip.Tab(title: "Session", count: asks > 0 ? asks : nil,
+                                          label: asks > 0 ? "Session, \(asks) question\(asks == 1 ? "" : "s")" : nil)
+            let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview"), sessionTab, sub, TabStrip.Tab(title: "Activity")],
+                                 selected: tabs.firstIndex(of: tab) ?? 0)
+            strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
+            return strip
+        }
     }
 
     private func loadData(item: Item, stream: Workstream?) {
@@ -149,7 +171,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Head and properties
 
-    private func head(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> NSView {
+    private func headRow(snap: ProjectSnapshot, item: Item) -> PageRow {
+        let prog = snap.progress(of: item.id)
+        let cleanup = data.cleaner.lines(item.key, data: data)
+        return PageRow("head", item, snap.summary, snap.statusOptions, prog.done, prog.total, snap.openSubItems(of: item.id),
+                       snap.canCloseParent(item), data.questions.count(key: key), saving, data.queue.contains(key),
+                       Self.sig(cleanup, data.statusJob.item(key))) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
+    }
+
+    private func head(snap: ProjectSnapshot, item: Item, cleanup: [CleanupLine]) -> NSView {
         let project = Chiplet(snap.summary.title, symbol: "folder", color: Palette.acc) { [weak self] in self?.go(.project(snap.summary.identifier)) }
         let copy = Chiplet(item.key, symbol: "doc.on.doc", color: Palette.dim, mono: true)
         copy.toolTip = "Copy \(item.key)"
@@ -165,7 +195,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let keyLine = NSStackView(h: top, spacing: 8)
         var chips: [NSView] = [statusChip(snap: snap, item: item)]
         if !snap.isDoneWithOpenSubItems(item),
-           let c = ItemLine.finishChip(item, snap: snap, cleanup: data.cleaner.lines(item.key, data: data)) { chips.append(c) }
+           let c = ItemLine.finishChip(item, snap: snap, cleanup: cleanup) { chips.append(c) }
         if snap.canCloseParent(item), let done = snap.firstState(group: "completed", else: .done) {
             let b = ActionButton("Close parent?", style: .link) { [weak self] in self?.save("status", ItemPatch(status: done.id)) }
             b.toolTip = "All sub-items are finished. Set \(item.key) to \(done.name)."
@@ -174,7 +204,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         chips.append(priorityChip(item))
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
         if !item.assignees.isEmpty { chips.append(Chiplet(item.assignees.joined(separator: ", "), symbol: "person")) }
-        chips.append(NSTextField.text("Updated \(relativeTime(item.activityAt))", size: 12, color: Palette.dim))
+        let at = item.activityAt
+        chips.append(RelativeTimeLabel({ at }, size: 12, format: { "Updated " + $0 }))
         if let saving { chips.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Saving \(saving)…", size: 12, color: Palette.dim)], spacing: 5)) }
         let inQueue = data.queue.contains(key)
         var actions: [NSView] = [ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
@@ -230,8 +261,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Done with open sub-items
 
-    private func openSubItemsBanner(snap: ProjectSnapshot, item: Item) -> NSView {
+    private func openSubItemsRow(snap: ProjectSnapshot, item: Item) -> PageRow {
         let open = snap.openDescendants(of: item.id)
+        return PageRow("open-subs", open, snap.progress(of: item.id).total, snap.option(item.statusOptionId)?.name) { [unowned self] in
+            self.openSubItemsBanner(snap: snap, item: item, open: open)
+        }
+    }
+
+    private func openSubItemsBanner(snap: ProjectSnapshot, item: Item, open: [String]) -> NSView {
         let total = snap.progress(of: item.id).total
         let closeTitle = "Close \(open.count) sub-item\(open.count == 1 ? "" : "s")"
         return Banner(.warning, title: "Plane says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(open.count) of \(max(total, open.count)) sub-items are open.",
@@ -285,43 +322,30 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Cleanup
 
-    private func cleanupCard(_ item: Item) -> NSView? {
-        let cleaner = data.cleaner
-        let lines = cleaner.lines(item.key, data: data)
+    // The card updates in place, so a check or a run does not build the page again.
+    private func cleanupRow(_ item: Item) -> PageRow? {
+        let lines = data.cleaner.lines(item.key, data: data)
         guard !lines.isEmpty else { return nil }
-        let safe = lines.filter { $0.safe && $0.removable }
-        let look = lines.count - safe.count
-        let chosen = safe.filter { !cleanupOff.contains($0.id) }
-        let running = cleaner.running.contains(item.key.uppercased())
-        let button = ActionButton(running ? "Cleaning up…" : "Clean up \(chosen.count)", symbol: "bubbles.and.sparkles", style: .primary) { [weak self] in
-            guard let self else { return }
-            cleaner.run(chosen, key: item.key, data: self.data) { [weak self] errors in
-                self?.note = errors.isEmpty ? nil : (.bad, errors.joined(separator: " "))
-                self?.reload()
-            }
-            self.reload()
-        }
-        button.isEnabled = !running && !chosen.isEmpty
-        let c = Card(title: "Cleanup", trailing: [button])
-        c.add(NSTextField.text(look == 0 ? "The item is finished. These are left over."
-                                         : "\(safe.count) safe, \(look) need\(look == 1 ? "s" : "") a look.", size: 12.5, color: Palette.mut))
-        for l in lines {
-            let ok = l.safe && l.removable
-            let box = ToggleChip("", on: ok && !cleanupOff.contains(l.id), enabled: ok) { [weak self] in
+        let off = cleanupOff, running = data.cleaner.running.contains(item.key.uppercased())
+        return PageRow("cleanup", Self.sig(lines), off, running, update: { ($0 as? CleanupCard)?.show(lines, off: off, running: running) }) { [unowned self] in
+            let c = CleanupCard(run: { [weak self] in self?.runCleanup() }) { [weak self] id in
                 guard let self else { return }
-                if self.cleanupOff.remove(l.id) == nil { self.cleanupOff.insert(l.id) }
+                if self.cleanupOff.remove(id) == nil { self.cleanupOff.insert(id) }
                 self.reload()
             }
-            box.setAccessibilityLabel(l.title)
-            var parts: [NSView] = [box, Pill(ok ? .ok : .warning, text: ok ? "Safe" : "Look"),
-                                   NSTextField.text(l.title, size: 12.5, weight: .medium),
-                                   NSTextField.text(l.detail, size: 12, color: Palette.dim), Spacer()]
-            if let url = l.url.flatMap(URL.init(string:)) {
-                parts.append(ActionButton(l.kind == .pr ? "Open the PR" : "Open", style: .link) { NSWorkspace.shared.open(url) })
-            }
-            c.add(NSStackView(h: parts, spacing: 8))
+            c.show(lines, off: off, running: running)
+            return c
         }
-        return c
+    }
+
+    // The Cleaner posts a change for this item when the run starts and ends.
+    private func runCleanup() {
+        let chosen = data.cleaner.lines(key, data: data).filter { $0.safe && $0.removable && !cleanupOff.contains($0.id) }
+        data.cleaner.run(chosen, key: key, data: data) { [weak self] errors in
+            guard let self, !errors.isEmpty || self.note != nil else { return }
+            self.note = errors.isEmpty ? nil : (.bad, errors.joined(separator: " "))
+            self.reload()
+        }
     }
 
     private func priorityChip(_ item: Item) -> NSView {
@@ -350,27 +374,54 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Overview
 
-    private func overview(_ main: NSStackView, pk: String, snap: ProjectSnapshot, item: Item, stream: Workstream?) {
+    private func overview(pk: String, snap: ProjectSnapshot, item: Item, stream: Workstream?) -> [PageRow] {
         let body = (item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let sums = data.itemSummaries
+        let k = item.key.uppercased()
         let long = ItemSummaries.offers(body)
         let summary = hiddenSummaries.contains(item.key) ? nil : sums.summary(item.key)
-        let busy = sums.busy.contains(item.key.uppercased())
-        if summary != nil || busy || (long && (sums.hasEngine || sums.errors[item.key.uppercased()] != nil)) {
-            main.addFull(summaryPanel(item, body: body, summary: summary, busy: busy))
+        let busy = sums.busy.contains(k)
+        var rows: [PageRow] = []
+        if summary != nil || busy || (long && (sums.hasEngine || sums.errors[k] != nil)) {
+            let linked = ItemPage.linkedKeys(body, except: k).filter { data.projectStore.item(key: $0) != nil }
+            rows.append(PageRow("summary", Self.sig(summary), busy, sums.errors[k], summary != nil && sums.isStale(k, body: body), sums.hasEngine,
+                                AI_CFG.itemSummary, linked, body.count) { [unowned self] in
+                self.summaryPanel(item, body: body, summary: summary, busy: busy, linked: linked)
+            })
         }
-        main.addFull(StatusCard(key: key, stream: stream, data: data, needsYou: needsYou) { [weak self] in self?.go($0) }.build())
-        if let card = cleanupCard(item) { main.addFull(card) }
-        if let card = suggestion(item) { main.addFull(card) }
-        if let card = plannerCard(item) { main.addFull(card) }
+        rows.append(statusRow(stream: stream))
+        if let r = cleanupRow(item) { rows.append(r) }
+        if hasCloud, data.suggestions.openPlan(naming: item.key) != nil {
+            rows.append(PageRow("suggestion", item.key) { [unowned self] in self.suggestion(item) })
+        }
+        if let r = plannerRow(item) { rows.append(r) }
+        let open = descriptionOpen, hasSummary = summary != nil
+        rows.append(PageRow("description", body, hasSummary, open, pk) { [unowned self] in
+            self.descriptionCard(body, pk: pk, hasSummary: hasSummary, open: open)
+        })
+        return rows
+    }
+
+    // The hash holds each input of StatusCard.
+    private func statusRow(stream: Workstream?) -> PageRow {
+        let job = data.statusJob, agents = data.agentIndex
+        let k = key.uppercased()
+        let s = job.status(k)
+        let print = Self.sig(s, job.reading.contains(k), stream, agents.agent(k), job.item(k), s.flatMap(job.outOfDate), job.on,
+                             agents.watch(k)?.recap, data.projectStore.isDone(key: k), AGENTS.writeBack, data.questions.entries(key: key))
+        return PageRow("status", print) { [unowned self] in
+            StatusCard(key: self.key, stream: stream, data: self.data, needsYou: self.needsYou) { [weak self] in self?.go($0) }.build()
+        }
+    }
+
+    // The web view keeps its holder while the body stays the same.
+    private func descriptionCard(_ body: String, pk: String, hasSummary: Bool, open: Bool) -> NSView {
         let d = Card(title: "Description", trailing: body.isEmpty ? [] : [NSTextField.text("\(body.count.formatted()) characters", size: 12, color: Palette.dim)])
         if body.isEmpty {
             d.add(NSTextField.text("No description.", size: 12.5, color: Palette.dim))
-            main.addFull(d)
-            return
+            return d
         }
-        if summary != nil {
-            let open = descriptionOpen
+        if hasSummary {
             d.add(Row([Glyph(open ? "chevron.down" : "chevron.right", color: Palette.dim, size: 11),
                        NSTextField.text(open ? "Hide full description" : "Show full description", size: 12.5, color: Palette.mut), Spacer()],
                       height: 26, inset: 2, label: open ? "Hide full description" : "Show full description") { [weak self] in
@@ -378,11 +429,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 self?.reload()
             })
         }
-        if summary == nil || descriptionOpen {
+        if !hasSummary || open {
             d.add(markdownHolder(markdown, height: &markdownHeight, min: 24))
             data.projectStore.resolveImages(body, projectKey: pk) { [weak self] out in self?.markdown.show(out, mode: .rendered) }
         }
-        main.addFull(d)
+        return d
     }
 
     private func markdownHolder(_ view: MarkdownView, height: inout NSLayoutConstraint?, min: CGFloat) -> NSView {
@@ -401,7 +452,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     // MARK: Summary
 
     // The Summary card: the AI summary of a long description, a placeholder while the AI works, or the error.
-    private func summaryPanel(_ item: Item, body: String, summary: ItemSummary?, busy: Bool) -> NSView {
+    private func summaryPanel(_ item: Item, body: String, summary: ItemSummary?, busy: Bool, linked: [String]) -> NSView {
         let sums = data.itemSummaries
         let k = item.key.uppercased()
         var head: [NSView] = []
@@ -440,7 +491,6 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let summary {
             c.add(markdownHolder(summaryMarkdown, height: &summaryHeight, min: 20))
             summaryMarkdown.show(summary.markdown, mode: .rendered)
-            let linked = ItemPage.linkedKeys(body, except: k).filter { data.projectStore.item(key: $0) != nil }
             if !linked.isEmpty {
                 let chips = linked.map { key in Chiplet(key, symbol: "link") { [weak self] in self?.go(.item(key, .overview)) } as NSView }
                 c.add(NSStackView(h: [NSTextField.text("Linked:", size: 12, color: Palette.dim), Wrap(chips), Spacer()], spacing: 6))
@@ -471,10 +521,20 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Planner
 
-    private func plannerCard(_ item: Item) -> NSView? {
+    private func plannerRow(_ item: Item) -> PageRow? {
         let rc = data.projectStore.relations
         guard rc.supports(item.key) else { return nil }
-        rc.load([item.key])
+        let rels = rc.relations(item.key)
+        let project = data.projectStore.item(key: item.key)?.snap.summary.ref.storeKey ?? ""
+        let areas = self.areas(item) ?? []
+        let shown = (rels ?? []).map { r in data.projectStore.item(key: r.item.key)?.item }
+        let print = Self.sig(rels, shown, data.projectStore.blockers(of: item.key), self.areas(item), areas.map { data.planner.kind($0, project: project) },
+                             rc.errors[item.key.uppercased()])
+        return PageRow("planner", print) { [unowned self] in self.plannerCard(item) }
+    }
+
+    private func plannerCard(_ item: Item) -> NSView {
+        let rc = data.projectStore.relations
         let actions = PlannerCard.Actions(
             open: { [weak self] k in self?.go(.item(k, .overview)) },
             add: { [weak self] k in self?.pickRelation(k, for: item) },
@@ -535,9 +595,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         reload()
     }
 
-    private func suggestion(_ item: Item) -> NSView? {
-        guard hasCloud, data.suggestions.openPlan(naming: item.key) != nil else { return nil }
-        return Banner(.info, title: "The Planner has a plan change for \(item.key).",
+    private func suggestion(_ item: Item) -> NSView {
+        Banner(.info, title: "The Planner has a plan change for \(item.key).",
                       actions: [ActionButton("Review") { [weak self] in self?.go(.work(.lanes)) }])
     }
 
@@ -571,23 +630,39 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Session
 
-    private func session(_ main: NSStackView, stream: Workstream?) {
-        questionCards = data.questions.entries(key: key).map { data.questions.card($0) }
-        questionCards.forEach { main.addFull($0) }
-        if let a = stream?.agent {
-            let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
-            let s = data.statusJob.item(key)
-            c.add(NSStackView(h: [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"),
-                                  NSTextField.text("since \(relativeTime(a.since))", size: 12, color: Palette.dim), Spacer()], spacing: 6))
-            if let h = s?.headline, !h.isEmpty { c.add(NSTextField.text(h, size: 12.5, color: Palette.mut, lines: 3)) }
-            c.add(tail.isEmpty ? InlineSpinner("Reading the terminal…") : TermView(lines: tail, height: 300))
-            if a.phase != .done && a.phase != .failed { c.add(replyRow()) }
-            main.addFull(c)
-        } else {
-            main.addFull(Banner(.idle, title: "No Orca session yet.", body: "Start the item in Orca to see its session here."))
+    private func session(stream: Workstream?) -> [PageRow] {
+        let entries = data.questions.entries(key: key)
+        questionCards = questionCards.filter { id, _ in entries.contains { $0.question.id == id } }
+        var rows = entries.map { e in
+            PageRow("q-\(e.question.id)", e) { [unowned self] in
+                let c = self.data.questions.card(e)
+                self.questionCards[e.question.id] = c
+                return c
+            }
         }
-        main.addFull(summaryCard(hasAgent: stream?.agent != nil))
-        if stream?.agent != nil { main.addFull(askCard()) }
+        if let a = stream?.agent {
+            let s = data.statusJob.item(key)
+            rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
+        } else {
+            rows.append(PageRow("no-session", key) { Banner(.idle, title: "No Orca session yet.", body: "Start the item in Orca to see its session here.") })
+        }
+        let notes = data.sessions, k = key.uppercased(), hasAgent = stream?.agent != nil
+        rows.append(PageRow("summary", Self.sig(notes.summary(key)), notes.busy.contains(k), hasAgent, AI_CFG.enabled, AI_CFG.sessionSummary,
+                            AGENTS.writeBack.sessionComment) { [unowned self] in self.summaryCard(hasAgent: hasAgent) })
+        if hasAgent {
+            rows.append(PageRow("ask", Self.sig(notes.answers[k]), asking, AI_CFG.enabled) { [unowned self] in self.askCard() })
+        }
+        return rows
+    }
+
+    private func terminalCard(_ a: AgentSession, status s: ItemStatus?) -> NSView {
+        let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
+        c.add(NSStackView(h: [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"),
+                              RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()], spacing: 6))
+        if let h = s?.headline, !h.isEmpty { c.add(NSTextField.text(h, size: 12.5, color: Palette.mut, lines: 3)) }
+        c.add(tail.isEmpty ? InlineSpinner("Reading the terminal…") : TermView(lines: tail, height: 300))
+        if a.phase != .done && a.phase != .failed { c.add(replyRow()) }
+        return c
     }
 
     private func summaryCard(hasAgent: Bool) -> NSView {
@@ -682,36 +757,40 @@ final class ItemPage: Page, NSTextFieldDelegate {
         return out
     }
 
-    private func subItems(_ main: NSStackView, snap: ProjectSnapshot, item: Item, progress: (done: Int, total: Int)) {
+    private func subItems(snap: ProjectSnapshot, item: Item) -> [PageRow] {
         let kids = snap.children(of: item.id)
+        let progress = snap.progress(of: item.id)
+        var rows: [PageRow] = []
         if progress.total > 0 {
-            main.addFull(NSStackView(h: [ProgressRing(done: progress.done, total: progress.total).sized(16),
-                                         NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], spacing: 8))
+            rows.append(PageRow("progress", progress.done, progress.total) {
+                NSStackView(h: [ProgressRing(done: progress.done, total: progress.total).sized(16),
+                                NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], spacing: 8)
+            })
         }
         let job = data.statusJob
-        let list = StickyListCard.table(kids.isEmpty ? nil : subTable)
-        for g in ItemPage.subGroups(kids, snap: snap, status: job.item) {
-            list.addGroup(g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })
-            for lane in g.lanes {
-                if !lane.priority.isEmpty { list.add(WorkPage.laneRow(lane)) }
-                for e in lane.entries {
-                    list.add(ItemLine(e.item, snap: snap, stream: data.workstreams.stream(e.item.key), status: job.item(e.item.key), layout: subTable,
-                                      cleanup: data.cleaner.lines(e.item.key, data: data)) { [weak self] in self?.go($0) })
+        let print = kids.map { k in
+            ItemLine.hash(k, snap: snap, stream: data.workstreams.stream(k.key), status: job.item(k.key), cleanup: data.cleaner.lines(k.key, data: data))
+        }
+        rows.append(PageRow("list", print, progress.total) { [unowned self] in
+            let list = StickyListCard.table(kids.isEmpty ? nil : self.subTable)
+            for g in ItemPage.subGroups(kids, snap: snap, status: job.item) {
+                list.addGroup(g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })
+                for lane in g.lanes {
+                    if !lane.priority.isEmpty { list.add(WorkPage.laneRow(lane)) }
+                    for e in lane.entries {
+                        list.add(ItemLine(e.item, snap: snap, stream: self.data.workstreams.stream(e.item.key), status: job.item(e.item.key), layout: self.subTable,
+                                          cleanup: self.data.cleaner.lines(e.item.key, data: self.data)) { [weak self] in self?.go($0) })
+                    }
                 }
             }
-        }
-        if progress.total > kids.count {
-            list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in Plane", size: 12, color: Palette.acc)], height: 32) {
-                NSWorkspace.shared.open(URL(string: item.url)!) })
-        }
-        if list.isEmpty { list.add(EmptyNote("No sub-items.", symbol: "list.bullet.indent")) }
-        main.addFull(list)
-        // Takes the rest when the table is short.
-        let rest = NSView()
-        rest.setContentHuggingPriority(.init(2), for: .vertical)
-        main.addArrangedSubview(rest)
-        main.distribution = .fill
-        main.setContentHuggingPriority(.init(1), for: .vertical)
+            if progress.total > kids.count {
+                list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in Plane", size: 12, color: Palette.acc)], height: 32) {
+                    NSWorkspace.shared.open(URL(string: item.url)!) })
+            }
+            if list.isEmpty { list.add(EmptyNote("No sub-items.", symbol: "list.bullet.indent")) }
+            return list
+        })
+        return rows
     }
 
     // MARK: Activity
@@ -745,12 +824,22 @@ final class ItemPage: Page, NSTextFieldDelegate {
         return out.sorted { $0.at > $1.at }
     }
 
-    private func activity(_ main: NSStackView, item: Item, stream: Workstream?) {
+    private func activity(item: Item, stream: Workstream?) -> [PageRow] {
         let all = events(item: item, stream: stream)
-        main.addFull(NSStackView(h: Source.allCases.map { s in
-            ToggleChip(s.rawValue, on: activitySource == s) { [weak self] in self?.activitySource = s; self?.reload() } as NSView
-        } + [Spacer()], spacing: 6))
+        let source = activitySource, pending = pendingComment, loading = timeline == nil
+        let shown = all.filter { source == .all || $0.source == source }
+        return [
+            PageRow("filters", source) { [unowned self] in
+                NSStackView(h: Source.allCases.map { s in
+                    ToggleChip(s.rawValue, on: source == s) { [weak self] in self?.activitySource = s; self?.reload() } as NSView
+                } + [Spacer()], spacing: 6)
+            },
+            PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
+            PageRow("list", Self.sig(shown), pending, loading) { [unowned self] in self.activityList(shown, pending: pending, loading: loading) },
+        ]
+    }
 
+    private func composeRow() -> NSView {
         let f = NSTextField()
         f.placeholderString = "Write a comment (Markdown). Return sends."
         f.setAccessibilityLabel("Comment")
@@ -760,15 +849,17 @@ final class ItemPage: Page, NSTextFieldDelegate {
         commentField = f
         let send = ActionButton("Comment") { [weak self] in self?.sendComment() }
         if pendingComment != nil { send.busy("Sending…") }
-        main.addFull(NSStackView(h: [f, send], spacing: 6))
+        return NSStackView(h: [f, send], spacing: 6)
+    }
 
+    private func activityList(_ shown: [Event], pending: String?, loading: Bool) -> NSView {
         let list = ListCard()
-        if let pendingComment {
-            list.add(Row([Spinner(size: .mini), NSTextField.text(pendingComment, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
-                         height: 34, label: "Sending comment: \(pendingComment)"))
+        if let pending {
+            list.add(Row([Spinner(size: .mini), NSTextField.text(pending, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
+                         height: 34, label: "Sending comment: \(pending)"))
         }
-        if timeline == nil { list.add(LoadingNote("Loading the activity")) }
-        for e in all where activitySource == .all || e.source == activitySource {
+        if loading { list.add(LoadingNote("Loading the activity")) }
+        for e in shown {
             var col: [NSView] = [NSTextField.text(e.text, size: 12.5, lines: 2)]
             if let b = e.body?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
                 let t = NSTextField(labelWithAttributedString: ItemWindow.inline(b, font: .systemFont(ofSize: 12.5)))
@@ -791,13 +882,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 src.leadingAnchor.constraint(equalTo: srcBox.leadingAnchor), src.topAnchor.constraint(equalTo: srcBox.topAnchor),
             ])
             let route = e.route
-            let row = Row([srcBox, text, NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim)], height: 34,
+            let at = e.at
+            let row = Row([srcBox, text, RelativeTimeLabel({ at })], height: 34,
                           label: "\(e.source.rawValue): \(e.text)", onClick: route.map { r in { [weak self] in self?.go(r) } })
             row.stack.alignment = .top
             list.add(row)
         }
         if list.isEmpty { list.add(EmptyNote("No activity.")) }
-        main.addFull(list)
+        return list
     }
 
     @objc private func sendComment() {
@@ -814,5 +906,70 @@ final class ItemPage: Page, NSTextFieldDelegate {
             if ok { self.commentField?.stringValue = ""; self.timeline = nil; self.note = nil } else { self.note = (.bad, self.data.projectStore.lastError ?? "Plane did not take the comment.") }
             self.reload()
         }
+    }
+}
+
+// The Cleanup card of a finished item. `show` updates the checks, the text and the button in place.
+final class CleanupCard: Card {
+    private let button: ActionButton
+    private let summary = NSTextField.text("", size: 12.5, color: Palette.mut)
+    private let flip: (String) -> Void
+    private var lines: [CleanupLine] = []
+    private var rows: [String: NSStackView] = [:]
+    private var boxes: [String: (view: ToggleChip, on: Bool)] = [:]
+
+    init(run: @escaping () -> Void, flip: @escaping (String) -> Void) {
+        button = ActionButton("Clean up", symbol: "bubbles.and.sparkles", style: .primary, run)
+        self.flip = flip
+        super.init(title: "Cleanup", trailing: [button])
+        add(summary)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(_ lines: [CleanupLine], off: Set<String>, running: Bool) {
+        let safe = lines.filter { $0.safe && $0.removable }
+        let look = lines.count - safe.count
+        let chosen = safe.filter { !off.contains($0.id) }.count
+        if running {
+            if !button.isBusy { button.busy("Cleaning up…") }
+        } else {
+            button.done()
+            button.title = "Clean up \(chosen)"
+            button.isEnabled = chosen > 0
+        }
+        summary.stringValue = look == 0 ? "The item is finished. These are left over." : "\(safe.count) safe, \(look) need\(look == 1 ? "s" : "") a look."
+        if lines != self.lines {
+            rows.values.forEach { $0.removeFromSuperview() }
+            rows = [:]
+            boxes = [:]
+            for l in lines { rows[l.id] = row(l); add(rows[l.id]!) }
+            self.lines = lines
+        }
+        for l in lines { setBox(l, on: l.safe && l.removable && !off.contains(l.id)) }
+    }
+
+    private func row(_ l: CleanupLine) -> NSStackView {
+        let ok = l.safe && l.removable
+        var parts: [NSView] = [Pill(ok ? .ok : .warning, text: ok ? "Safe" : "Look"), NSTextField.text(l.title, size: 12.5, weight: .medium),
+                               NSTextField.text(l.detail, size: 12, color: Palette.dim), Spacer()]
+        if let url = l.url.flatMap(URL.init(string:)) {
+            parts.append(ActionButton(l.kind == .pr ? "Open the PR" : "Open", style: .link) { NSWorkspace.shared.open(url) })
+        }
+        return NSStackView(h: parts, spacing: 8)
+    }
+
+    // ToggleChip has a fixed state. A new chip takes the place of the old one, and keeps the focus.
+    private func setBox(_ l: CleanupLine, on: Bool) {
+        guard let row = rows[l.id], boxes[l.id]?.on != on else { return }
+        let ok = l.safe && l.removable
+        let id = l.id
+        let box = ToggleChip("", on: on, enabled: ok) { [weak self] in self?.flip(id) }
+        box.setAccessibilityLabel(l.title)
+        let old = boxes[l.id]?.view
+        let focused = old.map { window?.firstResponder === $0 } ?? false
+        old?.removeFromSuperview()
+        row.insertArrangedSubview(box, at: 0)
+        boxes[l.id] = (box, on)
+        if focused { window?.makeFirstResponder(box) }
     }
 }

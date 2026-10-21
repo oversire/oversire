@@ -873,6 +873,7 @@ final class PageScroll: NSScrollView {
     }
 
     private var reconciler: RowReconciler?
+    private var base: (distribution: NSStackView.Distribution, hugging: NSLayoutConstraint.Priority) = (.gravityAreas, .defaultLow)
 
     /// Keeps the views with the same id, updates the rows whose hash changed, inserts and removes the others. No column swap.
     /// The first visible row keeps its place on screen.
@@ -883,11 +884,11 @@ final class PageScroll: NSScrollView {
             column.clear()
             r = RowReconciler(column)
             reconciler = r
-            if fills {
-                column.distribution = .fill
-                column.setHuggingPriority(.init(1), for: .vertical)
-            }
+            base = (column.distribution, column.huggingPriority(for: .vertical))
         }
+        // A page with tabs can fill on one tab only.
+        column.distribution = fills ? .fill : base.distribution
+        column.setHuggingPriority(fills ? .init(1) : base.hugging, for: .vertical)
         var rows = PageSection.flatten(sections)
         if fills {
             // Takes the rest when the table is short. A view with hugging 1 and no fit (SidePane) wins over it.

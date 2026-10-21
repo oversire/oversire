@@ -259,8 +259,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.reloadList(DataChange(.agents, origin: .event))
             self?.updateIcon()
         }
-        NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { [weak self] _ in
-            self?.reloadList(DataChange(.agents, origin: .event))
+        NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { [weak self] n in
+            let k = n.userInfo?[Cleaner.keyInfo] as? String
+            self?.reloadList(DataChange(.agents, items: k.map { [$0] } ?? [], origin: .event))
         }
         agentIndex.startTimer()
         startQuestions()
@@ -801,8 +802,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     // Git branch and HEAD of the worktrees. At most once a minute, or on demand.
-    func scanCheckouts(force: Bool = false) {
-        guard force || workstreams.scanAge > 60 else { return }
+    func scanCheckouts(force: Bool = false, done: (() -> Void)? = nil) {
+        guard force || workstreams.scanAge > 60 else { done?(); return }
         let known = Set(projectStore.tracked.map { $0.identifier.uppercased() })
         workstreams.scan(cards: agentIndex.cards, roots: Array(PROJECTS_CFG.orca.roots.values), known: known) { [weak self] in
             self?.reloadList(DataChange(.agents))
@@ -811,6 +812,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 guard let self else { return }
                 self.cleaner.sweep(self)
                 self.reloadList(DataChange(.agents))
+                done?()
             }
         }
     }
