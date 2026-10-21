@@ -791,6 +791,21 @@ func runSelfTest() {
         later.forEach { $0() }
         check(got.count == 1 && got[0].repos == ["o/r0", "o/r1"] && bus.sent == 1, "bus: 20 events in one burst give one delivery")
         _ = obs
+        // A page builds once for a change of its data, and not for the same data or for data it does not show.
+        let shots = UIShots(dir: NSTemporaryDirectory(), paths: [])
+        shots.firstLoad = false
+        shots.grouped = [("o/r", [fr("in_progress", nil)])]
+        Page.deferBuilds = false
+        let runsPage = RunsPage(.runs(.all), data: shots, router: Router())
+        _ = runsPage.view
+        runsPage.receive(DataChange(.runs, repos: ["o/r"]))
+        runsPage.receive(DataChange(.queue))
+        let quiet = runsPage.buildCount
+        shots.grouped = [("o/r", [fr("completed", "failure")])]
+        runsPage.receive(DataChange(.runs, repos: ["o/r"]))
+        check(quiet == 1 && runsPage.buildCount == 2 && runsPage.lastResult?.changed ?? 0 > 0,
+              "page builds: one for the open, none for the same data, one for a changed run (\(quiet), \(runsPage.buildCount))")
+        Page.deferBuilds = true
         var ws1 = Workstream(key: "FRITZ-1")
         ws1.checkouts = [Checkout(path: "/w", repo: "o/r", branch: "fritz-1/x", head: "s", key: "FRITZ-1", cardId: nil)]
         check(WorkstreamIndex.match(repo: "o/r", run: fr("completed", "failure"), checkouts: ws1.checkouts, prs: [], known: ["FRITZ"], rules: LinkRules()) != nil,

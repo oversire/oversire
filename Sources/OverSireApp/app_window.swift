@@ -135,11 +135,16 @@ class Page: NSViewController {
     func receive(_ c: DataChange) {
         guard c.touches(watches, repos: shownRepos, projects: shownProjects, items: shownItems) else { return }
         guard isShown, isViewLoaded else { stale = true; return }
-        let forced = c.domains.contains(.config) && c.origin == .user
-        let rows = sections()
-        if !forced, let print = rows.map(PageSection.fingerprint) ?? fingerprint(), print == builtPrint { return }
-        if !forced, rows == nil, watches.isSubset(of: .config) { return }
-        reload(reason: "data: " + c.reason, rows: rows)
+        guard wants(c) else { return }
+        reload(reason: "data: " + c.reason)
+    }
+
+    /// True when the change touches the shown data, and that data differs from the last build.
+    func wants(_ c: DataChange) -> Bool {
+        guard c.touches(watches, repos: shownRepos, projects: shownProjects, items: shownItems) else { return false }
+        if c.domains.contains(.config) && c.origin == .user { return true }
+        if let print = sections().map(PageSection.fingerprint) ?? fingerprint() { return print != builtPrint }
+        return !watches.isSubset(of: .config)
     }
 
     // MARK: Builds
@@ -154,9 +159,7 @@ class Page: NSViewController {
 
     func reload() { reload(reason: "page") }
 
-    func reload(reason: String) { reload(reason: reason, rows: nil) }
-
-    private func reload(reason: String, rows given: [PageSection]?) {
+    func reload(reason: String) {
         guard isShown else { stale = true; return }
         if !built, buildsLater, Self.deferBuilds {
             built = true
@@ -169,7 +172,7 @@ class Page: NSViewController {
         buildCount += 1
         lastBuildReason = reason
         let start = Date()
-        if let rows = given ?? sections() {
+        if let rows = sections() {
             builtPrint = PageSection.fingerprint(rows)
             lastResult = scroll.apply(rows, fills: fillsHeight)
         } else {
@@ -403,11 +406,11 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private func dataChanged(_ c: DataChange) {
         if c.domains.contains(.connection) { sidebar.live.show(data.relay) }
         for p in cache where p !== page { p.receive(c) }
-        if held == nil { held = c } else { held?.merge(c) }
+        if page?.wants(c) == true { if held == nil { held = c } else { held?.merge(c) } }
         // A window behind other windows builds when it shows again. A build blocks the main thread and the menu bar panel.
         guard isOnScreen else { changedWhileHidden = true; return }
         reloadSidebar()
-        gate.submit { [weak self] in self?.applyHeld() }
+        if held != nil { gate.submit { [weak self] in self?.applyHeld() } }
     }
 
     private func applyHeld() {
@@ -422,7 +425,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         guard changedWhileHidden, isOnScreen else { return }
         changedWhileHidden = false
         reloadSidebar()
-        gate.submit { [weak self] in self?.applyHeld() }
+        if held != nil { gate.submit { [weak self] in self?.applyHeld() } }
     }
 
     func windowDidUpdate(_ notification: Notification) {

@@ -366,7 +366,8 @@ final class HeldUpdatesPill: Box {
         show = ActionButton("Show", style: .link) {}
         super.init(fill: Palette.raise, border: Palette.line, radius: 14)
         let label = NSTextField.text("New updates", size: 12, weight: .medium)
-        let row = NSStackView(h: [Glyph("arrow.down.circle", color: Palette.mut, size: 12), label, show], spacing: 6)
+        let row = NSStackView(h: [Glyph("arrow.down.circle", color: Palette.mut, size: 12), label,
+                                  NSTextField.text("·", size: 12, color: Palette.dim), show], spacing: 6)
         addSubview(row)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),

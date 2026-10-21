@@ -727,6 +727,20 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                               let more = w.window?.contentView.flatMap({ UIShots.find($0) { $0.accessibilityLabel() == "Start in Orca with" } }) {
                         // startmenu:<KEY>: the agent list of the item page split button.
                         self.shootMenu(self.agentIndex.startMenu(found.item, snap: found.snap, anchor: more), under: more, name: "\(theme.rawValue)-startmenu")
+                    } else if p == "pill" {
+                        // pill: an update waits while the person scrolls.
+                        w.gate.begin(.scroll)
+                        w.gate.submit {}
+                    } else if p.hasPrefix("live:") {
+                        // live:on, connecting, error or off: the connection line of the sidebar. "on" shows a burst just now.
+                        let state: LiveSync.State
+                        switch p.dropFirst(5) {
+                        case "on": state = .live
+                        case "connecting": state = .connecting
+                        case "error": state = .error("The hub did not answer.")
+                        default: state = .off
+                        }
+                        w.sidebar.live.set(LiveLineModel(state: state, lastBurst: state == .live ? Date() : nil, pollEvery: POLL_NORMAL))
                     } else if p == "popover" {
                         self.glance = self.popoverSample()
                     } else if p == "menuicon" {
@@ -744,7 +758,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
