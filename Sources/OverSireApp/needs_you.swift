@@ -380,7 +380,7 @@ final class NeedsYouCard: NSObject {
 
 // One row of Needs you: one item, or one run or PR with no item. Home, its badge and the menu bar list them.
 struct NeedsYou: Equatable {
-    enum Kind: Int { case question, needsInput, blocked, usageLimit, stuck, notFinished, done, runFailed, review, mention }
+    enum Kind: Int { case question, permission, needsInput, blocked, usageLimit, stuck, notFinished, done, runFailed, review, mention }
 
     // The chips over the list.
     enum Filter: Int, CaseIterable {
@@ -389,7 +389,7 @@ struct NeedsYou: Equatable {
         func has(_ k: Kind) -> Bool {
             switch self {
             case .all: return true
-            case .blocked: return k == .question || k == .needsInput || k == .blocked
+            case .blocked: return k == .question || k == .permission || k == .needsInput || k == .blocked
             case .stuck: return k == .stuck || k == .usageLimit
             case .notFinished: return k == .notFinished
             }
@@ -428,6 +428,7 @@ struct NeedsYou: Equatable {
     var tone: Tone {
         switch kind {
         case .question: return .question
+        case .permission: return Tone(symbol: "lock.shield.fill", color: Palette.warn, word: "Permission")
         case .needsInput: return Tone(SessionState.needsInput)
         case .blocked: return Tone(SessionState.blocked)
         case .usageLimit: return Tone(symbol: "hourglass.circle.fill", color: Palette.warn, word: "Usage limit")
@@ -488,15 +489,18 @@ struct NeedsYou: Equatable {
             || (prs.first { $0.0 == repo }?.1.contains { $0.mine && $0.headRefName == r.headBranch } ?? false)
     }
 
-    /// The rows of the open questions. A form question gets its answer in Orca.
+    /// The rows of the open questions and permissions. A form question gets its answer in Orca.
     static func questions(_ hub: QuestionHub) -> [NeedsYou] {
         hub.open.map { e in
             let q = e.question
-            let key = hub.key(q) ?? "Session"
-            let text = (q.items.first?.text ?? "Asks a question").replacingOccurrences(of: "\n", with: " ")
-            let route: Route = q.origin.isIntake ? .intake(key.split(separator: "-").first.map(String.init)) : .item(key, .session)
-            return NeedsYou(kind: .question, key: key, reason: "\(text) · \(hub.place(q).text)", at: q.askedAt, route: route,
-                            act: q.answerable ? .answer : .answerInOrca(e.id))
+            let key = hub.key(q)
+            let first = q.items.first
+            var text = (first?.text ?? "Asks a question").replacingOccurrences(of: "\n", with: " ")
+            if q.via == .permission { text = "Allow " + [first?.header, text].compactMap { $0 }.joined(separator: ": ") }
+            let route: Route = q.origin.isIntake ? .intake(key?.split(separator: "-").first.map(String.init))
+                : key.map { .item($0, .session) } ?? .work(.worktrees)
+            return NeedsYou(kind: q.via == .permission ? .permission : .question, key: key ?? "Session", reason: "\(text) · \(hub.place(q).text)",
+                            at: q.askedAt, route: route, act: q.answerable ? .answer : .answerInOrca(e.id))
         }
     }
 

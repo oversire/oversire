@@ -85,7 +85,8 @@ final class QuestionHub {
         let waiting = all.filter { $0.state == .open || $0.state == .sending }
         if !waiting.isEmpty {
             let n = waiting.reduce(0) { $0 + $1.question.items.count }
-            let text = "✦ \(n) question\(n == 1 ? "" : "s")"
+            let word = waiting.allSatisfy { $0.question.via == .permission } ? "permission" : "question"
+            let text = "✦ \(n) \(word)\(n == 1 ? "" : "s")"
             return waiting.allSatisfy { !$0.question.answerable } ? text + " · in \(place(waiting[0].question).runtime)" : text
         }
         guard let last = all.last else { return nil }

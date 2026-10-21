@@ -261,11 +261,16 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             SessionQuestion(id: QuestionID(rawValue: "orca:local:\(id)"), session: s(id), origin: .session, items: items, via: via, askedAt: ago(at))
         }
         let answer = QuestionAnswer(question: "orca:local:m3", items: [.init(id: "q1", choices: ["Both"])])
+        let runner = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "oversire", id: "local"), id: "r1"), id: "s-1")
+        let permission = SessionQuestion(id: "runner:s-1:p-1", session: runner, origin: .session,
+                                         items: [.approve(id: "permission", header: "Bash", text: "npm test")], via: .permission,
+                                         askedAt: ago(1), expiresAt: Date().addingTimeInterval(240))
         questions.seed([
+            QuestionBoard.Entry(question: permission, state: .open, firstSeen: ago(1)),
             QuestionBoard.Entry(question: q("m1", [store, tests], .askReply, 3), state: .open, firstSeen: ago(3)),
             QuestionBoard.Entry(question: q("f2", [store], .form, 41), state: .open, firstSeen: ago(41)),
             QuestionBoard.Entry(question: q("m3", [store], .askReply, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
-        ], keys: [s("m1"): "OVERSIRE-143", s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"])
+        ], keys: [runner: "OVERSIRE-137", s("m1"): "OVERSIRE-143", s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"])
     }
 
     /// The id of the blocked row that the Sessions shot opens.

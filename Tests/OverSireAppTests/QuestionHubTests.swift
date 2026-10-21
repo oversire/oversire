@@ -67,6 +67,22 @@ final class QuestionHubTests: XCTestCase {
         XCTAssertEqual(NeedsYou.questions(h).first?.route, .intake("OVERSIRE"))
     }
 
+    func testPermissionRowsComeUnderTheQuestions() {
+        let runner = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "oversire", id: "local"), id: "r1"), id: "s-1")
+        let orca = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w1"), id: "term-1")
+        let p = SessionQuestion(id: "runner:s-1:p-1", session: runner, origin: .session, items: [.approve(id: "permission", header: "Bash", text: "npm test")],
+                                via: .permission, askedAt: t0.addingTimeInterval(60), expiresAt: t0.addingTimeInterval(600))
+        let h = hub()
+        h.seed([QuestionBoard.Entry(question: p, state: .open, firstSeen: t0),
+                QuestionBoard.Entry(question: question(orca, "q", origin: .work(item)), state: .open, firstSeen: t0)], keys: [:])
+        let rows = NeedsYou.ranked(NeedsYou.questions(h))
+        XCTAssertEqual(rows.map(\.kind), [.question, .permission])
+        XCTAssertEqual(rows[1].key, "Session")
+        XCTAssertEqual(rows[1].route, .work(.worktrees), "a runner session with no item opens Work")
+        XCTAssertTrue(rows[1].reason.hasPrefix("Allow Bash: npm test · OverSire runner"), rows[1].reason)
+        XCTAssertEqual(rows[1].act, .answer)
+    }
+
     func testMenuIconHasADotForQuestions() {
         let k = MenuIconState(runs: [], waitingAgents: 0, unread: 0, unreadDot: false, questions: 2)
         XCTAssertTrue(k.dot)

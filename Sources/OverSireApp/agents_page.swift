@@ -1,11 +1,9 @@
 import AppKit
 import OverSireCore
+import OverSireSync
 
 // The agents: runner sessions of the cloud, then the sessions that need you and all worktrees. Views › Activity shows the Orca events.
 final class AgentsPage: Page {
-    /// The prompt ids with an answer on the way.
-    private var answering: Set<String> = []
-    private var note: (Tone, String)?
     private var allWorktrees = false
     override var fillsHeight: Bool { true }
     private var expanded: Set<String> = UIShots.sessions ? ["uishots-card-3"] : []     // card ids with the status open
@@ -39,7 +37,8 @@ final class AgentsPage: Page {
             }]
         }
         WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, trailing: trailing, in: col)
-        if let note { col.addFull(Banner(note.0, title: note.1)) }
+        let hub = data.questions
+        for e in hub.open where e.question.session.workspace.account.provider == RunnerQuestions.provider { col.addFull(hub.card(e)) }
         if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty { runnerSessions(col, sessions) }
         guard idx.ready != nil else {
             col.addFull(Banner(.idle, title: "Orca is off or not installed.", body: "Turn on Orca to see sessions and worktrees here.",
@@ -62,8 +61,6 @@ final class AgentsPage: Page {
     }
 
     private func runnerSessions(_ col: NSStackView, _ sessions: [RunnerSession]) {
-        let asking = sessions.filter { $0.permission != nil }.sorted { $0.updatedAt < $1.updatedAt }
-        for s in asking { col.addFull(permissionCard(s)) }
         col.addFull(SectionTitle("Runner sessions", count: sessions.count))
         let list = ListCard()
         for s in sessions.sorted(by: { $0.updatedAt > $1.updatedAt }).prefix(30) { list.add(runnerRow(s)) }
@@ -87,50 +84,6 @@ final class AgentsPage: Page {
         let label = "\(runnerTitle(s)), \(s.agent), \(tone.word)" + (note.isEmpty ? "" : ": \(note)") + ", \(relativeTime(s.updatedAt))"
         return Row([Pill(tone), fixed(name, 124), fixed(Chiplet(s.agent, symbol: "terminal", mono: true), 100), text, Spacer(),
                     NSTextField.text(relativeTime(s.updatedAt), size: 11.5, color: Palette.dim)], height: 36, label: label)
-    }
-
-    private func permissionCard(_ s: RunnerSession) -> NSView {
-        guard let p = s.permission else { return NSView() }
-        let c = Card(border: Palette.warn.withAlphaComponent(0.55))
-        let title = s.item.flatMap { data.projectStore.item(key: $0.key)?.2.title }.map { " · \($0)" } ?? ""
-        let head = NSTextField.text("\(runnerTitle(s))\(title)", size: 13, weight: .semibold)
-        head.lineBreakMode = .byTruncatingTail
-        c.add(NSStackView(h: [Pill(Tone(s.state)), head, Chiplet(s.agent, symbol: "terminal", mono: true),
-                              NSTextField.text(timeLeft(p.expiresAt), size: 12, color: Palette.dim), Spacer()], spacing: 8))
-        if let summary = s.summary { c.add(NSTextField.text(summary, size: 12.5, color: Palette.mut, lines: 3)) }
-        c.add(TermView(lines: ["\(p.tool): \(p.text)"], height: 44))
-        let allow = ActionButton("Allow", style: .primary) { [weak self] in self?.answer(s, p, allow: true) }
-        let deny = ActionButton("Deny") { [weak self] in self?.answer(s, p, allow: false) }
-        if answering.contains(p.id) { allow.busy("Sending…"); deny.isEnabled = false }
-        allow.setAccessibilityLabel("Allow \(p.tool) for \(runnerTitle(s))")
-        deny.setAccessibilityLabel("Deny \(p.tool) for \(runnerTitle(s))")
-        c.add(NSStackView(h: [allow, deny, NSTextField.text("No answer before the time limit is a deny.", size: 12, color: Palette.dim), Spacer()],
-                          spacing: 6))
-        return c
-    }
-
-    private func timeLeft(_ at: Date) -> String {
-        let m = Int((at.timeIntervalSinceNow / 60).rounded(.up))
-        return m <= 0 ? "time limit reached" : "\(m) min left"
-    }
-
-    private func answer(_ s: RunnerSession, _ p: PermissionPrompt, allow: Bool) {
-        guard !answering.contains(p.id) else { return }
-        answering.insert(p.id)
-        reload()
-        let api = RelayAPI(base: RELAY.workerURL, token: SecretStore().get(SecretStore.deviceToken))
-        let session = s.id, title = runnerTitle(s)
-        Task { @MainActor in
-            let result = await Task.detached { api.answer(session: session, permission: p.id, allow: allow) }.value
-            self.answering.remove(p.id)
-            switch result {
-            case .success: self.note = nil
-            case .failure(.http(409)): self.note = (.info, "The prompt of \(title) has an answer already.")
-            case .failure(.http(410)): self.note = (.bad, "The prompt of \(title) expired. The runner denied it.")
-            case .failure(let e): self.note = (.bad, "Could not answer \(title): \(e)")
-            }
-            self.reload()
-        }
     }
 
     private func fixed(_ v: NSView, _ w: CGFloat) -> NSView {
