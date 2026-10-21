@@ -156,6 +156,35 @@ public struct PermissionPrompt: Hashable, Sendable, Codable {
     }
 }
 
+/// An agent asks the user one or more questions and waits. The id is the pending request id of the runner.
+/// Contract: work-order.json. The kind of an item is single, multi or free.
+public struct RunnerQuestion: Hashable, Sendable, Codable {
+    public var id: String
+    public var round: Int
+    public var items: [QuestionItem]
+    public var askedAt: Date
+
+    public init(id: String, round: Int = 1, items: [QuestionItem], askedAt: Date) {
+        self.id = id
+        self.round = round
+        self.items = items
+        self.askedAt = askedAt
+    }
+}
+
+/// The answer to the RunnerQuestion of a runner session. Contract: work-order.json.
+public struct RunnerAnswer: Hashable, Sendable, Codable {
+    public var id: String
+    public var items: [QuestionAnswer.Item]
+    public var note: String?
+
+    public init(id: String, items: [QuestionAnswer.Item], note: String? = nil) {
+        self.id = id
+        self.items = items
+        self.note = note
+    }
+}
+
 /// A session of the oversire runtime on a runner. Only the hub writes it. Contract: work-order.json.
 public struct RunnerSession: StoreRecord {
     public static let collection = "runner-sessions"
@@ -175,13 +204,14 @@ public struct RunnerSession: StoreRecord {
     public var state: State
     public var summary: String?
     public var permission: PermissionPrompt?
+    public var question: RunnerQuestion?
     public var error: String?
     public var startedAt: Date
     public var updatedAt: Date
 
     public init(id: String, runner: String, session: SessionRef, order: String, agent: String, repo: String, branch: String? = nil,
-                item: ItemRef? = nil, state: State, summary: String? = nil, permission: PermissionPrompt? = nil, error: String? = nil,
-                startedAt: Date, updatedAt: Date) {
+                item: ItemRef? = nil, state: State, summary: String? = nil, permission: PermissionPrompt? = nil,
+                question: RunnerQuestion? = nil, error: String? = nil, startedAt: Date, updatedAt: Date) {
         self.id = id
         self.runner = runner
         self.session = session
@@ -193,6 +223,7 @@ public struct RunnerSession: StoreRecord {
         self.state = state
         self.summary = summary
         self.permission = permission
+        self.question = question
         self.error = error
         self.startedAt = startedAt
         self.updatedAt = updatedAt
