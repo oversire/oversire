@@ -37,6 +37,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var tailAt = Date.distantPast
     private var saving: String?
     private var note: (Tone, String)?
+    private var cleanupOff: Set<String> = []   // safe cleanup lines that the user unchecked
     private var activitySource = Source.all
     private var replyField: NSTextField?
     private var commentField: NSTextField?
@@ -107,10 +108,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let main = NSStackView(v: [], spacing: 14)
         main.addFull(head(snap: snap, item: item, stream: stream))
         if let note { main.addFull(Banner(note.0, title: note.1)) }
+        if snap.isDoneWithOpenSubItems(item) { main.addFull(openSubItemsBanner(snap: snap, item: item)) }
         let prog = snap.progress(of: item.id)
         let tabs = Route.ItemTab.allCases
         let asks = data.questions.count(key: key)
-        let strip = TabStrip(["Overview", asks > 0 ? "Session ✦ \(asks)" : "Session", prog.total > 0 ? "Sub-items \(prog.done)/\(prog.total)" : "Sub-items", "Activity"],
+        let strip = TabStrip(["Overview", asks > 0 ? "Session ✦ \(asks)" : "Session", prog.total > 0 ? "\(snap.isDoneWithOpenSubItems(item) ? "⚠ " : "")Sub-items \(prog.done)/\(prog.total)" : "Sub-items", "Activity"],
                              selected: tabs.firstIndex(of: tab) ?? 0)
         strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
         main.addArrangedSubview(strip)
@@ -157,7 +159,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let asks = data.questions.count(key: key)
         if asks > 0 { top.append(Pill(.question, text: "Waits for you · \(asks) question\(asks == 1 ? "" : "s")")) }
         let keyLine = NSStackView(h: top, spacing: 8)
-        var chips: [NSView] = [statusChip(snap: snap, item: item), priorityChip(item)]
+        var chips: [NSView] = [statusChip(snap: snap, item: item)]
+        if !snap.isDoneWithOpenSubItems(item),
+           let c = ItemLine.finishChip(item, snap: snap, cleanup: data.cleaner.lines(item.key, data: data)) { chips.append(c) }
+        if snap.canCloseParent(item), let done = snap.firstState(group: "completed", else: .done) {
+            let b = ActionButton("Close parent?", style: .link) { [weak self] in self?.save("status", ItemPatch(status: done.id)) }
+            b.toolTip = "All sub-items are finished. Set \(item.key) to \(done.name)."
+            chips.append(b)
+        }
+        chips.append(priorityChip(item))
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
         if !item.assignees.isEmpty { chips.append(Chiplet(item.assignees.joined(separator: ", "), symbol: "person")) }
         chips.append(NSTextField.text("Updated \(relativeTime(item.activityAt))", size: 12, color: Palette.dim))
@@ -203,8 +213,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func statusChip(snap: ProjectSnapshot, item: Item) -> NSView {
         let opt = snap.option(item.statusOptionId)
-        let name = opt?.name ?? "No status"
-        let glyph = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: name).sized(12)
+        let open = snap.isDoneWithOpenSubItems(item) ? snap.openSubItems(of: item.id) : 0
+        let name = (opt?.name ?? "No status") + (open > 0 ? " · \(open) sub-item\(open == 1 ? "" : "s") open" : "")
+        let glyph = StatusGlyph.item(item, snap: snap).sized(12)
         return MenuChip(name, icon: glyph) { [weak self] in
             snap.statusOptions.map { o in
                 let a = MenuAction(o.name) { self?.save("status", ItemPatch(status: o.id)) }
@@ -212,6 +223,102 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 return a
             }
         }
+    }
+
+    // MARK: Done with open sub-items
+
+    private func openSubItemsBanner(snap: ProjectSnapshot, item: Item) -> NSView {
+        let open = snap.openDescendants(of: item.id)
+        let total = snap.progress(of: item.id).total
+        let closeTitle = "Close \(open.count) sub-item\(open.count == 1 ? "" : "s")"
+        return Banner(.warning, title: "Plane says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(open.count) of \(max(total, open.count)) sub-items are open.",
+                      body: "OverSire counts this item as not finished. Close the sub-items, or move the parent back to In progress.",
+                      actions: [
+                        ActionButton(closeTitle, symbol: "checkmark.circle", style: .primary) { [weak self] in self?.closeSubItems(open, snap: snap, item: item) },
+                        ActionButton("Reopen parent", symbol: "arrow.uturn.backward") { [weak self] in
+                            guard let self else { return }
+                            self.saving = "status"
+                            self.reload()
+                            self.data.projectStore.reopen(itemId: item.id) { [weak self] ok in self?.saved(ok) }
+                        },
+                      ])
+    }
+
+    // A sheet with one checkbox for each open sub-item. Sub-items that OverSire did not load share one box.
+    private func closeSubItems(_ ids: [String], snap: ProjectSnapshot, item: Item) {
+        let loaded = ids.compactMap { id in snap.items.first { $0.id == id } }
+        let stubs = ids.filter { id in !loaded.contains { $0.id == id } }
+        var boxes: [(NSButton, [String])] = loaded.map { (NSButton(checkboxWithTitle: "\($0.key)  \($0.title)", target: nil, action: nil), [$0.id]) }
+        if !stubs.isEmpty {
+            boxes.append((NSButton(checkboxWithTitle: "\(stubs.count) more sub-item\(stubs.count == 1 ? "" : "s") that OverSire did not load", target: nil, action: nil), stubs))
+        }
+        boxes.forEach { $0.0.state = .on; $0.0.lineBreakMode = .byTruncatingTail }
+        let list = NSStackView(v: boxes.map(\.0), spacing: 6)
+        list.frame = NSRect(x: 0, y: 0, width: 380, height: list.fittingSize.height)
+        let state = snap.firstState(group: "completed", else: .done)?.name ?? "Done"
+        let a = NSAlert()
+        a.messageText = "Close the open sub-items of \(item.key)?"
+        a.informativeText = "OverSire sets each checked sub-item to \(state) and adds a comment."
+        a.accessoryView = list
+        a.addButton(withTitle: "Close sub-items")
+        a.addButton(withTitle: "Cancel")
+        let run: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self, r == .alertFirstButtonReturn else { return }
+            let chosen = boxes.filter { $0.0.state == .on }.flatMap(\.1)
+            guard !chosen.isEmpty else { return }
+            self.saving = "sub-items"
+            self.note = nil
+            self.reload()
+            self.data.projectStore.closeSubItems(chosen, parentId: item.id) { [weak self] ok in self?.saved(ok) }
+        }
+        if let w = view.window { a.beginSheetModal(for: w, completionHandler: run) } else { run(a.runModal()) }
+    }
+
+    private func saved(_ ok: Bool) {
+        saving = nil
+        if !ok { note = (.bad, data.projectStore.lastError ?? "Plane did not take the change.") }
+        reload()
+    }
+
+    // MARK: Cleanup
+
+    private func cleanupCard(_ item: Item) -> NSView? {
+        let cleaner = data.cleaner
+        let lines = cleaner.lines(item.key, data: data)
+        guard !lines.isEmpty else { return nil }
+        let safe = lines.filter { $0.safe && $0.removable }
+        let look = lines.count - safe.count
+        let chosen = safe.filter { !cleanupOff.contains($0.id) }
+        let running = cleaner.running.contains(item.key.uppercased())
+        let button = ActionButton(running ? "Cleaning up…" : "Clean up \(chosen.count)", symbol: "bubbles.and.sparkles", style: .primary) { [weak self] in
+            guard let self else { return }
+            cleaner.run(chosen, key: item.key, data: self.data) { [weak self] errors in
+                self?.note = errors.isEmpty ? nil : (.bad, errors.joined(separator: " "))
+                self?.reload()
+            }
+            self.reload()
+        }
+        button.isEnabled = !running && !chosen.isEmpty
+        let c = Card(title: "Cleanup", trailing: [button])
+        c.add(NSTextField.text(look == 0 ? "The item is finished. These are left over."
+                                         : "\(safe.count) safe, \(look) need\(look == 1 ? "s" : "") a look.", size: 12.5, color: Palette.mut))
+        for l in lines {
+            let ok = l.safe && l.removable
+            let box = ToggleChip("", on: ok && !cleanupOff.contains(l.id), enabled: ok) { [weak self] in
+                guard let self else { return }
+                if self.cleanupOff.remove(l.id) == nil { self.cleanupOff.insert(l.id) }
+                self.reload()
+            }
+            box.setAccessibilityLabel(l.title)
+            var parts: [NSView] = [box, Pill(ok ? .ok : .warning, text: ok ? "Safe" : "Look"),
+                                   NSTextField.text(l.title, size: 12.5, weight: .medium),
+                                   NSTextField.text(l.detail, size: 12, color: Palette.dim), Spacer()]
+            if let url = l.url.flatMap(URL.init(string:)) {
+                parts.append(ActionButton(l.kind == .pr ? "Open the PR" : "Open", style: .link) { NSWorkspace.shared.open(url) })
+            }
+            c.add(NSStackView(h: parts, spacing: 8))
+        }
+        return c
     }
 
     private func priorityChip(_ item: Item) -> NSView {
@@ -250,6 +357,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             main.addFull(summaryPanel(item, body: body, summary: summary, busy: busy))
         }
         main.addFull(StatusCard(key: key, stream: stream, data: data, needsYou: needsYou) { [weak self] in self?.go($0) }.build())
+        if let card = cleanupCard(item) { main.addFull(card) }
         if let card = suggestion(item) { main.addFull(card) }
         if let card = plannerCard(item) { main.addFull(card) }
         let d = Card(title: "Description", trailing: body.isEmpty ? [] : [NSTextField.text("\(body.count.formatted()) characters", size: 12, color: Palette.dim)])
