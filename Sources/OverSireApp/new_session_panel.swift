@@ -12,6 +12,9 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         var start: (NewSessionModel) -> Void = { _ in }
         var chooseRoot: (String) -> Void = { _ in }
         var closed: () -> Void = {}
+        /// Asks the tracker if the intake of a project (store key) is on.
+        var checkIntake: (String) -> Void = { _ in }
+        var enableIntake: (String) -> Void = { _ in }
     }
 
     private static let highlight = NSColor(srgbRed: 0x3d / 255, green: 0x7f / 255, blue: 0xd6 / 255, alpha: 1)
@@ -292,7 +295,13 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         workspaceHolder.isHidden = workspaceHolder.arrangedSubviews.isEmpty
 
         errorHolder.clear()
-        if case .failed(let e) = model.phase {
+        if model.mode == .intake, let s = sel { actions.checkIntake(s.store) }
+        if let note = model.intakeOffNote, let s = sel {
+            errorHolder.addFull(Banner(.warning, title: note, body: "Turn on Intake for \(s.key), or create a work item with the same text and files.", actions: [
+                ActionButton("Turn on Intake", style: .primary) { [weak self] in self?.actions.enableIntake(s.store) },
+                ActionButton("Create as item") { [weak self] in self?.setMode(.item) },
+            ]))
+        } else if case .failed(let e) = model.phase {
             var acts: [NSView] = []
             if hostFilesFailed && !model.intake && session {
                 acts.append(ActionButton("Send with intake") { [weak self] in
@@ -449,6 +458,11 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     func setPhase(_ p: NewSessionModel.Phase, hostFiles: Bool = false) {
         model.phase = p
         hostFilesFailed = hostFiles
+        refresh()
+    }
+
+    func setIntake(_ store: String, off: Bool) {
+        if off { model.intakeOff.insert(store) } else { model.intakeOff.remove(store) }
         refresh()
     }
 
@@ -688,6 +702,8 @@ final class NewSessionController {
     var created: (String) -> Void = { _ in }     // gets the store key of the project with a new item
     private(set) var toast: SessionToast?
     private var hotKey: GlobalHotKey?
+    private var intakeOn: [String: Bool] = [:]
+    private var intakeAsked: Set<String> = []
     private(set) lazy var starter = SessionStarter(
         project: { [weak self] k in self?.summary(k)?.ref },
         tracker: { ENV.tracker($0.workspace) },
@@ -744,9 +760,13 @@ final class NewSessionController {
     }
 
     private func makePanel(_ m: NewSessionModel, saved: NewPanelFrame?) -> NewSessionPanel {
+        var m = m
+        m.intakeOff.formUnion(intakeOn.filter { !$0.value }.keys)
         var a = NewSessionPanel.Actions()
         a.start = { [weak self] m in self?.start(m) }
         a.chooseRoot = { [weak self] k in self?.chooseRoot(k) }
+        a.checkIntake = { [weak self] k in self?.checkIntake(k) }
+        a.enableIntake = { [weak self] k in self?.enableIntake(k) }
         a.closed = { [weak self] in
             self?.panel = nil
             NotificationCenter.default.post(name: Self.changed, object: self)
@@ -824,6 +844,39 @@ final class NewSessionController {
         }
     }
 
+    // Once for each project while the app runs. A failed create with the intake off also sets it.
+    private func checkIntake(_ store: String) {
+        if let on = intakeOn[store] {
+            if panel?.model.intakeOff.contains(store) != !on { panel?.setIntake(store, off: !on) }
+            return
+        }
+        guard !intakeAsked.contains(store) else { return }
+        intakeAsked.insert(store)
+        Task { @MainActor [weak self] in
+            guard let self, let on = await self.starter.intakeOn(store) else { return }
+            self.intakeOn[store] = on
+            if !on { self.panel?.setIntake(store, off: true) }
+        }
+    }
+
+    // Only on a click: it changes the project in the tracker.
+    private func enableIntake(_ store: String) {
+        guard let p = panel else { return }
+        p.setPhase(.starting("Turning on Intake…"))
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.starter.enableIntake(store)
+                self.intakeOn[store] = true
+                p.setIntake(store, off: false)
+                p.setPhase(.edit)
+            } catch {
+                log.error("New intake: turn on failed: \(error.localizedDescription, privacy: .public)")
+                p.setPhase(.failed(error.localizedDescription))
+            }
+        }
+    }
+
     private func create(_ m: NewSessionModel, in p: NewSessionPanel) {
         let req = SessionStarter.Request(project: m.selected, text: m.text, files: m.files, intake: m.mode == .intake,
                                          title: m.itemTitle, state: m.itemState, priority: m.priority)
@@ -839,7 +892,13 @@ final class NewSessionController {
                 self.showToast(r, mode: m.mode, files: m.files.count)
             } catch {
                 log.error("New \(m.mode.rawValue, privacy: .public): create failed: \(error.localizedDescription, privacy: .public)")
-                p.setPhase(.failed(error.localizedDescription))
+                if (error as? ProviderError)?.isIntakeOff == true {
+                    self.intakeOn[m.selected] = false
+                    p.setIntake(m.selected, off: true)
+                    p.setPhase(.edit)
+                } else {
+                    p.setPhase(.failed(error.localizedDescription))
+                }
             }
         }
     }

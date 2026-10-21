@@ -71,6 +71,7 @@ struct NewSessionModel: Equatable {
     var phase = Phase.edit
     var maxBytes: Int
     var agent: String
+    var intakeOff: Set<String> = []   // store keys of projects with the intake off
 
     init(choices: [Choice], cfg: SessionConfig, agent: String) {
         self.choices = choices
@@ -105,10 +106,17 @@ struct NewSessionModel: Equatable {
 
     var makesItem: Bool { mode != .session }
 
+    /// Set in Intake mode when the project has its intake off.
+    var intakeOffNote: String? {
+        guard mode == .intake, let s = selection, intakeOff.contains(s.store) else { return nil }
+        return "Intake is off for \(s.key) in Plane."
+    }
+
     /// Why Start or Create is off, for the hint and VoiceOver. Nil: the button is on.
     var blocker: String? {
         guard let s = selection else { return "Track a project first." }
         if isStarting { return nil }
+        if let n = intakeOffNote { return n }
         if makesItem {
             return itemTitle.isEmpty ? "Type a title or a description." : nil
         }

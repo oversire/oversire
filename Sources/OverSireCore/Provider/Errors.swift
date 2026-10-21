@@ -23,4 +23,17 @@ public enum ProviderError: Error, Hashable, Sendable {
         case .vendor(_, let m): return m
         }
     }
+
+    /// The vendor code when the project has its intake off.
+    public static let intakeOff = "intake_off"
+
+    public var isIntakeOff: Bool {
+        if case .vendor(Self.intakeOff, _) = self { return true }
+        return false
+    }
+}
+
+// Pages show `localizedDescription`. Without this, they show "ProviderError error 4".
+extension ProviderError: LocalizedError {
+    public var errorDescription: String? { message }
 }

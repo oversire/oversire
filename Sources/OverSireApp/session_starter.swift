@@ -154,6 +154,17 @@ final class SessionStarter {
         self.asks = asks
     }
 
+    /// False when the project has its intake off. Nil when the tracker does not tell.
+    func intakeOn(_ store: String) async -> Bool? {
+        guard let p = project(store), let t = tracker(p) as? any ProjectSettingsReading else { return nil }
+        return try? await t.settings(p).features[.intake]
+    }
+
+    func enableIntake(_ store: String) async throws {
+        guard let p = project(store), let t = tracker(p) as? any ProjectSettingsEditing else { throw ProviderError.unsupported(.projectSettingsEdit) }
+        try await t.update(p, ProjectSettingsPatch(features: [.intake: true]))
+    }
+
     /// Makes an intake item (`intake`) or a work item, then sends the files to it. No terminal opens.
     func create(_ r: Request, intake: Bool, progress: @escaping (String) -> Void) async throws -> Made {
         guard let p = project(r.project) else { throw SessionStartError.noProject(r.project) }

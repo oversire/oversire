@@ -311,7 +311,17 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
 
     /// Only v1 gives the new work item with its sequence number.
     public func createIntake(_ d: ItemDraft, in p: ProjectRef) async throws -> (item: ItemRef, intake: IntakeItem) {
-        let o = try await api.send("POST", "\(ws)/projects/\(p.id)/intake-issues/", body: ["issue": d.planeFields]) as? [String: Any]
+        let o: [String: Any]?
+        do {
+            o = try await api.send("POST", "\(ws)/projects/\(p.id)/intake-issues/", body: ["issue": d.planeFields]) as? [String: Any]
+        } catch {
+            // Plane gives no clear error when the intake is off. The project tells.
+            if let proj = try? await api.send("GET", "\(ws)/projects/\(p.id)/") as? [String: Any], proj["intake_view"] as? Bool == false {
+                let key = proj["identifier"] as? String ?? p.key ?? "the project"
+                throw ProviderError.vendor(code: ProviderError.intakeOff, message: "Intake is off for \(key) in Plane.")
+            }
+            throw error
+        }
         let issue = o?["issue_detail"] as? [String: Any] ?? [:]
         guard let o, let id = PlaneAPI.id(o["id"]), let work = PlaneAPI.id(o["issue"]) ?? PlaneAPI.id(issue["id"]) else {
             throw ProviderError.decoding("no id for the new intake item")

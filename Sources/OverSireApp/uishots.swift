@@ -848,7 +848,7 @@ extension UIShots {
 // MARK: New session samples
 
 extension UIShots {
-    /// session:<frame>: the New panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast, intake, item, itemtoast.
+    /// session:<frame>: the New panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast, intake, intakeoff, item, itemtoast.
     static func sessionSample(_ frame: String, shooting w: AppWindow) -> NSWindow? {
         let c = NewSessionController(projects: { [] })
         let choices = [NewSessionModel.Choice(key: "OVERSIRE", name: "OverSire", store: "plane:ocral/OVERSIRE", root: NSHomeDirectory() + "/Projects/oversire"),
@@ -859,8 +859,8 @@ extension UIShots {
                                                        StatusOption(id: "p", name: "In Progress", color: "#999", group: "started")]),
                        NewSessionModel.Choice(key: "FRITZ", name: "Fritz", store: "plane:ocral/FRITZ", root: NSHomeDirectory() + "/notes")]
         var cfg = SessionConfig()
-        cfg.lastProject = ["noworkspace", "intake", "item"].contains(frame) ? "plane:ocral/TREBI" : "plane:ocral/OVERSIRE"
-        cfg.mode = frame == "intake" ? .intake : frame == "item" ? .item : .session
+        cfg.lastProject = ["noworkspace", "intake", "intakeoff", "item"].contains(frame) ? "plane:ocral/TREBI" : "plane:ocral/OVERSIRE"
+        cfg.mode = frame.hasPrefix("intake") ? .intake : frame == "item" ? .item : .session
         cfg.intake = frame != "direct"
         var m = NewSessionModel(choices: choices, cfg: cfg, agent: "claude")
         if frame == "toast" {
@@ -876,7 +876,8 @@ extension UIShots {
             return c.toast
         }
         if frame == "list" { m.type("s") }
-        if frame == "intake" { m.text = "Steps:\n1. Sign in with Google.\n2. The redirect lands on /callback and the page is blank." }
+        if frame == "intakeoff" { m.intakeOff = ["plane:ocral/TREBI"] }
+        if frame.hasPrefix("intake") { m.text = "Steps:\n1. Sign in with Google.\n2. The redirect lands on /callback and the page is blank." }
         if frame == "item" { m.titleText = "Add a retry to the OAuth callback"; m.text = "The token exchange fails on a slow network."; m.priority = "medium" }
         if ["files", "direct", "failed", "intake", "item"].contains(frame) {
             if m.text.isEmpty { m.text = "The runs page is out of date after a re-run.\nFix the refresh and add a test." }

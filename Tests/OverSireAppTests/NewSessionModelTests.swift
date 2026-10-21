@@ -24,6 +24,20 @@ final class NewSessionModelTests: XCTestCase {
         XCTAssertNil(NewSessionModel(choices: [], cfg: SessionConfig(), agent: "claude").selection)
     }
 
+    func testIntakeOffTellsBeforeTheCreate() {
+        var m = model(last: "ocral/o")
+        m.mode = .intake
+        m.titleText = "Crash on start"
+        XCTAssertNil(m.blocker)
+        m.intakeOff = ["ocral/o"]
+        XCTAssertEqual(m.intakeOffNote, "Intake is off for OVERSIRE in Plane.")
+        XCTAssertEqual(m.blocker, m.intakeOffNote)
+        m.mode = .item
+        XCTAssertNil(m.intakeOffNote, "Create as item keeps the text and works")
+        XCTAssertNil(m.blocker)
+        XCTAssertEqual(m.titleText, "Crash on start")
+    }
+
     func testMatchOrder() {
         var m = model()
         m.type("ov")

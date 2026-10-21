@@ -67,6 +67,29 @@ final class PlaneIntakeCreateTests: XCTestCase {
         } catch { XCTAssertEqual((error as? ProviderError).map { if case .vendor(let c, _) = $0 { return c } else { return "" } }, "403") }
     }
 
+    func testIntakeOffGivesAClearError() async throws {
+        http.on("POST", "\(ws)/projects/\(project)/intake-issues/", status: 400, #"{"error":"Intake is not enabled for this project"}"#)
+        http.on("GET", "\(ws)/projects/\(project)/", try String(contentsOf: fixtureDir("plane").appendingPathComponent("project-intake-off.json"), encoding: .utf8))
+        do {
+            _ = try await plane.createIntake(ItemDraft(title: "Snap basket", bodyMarkdown: "x"), in: ref)
+            XCTFail("no error")
+        } catch let e as ProviderError {
+            XCTAssertTrue(e.isIntakeOff)
+            XCTAssertEqual(e.localizedDescription, "Intake is off for OVERSIRE in Plane.")
+        }
+    }
+
+    func testOtherFailureKeepsItsError() async throws {
+        http.on("POST", "\(ws)/projects/\(project)/intake-issues/", status: 400, #"{"error":"bad name"}"#)
+        http.on("GET", "\(ws)/projects/\(project)/", try String(contentsOf: fixtureDir("plane").appendingPathComponent("project.json"), encoding: .utf8))
+        do {
+            _ = try await plane.createIntake(ItemDraft(title: "Snap basket", bodyMarkdown: "x"), in: ref)
+            XCTFail("no error")
+        } catch let e as ProviderError {
+            XCTAssertFalse(e.isIntakeOff)
+        }
+    }
+
     func testConformance() async {
         http.on("GET", "\(ws)/projects/\(project)/", #"{"id":"\#(project)","identifier":"OVERSIRE"}"#)
         let r = await TrackerConformance.intakeAndAttachments(plane, project: ref)
