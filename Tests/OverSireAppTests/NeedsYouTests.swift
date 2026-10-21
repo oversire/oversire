@@ -30,13 +30,35 @@ final class NeedsYouTests: XCTestCase {
     }
 
     func testFilters() {
-        let kinds: [NeedsYou.Kind] = [.needsInput, .blocked, .usageLimit, .stuck, .notFinished, .done, .runFailed, .review, .mention]
+        let kinds: [NeedsYou.Kind] = [.needsInput, .blocked, .usageLimit, .stuck, .notFinished, .openSubItems, .done, .runFailed, .review, .mention]
         func of(_ f: NeedsYou.Filter) -> [NeedsYou.Kind] { kinds.filter(f.has) }
         XCTAssertEqual(of(.all), kinds)
         XCTAssertEqual(of(.blocked), [.needsInput, .blocked])
         XCTAssertEqual(of(.stuck), [.usageLimit, .stuck])
-        XCTAssertEqual(of(.notFinished), [.notFinished])
+        XCTAssertEqual(of(.notFinished), [.notFinished, .openSubItems])
         XCTAssertEqual(NeedsYou.Filter.allCases.map(\.title), ["All", "Blocked", "Stuck", "Not finished"])
+    }
+
+    func testDoneWithOpenSubItems() {
+        let now = Date()
+        let done = StatusOption(id: "d", name: "Done", color: "", group: "completed")
+        let todo = StatusOption(id: "t", name: "Todo", color: "", group: "unstarted")
+        func item(_ id: String, _ state: String, parent: String? = nil, ago: TimeInterval = 60) -> Item {
+            Item(id: id, key: "A-\(id)", title: "T\(id)", url: "u", statusOptionId: state, fields: [:], assignees: [], labels: [],
+                 author: nil, updatedBy: nil, updatedAt: now, activityAt: now.addingTimeInterval(-ago), commentCount: 0, lastComment: nil,
+                 mentionsMe: false, parentId: parent)
+        }
+        let snap = ProjectSnapshot(summary: ProjectSummary(ref: ProjectRef(workspace: "w", id: "p"), identifier: "A", title: "A", url: "", closed: false),
+                                   statusOptions: [todo, done],
+                                   items: [item("1", "d"), item("2", "t", parent: "1"), item("3", "t", parent: "1"),
+                                           item("4", "d"), item("5", "d", parent: "4"),
+                                           item("6", "d", ago: 8 * 86400), item("7", "t", parent: "6")],
+                                   fetchedAt: now)
+        let rows = NeedsYou.openSubItems([snap], now: now)
+        XCTAssertEqual(rows.map(\.key), ["A-1"], "a finished parent and an old one give no row")
+        XCTAssertEqual(rows.first?.reason, "Done with 2 open sub-items · T1")
+        XCTAssertEqual(rows.first?.act, .closeSubItems("A-1"))
+        XCTAssertEqual(rows.first?.kind.rawValue, NeedsYou.Kind.notFinished.rawValue + 1)
     }
 
     func testStepsInAFewWords() {

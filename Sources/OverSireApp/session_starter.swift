@@ -55,6 +55,13 @@ enum SessionPrompt {
     /// An edited template stays. The old default becomes the new one.
     static func migrate(intake t: String) -> String { t == intakeOld ? intakeDefault : t }
     static let filesDefault = "{text}\n\nAttached files:\n{paths}"
+    /// The last paragraph of each item start. A Done parent with open sub-items is not finished (OVERSIRE-205).
+    static let subItemsRule = "When you set the parent to Done, set each finished sub-item to Done too. "
+        + "Leave a sub-item open only when it is not done, and say why in a comment."
+
+    static func withSubItemsRule(_ prompt: String) -> String {
+        prompt.contains(subItemsRule) ? prompt : prompt + "\n\n" + subItemsRule
+    }
 
     /// With no files, the template lines that hold {item} drop.
     static func intake(_ template: String, values: [String: String], files: Bool) -> String {

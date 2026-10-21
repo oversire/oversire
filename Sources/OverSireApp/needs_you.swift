@@ -380,7 +380,7 @@ final class NeedsYouCard: NSObject {
 
 // One row of Needs you: one item, or one run or PR with no item. Home, its badge and the menu bar list them.
 struct NeedsYou: Equatable {
-    enum Kind: Int { case question, permission, needsInput, blocked, usageLimit, stuck, notFinished, done, runFailed, review, mention }
+    enum Kind: Int { case question, permission, needsInput, blocked, usageLimit, stuck, notFinished, openSubItems, done, runFailed, review, mention }
 
     // The chips over the list.
     enum Filter: Int, CaseIterable {
@@ -391,14 +391,15 @@ struct NeedsYou: Equatable {
             case .all: return true
             case .blocked: return k == .question || k == .permission || k == .needsInput || k == .blocked
             case .stuck: return k == .stuck || k == .usageLimit
-            case .notFinished: return k == .notFinished
+            case .notFinished: return k == .notFinished || k == .openSubItems
             }
         }
     }
 
     // The action that shows on hover.
     enum Act: Equatable {
-        case answer, answerInOrca(QuestionID), reply(String), checklist(String), nudge(String), ask(String), approve(String), rerun(repo: String, run: Run), open(String)
+        case answer, answerInOrca(QuestionID), reply(String), checklist(String), nudge(String), ask(String), approve(String), rerun(repo: String, run: Run), open(String),
+             closeSubItems(String)
         var title: String {
             switch self {
             case .answer: return "Answer"
@@ -410,6 +411,7 @@ struct NeedsYou: Equatable {
             case .approve: return "Approve"
             case .rerun: return "Re-run failed"
             case .open: return "Open PR"
+            case .closeSubItems: return "Close sub-items…"
             }
         }
     }
@@ -434,6 +436,7 @@ struct NeedsYou: Equatable {
         case .usageLimit: return Tone(symbol: "hourglass.circle.fill", color: Palette.warn, word: "Usage limit")
         case .stuck: return Tone(StatusReply.State.stuck)
         case .notFinished: return Tone(StatusReply.State.unfinished)
+        case .openSubItems: return Tone(symbol: "exclamationmark.triangle.fill", color: Palette.bad, word: "Done with open sub-items")
         case .done: return Tone(StatusReply.State.done)
         case .runFailed: return .bad
         case .review: return Tone(symbol: "eye.circle.fill", color: Palette.acc, word: "Review")
@@ -471,6 +474,17 @@ struct NeedsYou: Equatable {
                 return NeedsYou(kind: .done, key: s.key, reason: StatusJob.frees(s) ? "Looks done · approve to free the slot" : "Looks done",
                                 at: s.at, route: .item(s.key, .overview), act: .approve(s.id))
             default: return nil
+            }
+        }
+    }
+
+    /// Done items with open sub-items that changed in the last week. OverSire counts them as not finished.
+    static func openSubItems(_ snaps: [ProjectSnapshot], now: Date = Date()) -> [NeedsYou] {
+        snaps.flatMap { snap in
+            snap.items.filter { snap.isDoneWithOpenSubItems($0) && now.timeIntervalSince($0.activityAt) < 7 * 86400 }.map { i in
+                let n = snap.openSubItems(of: i.id)
+                return NeedsYou(kind: .openSubItems, key: i.key, reason: "Done with \(n) open sub-item\(n == 1 ? "" : "s") · " + i.title,
+                                at: i.activityAt, route: .item(i.key, .overview), act: .closeSubItems(i.key))
             }
         }
     }
@@ -521,6 +535,7 @@ struct NeedsYou: Equatable {
                                 at: agents.watch(l.key)?.changedAt ?? now, route: .item(l.key, .session)))
         }
         out += checks(data.statusJob.pending)
+        out += openSubItems(Array(data.projectStore.snapshots.values), now: now)
         let ws = data.workstreams
         for (repo, r) in failingRuns(data.grouped) where counts(r, repo: repo, prs: data.prGrouped) {
             let link = ws.link(runId: r.id)
@@ -595,6 +610,7 @@ final class NeedsYouRow: Row {
                 case .ask(let id): job.ask(id)
                 case .rerun(let repo, let r): data.rerun(repo: repo, runs: [r], failedOnly: true)
                 case .open(let url): if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                case .closeSubItems(let k): NeedsYouRow.finish(k, data: data, window: NSApp.keyWindow)
                 }
             })
         }
@@ -610,4 +626,25 @@ final class NeedsYouRow: Row {
         }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    // The two choices of the item page banner. Close sets all open sub-items to the first completed state.
+    static func finish(_ key: String, data: AppData, window: NSWindow?) {
+        let store = data.projectStore
+        guard let f = store.item(key: key), f.snap.isDoneWithOpenSubItems(f.item) else { return }
+        let open = f.snap.openDescendants(of: f.item.id)
+        let a = NSAlert()
+        a.messageText = "\(key) is Done, but \(open.count) sub-item\(open.count == 1 ? " is" : "s are") open."
+        a.informativeText = "OverSire counts this item as not finished. Close the sub-items, or move the parent back to In progress."
+        a.addButton(withTitle: "Close \(open.count) sub-item\(open.count == 1 ? "" : "s")")
+        a.addButton(withTitle: "Reopen parent")
+        a.addButton(withTitle: "Cancel")
+        let run: (NSApplication.ModalResponse) -> Void = { r in
+            switch r {
+            case .alertFirstButtonReturn: store.closeSubItems(open, parentId: f.item.id) { _ in }
+            case .alertSecondButtonReturn: store.reopen(itemId: f.item.id) { _ in }
+            default: break
+            }
+        }
+        if let window { a.beginSheetModal(for: window, completionHandler: run) } else { run(a.runModal()) }
+    }
 }

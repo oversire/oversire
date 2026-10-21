@@ -83,7 +83,19 @@ final class ProjectSettingsPageTests: XCTestCase {
         cfg.setLocal("SLING", l)
         let r = cfg.launch(for: item("SLING-7"))
         XCTAssertEqual(r.agent, "codex")
-        XCTAssertEqual(r.prompt, "fix SLING-7")
-        XCTAssertEqual(cfg.launch(for: item("OTHER-1")).prompt, cfg.runtime.prompt(for: item("OTHER-1")))
+        XCTAssertEqual(r.prompt, "fix SLING-7\n\n" + SessionPrompt.subItemsRule)
+        XCTAssertEqual(cfg.launch(for: item("OTHER-1")).prompt, SessionPrompt.withSubItemsRule(cfg.runtime.prompt(for: item("OTHER-1"))))
+    }
+
+    func testStartPromptSnapshot() {
+        XCTAssertEqual(ProjectsConfig().launch(for: item("OTHER-1")).prompt, """
+            work on https://plane/OTHER-1 in worktree group .wt/other-1
+
+            When you set the parent to Done, set each finished sub-item to Done too. \
+            Leave a sub-item open only when it is not done, and say why in a comment.
+            """)
+        var cfg = ProjectsConfig()
+        cfg.runtime.prompt = "{KEY}\n\n" + SessionPrompt.subItemsRule
+        XCTAssertEqual(cfg.launch(for: item("OTHER-1")).prompt, "OTHER-1\n\n" + SessionPrompt.subItemsRule, "no second copy")
     }
 }

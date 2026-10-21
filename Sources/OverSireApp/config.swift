@@ -294,7 +294,7 @@ struct ProjectsConfig: Codable {
         if let agent { r.agent = agent }
         if let p = l.prompt, !p.isEmpty { r.prompt = p }
         let command = try? r.command(for: r.agent).resolve(name: item.key, key: item.key, title: item.title)
-        return (r.agent, r.prompt(for: item), command)
+        return (r.agent, SessionPrompt.withSubItemsRule(r.prompt(for: item)), command)
     }
 
     // The Orca root of a project. `orca.roots` (by "slug/uuid") stays a mirror, because older code reads it.
