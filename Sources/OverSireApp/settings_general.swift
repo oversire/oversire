@@ -66,8 +66,8 @@ extension SettingsPage {
                 ONE_ROW_PER_WORKFLOW = i > 0
                 LATEST_ACROSS_BRANCHES = i == 2
             }),
-            FieldRow("Project view", note: "The view that a project opens with.",
-                     Segmented(["Board", "Activity"], selected: PROJECTS_CFG.defaultView == .activity ? 1 : 0, label: "Project view") { [weak self] i in
+            FieldRow("Menu bar view", note: "The view that the menu bar panel opens with.",
+                     Segmented(["By project", "Activity"], selected: PROJECTS_CFG.defaultView == .activity ? 1 : 0, label: "Menu bar view") { [weak self] i in
                 PROJECTS_CFG.defaultView = i == 1 ? .activity : .board
                 self?.app?.applyProjectSelection()
             }),

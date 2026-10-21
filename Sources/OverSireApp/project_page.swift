@@ -104,11 +104,67 @@ final class BoardCard: Row {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+/// What a project page shows for a key with no items yet.
+enum ProjectLookup: Hashable {
+    case loading, failed(String), looking, untracked(canTrack: Bool)
+
+    /// `tracked`: OverSire tracks the key. `asked`: the catalog was refreshed for the key.
+    static func of(tracked: Bool, fetching: Bool, error: String?, catalogBusy: Bool, asked: Bool, inCatalog: Bool) -> ProjectLookup {
+        if tracked { return !fetching ? error.map { .failed($0) } ?? .loading : .loading }
+        return !asked || catalogBusy ? .looking : .untracked(canTrack: inCatalog)
+    }
+
+    /// The state for a key. An unknown key starts one catalog refresh. `changed` runs when that refresh ends.
+    init(key: String, data: AppData, changed: @escaping () -> Void) {
+        let store = data.projectStore, catalog = data.projectCatalog
+        let summary = store.tracked.first { $0.identifier.uppercased() == key }
+        var asked = true
+        if summary == nil, catalog.lookUp(key) {
+            asked = false
+            var token: Any?
+            token = NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: catalog, queue: .main) { _ in
+                guard !catalog.refreshing else { return }
+                token.map(NotificationCenter.default.removeObserver)
+                token = nil
+                changed()
+            }
+        }
+        let storeKey = summary?.ref.storeKey ?? ""
+        self = .of(tracked: summary != nil, fetching: store.refreshing.contains(storeKey), error: store.errors[storeKey],
+                   catalogBusy: catalog.refreshing, asked: asked, inCatalog: catalog.project(key: key) != nil)
+    }
+
+    func view(key: String, data: AppData?) -> NSView {
+        switch self {
+        case .loading: return LoadingNote("Loading the items of \(key)…")
+        case .looking: return LoadingNote("Looking for \(key) in Plane…")
+        case .failed(let error):
+            let retry = ActionButton("Try again", symbol: "arrow.clockwise") {
+                guard let store = data?.projectStore, let p = store.tracked.first(where: { $0.identifier.uppercased() == key }) else { return }
+                store.refresh([p.ref.storeKey], force: true) { _ in }
+            }
+            return Banner(.bad, title: "Plane did not give the items of \(key)", body: error, actions: [retry])
+        case .untracked(let canTrack):
+            guard canTrack, let p = data?.projectCatalog.project(key: key) else {
+                return EmptyNote("OverSire does not track \(key). Plane has no open project with this key.", symbol: "questionmark.folder")
+            }
+            let track = ActionButton("Track \(key)", symbol: "plus") {
+                if !PROJECTS_CFG.picked.contains(p.ref.storeKey) { PROJECTS_CFG.picked.append(p.ref.storeKey) }
+                saveConfig()
+                (NSApp.delegate as? GHActionsBar)?.applyProjectSelection()
+            }
+            return NSStackView(v: [EmptyNote("OverSire does not track \(key).", symbol: "folder"), track], spacing: 10)
+        }
+    }
+}
+
 // Items of one project: a list grouped by status, or a board.
 final class ProjectPage: Page {
+    private enum Layout: String { case list, board }
     private static let layoutKey = "projectLayout"
     override var fillsHeight: Bool { !board }
-    private var board = UserDefaults.standard.string(forKey: ProjectPage.layoutKey) == "board"
+    // List, unless the person picked Board.
+    private var board = Layout(rawValue: UserDefaults.standard.string(forKey: ProjectPage.layoutKey) ?? "") == .board
     private var onlyAgent = false
     private var onlyFailing = false
     private var onlyMine = false
@@ -130,15 +186,10 @@ final class ProjectPage: Page {
         pageBusy = data.projectsLoading
         let key = projectKey
         guard let snap = snapshot else {
-            let loading = data.projectsLoading
+            let lookup = ProjectLookup(key: key, data: data) { [weak self] in self?.reload() }
             return [PageSection("top", rows: [
                 PageRow("header", key) { PageHeader(key, caption: "Project") },
-                PageRow(loading ? "loading" : "missing", key) {
-                    guard loading else { return EmptyNote("OverSire does not track a project with the key \(key).", symbol: "questionmark.folder") }
-                    let c = ListCard()
-                    c.add(LoadingNote("Loading \(key)"))
-                    return c
-                },
+                PageRow("lookup", key, lookup) { [weak self] in lookup.view(key: key, data: self?.data) },
             ])]
         }
         let ws = data.workstreams, job = data.statusJob
@@ -241,7 +292,7 @@ final class ProjectPage: Page {
 
     @objc fileprivate func layoutChanged(_ s: NSSegmentedControl) {
         board = s.selectedSegment == 1
-        UserDefaults.standard.set(board ? "board" : "list", forKey: ProjectPage.layoutKey)
+        UserDefaults.standard.set((board ? Layout.board : .list).rawValue, forKey: ProjectPage.layoutKey)
         reload()
     }
 }

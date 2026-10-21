@@ -22,6 +22,7 @@ final class ProjectCatalog {
     private(set) var fetchedAt: [String: Date] = [:]
     private(set) var status: [String: OwnerFetch] = [:]
     private var ticket: [String: Int] = [:]
+    private var lookedUp = Set<String>()
     private let trackers: TrackerDirectory
     private let path: String
 
@@ -56,6 +57,19 @@ final class ProjectCatalog {
     }
 
     func refreshIfStale() { if isStale { refreshAll() } }
+
+    /// The open project with this key ("MCPQ") in any workspace.
+    func project(key: String) -> ProjectSummary? {
+        workspaces.lazy.flatMap { self.projects(of: $0) }.first { !$0.closed && $0.identifier.uppercased() == key.uppercased() }
+    }
+
+    /// Refreshes all workspaces once for a key that OverSire does not track. A new Plane project then shows with no wait for the cache.
+    /// False when the key was looked up before.
+    func lookUp(_ key: String) -> Bool {
+        guard lookedUp.insert(key.uppercased()).inserted else { return false }
+        refreshAll(force: true)
+        return true
+    }
 
     func refreshAll(force: Bool = false) {
         for w in workspaces { refresh(w, force: force) }

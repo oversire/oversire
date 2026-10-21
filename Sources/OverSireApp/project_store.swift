@@ -32,6 +32,8 @@ final class ProjectStore {
     private(set) var snapshots: [String: ProjectSnapshot] = [:]
     private(set) var refreshing: Set<String> = []
     private(set) var lastError: String?
+    /// The last fetch error of each project, by store key. A good fetch clears it.
+    private(set) var errors: [String: String] = [:]
     private(set) var tracked: [ProjectSummary] = []
     private(set) var liveKeys: Set<String> = []
     private(set) var intakeKeys: [String: Int] = [:]   // work item id → number, for keys such as TREBI-264
@@ -70,12 +72,14 @@ final class ProjectStore {
     }
 
     func track(_ projects: [ProjectSummary], live: Set<String>) {
+        let changed = Set(tracked.map(\.ref.storeKey)) != Set(projects.map(\.ref.storeKey))
         tracked = projects
         liveKeys = live
         PROJECT_ICONS.track(projects)
         restartTimer()
         let keys = projects.map { $0.ref.storeKey }
         refresh(keys, force: false) { _ in }
+        if changed { publish(DataChange(.projects, origin: .event)) }
     }
 
     func restartTimer() {
@@ -113,6 +117,7 @@ final class ProjectStore {
             guard let self = self else { return }
             var fresh: [ProjectSnapshot] = []
             var error: String?
+            var errors: [String: String] = [:]
             for (n, (p, client, previous)) in jobs.enumerated() {
                 if n > 0, let token { await MainActor.run { self.busy?.update(token, label(n)) } }
                 let started = Date()
@@ -124,6 +129,7 @@ final class ProjectStore {
                 }
                 guard let client else {
                     error = "\(p.ref.workspace): " + ProjectStore.noToken
+                    errors[p.ref.storeKey] = ProjectStore.noToken
                     line(.error, ProjectStore.noToken)
                     continue
                 }
@@ -133,13 +139,14 @@ final class ProjectStore {
                     line(.ok, "\(s.items.count) items")
                 case .failure(let e):
                     error = "\(p.ref.workspace): " + e.message
+                    errors[p.ref.storeKey] = e.message
                     line(.error, e.message)
                 }
             }
             let failed = error != nil
             DispatchQueue.main.async {
                 if let token { self.busy?.end(token) }
-                for k in todo { self.refreshing.remove(k) }
+                for k in todo { self.refreshing.remove(k); self.errors[k] = errors[k] }
                 self.lastError = error
                 var changed = Set<String>()
                 var projects = force ? Set(todo) : []

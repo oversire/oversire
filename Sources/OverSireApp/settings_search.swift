@@ -93,7 +93,7 @@ struct SettingsIndex {
         Entry("Tabs", .menubar, "runs pull requests projects insights"),
         Entry("Blue dot on the menu bar icon", .menubar, "badge unread"),
         Entry("One row per workflow", .runs, "actions group"),
-        Entry("Project view", .runs, "board activity"),
+        Entry("Menu bar view", .runs, "by project activity board panel"),
         Entry("Items per project", .runs, "limit count"),
         Entry("Hide Done items", .runs, "closed completed"),
         Entry("List sub-items as rows", .runs, "children"),

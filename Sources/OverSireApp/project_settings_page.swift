@@ -186,7 +186,7 @@ final class ProjectSettingsPage: Page {
     override func build(_ col: NSStackView) {
         guard let p = project else {
             col.addFull(PageHeader("\(key) settings", caption: "Project settings"))
-            col.addFull(data.projectsLoading ? LoadingNote("Loading \(key)") : EmptyNote("OverSire does not track a project with the key \(key).", symbol: "questionmark.folder"))
+            col.addFull(ProjectLookup(key: key, data: data) { [weak self] in self?.reload() }.view(key: key, data: data))
             return
         }
         if loadingKey != key { load(p) }

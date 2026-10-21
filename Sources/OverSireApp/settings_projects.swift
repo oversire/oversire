@@ -132,6 +132,7 @@ final class ProjectListView: NSStackView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.applyQueued = false
             (NSApp.delegate as? GHActionsBar)?.applyProjectSelection()
+            self?.catalog.refreshAll()
         }
     }
 }
