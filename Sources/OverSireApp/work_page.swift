@@ -1,7 +1,7 @@
 import AppKit
 import OverSireCore
 
-// Work: your items, the queue and the worktrees. The Items tab shows In progress, Up next (the queue) and Not started.
+// Work: your items, the queue and the worktrees. The Items tab shows In progress, Done, Up next (the queue) and Not started.
 final class WorkPage: Page {
     typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
     typealias Lane = (priority: String, entries: [Entry])
@@ -56,15 +56,32 @@ final class WorkPage: Page {
         }
     }
 
+    /// The sections of the Items tab, top to bottom. The ids are the fold keys in `PROJECTS_CFG.workFolded`.
+    enum Section: String, CaseIterable { case progress, done, upNext = "upnext", todo }
+
     /// Your finished root items: finished in the "Hide Done items after" window, or with cleanup left at any age. Newest first.
     static func done(_ data: AppData, now: Date = Date()) -> [Entry] {
-        let days = PROJECTS_CFG.hideDoneAfterDays
-        return data.projectStore.snapshots.values.flatMap { snap in
+        done(Array(data.projectStore.snapshots.values), days: PROJECTS_CFG.hideDoneAfterDays, now: now) {
+            !data.cleaner.lines($0, data: data).isEmpty
+        }.map { ($0.item, $0.snap, data.workstreams.stream($0.item.key)) }
+    }
+
+    static func done(_ snaps: [ProjectSnapshot], days: Int, now: Date, cleanup: (String) -> Bool) -> [(item: Item, snap: ProjectSnapshot)] {
+        snaps.flatMap { snap in
             snap.rootItems.filter { i in
                 guard i.isMine(snap.me), snap.isFinished(i) else { return false }
-                return !snap.isHiddenDone(i, afterDays: days == 0 ? 1 : days, now: now) || !data.cleaner.lines(i.key, data: data).isEmpty
-            }.map { ($0, snap, data.workstreams.stream($0.key)) }
+                return !snap.isHiddenDone(i, afterDays: days == 0 ? 1 : days, now: now) || cleanup(i.key)
+            }.map { ($0, snap) }
         }.sorted { $0.item.updatedAt > $1.item.updatedAt }
+    }
+
+    /// The note of the Done header for the "Hide Done items after" days.
+    static func doneNote(days: Int) -> String {
+        switch days {
+        case ..<0: return "Only items with cleanup left"
+        case 0, 1: return "Last 24 h"
+        default: return "Last \(days) days"
+        }
     }
 
     /// The page title, the caption, the actions and the tabs. The Worktrees tab uses it too.
@@ -102,10 +119,14 @@ final class WorkPage: Page {
         let job = data.statusJob
         let groups = WorkPage.itemGroups(list, queued: q.contains, status: job.item)
         var rows: [PageRow] = []
-        if let g = groups.first(where: { $0.title == "In progress" }) { rows += group(g, queue: false) }
-        rows += upNext()
-        if let g = groups.first(where: { $0.title == "Not started" }) { rows += group(g, queue: true) }
-        rows += doneGroup()
+        for section in Section.allCases {
+            switch section {
+            case .progress: if let g = groups.first(where: { $0.title == "In progress" }) { rows += group(g, id: section, queue: false) }
+            case .done: rows += doneGroup()
+            case .upNext: rows += upNext()
+            case .todo: if let g = groups.first(where: { $0.title == "Not started" }) { rows += group(g, id: section, queue: true) }
+            }
+        }
         pageBusy = data.projectsLoading
         if rows.isEmpty {
             let loading = data.projectsLoading
@@ -115,10 +136,21 @@ final class WorkPage: Page {
         return [PageSection("top", rows: top), PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
+    // The fold state of a section. A change saves the config and builds the page again.
+    private func fold(_ s: Section) -> GroupFold {
+        GroupFold(expanded: !PROJECTS_CFG.workFolded.contains(s.rawValue)) { [weak self] in
+            if PROJECTS_CFG.workFolded.remove(s.rawValue) == nil { PROJECTS_CFG.workFolded.insert(s.rawValue) }
+            saveConfig()
+            self?.reload()
+        }
+    }
+
     // One group with a label row for each priority. `queue`: the rows show "＋ Queue" on hover.
-    private func group(_ g: (title: String, lanes: [Lane]), queue: Bool) -> [PageRow] {
+    private func group(_ g: (title: String, lanes: [Lane]), id: Section, queue: Bool) -> [PageRow] {
         let job = data.statusJob
-        var rows = [StickyListCard.group(g.title, g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })]
+        let fold = fold(id)
+        var rows = [StickyListCard.group(id.rawValue, g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count }, fold: fold)]
+        guard fold.expanded else { return rows }
         for lane in g.lanes {
             rows.append(PageRow("lane.\(g.title).\(lane.priority)", lane.entries.count) { WorkPage.laneRow(lane) })
             let m = more[g.title + lane.priority] ?? MoreRows()
@@ -140,17 +172,23 @@ final class WorkPage: Page {
     }
 
     // Finished items. A row with cleanup left shows the "Done · cleanup" chip. The cleanup actions are on the item page.
+    // The header shows the cleanup count also when the group is folded.
     private func doneGroup() -> [PageRow] {
         let list = WorkPage.done(data)
         guard !list.isEmpty else { return [] }
         let job = data.statusJob
         let cleanups = Dictionary(list.map { ($0.item.key, data.cleaner.lines($0.item.key, data: data)) }, uniquingKeysWith: { a, _ in a })
         let left = cleanups.values.filter { !$0.isEmpty }.count
-        let days = max(1, PROJECTS_CFG.hideDoneAfterDays)
-        let note = left > 0 ? "\(left) with cleanup left" : "Finished in the last \(days) day\(days > 1 ? "s" : "")"
-        var rows = [StickyListCard.group("done", "Done", count: list.count, extra: note) {
-            [NSTextField.text(note, size: 12, color: Palette.dim)]
-        }]
+        let note = WorkPage.doneNote(days: PROJECTS_CFG.hideDoneAfterDays)
+        let fold = fold(.done)
+        var rows = [StickyListCard.group(Section.done.rawValue, "Done", count: list.count, extra: [note, "\(left)"], fold: fold, trailing: {
+            let hint = NSTextField.text(note, size: 12, color: Palette.dim)
+            guard left > 0 else { return [hint] }
+            let flag = Chiplet("\(left) need\(left == 1 ? "s" : "") cleanup", symbol: "bubbles.and.sparkles", color: Palette.warn)
+            flag.toolTip = "\(left) finished item\(left == 1 ? " has" : "s have") things to clean up"
+            return [hint, flag]
+        })]
+        guard fold.expanded else { return rows }
         let m = more["Done"] ?? MoreRows()
         more["Done"] = m
         rows += PageRow.limited(list, more: m, reload: { [weak self] in self?.reload() }) { [weak self, table, commands] e in
@@ -169,12 +207,14 @@ final class WorkPage: Page {
         guard !entries.isEmpty else { return [] }
         // The Planner plan changes show on the lane board.
         let plans = hasCloud ? data.suggestions.openPlans().count : 0
-        var rows = [StickyListCard.group("upnext", "Up next", count: entries.count, extra: plans) { [] } trailing: { [weak self] in [
+        let fold = fold(.upNext)
+        var rows = [StickyListCard.group(Section.upNext.rawValue, "Up next", count: entries.count, extra: plans, fold: fold) { [] } trailing: { [weak self] in [
             NSTextField.text("Starts in this order when a slot frees", size: 12, color: Palette.dim),
             ActionButton(plans > 0 ? "Lane board · \(plans) plan change\(plans == 1 ? "" : "s")" : "Lane board", style: .link) {
                 self?.go(.work(.lanes))
             },
         ] }]
+        guard fold.expanded else { return rows }
         let world = q.world(workstreams: data.workstreams)
         for lane in q.lanes {
             let pick = lane.pick(state: q.state(lane.project), world: world)

@@ -5,10 +5,12 @@ import OverSireCore
 final class MyItemsOrderTests: XCTestCase {
     private let options = [StatusOption(id: "b", name: "Backlog", color: "#888888", group: "backlog"),
                            StatusOption(id: "t", name: "Todo", color: "#888888", group: "unstarted"),
-                           StatusOption(id: "p", name: "In progress", color: "#F59E0B", group: "started")]
-    private var snap: ProjectSnapshot {
+                           StatusOption(id: "p", name: "In progress", color: "#F59E0B", group: "started"),
+                           StatusOption(id: "d", name: "Done", color: "#22C55E", group: "completed")]
+    private var snap: ProjectSnapshot { snap([]) }
+    private func snap(_ items: [Item]) -> ProjectSnapshot {
         ProjectSnapshot(summary: ProjectSummary(ref: ProjectRef(workspace: "acme", id: "w"), identifier: "ENG", title: "Board", url: "", closed: false),
-                        statusOptions: options, items: [], fetchedAt: Date(), me: "ada")
+                        statusOptions: options, items: items, fetchedAt: Date(), me: "ada")
     }
 
     private func entry(_ n: Int, _ status: String, priority: String? = nil, ago: Double = 0, ciFails: Bool = false) -> WorkPage.Entry {
@@ -61,5 +63,31 @@ final class MyItemsOrderTests: XCTestCase {
         let keys = g.flatMap { $0.lanes.flatMap(\.entries) }.map(\.item.key)
         XCTAssertEqual(Set(keys), ["ENG-1", "ENG-3"])
         XCTAssertEqual(WorkPage.itemGroups([entry(2, "t")], queued: { _ in true }, status: status([:])).map(\.title), [])
+    }
+
+    func testSectionOrder() {
+        XCTAssertEqual(WorkPage.Section.allCases, [.progress, .done, .upNext, .todo])
+        XCTAssertTrue(ProjectsConfig().workFolded.contains(WorkPage.Section.done.rawValue))
+    }
+
+    private func finished(_ n: Int, hoursAgo: Double, now: Date) -> Item {
+        let at = now.addingTimeInterval(-hoursAgo * 3600)
+        return Item(id: "\(n)", key: "ENG-\(n)", title: "Item \(n)", url: "", statusOptionId: "d", fields: [:], assignees: ["ada"], labels: [],
+                    author: "ada", updatedBy: "ada", updatedAt: at, activityAt: at, commentCount: 0, lastComment: nil, mentionsMe: false)
+    }
+
+    func testDoneHasRecentItemsAndOldItemsWithCleanup() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let s = snap([finished(1, hoursAgo: 2, now: now), finished(2, hoursAgo: 72, now: now), finished(3, hoursAgo: 240, now: now)])
+        let got = WorkPage.done([s], days: 1, now: now) { $0 == "ENG-3" }
+        XCTAssertEqual(got.map(\.item.key), ["ENG-1", "ENG-3"])
+        XCTAssertEqual(WorkPage.done([s], days: -1, now: now) { $0 == "ENG-3" }.map(\.item.key), ["ENG-3"])
+    }
+
+    func testDoneNote() {
+        XCTAssertEqual(WorkPage.doneNote(days: 1), "Last 24 h")
+        XCTAssertEqual(WorkPage.doneNote(days: 0), "Last 24 h")
+        XCTAssertEqual(WorkPage.doneNote(days: 7), "Last 7 days")
+        XCTAssertEqual(WorkPage.doneNote(days: -1), "Only items with cleanup left")
     }
 }

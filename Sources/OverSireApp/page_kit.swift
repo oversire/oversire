@@ -1417,19 +1417,68 @@ extension StickyListCard {
         addGroup { StickyListCard.groupHead(title, count: count, lead: lead, trailing: trailing) }
     }
 
-    static func groupHead(_ title: String, count: Int, lead: () -> [NSView] = { [] }, trailing: () -> [NSView] = { [] }) -> Row {
-        let head = Row(lead() + [NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()]
-                       + trailing(), height: 32, label: "\(title), \(count)")
-        head.restFill = Palette.raise
+    static func groupHead(_ title: String, count: Int, fold: GroupFold? = nil, lead: () -> [NSView] = { [] }, trailing: () -> [NSView] = { [] }) -> Row {
+        let head = GroupHead(fold: fold)
+        head.show(groupViews(title, count: count, fold: fold, lead: lead(), trailing: trailing()), title: title, count: count)
         return head
     }
 
+    private static func groupViews(_ title: String, count: Int, fold: GroupFold?, lead: [NSView], trailing: [NSView]) -> [NSView] {
+        let chevron = fold.map { [Glyph($0.expanded ? "chevron.down" : "chevron.right", color: Palette.mut, size: 10)] } ?? []
+        return chevron + lead + [NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()] + trailing
+    }
+
     /// The group row of `apply`. Its hash is the title and the count, plus `extra` for the views of `lead` and `trailing`.
-    static func group(_ id: String, _ title: String, count: Int, extra: AnyHashable = 0, lead: @escaping () -> [NSView] = { [] },
-                      trailing: @escaping () -> [NSView] = { [] }) -> PageRow {
-        var r = PageRow("group." + id, title, count, extra) { StickyListCard.groupHead(title, count: count, lead: lead, trailing: trailing) }
+    /// With `fold`, the row folds the group. A change updates the row in place, so it keeps the focus.
+    static func group(_ id: String, _ title: String, count: Int, extra: AnyHashable = 0, fold: GroupFold? = nil,
+                      lead: @escaping () -> [NSView] = { [] }, trailing: @escaping () -> [NSView] = { [] }) -> PageRow {
+        var r = PageRow("group." + id, title, count, extra, fold?.expanded, update: { v in
+            guard let head = v as? GroupHead else { return }
+            head.fold = fold
+            head.show(groupViews(title, count: count, fold: fold, lead: lead(), trailing: trailing()), title: title, count: count)
+        }) { StickyListCard.groupHead(title, count: count, fold: fold, lead: lead, trailing: trailing) }
         r.group = true
         return r
+    }
+}
+
+/// The fold state of a group row, and the action that changes it.
+struct GroupFold {
+    let expanded: Bool
+    let toggle: () -> Void
+}
+
+// A group row. With a fold, a click, Space or Return folds or opens the group. Left folds, right opens.
+final class GroupHead: Row {
+    var fold: GroupFold? { didSet { applyFold() } }
+
+    init(fold: GroupFold?) {
+        self.fold = fold
+        super.init([], height: 32)
+        restFill = Palette.raise
+        applyFold()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func applyFold() {
+        onClick = fold?.toggle
+        setAccessibilityRole(fold == nil ? .group : .disclosureTriangle)
+        setAccessibilityValue(fold.map { $0.expanded ? 1 : 0 })
+        setAccessibilityDisclosed(fold?.expanded ?? false)
+    }
+
+    func show(_ views: [NSView], title: String, count: Int) {
+        stack.setViews(views, in: .leading)
+        let state = fold.map { $0.expanded ? ", expanded" : ", folded" } ?? ""
+        setAccessibilityLabel("\(title), \(count)\(state)")
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if let fold, event.keyCode == 123 || event.keyCode == 124 {
+            if fold.expanded == (event.keyCode == 123) { fold.toggle() }
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 

@@ -228,6 +228,7 @@ struct ProjectsConfig: Codable {
     var notifications = ProjectNotificationSettings()
     var order: [String] = []          // project keys, top to bottom
     var folded: [String] = []         // project keys that show only the header
+    var workFolded: Set<String> = ["done"]   // Work › Items section ids that show only the header
     var capture = CaptureConfig()
     var runtime = RuntimeConfig()
     var orca = OrcaConfig()
@@ -255,6 +256,7 @@ struct ProjectsConfig: Codable {
         notifications = try c.decodeIfPresent(ProjectNotificationSettings.self, forKey: .notifications) ?? ProjectNotificationSettings()
         order = try c.decodeIfPresent([String].self, forKey: .order) ?? []
         folded = try c.decodeIfPresent([String].self, forKey: .folded) ?? []
+        workFolded = try c.decodeIfPresent(Set<String>.self, forKey: .workFolded) ?? ["done"]
         capture = try c.decodeIfPresent(CaptureConfig.self, forKey: .capture) ?? CaptureConfig()
         orca = try c.decodeIfPresent(OrcaConfig.self, forKey: .orca) ?? OrcaConfig()
         if let r = try c.decodeIfPresent(RuntimeConfig.self, forKey: .runtime) {
