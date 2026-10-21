@@ -128,6 +128,7 @@ class Page: NSViewController {
     func sections() -> [PageSection]? { nil }
 
     /// A hash of only the data that this page shows. The page builds when it changes. Nil: no hash, each change builds.
+    /// A page with no `sections()` can give its own hash.
     func fingerprint() -> Int? { sections().map(PageSection.fingerprint) }
 
     /// Called by the window for each coalesced change.
@@ -136,7 +137,7 @@ class Page: NSViewController {
         guard isShown, isViewLoaded else { stale = true; return }
         let forced = c.domains.contains(.config) && c.origin == .user
         let rows = sections()
-        if !forced, let rows, PageSection.fingerprint(rows) == builtPrint { return }
+        if !forced, let print = rows.map(PageSection.fingerprint) ?? fingerprint(), print == builtPrint { return }
         if !forced, rows == nil, watches.isSubset(of: .config) { return }
         reload(reason: "data: " + c.reason, rows: rows)
     }
@@ -172,7 +173,7 @@ class Page: NSViewController {
             builtPrint = PageSection.fingerprint(rows)
             lastResult = scroll.apply(rows, fills: fillsHeight)
         } else {
-            builtPrint = nil
+            builtPrint = fingerprint()
             lastResult = nil
             scroll.rebuild(fills: fillsHeight) { build($0) }
         }
@@ -201,7 +202,7 @@ class Page: NSViewController {
     func attach() {
         isShown = true
         guard stale else { return }
-        if let rows = sections(), PageSection.fingerprint(rows) == builtPrint { stale = false; return }
+        if let print = sections().map(PageSection.fingerprint) ?? fingerprint(), print == builtPrint { stale = false; return }
         reload(reason: "attach stale")
     }
 

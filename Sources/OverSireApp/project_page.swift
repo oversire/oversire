@@ -102,13 +102,6 @@ final class BoardCard: Row {
         commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
-
-    /// The values that an item line shows.
-    static func hash(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?) -> Int {
-        let prog = snap.progress(of: item.id)
-        return PageRow.hash([item, snap.option(item.statusOptionId), prog.done, prog.total, status?.label, status?.tone.word, status?.tip,
-                             stream?.ci?.word])
-    }
 }
 
 // Items of one project: a list grouped by status, or a board.
@@ -127,67 +120,90 @@ final class ProjectPage: Page {
 
     private var projectKey: String { if case .project(let k) = route { return k }; return "" }
 
-    override func build(_ col: NSStackView) {
+    override var watches: DataDomains { [.projects, .intake, .agents, .runs, .summaries, .config] }
+    override var shownProjects: Set<String>? { snapshot.map { [$0.summary.ref.storeKey] } }
+
+    private var snapshot: ProjectSnapshot? { data.projectStore.snapshots.values.first { $0.summary.identifier.uppercased() == projectKey } }
+
+    override func sections() -> [PageSection]? {
         let store = data.projectStore
         pageBusy = data.projectsLoading
-        guard let snap = store.snapshots.values.first(where: { $0.summary.identifier.uppercased() == projectKey }) else {
-            col.addFull(PageHeader(projectKey, caption: "Project"))
-            if data.projectsLoading {
-                let c = ListCard()
-                c.add(LoadingNote("Loading \(projectKey)"))
-                col.addFull(c)
-            } else {
-                col.addFull(EmptyNote("OverSire does not track a project with the key \(projectKey).", symbol: "questionmark.folder"))
-            }
-            return
+        let key = projectKey
+        guard let snap = snapshot else {
+            let loading = data.projectsLoading
+            return [PageSection("top", rows: [
+                PageRow("header", key) { PageHeader(key, caption: "Project") },
+                PageRow(loading ? "loading" : "missing", key) {
+                    guard loading else { return EmptyNote("OverSire does not track a project with the key \(key).", symbol: "questionmark.folder") }
+                    let c = ListCard()
+                    c.add(LoadingNote("Loading \(key)"))
+                    return c
+                },
+            ])]
         }
-        let ws = data.workstreams
+        let ws = data.workstreams, job = data.statusJob
         var items = snap.listed(subItems: showSubItems)
         if onlyAgent { items = items.filter { ws.stream($0.key)?.agent != nil } }
         if onlyFailing { items = items.filter { ws.stream($0.key)?.ci?.word == Tone.bad.word } }
         if onlyMine { items = items.filter { $0.isMine(snap.me) } }
         let open = snap.notDoneCount(snap.rootItems)
-
-        var actions: [NSView] = []
-        if let n = snap.intake?.count, n > 0 {
-            actions.append(ActionButton("\(n) intake", symbol: "tray.and.arrow.down") { [weak self] in self?.go(.intake(self?.projectKey)) })
+        let intake = snap.intake?.count ?? 0
+        let board = board, ident = snap.summary.identifier
+        let header = PageRow("header", snap.summary.title, snap.summary.url, open, intake, board) { [weak self] in
+            var actions: [NSView] = []
+            if intake > 0 {
+                actions.append(ActionButton("\(intake) intake", symbol: "tray.and.arrow.down") { self?.go(.intake(key)) })
+            }
+            let seg = NSSegmentedControl(labels: ["List", "Board"], trackingMode: .selectOne, target: self, action: #selector(ProjectPage.layoutChanged(_:)))
+            seg.selectedSegment = board ? 1 : 0
+            seg.setAccessibilityLabel("Layout")
+            actions.append(seg)
+            actions.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: snap.summary.url)!) })
+            let gear = ActionButton("", symbol: "gearshape") { self?.go(.projectSettings(key, .appearance)) }
+            gear.toolTip = "Project settings (⌘,)"
+            gear.setAccessibilityLabel("Project settings")
+            actions.append(gear)
+            return PageHeader(snap.summary.title, updated: { [weak store] in store?.snapshots.values.first { $0.summary.identifier == ident }?.fetchedAt },
+                              caption: { "\(open) open · updated \($0)" }, actions: actions)
         }
-        let seg = NSSegmentedControl(labels: ["List", "Board"], trackingMode: .selectOne, target: self, action: #selector(layoutChanged(_:)))
-        seg.selectedSegment = board ? 1 : 0
-        seg.setAccessibilityLabel("Layout")
-        actions.append(seg)
-        actions.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: snap.summary.url)!) })
-        let gear = ActionButton("", symbol: "gearshape") { [weak self] in self?.go(.projectSettings(self?.projectKey ?? "", .appearance)) }
-        gear.toolTip = "Project settings (⌘,)"
-        gear.setAccessibilityLabel("Project settings")
-        actions.append(gear)
-        col.addFull(PageHeader(snap.summary.title, caption: "\(open) open · updated \(relativeTime(snap.fetchedAt))", actions: actions))
-
-        let filters = NSStackView(h: [
-            ToggleChip("Mine", on: onlyMine) { [weak self] in self?.flip(\.onlyMine) },
-            ToggleChip("Has session", on: onlyAgent) { [weak self] in self?.flip(\.onlyAgent) },
-            ToggleChip("CI failing", on: onlyFailing) { [weak self] in self?.flip(\.onlyFailing) },
-            ToggleChip("Sub-items", on: showSubItems) { [weak self] in self?.flip(\.showSubItems) },
-            ToggleChip("Show done", on: showDone) { [weak self] in self?.flip(\.showDone) },
-            Spacer(),
-            NSTextField.text("Grouped by status · sorted by priority, Done by last change", size: 12, color: Palette.dim),
-        ], spacing: 6)
-        col.addFull(filters)
+        let flags = [onlyMine, onlyAgent, onlyFailing, showSubItems, showDone]
+        let filters = PageRow("filters", flags) { [weak self] in
+            NSStackView(h: [
+                ToggleChip("Mine", on: flags[0]) { self?.flip(\.onlyMine) },
+                ToggleChip("Has session", on: flags[1]) { self?.flip(\.onlyAgent) },
+                ToggleChip("CI failing", on: flags[2]) { self?.flip(\.onlyFailing) },
+                ToggleChip("Sub-items", on: flags[3]) { self?.flip(\.showSubItems) },
+                ToggleChip("Show done", on: flags[4]) { self?.flip(\.showDone) },
+                Spacer(),
+                NSTextField.text("Grouped by status · sorted by priority, Done by last change", size: 12, color: Palette.dim),
+            ], spacing: 6)
+        }
+        let top = PageSection("top", rows: [header, filters])
 
         let groups = statusGroups(snap, items)
-        if board { col.addFull(boardView(groups, ws, snap)); return }
-        let list = StickyListCard.table(table)
+        if board {
+            let hash = PageRow.hash(groups.map { g -> AnyHashable in
+                [g.0.id, g.0.name, g.1.count] + g.1.prefix(25).map { AnyHashable(ItemLine.hash($0, snap: snap, stream: ws.stream($0.key), status: job.item($0.key))) }
+            })
+            return [top, PageSection("items", rows: [PageRow("board", hash: hash) { [weak self] in self?.boardView(groups, ws, snap) ?? NSView() }])]
+        }
+        var rows: [PageRow] = []
         for (opt, its) in groups where !its.isEmpty {
-            list.addGroup(opt.name, count: its.count, lead: {
+            rows.append(StickyListCard.group(opt.id, opt.name, count: its.count, extra: [opt.category.rank, opt.color] as [AnyHashable]) {
                 [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16)]
             })
             let m = more[opt.id] ?? MoreRows()
             more[opt.id] = m
-            list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), status: self?.data.statusJob.item(i.key), layout: table,
-                                                                          cleanup: self.map { $0.data.cleaner.lines(i.key, data: $0.data) } ?? []) { self?.go($0) } }
+            rows += PageRow.limited(its, more: m, reload: { [weak self] in self?.reload() }) { [weak self, table, commands] i in
+                let stream = ws.stream(i.key), st = job.item(i.key), cleanup = data.cleaner.lines(i.key, data: data)
+                return PageRow(i.key, hash: ItemLine.hash(i, snap: snap, stream: stream, status: st, cleanup: cleanup)) {
+                    ItemLine(i, snap: snap, stream: stream, status: st, layout: table, commands: commands, cleanup: cleanup) { self?.go($0) }
+                }
+            }.map { r in r.id == "more" ? PageRow("more.\(opt.id)", hash: r.hash, make: r.make) : r }
         }
-        if list.isEmpty { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
-        col.addFull(list)
+        if rows.isEmpty { rows = [PageRow("empty", 0) { EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle") }] }
+        let table = table
+        return [top, PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
     // Plane states in their category order. Without Show done, Done items follow the "Hide Done items" setting.
@@ -223,7 +239,7 @@ final class ProjectPage: Page {
         reload()
     }
 
-    @objc private func layoutChanged(_ s: NSSegmentedControl) {
+    @objc fileprivate func layoutChanged(_ s: NSSegmentedControl) {
         board = s.selectedSegment == 1
         UserDefaults.standard.set(board ? "board" : "list", forKey: ProjectPage.layoutKey)
         reload()

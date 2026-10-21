@@ -26,7 +26,7 @@ final class IntakeWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDel
     private var error: String?
     private var listOffset: CGFloat = 0
     private var scroll: NSScrollView?
-    private var observer: Any?
+    private var observation: ChangeBus.Observation?
     private var scrollObserver: Any?
     private var keyMonitor: Any?
     private let filterField = NSSearchField()
@@ -50,8 +50,8 @@ final class IntakeWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDel
         filterField.sendsSearchStringImmediately = true
         filterField.delegate = self
         filterField.toolTip = "Show only items with this text in the title or the key (⌘F)"
-        observer = NotificationCenter.default.addObserver(forName: ProjectStore.changed, object: store, queue: .main) { [weak self] _ in
-            guard let self, self.window?.isVisible == true else { return }
+        observation = ChangeBus.shared.observe { [weak self] c in
+            guard let self, self.window?.isVisible == true, c.touches([.projects, .intake], repos: nil, projects: [self.projectKey], items: nil) else { return }
             self.rebuild()
             self.loadKeys()
         }

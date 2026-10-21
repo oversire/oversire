@@ -6,6 +6,13 @@ final class InsightsPage: Page {
     override var buildsLater: Bool { true }
     private var repo: String?
 
+    override var watches: DataDomains { [.runs, .config] }
+
+    override func fingerprint() -> Int? {
+        let recs = DeployLog.shared.all()
+        return PageRow.hash([recs.count, recs.last?.completedAt, repo, Calendar.current.startOfDay(for: Date())])
+    }
+
     // Pass rate of each day, oldest first. Nil for a day with no finished run. Pure, for the selftest.
     static func daily(_ recs: [DeployRecord], days: Int = 14, now: Date = Date()) -> [(day: Date, rate: Double?)] {
         let cal = Calendar.current

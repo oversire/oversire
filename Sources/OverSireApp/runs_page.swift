@@ -362,6 +362,17 @@ final class RunPage: Page {
 
     private var current: Run? { data.grouped.first { $0.0 == repo }?.1.first { $0.id == runId } ?? run }
 
+    override var watches: DataDomains { [.runs, .agents, .config] }
+    override var shownRepos: Set<String>? { [repo] }
+
+    override func fingerprint() -> Int? {
+        let r = current, link = r.flatMap { data.workstreams.link(runId: $0.id) }
+        let phase = link.flatMap { data.workstreams.stream($0.key)?.agent?.phase }
+        let cia = data.ciAssist
+        return PageRow.hash([String(describing: r), link?.key, link?.reason.rawValue, phase.map { String(describing: $0) },
+                             r.map { cia.isFlaky(repo: repo, $0) }, r.map { cia.retried($0) }])
+    }
+
     private func load() {
         let (repo, id, key) = (self.repo, self.runId, jobsKey)
         if jobs == nil, let j = Self.endedJobs[key] {

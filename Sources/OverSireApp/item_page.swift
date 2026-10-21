@@ -31,7 +31,6 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var summaryHeight: NSLayoutConstraint?
     private var descriptionOpen = false
     private var hiddenSummaries: Set<String> = []
-    private var summaryObserver: Any?
     private var timeline: [ActivityEntry]?
     private var tail: [String] = []
     private var tailAt = Date.distantPast
@@ -45,8 +44,6 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var asking = false
     private var sending = false
     private var pendingComment: String?
-    private var relationObserver: Any?
-    private var questionObserver: Any?
     private var questionCards: [QuestionCard] = []
     private lazy var needsYou = NeedsYouCard(page: self)
 
@@ -61,26 +58,24 @@ final class ItemPage: Page, NSTextFieldDelegate {
         summaryMarkdown.translatesAutoresizingMaskIntoConstraints = true
         summaryMarkdown.onHeight = { [weak self] h in self?.summaryHeight?.constant = max(20, h) }
         super.viewDidLoad()
-        relationObserver = NotificationCenter.default.addObserver(forName: RelationCache.changed, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.tab == .overview, !self.isEditing else { return }
-            self.reload()
-        }
-        questionObserver = NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: nil, queue: .main) { [weak self] _ in
-            guard let self, !self.isEditing else { return }
-            self.reload()
-        }
-        summaryObserver = NotificationCenter.default.addObserver(forName: ItemSummaries.changed, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.tab == .overview, !self.isEditing else { return }
-            self.reload()
-        }
     }
-
-    deinit { [relationObserver, summaryObserver, questionObserver].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver) }
 
     override func show(_ r: Route) {
         if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = []; descriptionOpen = false }; tailAt = .distantPast }
         super.show(r)
     }
+
+    override var watches: DataDomains {
+        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config]
+        switch tab {
+        case .overview: d.formUnion([.relations, .planner, .runs, .prs])
+        case .session, .activity: d.formUnion([.runs, .prs])
+        case .subitems: break
+        }
+        return d
+    }
+    override var shownItems: Set<String>? { [key.uppercased(), key] }
+    override var shownProjects: Set<String>? { data.projectStore.item(key: key).map { [$0.0] } }
 
     override var isEditing: Bool {
         super.isEditing || !(replyField?.stringValue.isEmpty ?? true) || !(commentField?.stringValue.isEmpty ?? true) || !(askField?.stringValue.isEmpty ?? true)

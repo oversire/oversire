@@ -59,16 +59,22 @@ class TabVC: NSViewController {
     var scrollView: NSScrollView!
     var doc: Flipped!
     var footerView: NSView!
+    private var observation: ChangeBus.Observation?
+    private var builtAt = Date.distantPast
+    private var builtError: String?
+    /// The content builds of this panel. The tests read it.
+    private(set) var builds = 0
 
     var showsSubBar: Bool { selectedTab == .actions || selectedTab == .projects }
     var chrome: CGFloat { TAB_H + (showsSubBar ? SUB_H : 0) }
 
     init(grouped: [(String, [Run])], prGrouped: [(String, [ChangeRequest])], updated: Date, loading: Bool,
-         tab: Tab, repo: String?, expandedPR: String? = nil) {
+         tab: Tab, repo: String?, expandedPR: String? = nil, bus: ChangeBus = .shared) {
         self.grouped = grouped; self.prGrouped = prGrouped
         self.updated = updated; self.loading = loading
         self.selectedTab = tab; self.selectedRepo = repo; self.expandedPR = expandedPR
         super.init(nibName: nil, bundle: nil)
+        observation = bus.observe { [weak self] c in self?.receive(c) }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -119,12 +125,34 @@ class TabVC: NSViewController {
         rebuildContent()
     }
 
-    // Shows fresh data in the open panel. Keeps the expanded row and the scroll position.
+    /// The data of the open tab. A change outside it does not rebuild the panel.
+    var watches: DataDomains {
+        switch selectedTab {
+        case .actions: return [.runs, .agents, .config]
+        case .prs: return [.prs, .runs, .config]
+        case .projects: return [.projects, .intake, .agents, .summaries, .questions, .config]
+        case .insights: return [.runs, .config]
+        }
+    }
+
+    /// Keeps fresh data. The panel rebuilds on a bus change, on a new load state or error, or after a minute for the time texts.
     func update(grouped: [(String, [Run])], prGrouped: [(String, [ChangeRequest])], updated: Date, loading: Bool) {
+        let wasLoading = self.loading
         self.grouped = grouped; self.prGrouped = prGrouped
         self.updated = updated; self.loading = loading
         guard isViewLoaded else { return }
         (footerView as? Footer)?.showUpdated(updated)
+        if loading != wasLoading || lastFetchError != builtError || -builtAt.timeIntervalSinceNow > 60 { refresh() }
+    }
+
+    /// One coalesced change of the bus.
+    func receive(_ c: DataChange) {
+        let repos = selectedTab == .actions ? selectedRepo.map { Set([$0]) } : nil
+        guard isViewLoaded, c.touches(watches, repos: repos, projects: nil, items: nil) else { return }
+        refresh()
+    }
+
+    private func refresh() {
         if dragLine != nil { return }
         JobSummary.close()  // the rebuild removes its chip
         rebuildContent()
@@ -136,6 +164,9 @@ class TabVC: NSViewController {
         func row(_ id: String?) -> NSView? { id.flatMap { id in doc.subviews.first { $0.identifier?.rawValue == id } } }
         var top = scrollView.contentView.bounds.origin.y
         let anchorOffset = row(anchor).map { $0.frame.minY - top }
+        builds += 1
+        builtAt = Date()
+        builtError = lastFetchError
         NSApp.withPinnedAppearance {
             doc.subviews.forEach { $0.removeFromSuperview() }
             let w = POP_W

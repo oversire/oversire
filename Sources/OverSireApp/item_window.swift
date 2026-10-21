@@ -67,9 +67,8 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     private var pending = false          // a store change came while the user typed
     private var images: (source: String, text: String)?   // the description with signed image links
     private var keyMonitor: Any?
-    private var observer: Any?
+    private var observation: ChangeBus.Observation?
     private var scrollObserver: Any?
-    private var agentObserver: Any?
     private var agentTail: (key: String, lines: [String], at: Date)?
     private var agents: AgentIndex? { (NSApp.delegate as? GHActionsBar)?.agentIndex.ready }
     private var statusHover: HoverSummary?   // the summary of the session chip
@@ -87,14 +86,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         super.init(window: win)
         win.delegate = self
         markdown.onHeight = { [weak self] _ in self?.rebuild() }
-        observer = NotificationCenter.default.addObserver(forName: ProjectStore.changed, object: store, queue: .main) { [weak self] _ in
-            self?.storeChanged()
-        }
-        if let a = (NSApp.delegate as? GHActionsBar)?.agentIndex {
-            agentObserver = NotificationCenter.default.addObserver(forName: AgentIndex.changed, object: a, queue: .main) { [weak self] _ in
-                self?.storeChanged()
-            }
-        }
+        observation = ChangeBus.shared.observe { [weak self] c in self?.receive(c) }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in self?.key(e) ?? e }
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -136,6 +128,13 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     }
 
     // A store change rebuilds the window. While the user types, it waits for the end of the edit.
+    // A change of the project or the session of the open item rebuilds.
+    private func receive(_ c: DataChange) {
+        let found = itemId.flatMap { store.item($0) }
+        guard c.touches([.projects, .agents], repos: nil, projects: found.map { [$0.key] }, items: found.map { [$0.item.key, $0.item.key.uppercased()] }) else { return }
+        storeChanged()
+    }
+
     private func storeChanged() {
         guard window?.isVisible == true else { return }
         if edit != nil || window?.firstResponder is NSTextView { pending = true; return }
