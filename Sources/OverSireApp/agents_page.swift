@@ -258,6 +258,9 @@ final class AgentsPage: Page {
         r.isEnabled = canRead && !reading
         if !canRead { r.alphaValue = 0; r.setAccessibilityElement(false) }
         var trailing: [NSView] = [r]
+        // Each row keeps the Remove slot too, so that the columns align.
+        let slot = NSStackView(h: [Spacer()], spacing: 0)
+        slot.widthAnchor.constraint(equalToConstant: 112).isActive = true
         if let l = cleanup, l.removable, let key {
             let running = data.cleaner.running.contains(key.uppercased())
             let b = ActionButton(running ? "Removing…" : l.safe ? "Remove" : "Remove…", symbol: running ? nil : "trash") { [weak self] in
@@ -266,8 +269,9 @@ final class AgentsPage: Page {
             b.isEnabled = !running
             b.setAccessibilityLabel("Remove the worktree \(c.name)")
             b.toolTip = l.safe ? "orca worktree rm" : l.detail
-            trailing.append(b)
+            slot.addArrangedSubview(b)
         }
+        trailing.append(slot)
         let open = ActionButton("Open", style: .plain) { [weak self] in
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }

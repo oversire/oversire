@@ -341,6 +341,12 @@ final class ProjectStore {
         update(itemId: itemId, ItemPatch(status: state.id), failure: "Could not reopen the item", done: done)
     }
 
+    /// For `--uishots`: a changed copy of a snapshot. The next refresh replaces it.
+    func seed(_ snap: ProjectSnapshot) {
+        snapshots[snap.summary.ref.storeKey] = snap
+        publish()
+    }
+
     // `done(created, message)`.
     func create(_ new: NewItem, done: @escaping (Bool, String?) -> Void) {
         guard let snap = snapshots[new.projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {

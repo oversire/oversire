@@ -104,7 +104,10 @@ final class Cleaner {
     }
 
     /// Sets the facts. For tests and --uishots.
-    func load(_ f: CleanupFacts) { facts = f }
+    func load(_ f: CleanupFacts, records r: [CleanupRecord]? = nil) {
+        facts = f
+        if let r { records = r }
+    }
 
     // MARK: The plan (pure)
 

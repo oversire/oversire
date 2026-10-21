@@ -109,6 +109,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
     // OVERSIRE_UISHOTS_SESSIONS=1: one OVERSIRE session in each state, a blocked checklist and a quiet check.
     static let sessions = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SESSIONS"] == "1"
+    /// Finished items with leftovers, and OVERSIRE-205 as Done with open sub-items.
+    static let cleanup = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLEANUP"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
     // OVERSIRE_UISHOTS_AI=on: Settings › AI shows a sample key that passed Test. No AI job runs.
@@ -247,6 +249,49 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         for k in ["OVERSIRE-145", "OVERSIRE-139"] {
             if let f = projectStore.item(key: k), queue.lane(pk)?.entries.contains(where: { $0.key == k }) != true { queue.add(f.item, snap: snap) }
         }
+    }
+
+    private func seedCleanup() {
+        guard UIShots.cleanup, let found = projectStore.item(key: "OVERSIRE-205") else { return }
+        let snap = found.snap
+        guard let done = snap.firstState(group: "completed", else: .done) else { return }
+        // OVERSIRE-205 becomes Done in the copy. Its sub-items stay open.
+        let items = snap.items.map { i -> Item in
+            guard i.id == found.item.id, var o = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(i))) as? [String: Any] else { return i }
+            o["statusOptionId"] = done.id
+            return (try? JSONSerialization.data(withJSONObject: o)).flatMap { try? JSONDecoder().decode(Item.self, from: $0) } ?? i
+        }
+        let copy = ProjectSnapshot(summary: snap.summary, statusOptions: snap.statusOptions, items: items, fetchedAt: snap.fetchedAt,
+                                   fields: snap.fields, me: snap.me, meId: snap.meId, index: snap.index, intake: snap.intake)
+        projectStore.seed(copy)
+
+        // Three finished items: one safe, one with changes and an open PR, one with a live agent.
+        let finished = copy.items.filter { copy.isFinished($0) && $0.parentId != found.item.id }.sorted { $0.updatedAt > $1.updatedAt }.prefix(3)
+        guard finished.count == 3 else { print("UISHOTS cleanup needs 3 finished items"); return }
+        let main = "/Users/ada/src/oversire", repo = "oversire/oversire"
+        var f = CleanupFacts()
+        f.bases[main] = "main"
+        f.repos[main] = repo
+        var cards: [Workspace] = []
+        func pr(_ n: Int, _ state: String, head: String) -> ChangeRequest {
+            ChangeRequest(number: n, title: "t", state: state, author: .init(login: "ada"), headRefName: head, baseRefName: "main",
+                          url: "https://github.com/\(repo)/pull/\(n)", createdAt: "", updatedAt: "", reviewDecision: nil, additions: 0, deletions: 0,
+                          isDraft: false, labels: [], body: nil)
+        }
+        for (n, item) in finished.enumerated() {
+            let b = item.key.lowercased(), path = "/Users/ada/orca/\(b)"
+            let live = n == 2 ? [AgentSession(phase: .waiting, since: Date().addingTimeInterval(-600), card: "uishots-clean-\(n)", paneKey: "c\(n)")] : []
+            cards.append(Workspace(id: "uishots-clean-\(n)", repo: "oversire", path: path, name: b, comment: nil, liveTerminals: n == 2 ? 1 : 0,
+                                   lastActivity: item.updatedAt, agents: live, branch: b))
+            f.states[path] = CheckoutState(branch: b, dirty: n == 1 ? 3 : 0, ahead: 0, base: "main")
+            f.remotes[main, default: []].insert(b)
+            f.pulls["\(repo)|\(b)"] = [pr(300 + n, n == 1 ? "OPEN" : "MERGED", head: b)]
+            if n == 0 { f.branches[main] = [GitBranch(name: b + "-spike", merged: true, checkedOut: false)] }
+        }
+        print("UISHOTS cleanup \(finished.map(\.key))")
+        agentIndex.seed(cards: agentIndex.cards + cards)
+        cleaner.load(f, records: [CleanupRecord(at: Date().addingTimeInterval(-1800), key: finished[finished.startIndex].key,
+                                         text: "Removed worktree \(finished[finished.startIndex].key.lowercased()) (\(finished[finished.startIndex].key) finished 1 h ago)")])
     }
 
     /// One ask of OVERSIRE-143 (found by its terminal), one Orca form of OVERSIRE-140, one answer in Orca for OVERSIRE-142.
@@ -584,6 +629,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedPlanner()
         seedSummaries()
         seedSessions()
+        seedCleanup()
         // The heuristics only: a shot never calls the AI.
         statusJob.ai = { nil }
         statusJob.tick(workstreams: workstreams, store: projectStore)
