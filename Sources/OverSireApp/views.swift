@@ -170,6 +170,15 @@ class Footer: NSView {
         ts.font = .systemFont(ofSize: 10); ts.textColor = .secondaryLabelColor; ts.alignment = .center
         ts.frame = NSRect(x: 244, y: 11, width: w - 384, height: 16)
         addSubview(ts)
+        if let v = (NSApp.delegate as? GHActionsBar)?.updater.readyVersion {
+            ts.frame.size.height = 12; ts.frame.origin.y = 22
+            let ub = NSButton(title: "v\(v) ready · Install", target: NSApp.delegate, action: #selector(GHActionsBar.showUpdates))
+            ub.isBordered = false
+            ub.attributedTitle = NSAttributedString(string: ub.title, attributes: [.foregroundColor: Palette.acc, .font: NSFont.systemFont(ofSize: 10.5, weight: .medium)])
+            ub.frame = NSRect(x: 244, y: 4, width: w - 384, height: 16)
+            ub.setAccessibilityLabel("Version \(v) is ready. Open the update settings")
+            addSubview(ub)
+        }
 
         // Live updates: green = live, grey = polling, orange = relay error.
         if let (color, tip) = (NSApp.delegate as? GHActionsBar)?.relay.statusDot {

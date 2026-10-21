@@ -236,20 +236,15 @@ extension SettingsPage {
 
     private func startup() -> [NSView] {
         let u = data.updater
-        let status = u.statusText
-        let ready: Bool = { if case .ready = u.state { return true }; return false }()
-        let failed: Bool = { if case .failed = u.state { return true }; return false }()
-        let check = ActionButton(ready ? "Restart now" : "Check now") { ready ? u.install() : u.check(manual: true) }
-        check.isEnabled = !u.busy
-        var version: [NSView] = [TwoLine("Updates", "Version \(u.current)" + (status.isEmpty ? "" : " · \(status)"), weight: .medium), Spacer()]
-        if failed { version.insert(Glyph(.bad, size: 13), at: 0) }
         return [
             SwitchRow("Open the window at launch", on: GENERAL.openWindowAtLaunch) { GENERAL.openWindowAtLaunch = $0 },
-            SwitchRow("Install updates automatically", note: u.isDev ? "Off in a development build." : nil, on: AUTO_UPDATE, enabled: !u.isDev) {
+            SwitchRow("Download updates automatically",
+                      note: u.isDev ? "Off in a development build." : "OverSire checks every 4 hours and gets the new version ready. It never installs without you.",
+                      on: AUTO_UPDATE, enabled: !u.isDev) {
                 AUTO_UPDATE = $0
                 if $0 { u.check(manual: false) }
             },
-            Row(version + [check], height: 52, label: "Updates"),
+            UpdateStatus(u),
         ]
     }
 
@@ -274,5 +269,56 @@ extension SettingsPage {
                      NSTextField.text(PROJECTS_CFG.capture.session.enabled ? PROJECTS_CFG.capture.session.shortcutLabel : "Off", size: 12, color: Palette.mut, mono: true)),
             d,
         ]
+    }
+}
+
+// The Updates row. It follows the updater state: check, download progress, ready to install, failed.
+final class UpdateStatus: NSStackView {
+    private let updater: Updater
+    private var observer: Any?
+
+    init(_ updater: Updater) {
+        self.updater = updater
+        super.init(frame: .zero)
+        orientation = .vertical
+        translatesAutoresizingMaskIntoConstraints = false
+        observer = NotificationCenter.default.addObserver(forName: Updater.changed, object: updater, queue: .main) { [weak self] _ in self?.render() }
+        render()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { observer.map(NotificationCenter.default.removeObserver) }
+
+    private func render() {
+        arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let u = updater
+        let status = u.statusText
+        let detail = "Version \(u.current)" + (status.isEmpty ? "" : " · \(status)")
+        var views: [NSView]
+        let button: ActionButton
+        switch u.state {
+        case .ready(let v):
+            views = [Glyph(.ok, size: 13), TwoLine("v\(v) is ready to install", detail, weight: .medium)]
+            button = ActionButton("Install and restart", style: .primary) { u.install() }
+        case .failed:
+            views = [Glyph(.bad, size: 13), TwoLine("Update failed", detail, weight: .medium)]
+            button = ActionButton("Try again") { u.check(manual: true) }
+        case .downloading:
+            let bar = NSProgressIndicator()
+            bar.style = .bar; bar.isIndeterminate = false; bar.minValue = 0; bar.maxValue = 1; bar.doubleValue = u.progress
+            bar.controlSize = .small
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            let col = NSStackView(views: [TwoLine("Updates", detail, weight: .medium), bar])
+            col.orientation = .vertical; col.alignment = .leading; col.spacing = 4
+            views = [col]
+            button = ActionButton("Check now") {}
+        default:
+            views = [TwoLine("Updates", detail, weight: .medium)]
+            button = ActionButton("Check now") { u.check(manual: true) }
+        }
+        button.isEnabled = !u.busy
+        let row = Row(views + [Spacer(), button], height: 52, label: "Updates")
+        addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
     }
 }

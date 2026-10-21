@@ -99,33 +99,67 @@ final class Glyph: NSImageView {
     }
     convenience init(_ tone: Tone, size: CGFloat = 14) {
         self.init(tone.symbol, color: tone.color, size: size, label: tone.word)
-        spins = tone.spins
+        if tone.spins { startSpin() }
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    // One turn in 3 s.
-    private var spins = false
+    // A spinning glyph draws in a sublayer and turns only that layer. AppKit moves the backing layer
+    // on each layout, so a turn of the backing layer goes off center.
+    private var spin: CALayer?
+    private var spinImage: NSImage?
+
+    private func startSpin() {
+        guard let img = image else { return }
+        spinImage = img
+        image = nil
+        wantsLayer = true
+        let l = CALayer()
+        l.contentsGravity = .center
+        layer?.addSublayer(l)
+        spin = l
+        paintSpin()
+    }
+
+    override var intrinsicContentSize: NSSize { spinImage?.size ?? super.intrinsicContentSize }
+
+    private func paintSpin() {
+        guard let l = spin, let img = spinImage else { return }
+        let scale = window?.backingScaleFactor ?? 2
+        var tinted: NSImage?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color = (contentTintColor ?? Palette.mut).usingColorSpace(.sRGB) ?? .gray
+            tinted = img.withSymbolConfiguration(.init(paletteColors: [color]))
+        }
+        l.contentsScale = scale
+        l.contents = tinted?.layerContents(forContentsScale: scale)
+    }
 
     override func layout() {
         super.layout()
-        guard spins, let l = layer else { return }
-        l.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        l.position = CGPoint(x: frame.midX, y: frame.midY)
+        guard let l = spin else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        l.bounds = bounds
+        l.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        paintSpin()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard spins else { return }
-        layer?.removeAnimation(forKey: "spin")
+        guard let l = spin else { return }
+        paintSpin()
+        l.removeAnimation(forKey: "spin")
         guard window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        wantsLayer = true
-        needsLayout = true
         let a = CABasicAnimation(keyPath: "transform.rotation.z")
         a.fromValue = 0
         a.toValue = -2 * Double.pi
-        a.duration = 3
+        a.duration = 3   // one turn in 3 s
         a.repeatCount = .infinity
-        layer?.add(a, forKey: "spin")
+        l.add(a, forKey: "spin")
     }
 }
 

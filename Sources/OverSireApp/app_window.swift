@@ -285,7 +285,11 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             guard let self else { return }
             self.refreshButton?.show(self.data.busy)
         })
+        observers.append(NotificationCenter.default.addObserver(forName: Updater.changed, object: data.updater, queue: .main) { [weak self] _ in
+            self?.syncUpdateItem()
+        })
         display(router.current)
+        syncUpdateItem()
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -404,6 +408,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private let settingsId = NSToolbarItem.Identifier("settings")
     private let copyId = NSToolbarItem.Identifier("copy")
     private let newSessionId = NSToolbarItem.Identifier("newSession")
+    private let updateId = NSToolbarItem.Identifier("update")
     private var newSessionButton: NSButton?
 
     // apple.terminal with a small plus at the bottom right. SF Symbols has no such symbol.
@@ -426,7 +431,18 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.toggleSidebar, .flexibleSpace, navId, newSessionId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, copyId, refreshId, settingsId]
     }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) + [updateId] }
+
+    // The "Update ready" chip shows only while a downloaded update waits for a click.
+    private func syncUpdateItem() {
+        guard let tb = window?.toolbar else { return }
+        let at = tb.items.firstIndex { $0.itemIdentifier == updateId }
+        if let at { tb.removeItem(at: at) }
+        guard data.updater.readyVersion != nil, let p = tb.items.firstIndex(where: { $0.itemIdentifier == paletteId }) else { return }
+        tb.insertItem(withItemIdentifier: updateId, at: p)
+    }
+
+    @objc private func openUpdates() { router.go(.settings(.general, anchor: SettingsAnchor.startup.rawValue)) }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
@@ -478,6 +494,19 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             b.toolTip = "Copy the oversire:// link of this page"
             i.view = b
             i.label = "Copy link"
+            return i
+        case updateId:
+            let i = NSToolbarItem(itemIdentifier: id)
+            let v = data.updater.readyVersion ?? ""
+            let b = NSButton(title: "Update ready · v\(v)", target: self, action: #selector(openUpdates))
+            b.bezelStyle = .texturedRounded
+            b.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)
+            b.imagePosition = .imageLeading
+            b.contentTintColor = Palette.ok
+            b.toolTip = "v\(v) is downloaded and verified. Open Settings › General to install."
+            b.setAccessibilityLabel("Update ready, version \(v). Open the update settings")
+            i.view = b
+            i.label = "Update ready"
             return i
         case settingsId:
             let i = NSToolbarItem(itemIdentifier: id)

@@ -2,14 +2,14 @@ import Cocoa
 import OverSireCore
 import Security
 
-// Installs signed, notarized releases from GitHub and restarts the app.
+// Downloads signed, notarized releases from GitHub. It installs and restarts only on a click.
 // Dev builds (version ends in "-dev") only report a newer release.
 final class Updater {
     enum State: Equatable {
         case idle, checking, upToDate
-        case available(String)    // newer release, auto-install is off or this is a dev build
+        case available(String)    // newer release, auto-download is off or this is a dev build
         case downloading(String)
-        case ready(String)        // verified and staged, installs when the popover is closed
+        case ready(String)        // verified and staged, waits for install()
         case failed(String)
     }
 
@@ -23,10 +23,15 @@ final class Updater {
     let appURL: URL
     private(set) var state: State = .idle { didSet { NotificationCenter.default.post(name: Updater.changed, object: self) } }
     private(set) var lastCheck: Date?
-    /// False while the user looks at the app. The install waits until it is true.
-    var canRestart: () -> Bool = { true }
+    /// 0...1 while the state is .downloading.
+    private(set) var progress: Double = 0
+    /// Called once for each version that becomes ready.
+    var onReady: ((String) -> Void)?
     private var staged: URL?
     private var timer: Timer?
+    private var progressWatch: NSKeyValueObservation?
+    private static let stagedKey = "updateStaged"   // [path, version] of a staged update, kept through a relaunch
+    private static let notifiedKey = "updateNotified"
 
     init(bundle: Bundle = .main) {
         current = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -42,21 +47,23 @@ final class Updater {
         case .checking: return "Checking…"
         case .upToDate: return "Up to date"
         case .available(let v): return "v\(v) is available"
-        case .downloading(let v): return "Downloading v\(v)…"
-        case .ready(let v): return "v\(v) installs when this window closes"
+        case .downloading(let v): return "Downloading v\(v)… \(Int(progress * 100))%"
+        case .ready: return "Downloaded and verified"
         case .failed(let e): return "Update failed: \(e)"
         }
     }
 
+    var readyVersion: String? { if case .ready(let v) = state { return v }; return nil }
+
     func start() {
+        restoreStaged()
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.check(manual: false) }
         timer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in self?.tick() }
         timer?.tolerance = 60
     }
 
-    // Checks on the 4-hour cadence and installs a staged release once the user is not looking.
+    // Checks on the 4-hour cadence. A staged release waits for install().
     private func tick() {
-        if case .ready = state { installIfIdle(); return }
         if Date().timeIntervalSince(lastCheck ?? .distantPast) >= Updater.checkInterval { check(manual: false) }
     }
 
@@ -87,9 +94,10 @@ final class Updater {
     }
 
     private func download(_ url: URL, version: String) {
+        progress = 0
         state = .downloading(version)
         log.info("Updater: downloading v\(version)")
-        URLSession.shared.downloadTask(with: url) { tmp, _, err in
+        let task = URLSession.shared.downloadTask(with: url) { tmp, _, err in
             guard let tmp = tmp else {
                 DispatchQueue.main.async { self.fail(err?.localizedDescription ?? "download failed") }
                 return
@@ -99,15 +107,50 @@ final class Updater {
             DispatchQueue.main.async {
                 switch result {
                 case .success(let app):
-                    self.staged = app
-                    self.state = .ready(version)
+                    UserDefaults.standard.set([app.path, version], forKey: Updater.stagedKey)
                     log.info("Updater: v\(version) verified and staged")
-                    self.installIfIdle()
+                    self.becomeReady(app, version: version)
                 case .failure(let e):
                     self.fail("\(e)")
                 }
             }
-        }.resume()
+        }
+        progressWatch = task.progress.observe(\.fractionCompleted) { [weak self] p, _ in
+            let f = p.fractionCompleted
+            DispatchQueue.main.async {
+                guard let self, case .downloading = self.state, Int(f * 100) != Int(self.progress * 100) else { return }
+                self.progress = f
+                NotificationCenter.default.post(name: Updater.changed, object: self)
+            }
+        }
+        task.resume()
+    }
+
+    private func becomeReady(_ app: URL, version: String) {
+        progressWatch = nil
+        staged = app
+        state = .ready(version)
+        guard UserDefaults.standard.string(forKey: Updater.notifiedKey) != version else { return }
+        UserDefaults.standard.set(version, forKey: Updater.notifiedKey)
+        onReady?(version)
+    }
+
+    // A release staged before a quit stays ready, if the copy is still there and still verifies.
+    private func restoreStaged() {
+        guard let saved = UserDefaults.standard.stringArray(forKey: Updater.stagedKey), saved.count == 2 else { return }
+        let app = URL(fileURLWithPath: saved[0]), version = saved[1]
+        guard Updater.isNewer(version, than: current), FileManager.default.fileExists(atPath: app.path) else {
+            UserDefaults.standard.removeObject(forKey: Updater.stagedKey); return
+        }
+        state = .checking
+        DispatchQueue.global(qos: .utility).async {
+            let ok = (try? Updater.verify(app, version: version)) != nil
+            DispatchQueue.main.async {
+                if ok { self.becomeReady(app, version: version); return }
+                UserDefaults.standard.removeObject(forKey: Updater.stagedKey)
+                self.state = .idle
+            }
+        }
     }
 
     // Unpacks the zip next to the app (same volume, so the swap is a rename) and verifies it.
@@ -141,11 +184,6 @@ final class Updater {
         guard notarized.ok else { throw UpdateError("not notarized: \(notarized.text)") }
     }
 
-    func installIfIdle() {
-        guard case .ready = state, canRestart() else { return }
-        install()
-    }
-
     // A detached script waits for this process to exit, swaps the bundles, and opens the new app.
     // If the new app is not running after 15 seconds, the script puts the old app back.
     func install() {
@@ -172,6 +210,7 @@ final class Updater {
         p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { fail("cannot start the installer: \(error.localizedDescription)"); return }
         UserDefaults.standard.set(version, forKey: "updatedTo")
+        UserDefaults.standard.removeObject(forKey: Updater.stagedKey)
         log.info("Updater: installing v\(version) and restarting")
         NSApp.terminate(nil)
     }

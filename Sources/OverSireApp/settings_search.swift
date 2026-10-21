@@ -111,7 +111,7 @@ struct SettingsIndex {
         Entry("Create intake item by default", .capture, "new session"),
         Entry("File limit without intake", .capture, "new session size upload"),
         Entry("Open the window at launch", .startup, "login start"),
-        Entry("Install updates automatically", .startup, "update release version"),
+        Entry("Download updates automatically", .startup, "update install release version"),
         Entry("Open the window", .shortcuts, "hotkey global"),
         Entry("New item (quick capture)", .shortcuts, "hotkey"),
         Entry("New session", .shortcuts, "hotkey agent"),

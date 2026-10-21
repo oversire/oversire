@@ -199,7 +199,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             ((self?.popover.contentViewController as? TabVC)?.footerView as? Footer)?.showQuota(self?.rateLimit.latest)
         }
         rateLimit.start()
-        updater.canRestart = { [weak self] in !(self?.popover.isShown ?? false) }
+        updater.onReady = { [weak self] v in
+            self?.notify(title: "OverSire", subtitle: "v\(v) is ready to install", body: "Install it from Settings › General.", id: "update-ready-\(v)")
+        }
         updater.start()
         if let v = updater.takeUpdateNotice() {
             notify(title: "OverSire", subtitle: "Updated to v\(v)", body: "The new version is running.", id: "updated-\(v)")
@@ -1043,6 +1045,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     @objc func showLogs() { showSettings(.settings(.logs)) }
 
+    @objc func showUpdates() { showSettings(.settings(.general, anchor: SettingsAnchor.startup.rawValue)) }
+
     @objc func showRelaySettings() { showSettings(.settings(.accounts, anchor: SettingsAnchor.live.rawValue)) }
 
     @objc func showList() {
@@ -1067,7 +1071,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         popover.behavior = .transient
         popover.contentViewController = nil  // Release settings view if open
         updatePolling()                      // nobody is watching: back to the slow cadence
-        updater.installIfIdle()
     }
 }
 
