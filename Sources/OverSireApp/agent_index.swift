@@ -104,6 +104,9 @@ final class AgentIndex: NSObject {
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
 
     static let linkAge: TimeInterval = 30 * 86400
+
+    /// The card of the last session that OverSire started for the item, in the last 30 days.
+    func launchedCard(_ key: String) -> String? { links[key.uppercased()]?.workspace.id }
     private var observer: NSObjectProtocol?
 
     /// For `--uishots`: a session without Orca. The next poll replaces it.

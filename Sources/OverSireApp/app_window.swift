@@ -11,6 +11,7 @@ protocol AppData: AnyObject {
     var agentIndex: AgentIndex { get }
     var relay: LiveSync { get }
     var workstreams: WorkstreamIndex { get }
+    var cleaner: Cleaner { get }
     var queue: WorkQueue { get }
     var memory: ProjectMemory { get }
     var areas: ItemAreaBook { get }

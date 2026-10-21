@@ -102,6 +102,11 @@ public struct GitCheckout: Sendable {
         _ = try await run(["branch", "-d", name])
     }
 
+    /// Forgets origin/<name> after the branch went from the remote.
+    public func forgetRemoteBranch(_ name: String) async throws {
+        _ = try await run(["branch", "-dr", "origin/" + name])
+    }
+
     /// The branches of origin that the last fetch saw, without "origin/".
     public func remoteBranches() async throws -> [String] {
         try await run(["for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin"]).split(separator: "\n").map(String.init)

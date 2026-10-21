@@ -59,6 +59,7 @@ struct AgentsConfig: Codable, Equatable {
     var intakeScratch = false           // Enhance works in a scratch worktree, not in main
     var enhanceVague = true             // start Enhance for a new intake item with a short note
     var writeBack = WriteBackConfig()
+    var cleanup = CleanupConfig()
 
     /// The user template of Contract/prompts/enhance.md.
     static var defaultIntakePrompt: String { EnhancePrompt.template }
@@ -79,6 +80,7 @@ struct AgentsConfig: Codable, Equatable {
         intakeScratch = try c.decodeIfPresent(Bool.self, forKey: .intakeScratch) ?? false
         enhanceVague = try c.decodeIfPresent(Bool.self, forKey: .enhanceVague) ?? true
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()
+        cleanup = try c.decodeIfPresent(CleanupConfig.self, forKey: .cleanup) ?? CleanupConfig()
     }
 
     func slots(_ projectKey: String) -> Int { max(1, slots[projectKey] ?? PlannerSettings.defaultSlots) }

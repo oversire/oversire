@@ -17,6 +17,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: UIShots.tmp + "/store")))
     lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()
+    let cleaner = Cleaner(defaults: UserDefaults(suiteName: "oversire-uishots")!)
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: writes)
     lazy var updater = Updater()

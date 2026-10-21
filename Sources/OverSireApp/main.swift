@@ -82,6 +82,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var newSession = NewSessionController(projects: { [weak self] in self?.projectStore.tracked ?? [] },
                                                states: { [weak self] k in self?.projectStore.snapshots[k]?.statusOptions ?? [] })
     let workstreams = WorkstreamIndex()
+    let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
@@ -793,6 +794,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let known = Set(projectStore.tracked.map { $0.identifier.uppercased() })
         workstreams.scan(cards: agentIndex.cards, roots: Array(PROJECTS_CFG.orca.roots.values), known: known) { [weak self] in
             self?.reloadList()
+            guard let self else { return }
+            self.cleaner.refresh(self) { [weak self] in
+                guard let self else { return }
+                self.cleaner.sweep(self)
+                self.reloadList()
+            }
         }
     }
 

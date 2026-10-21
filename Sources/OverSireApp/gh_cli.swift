@@ -59,6 +59,12 @@ struct RepoClient {
         return h
     }
 
+    /// The code host of a repo, when it can delete branches.
+    func branchHost(_ repo: String) -> (host: any BranchDeleting, ref: RepoRef)? {
+        guard let h = (try? host(repo)) as? any BranchDeleting, h.capabilities.contains(.deleteBranch) else { return nil }
+        return (h, Self.repoRef(h, repo))
+    }
+
     static func repoRef(_ p: any Provider, _ path: String) -> RepoRef {
         (p as? any RepoAddressing)?.repoRef(path) ?? RepoRef(account: p.account, path: path, url: URL(string: "https://github.com/\(path)")!)
     }
