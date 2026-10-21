@@ -122,7 +122,8 @@ final class QuestionHub {
         let account = q.session.workspace.account
         if account.provider == RunnerQuestions.provider {
             let runner = writes.load(RunnerSession.self).first { $0.session == q.session }?.runner
-            return QuestionPlace(runtime: "OverSire runner", host: runner ?? "runner", local: false)
+            let state = writes.load(RunnerState.self).first { $0.device == runner }
+            return QuestionPlace(runtime: "OverSire runner", host: runner ?? "runner", local: false, offline: state.map { !$0.online } ?? false)
         }
         let name = ENV.registry.descriptors(.runtime).first { $0.id == account.provider }?.displayName ?? account.provider.rawValue.capitalized
         if let env = (ENV.provider(account) as? OrcaRuntime)?.environment { return QuestionPlace(runtime: name, host: "remote: \(env)", local: false) }

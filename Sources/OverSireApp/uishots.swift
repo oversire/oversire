@@ -1067,7 +1067,8 @@ extension UIShots {
                  (e(two, .answeredElsewhere(nil, at: ago(2))), remote, acts, nil)],
                 [(e(two, .raced(at: ago(1))), here, acts, nil),
                  (e(two, .gone(at: ago(3))), here, acts, nil),
-                 (e(q("p1", [.approve(id: "q1", header: "Bash", text: "npm test")], .permission, 1, .work(item("TOWERTAIL-2"))), .open), runner, acts, nil)],
+                 (e(q("p1", [.approve(id: "q1", header: "Bash", text: "npm test")], .permission, 1, .work(item("TOWERTAIL-2"))), .open), runner, acts, nil),
+                 (e(two, .answeredHere(answer, at: ago(1))), QuestionPlace(runtime: "OverSire runner", host: "mba", local: false, offline: true), acts, nil)],
             ]
         } else {
             var enhance = acts

@@ -9,6 +9,8 @@ struct QuestionPlace: Equatable {
     var runtime: String
     var host: String
     var local = true
+    /// The runner is offline. The hub keeps a sent answer for 60 min.
+    var offline = false
 
     var text: String { "\(runtime) · \(host)" }
 }
@@ -169,7 +171,8 @@ final class QuestionCard: Card, NSTextFieldDelegate {
             add(footer())
         case .answeredHere(let a, _):
             add(result(Tone(symbol: "checkmark.circle.fill", color: Palette.ok, word: "Answered"), title: "You answered",
-                       lines: lines(a), pill: Pill(.working, text: "Session works"), dismiss: false))
+                       lines: lines(a), pill: place.offline ? Pill(.queued, text: "Sent, the runner is offline") : Pill(.working, text: "Session works"),
+                       dismiss: false))
         case .answeredElsewhere(let a, _):
             let missing = place.local ? "OverSire cannot read the answer."
                 : "OverSire cannot read the answer on a remote \(place.runtime) server."

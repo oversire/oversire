@@ -85,6 +85,18 @@ final class QuestionCardTests: XCTestCase {
         XCTAssertTrue(c.canSend)
     }
 
+    @MainActor
+    func testAnswerToAnOfflineRunnerSaysSent() {
+        let q = SessionQuestion(id: "runner:s1:m1", session: session, origin: .session, items: [single], via: .runnerInput, askedAt: Date())
+        let answered = QuestionBoard.Entry(question: q, state: .answeredHere(QuestionAnswer(question: q.id, items: []), at: Date()), firstSeen: Date())
+        func texts(_ v: NSView) -> [String] { ((v as? NSTextField).map { [$0.stringValue] } ?? []) + v.subviews.flatMap(texts) }
+        let place = QuestionPlace(runtime: "OverSire runner", host: "mba", local: false)
+        var offline = place
+        offline.offline = true
+        XCTAssertTrue(texts(QuestionCard(answered, place: offline, checkedAt: nil, actions: .init())).contains("Sent, the runner is offline"))
+        XCTAssertTrue(texts(QuestionCard(answered, place: place, checkedAt: nil, actions: .init())).contains("Session works"))
+    }
+
     func testSpan() {
         XCTAssertEqual(QuestionCard.span(20), "now")
         XCTAssertEqual(QuestionCard.span(4 * 60), "4 min")
