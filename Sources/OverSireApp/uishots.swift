@@ -608,6 +608,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.glance = UIShots.menuIconSample()
                     } else if p == "kit" {
                         self.glance = UIShots.kitSample()
+                    } else if p.hasPrefix("questions:") {
+                        self.glance = UIShots.questionsSample(String(p.dropFirst(10)))
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if let r = Route(path: p) {
@@ -947,3 +949,87 @@ extension UIShots {
     }
 }
 
+
+// MARK: Question card samples
+
+extension UIShots {
+    /// questions:open or questions:closed: the question card in each state, in two columns.
+    static func questionsSample(_ set: String) -> NSWindow {
+        let now = Date()
+        let ago = { (m: Double) in now.addingTimeInterval(-m * 60) }
+        let account = AccountID(provider: "orca", id: "local")
+        let project = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE")
+        let item = { (k: String) in ItemRef(project: project, id: k, key: k, url: URL(string: "https://app.plane.so/ocral/browse/\(k)/")!) }
+        let session = SessionRef(workspace: WorkspaceRef(account: account, id: "w1"), id: "term_1")
+        let store = QuestionItem(id: "q1", header: "Store", text: "Where does the board keep the answered questions?",
+                                 why: "Two stores exist. The cloud store is paid.", kind: .single,
+                                 options: [.init(label: "Local JSON files", detail: "~/.config/oversire/store"), .init(label: "Cloud store")],
+                                 allowsOther: true)
+        let tests = QuestionItem(id: "q2", header: "Tests", text: "Which tests do you want for the card?", kind: .multi,
+                                 options: [.init(label: "Unit"), .init(label: "uishots"), .init(label: "Live")])
+        let free = QuestionItem(id: "q1", text: "What name do you want for the new setting?", kind: .free)
+        let q = { (id: String, items: [QuestionItem], via: SessionQuestion.Via, at: Double, origin: SessionQuestion.Origin) in
+            SessionQuestion(id: QuestionID(rawValue: "orca:local:\(id)"), session: session, origin: origin, items: items, via: via, askedAt: ago(at),
+                            expiresAt: via == .permission ? now.addingTimeInterval(240) : nil)
+        }
+        let e = { (q: SessionQuestion, s: QuestionState) in QuestionBoard.Entry(question: q, state: s, firstSeen: q.askedAt) }
+        let here = QuestionPlace(runtime: "Orca", host: "this Mac")
+        let remote = QuestionPlace(runtime: "Orca", host: "remote: studio", local: false)
+        let runner = QuestionPlace(runtime: "OverSire runner", host: "mba", local: false)
+        let work = SessionQuestion.Origin.work(item("OVERSIRE-186"))
+        let answer = QuestionAnswer(question: "orca:local:m1", items: [.init(id: "q1", choices: ["Local JSON files"]), .init(id: "q2", choices: ["Unit", "uishots"])])
+        var acts = QuestionCard.Actions()
+        acts.reveal = {}
+        acts.askAgain = {}
+        let cards: [[(QuestionBoard.Entry, QuestionPlace, QuestionCard.Actions, ((QuestionCard) -> Void)?)]]
+        if set == "closed" {
+            let two = q("m1", [store, tests], .askReply, 6, work)
+            cards = [
+                [(e(two, .answeredHere(answer, at: ago(1))), here, acts, nil),
+                 (e(two, .answeredElsewhere(answer, at: ago(2))), here, acts, nil),
+                 (e(two, .answeredElsewhere(nil, at: ago(2))), remote, acts, nil)],
+                [(e(two, .raced(at: ago(1))), here, acts, nil),
+                 (e(two, .gone(at: ago(3))), here, acts, nil),
+                 (e(q("p1", [.approve(id: "q1", header: "Bash", text: "npm test")], .permission, 1, .work(item("TOWERTAIL-2"))), .open), runner, acts, nil)],
+            ]
+        } else {
+            var enhance = acts
+            enhance.stop = {}
+            var failed = e(q("m4", [free], .runnerInput, 3, work), .open)
+            failed.error = "the runner is offline"
+            cards = [
+                [(e(q("m1", [store, tests], .askReply, 4, work), .open), here, acts, { c in c.pick(0, of: "q1"); c.pick(1, of: "q2") }),
+                 (e(q("m2", [free], .askReply, 2, work), .sending), here, acts, { c in c.write("Ask about questions", in: "q1") }),
+                 (failed, runner, acts, nil)],
+                [(e(q("f1", [store, tests], .form, 52, work), .open), here, acts, nil),
+                 (e(SessionQuestion(id: "orca:studio:m5", session: session, origin: .intake(item("TREBI-471")), round: 2, items: [tests], via: .askReply,
+                                    askedAt: ago(1)), .open), remote, enhance, nil)],
+            ]
+        }
+        let columns = cards.map { col -> NSView in
+            let v = NSStackView(v: [], spacing: 14)
+            for (entry, place, actions, prep) in col {
+                let c = QuestionCard(entry, place: place, checkedAt: now.addingTimeInterval(-8), now: { now }, actions: actions)
+                prep?(c)
+                v.addFull(c)
+            }
+            v.widthAnchor.constraint(equalToConstant: 600).isActive = true
+            // The shorter column takes the free height here, not in a card.
+            let fill = NSView()
+            fill.setContentHuggingPriority(.init(1), for: .vertical)
+            v.addArrangedSubview(fill)
+            return v
+        }
+        let w = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 1280, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+        w.title = "Question card"
+        let page = PageScroll(maxWidth: 1280)
+        let root = Box(fill: Palette.bg, border: nil, radius: 0)
+        root.addSubview(page)
+        NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: root.leadingAnchor), page.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                                     page.topAnchor.constraint(equalTo: root.topAnchor), page.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
+        w.contentView = root
+        page.rebuild { col in col.addArrangedSubview(NSStackView(h: columns, spacing: 20, align: .top)) }
+        w.orderFrontRegardless()
+        return w
+    }
+}

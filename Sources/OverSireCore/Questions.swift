@@ -217,6 +217,14 @@ public final class QuestionBoard: @unchecked Sendable {
         public var error: String?       // the last failed send
         public var stale = false        // the channel failed two reads in a row
 
+        public init(question: SessionQuestion, state: QuestionState, firstSeen: Date, error: String? = nil, stale: Bool = false) {
+            self.question = question
+            self.state = state
+            self.firstSeen = firstSeen
+            self.error = error
+            self.stale = stale
+        }
+
         public var id: QuestionID { question.id }
     }
 

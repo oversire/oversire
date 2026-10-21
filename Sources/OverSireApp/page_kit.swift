@@ -177,6 +177,8 @@ final class ActionButton: NSButton {
 // A small rounded label: "main", "FRITZ-17", "3 / 5". A click handler makes it a button.
 class Chiplet: Box {
     var onClick: (() -> Void)?
+    /// False: Tab skips the chip. A card that picks with keys sets it.
+    var keyFocus = true
     private let label: NSTextField
 
     // `icon` takes the place of `symbol`, for a drawn glyph such as StatusGlyph.
@@ -221,7 +223,7 @@ class Chiplet: Box {
 
     // A chip with a click handler takes keyboard focus. Space or Return presses it.
     override var acceptsFirstResponder: Bool { onClick != nil }
-    override var canBecomeKeyView: Bool { onClick != nil }
+    override var canBecomeKeyView: Bool { onClick != nil && keyFocus }
     override func keyDown(with event: NSEvent) {
         if onClick != nil, [36, 49, 76].contains(event.keyCode) { onClick?(); return }
         super.keyDown(with: event)
