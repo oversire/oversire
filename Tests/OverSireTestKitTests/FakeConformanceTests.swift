@@ -64,6 +64,21 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertEqual(lossy.problems, ["update did not change the title"])
     }
 
+    func testFakeQuestionChannelPassesItsSuite() async {
+        let r = await QuestionChannelConformance.run(sessions: [FakeQuestionChannel().session("s1")]) {
+            let ch = FakeQuestionChannel()
+            for (id, via) in [("1", SessionQuestion.Via.askReply), ("2", .form)] {
+                ch.ask(SessionQuestion(id: QuestionID(rawValue: "fake:\(id)"), session: ch.session("s1"), origin: .session,
+                                       items: [QuestionItem(id: "q1", text: "Which?", kind: .multi, options: [.init(label: "A")])],
+                                       via: via, askedAt: Date(timeIntervalSince1970: 1)))
+            }
+            return ch
+        }
+        XCTAssertTrue(r.passed, r.description)
+        let empty = await QuestionChannelConformance.run(sessions: []) { FakeQuestionChannel() }
+        XCTAssertEqual(empty.problems, ["no answerable question to test"])
+    }
+
     func testPollGivesEachEventOnce() async throws {
         let t = FakeTracker()
         let ref = try await t.create(ItemDraft(title: "A"), in: t.project)

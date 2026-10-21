@@ -62,6 +62,7 @@ public enum ProviderConformance {
         (.reveal, "Revealing", { $0 is any Revealing }),
         (.hostFiles, "HostFileWriting", { $0 is any HostFileWriting }),
         (.sessionHistory, "SessionHistoryReading", { $0 is any SessionHistoryReading }),
+        (.questions, "QuestionChannel", { $0 is any QuestionChannel }),
         (.projectSettings, "ProjectSettingsReading", { $0 is any ProjectSettingsReading }),
         (.projectSettingsEdit, "ProjectSettingsEditing", { $0 is any ProjectSettingsEditing }),
     ]

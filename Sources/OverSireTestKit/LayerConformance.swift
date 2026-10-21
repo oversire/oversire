@@ -217,3 +217,64 @@ public enum RuntimeConformance {
         return r
     }
 }
+
+public enum QuestionChannelConformance {
+    /// Reads the open questions of `sessions` twice, answers the first answerable one twice,
+    /// and checks the form questions. The channel must have at least one answerable question.
+    public static func run(sessions: [SessionRef], make: @Sendable () async throws -> any QuestionChannel) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let ch = await r.step("make", make) else { return r }
+        r.merge(ProviderConformance.capabilities(ch))
+        r.expect(ch.capabilities.contains(.questions), "a QuestionChannel needs the capability questions")
+        guard let first = await r.step("openQuestions", { try await ch.openQuestions(in: sessions) }),
+              let second = await r.step("openQuestions again", { try await ch.openQuestions(in: sessions) }) else { return r }
+        r.expect(first.map(\.id) == second.map(\.id), "two reads give other ids: \(first.map(\.id)) and \(second.map(\.id))")
+        r.expect(Set(first.map(\.id)).count == first.count, "a read has two questions with the same id")
+        for q in first {
+            r.expect(sessions.contains(q.session), "question \(q.id) is for a session that was not asked for")
+            r.expect(!q.items.isEmpty, "question \(q.id) has no items")
+        }
+
+        for q in first where q.via == .form {
+            r.expect(!q.answerable, "form question \(q.id) is answerable")
+            do {
+                _ = try await ch.answer(q, answer(for: q))
+                r.expect(false, "answer on form question \(q.id) did not throw")
+            } catch let e as QuestionError {
+                r.expect(e == .notAnswerable, "answer on form question \(q.id) threw \(e)")
+            } catch {
+                r.expect(false, "answer on form question \(q.id) threw \(error), not QuestionError.notAnswerable")
+            }
+        }
+
+        guard let q = first.first(where: \.answerable) else {
+            r.expect(false, "no answerable question to test")
+            return r
+        }
+        let a = answer(for: q)
+        r.expect((try? q.validate(a)) != nil, "the sample answer does not fit question \(q.id)")
+        if let res = await r.step("answer", { try await ch.answer(q, a) }) {
+            r.expect(res == .sent, "answer gave \(res), not sent")
+        }
+        if let res = await r.step("answer again", { try await ch.answer(q, a) }) {
+            r.expect(res == .sent || res == .alreadyAnswered, "a repeated answer gave \(res)")
+        }
+        if let after = await r.step("openQuestions after the answer", { try await ch.openQuestions(in: sessions) }) {
+            r.expect(!after.contains { $0.id == q.id }, "question \(q.id) is still open after the answer")
+        }
+        let missing = SessionQuestion(id: QuestionID(rawValue: q.id.rawValue + "-missing"), session: q.session, origin: q.origin,
+                                      items: q.items, via: q.via, askedAt: q.askedAt)
+        if let res = await r.step("answer a question that is not open", { try await ch.answer(missing, answer(for: missing)) }) {
+            r.expect(res == .alreadyAnswered || res == .gone, "answer on a question that is not open gave \(res)")
+        }
+        return r
+    }
+
+    /// A valid answer: the first option of each item, or a short text.
+    public static func answer(for q: SessionQuestion) -> QuestionAnswer {
+        QuestionAnswer(question: q.id, items: q.items.map { i in
+            if let o = i.options.first { return QuestionAnswer.Item(id: i.id, choices: [o.label]) }
+            return QuestionAnswer.Item(id: i.id, other: "Conformance answer")
+        })
+    }
+}
