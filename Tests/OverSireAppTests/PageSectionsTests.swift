@@ -77,7 +77,7 @@ final class PageSectionsTests: XCTestCase {
 
     func testProjectPageMissingProject() {
         let page = ProjectPage(.project("NOPE"), data: TestAppData(), router: Router())
-        XCTAssertEqual(ids(page.sections()), ["top/header", "top/missing"])
+        XCTAssertEqual(ids(page.sections()), ["top/header", "top/lookup"])
     }
 }
 
