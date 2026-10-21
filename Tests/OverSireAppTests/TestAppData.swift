@@ -30,6 +30,7 @@ final class TestAppData: AppData {
                                          statePath: tmp + "/state.json", activityPath: tmp + "/activity.jsonl")
     lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()
+    let cleaner = Cleaner(defaults: UserDefaults(suiteName: "oversire-tests")!)
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
     lazy var memory = ProjectMemory(writes: writes)
     lazy var updater = Updater()
