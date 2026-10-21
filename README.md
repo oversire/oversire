@@ -46,7 +46,6 @@ OverSire is built on three principles:
 - **Sub-items** — the list shows only top-level items. A ring and a count such as `3/5` show the done sub-items of an item. The ring is blue while sub-items are open, and green when all are done. To also list sub-items as rows, turn on Settings › General › "List sub-items as rows"
 - **Change it in place** — set the status, priority, labels and assignees, edit the title and description (**Edit**, ⌘↩ saves, Esc cancels), or comment. OverSire changes Markdown to Plane rich text and back. Plane often does not record the new status of a change. OverSire then shows the status from the next change, or the status now
 - **New item** — click **+** next to the filter, or press ⌘N. Set the state and the priority
-- **Copy for agent** — copies the item as Markdown: title, facts, link, description and all comments. Paste it into a coding agent
 - **Fold and reorder** — click a project header to fold it. A folded header shows one number: the items that are not done. Drag the grip to change the order
 - **Hide Done items** — Settings › General › "Hide Done items" is Always, older than 1, 7 or 30 days, or Never. The default is older than 1 day
 - **Filter** — press ⌘F and type. The filter looks in titles and descriptions. Esc clears it

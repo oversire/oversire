@@ -270,19 +270,6 @@ final class ProjectStore {
         }
     }
 
-    // Title, facts, link, description and all comments as Markdown, on the pasteboard.
-    func copyForAgent(_ id: String) {
-        timeline(itemId: id) { [weak self] entries in
-            guard let found = self?.item(id) else { return }
-            let comments = entries.compactMap { e -> Comment? in
-                if case .comments(_, let last) = e.change { return last }
-                return nil
-            }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(found.item.agentMarkdown(snap: found.snap, comments: comments), forType: .string)
-        }
-    }
-
     func comment(itemId: String, body: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: "Could not post the comment", done: done) { c, ref in
             try await c.comment(ref, markdown: body)

@@ -137,7 +137,7 @@ final class HomePage: Page {
         for r in needsRows + movingRows + [week] { h.combine(r.id); h.combine(r.hash) }
         rows.append(PageRow("columns", hash: h.finalize(), update: { ($0 as? HomeColumns)?.apply(needsRows, movingRows, week) }) {
             let c = HomeColumns()
-            c.apply(needsRows, movingRows, week, mark: false)
+            c.apply(needsRows, movingRows, week)
             return c
         })
         return [PageSection("home", rows: rows)]
@@ -389,9 +389,9 @@ final class HomeColumns: NSStackView {
     }
     required init(coder: NSCoder) { fatalError() }
 
-    func apply(_ needsRows: [PageRow], _ movingRows: [PageRow], _ weekRow: PageRow, mark: Bool = true) {
-        needs.apply(needsRows, mark: mark)
-        moving.apply(movingRows, mark: mark)
+    func apply(_ needsRows: [PageRow], _ movingRows: [PageRow], _ weekRow: PageRow) {
+        needs.apply(needsRows)
+        moving.apply(movingRows)
         guard weekRow.hash != weekHash else { return }
         weekHash = weekRow.hash
         week.clear()

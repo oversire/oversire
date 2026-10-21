@@ -163,7 +163,7 @@ class Page: NSViewController {
         guard isShown else { stale = true; return }
         if !built, buildsLater, Self.deferBuilds {
             built = true
-            if sections() == nil { scroll.rebuild { skeleton($0) } } else { scroll.apply(skeletonRows(), fills: false, mark: false) }
+            if sections() == nil { scroll.rebuild { skeleton($0) } } else { scroll.apply(skeletonRows(), fills: false) }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in self?.reload(reason: reason) }
             return
         }

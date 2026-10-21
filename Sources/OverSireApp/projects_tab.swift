@@ -483,7 +483,6 @@ final class AgentPill: NSView {
 
 final class ProjectItemRow: NSView {
     var onToggle: (() -> Void)?
-    var onAgent: (() -> Void)?
     var onStart: ((NSView) -> Void)?
     var onStartMenu: ((_ anchor: NSView, _ header: Bool) -> NSMenu)?   // "Start in Orca with"
     var onPill: ((NSView) -> Void)?
@@ -571,8 +570,8 @@ final class ProjectItemRow: NSView {
         addSubview(lk)
         let cp = NSButton(frame: NSRect(x: w - 36, y: (ROW_H - 22) / 2, width: 28, height: 22))
         cp.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy link")
-        cp.isBordered = false; cp.target = self; cp.action = #selector(copyMenu(_:))
-        cp.toolTip = "Copy"
+        cp.isBordered = false; cp.target = self; cp.action = #selector(copyLink)
+        cp.toolTip = "Copy link"
         addSubview(cp)
         if let pill {
             pill.frame.origin = NSPoint(x: w - 66 - pill.frame.width, y: (ROW_H - 18) / 2)
@@ -601,24 +600,13 @@ final class ProjectItemRow: NSView {
         setAccessibilityLabel("\(item.title), \(opt?.name ?? "no status")" + sub)
     }
     required init?(coder: NSCoder) { fatalError() }
-    @objc func copyMenu(_ sender: NSButton) {
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Copy link", action: #selector(copyLink), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Copy for agent", action: #selector(copyAgent), keyEquivalent: "").target = self
-        if onStart != nil, play == nil {
-            menu.addItem(.separator())
-            menu.addItem(withTitle: hasAgent ? "Start another session in Orca" : "Start in Orca", action: #selector(startAgent(_:)), keyEquivalent: "").target = self
-        }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
-    }
     @objc func startWithMenu(_ sender: NSButton) {
         onStartMenu?(play ?? sender, true).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
     }
-    // The right-click menu: the Copy menu, plus "Start in Orca with ›".
+    // The right-click menu: Copy link, plus the Start in Orca entries.
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = NSMenu()
         menu.addItem(withTitle: "Copy link", action: #selector(copyLink), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Copy for agent", action: #selector(copyAgent), keyEquivalent: "").target = self
         if onStart != nil {
             menu.addItem(.separator())
             menu.addItem(withTitle: hasAgent ? "Start another session in Orca" : "Start in Orca", action: #selector(startAgent(_:)), keyEquivalent: "").target = self
@@ -636,7 +624,6 @@ final class ProjectItemRow: NSView {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(urlStr, forType: .string)
     }
-    @objc func copyAgent() { onAgent?() }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
@@ -866,7 +853,6 @@ extension TabVC {
                     row.onStartMenu = { anchor, header in agents.startMenu(item, snap: snap, anchor: anchor, header: header) }
                     row.onPill = { [weak agents] anchor in agents?.pillClicked(item, snap: snap, anchor: anchor) }
                 }
-                row.onAgent = { [weak store] in store?.copyForAgent(item.id) }
                 row.identifier = NSUserInterfaceItemIdentifier("item:" + item.id)
                 rows.append(row)
             }

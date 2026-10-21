@@ -843,7 +843,7 @@ final class PageScroll: NSScrollView {
     /// Keeps the views with the same id, updates the rows whose hash changed, inserts and removes the others. No column swap.
     /// The first visible row keeps its place on screen.
     @discardableResult
-    func apply(_ sections: [PageSection], fills: Bool = false, mark: Bool = true) -> RowReconciler.Result {
+    func apply(_ sections: [PageSection], fills: Bool = false) -> RowReconciler.Result {
         let r: RowReconciler
         if let rec = reconciler { r = rec } else {
             column.clear()
@@ -867,7 +867,7 @@ final class PageScroll: NSScrollView {
         }
         self.fills = fills
         fillHeight.forEach { $0.isActive = fills }
-        return r.apply(rows, mark: mark)
+        return r.apply(rows)
     }
 
     // The inner scroll views that keep their position over a rebuild. Their identifier names them.

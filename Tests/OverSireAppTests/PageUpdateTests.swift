@@ -132,20 +132,35 @@ final class PageReconcileTests: XCTestCase {
     func testUnchangedRowsKeepTheirViews() {
         let stack = NSStackView(v: [], spacing: 0)
         let r = RowReconciler(stack)
-        r.apply(rows(10), mark: false)
+        r.apply(rows(10))
         let kept = r.view("r3"), changed = r.view("r5")
-        let res = r.apply(rows(10, changed: 5), mark: false)
+        let res = r.apply(rows(10, changed: 5))
         XCTAssertEqual(res, RowReconciler.Result(kept: 9, updated: 1, inserted: 0, removed: 0))
         XCTAssertTrue(r.view("r3") === kept)
         XCTAssertFalse(r.view("r5") === changed)
     }
 
+    func testChangedRowUpdatesInPlaceWithNoTint() {
+        let stack = NSStackView(v: [], spacing: 0)
+        let r = RowReconciler(stack)
+        let make = { (v: Int) in
+            [PageRow("a", v, update: { ($0 as? NSTextField)?.stringValue = "a \(v)" }) { NSTextField.text("a \(v)") }]
+        }
+        r.apply(make(0))
+        let view = r.view("a")
+        let res = r.apply(make(1))
+        XCTAssertEqual(res.updated, 1)
+        XCTAssertTrue(r.view("a") === view)
+        XCTAssertEqual((view as? NSTextField)?.stringValue, "a 1")
+        XCTAssertNil(view?.layer?.sublayers?.first { $0.name == "oversire.mark" })
+    }
+
     func testInsertRemoveAndOrder() {
         let stack = NSStackView(v: [], spacing: 0)
         let r = RowReconciler(stack)
-        r.apply(rows(3), mark: false)
+        r.apply(rows(3))
         let next = [rows(4)[3], rows(3)[0], rows(3)[2]]
-        let res = r.apply(next, mark: false)
+        let res = r.apply(next)
         XCTAssertEqual(res.inserted, 1)
         XCTAssertEqual(res.removed, 1)
         XCTAssertEqual(r.ids, ["r3", "r0", "r2"])
@@ -155,12 +170,12 @@ final class PageReconcileTests: XCTestCase {
     func testFiveHundredRowsApplyFast() {
         let stack = NSStackView(v: [], spacing: 0)
         let r = RowReconciler(stack)
-        r.apply(rows(500), mark: false)
+        r.apply(rows(500))
         var best = Double.infinity
         for k in 0..<5 {
             let next = rows(500, changed: k)
             let t = Date()
-            r.apply(next, mark: false)
+            r.apply(next)
             best = min(best, Date().timeIntervalSince(t))
         }
         XCTAssertLessThan(best * 1000, 5, "500 rows with one change take \(best * 1000) ms")

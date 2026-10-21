@@ -63,7 +63,7 @@ struct PageRow {
         for r in rows { h.combine(r.id); h.combine(r.hash) }
         return PageRow(id, hash: h.finalize(), update: { ($0 as? C)?.apply(rows) }) {
             let c = card()
-            c.apply(rows, mark: false)
+            c.apply(rows)
             return c
         }
     }
@@ -129,14 +129,12 @@ final class RowReconciler {
     func view(_ id: String) -> NSView? { views[id]?.view }
 
     /// Keeps the views with the same id, updates the rows whose hash changed, inserts and removes the others.
-    /// `mark` tints the rows that changed, so the page shows what came in.
     @discardableResult
-    func apply(_ input: [PageRow], mark: Bool = true) -> Result {
+    func apply(_ input: [PageRow]) -> Result {
         let rows = RowReconciler.unique(input)
         let anchor = captureAnchor()
         var result = Result()
         var next: [String: (view: NSView, hash: Int)] = [:]
-        var changed: [NSView] = []
         for r in rows {
             if let old = views[r.id] {
                 if old.hash == r.hash { next[r.id] = old; result.kept += 1; continue }
@@ -147,11 +145,9 @@ final class RowReconciler {
                     next[r.id] = (r.make(), r.hash)
                 }
                 result.updated += 1
-                changed.append(next[r.id]!.view)
             } else {
                 next[r.id] = (r.make(), r.hash)
                 result.inserted += 1
-                if applied { changed.append(next[r.id]!.view) }
             }
         }
         result.removed = views.keys.filter { next[$0] == nil }.count
@@ -181,7 +177,6 @@ final class RowReconciler {
         groups = rows.filter(\.group).map { ($0.id, next[$0.id]!.view, $0.hash, $0.make) }
         applied = true
         restore(anchor)
-        if mark, !changed.isEmpty { changed.forEach(RowReconciler.tint) }
         return result
     }
 
@@ -249,40 +244,13 @@ final class RowReconciler {
     }
 
     static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-
-    /// A short accent tint that fades out. Not with Reduce Motion.
-    static func tint(_ v: NSView) {
-        guard !reduceMotion else { return }
-        v.wantsLayer = true
-        guard let layer = v.layer else { return }
-        layer.sublayers?.filter { $0.name == "oversire.mark" }.forEach { $0.removeFromSuperlayer() }
-        let mark = CALayer()
-        mark.name = "oversire.mark"
-        mark.frame = layer.bounds
-        mark.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        mark.cornerRadius = layer.cornerRadius
-        v.effectiveAppearance.performAsCurrentDrawingAppearance {
-            mark.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.14).cgColor
-        }
-        mark.opacity = 0
-        layer.addSublayer(mark)
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = 1
-        fade.toValue = 0
-        fade.duration = 2.4
-        fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { mark.removeFromSuperlayer() }
-        mark.add(fade, forKey: "fade")
-        CATransaction.commit()
-    }
 }
 
 extension RowList {
     /// Reconciles the rows of the list in place.
     @discardableResult
-    func apply(_ rows: [PageRow], mark: Bool = true) -> RowReconciler.Result {
-        let r = reconciler.apply(rows, mark: mark)
+    func apply(_ rows: [PageRow]) -> RowReconciler.Result {
+        let r = reconciler.apply(rows)
         didApply()
         return r
     }

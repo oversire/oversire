@@ -191,7 +191,6 @@ final class ItemPage: Page, NSTextFieldDelegate {
             actions.append(NSStackView(h: [b, more], spacing: 1))
         }
         actions += [
-            ActionButton("Copy for agent", symbol: "doc.on.doc") { [weak self] in self?.data.projectStore.copyForAgent(item.id) },
             ActionButton("Copy link", symbol: "link") { [weak self] in
                 guard let self else { return }
                 NSPasteboard.general.clearContents()

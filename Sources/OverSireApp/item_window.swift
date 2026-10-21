@@ -203,7 +203,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         content.addSubview(crumb)
         let open = button("Open in Plane", #selector(openInPlane), in: content)
         open.frame.origin = NSPoint(x: w - pad - open.frame.width, y: y)
-        let copy = button("Copy ▾", #selector(copyMenu(_:)), in: content)
+        let copy = button("Copy link", #selector(copyLink), in: content)
         copy.frame.origin = NSPoint(x: open.frame.minX - copy.frame.width - 6, y: y)
         y += 32
 
@@ -468,11 +468,8 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         if let a = item.author { line("Created by", a) }
         line("Updated", relativeTime(item.updatedAt) + (item.updatedBy.map { " by \($0)" } ?? ""))
         y += 12
-        let agent = button("Copy for agent", #selector(copyAgent), in: doc)
-        agent.frame.origin = NSPoint(x: pad - 4, y: y)
-        agent.toolTip = "Title, description and comments as Markdown"
         let read = button("Mark as read", #selector(markRead), in: doc)
-        read.frame.origin = NSPoint(x: agent.frame.maxX + 6, y: y)
+        read.frame.origin = NSPoint(x: pad - 4, y: y)
         return y + 40
     }
 
@@ -507,7 +504,6 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
                 row.onStart = { [weak agents] anchor in agents?.start(kid, snap: snap, anchor: anchor) }
                 row.onPill = { [weak agents] anchor in agents?.pillClicked(kid, snap: snap, anchor: anchor) }
             }
-            row.onAgent = { [weak self] in self?.store.copyForAgent(kid.id) }
             row.frame.origin = NSPoint(x: 0, y: y)
             doc.addSubview(row)
             y += row.frame.height
@@ -842,18 +838,11 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     @objc private func openInPlane() {
         if let id = itemId, let u = store.item(id).flatMap({ URL(string: $0.item.url) }) { NSWorkspace.shared.open(u) }
     }
-    @objc private func copyMenu(_ sender: NSButton) {
-        let menu = NSMenu()
-        menu.addItem(withTitle: "Copy link", action: #selector(copyLink), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Copy for agent", action: #selector(copyAgent), keyEquivalent: "").target = self
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
-    }
     @objc private func copyLink() {
         guard let id = itemId, let url = store.item(id)?.item.url else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url, forType: .string)
     }
-    @objc private func copyAgent() { if let id = itemId { store.copyForAgent(id) } }
     @objc private func markRead() { if let id = itemId { store.markRead(itemId: id) } }
 
     @objc private func sendComment() {
