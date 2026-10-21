@@ -97,9 +97,13 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertFalse(s.isHiddenDone(s.items[0], afterDays: -1), "Hide Done does not hide p")
         XCTAssertEqual(s.groupSorted(s.rootItems).map(\.id), ["q", "p", "lone"])
 
+        XCTAssertEqual(s.openDescendants(of: "p"), ["g1"])
+        XCTAssertEqual(s.firstState(group: "completed", else: .done)?.id, "s7")
+        XCTAssertEqual(s.firstState(group: "started", else: .progress)?.id, doing.id)
         s.index = [ItemStub(id: "p", parentId: nil, stateId: "s7", activityAt: nil),
                    ItemStub(id: "c3", parentId: "p", stateId: "s1", activityAt: nil)]
         XCTAssertEqual(s.openSubItems(of: "p"), 2, "a sub-item in the index only counts")
+        XCTAssertEqual(s.openDescendants(of: "p"), ["g1", "c3"])
         s.statusOptions[0].localCategory = .done
         XCTAssertEqual(s.openSubItems(of: "p"), 0, "a status set to Done counts as closed")
         XCTAssertTrue(s.isFinished(s.items[0]))
@@ -109,6 +113,7 @@ final class TrackerModelTests: XCTestCase {
         let s = snap([item("a", status: "s5", parent: "b"), item("b", status: "s1", parent: "a")], [todo, done])
         XCTAssertEqual(s.openSubItems(of: "a"), 1)
         XCTAssertFalse(s.isFinished(s.items[0]))
+        XCTAssertEqual(s.openDescendants(of: "a"), ["b"])
     }
 
     func testSnapshotKeepsOneItemPerId() {

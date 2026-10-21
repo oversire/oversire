@@ -28,7 +28,21 @@ struct CleanupConfig: Codable, Equatable {
 
 /// One thing left over. A safe line is checked by default, and auto-remove may run it. A Look line is never checked.
 struct CleanupLine: Equatable {
-    enum Kind: String { case worktree, card, group, localBranch, remoteBranch, pr, session }
+    enum Kind: String {
+        case worktree, card, group, localBranch, remoteBranch, pr, session
+
+        var noun: String {
+            switch self {
+            case .worktree: return "worktree"
+            case .card: return "Orca card"
+            case .group: return "worktree group"
+            case .localBranch: return "local branch"
+            case .remoteBranch: return "remote branch"
+            case .pr: return "open PR"
+            case .session: return "live session"
+            }
+        }
+    }
     enum Action: Equatable {
         case workspace(Workspace)                            // orca worktree rm
         case group(path: String, worktrees: [String])        // git worktree remove each, then the folder

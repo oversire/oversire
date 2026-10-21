@@ -16,10 +16,11 @@ final class ItemLine: TableRow {
     }
 
     init(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?, layout: ColumnLayout, commands: RowCommander? = nil,
-         go: @escaping (Route) -> Void) {
+         cleanup: [CleanupLine] = [], go: @escaping (Route) -> Void) {
         let opt = snap.option(item.statusOptionId)
+        let finish = ItemLine.finishChip(item, snap: snap, cleanup: cleanup)
         var cells: [String: NSView] = [
-            "status": StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status").sized(16),
+            "status": StatusGlyph.item(item, snap: snap).sized(16),
             "key": NSTextField.text(item.key, size: 11.5, color: Palette.dim, mono: true),
             "title": NSTextField.text(item.title, size: 13),
             "updated": NSTextField.text(relativeTime(item.activityAt), size: 11.5, color: Palette.dim),
@@ -29,16 +30,33 @@ final class ItemLine: TableRow {
             cells["sub"] = NSStackView(h: [ProgressRing(done: prog.done, total: prog.total).sized(14),
                                            NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)], spacing: 4)
         }
-        cells["session"] = StatusPill.or(status)
+        cells["session"] = finish ?? StatusPill.or(status)
         if let ci = stream?.ci { cells["ci"] = Chiplet("CI", symbol: ci.symbol, color: ci.color) }
         if let p = item.fields["Priority"], p != "None" { cells["priority"] = Chiplet(p) }
         if let who = item.assignees.first { cells["who"] = Avatar(who) }
-        let parts = [opt?.name, status?.label, stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
+        let parts = [finish?.accessibilityLabel() ?? opt?.name, status?.label, stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
         super.init(layout, cells: cells, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
         itemActions(url: item.url, key: item.key)
         commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// "Done · N open" for a Done item with open sub-items. "Done · cleanup" for a finished item with leftovers. Else nil.
+    static func finishChip(_ item: Item, snap: ProjectSnapshot, cleanup: [CleanupLine]) -> Chiplet? {
+        if snap.isDoneWithOpenSubItems(item) {
+            let n = snap.openSubItems(of: item.id)
+            let c = Chiplet("Done · \(n) open", symbol: "exclamationmark.triangle.fill", color: Palette.bad)
+            c.toolTip = "Plane says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(n) sub-item\(n == 1 ? " is" : "s are") open."
+            c.setAccessibilityLabel("Done, \(n) sub-item\(n == 1 ? "" : "s") open")
+            return c
+        }
+        guard !cleanup.isEmpty else { return nil }
+        let c = Chiplet("Done · cleanup", symbol: "bubbles.and.sparkles", color: Palette.warn)
+        let kinds = cleanup.map(\.kind.noun).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        c.toolTip = "Done. \(cleanup.count) thing\(cleanup.count == 1 ? "" : "s") to clean up: \(kinds.joined(separator: ", "))"
+        c.setAccessibilityLabel(c.toolTip!)
+        return c
+    }
 }
 
 // Initials in a round badge. The name is the tooltip.
@@ -151,7 +169,8 @@ final class ProjectPage: Page {
             })
             let m = more[opt.id] ?? MoreRows()
             more[opt.id] = m
-            list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), status: self?.data.statusJob.item(i.key), layout: table) { self?.go($0) } }
+            list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), status: self?.data.statusJob.item(i.key), layout: table,
+                                                                          cleanup: self.map { $0.data.cleaner.lines(i.key, data: $0.data) } ?? []) { self?.go($0) } }
         }
         if list.isEmpty { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
         col.addFull(list)

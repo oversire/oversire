@@ -288,6 +288,29 @@ public struct ProjectSnapshot: Codable, Sendable {
         return progress(of: item.id).total > 0
     }
 
+    /// The ids of the open sub-items at all levels, loaded or not. Parents come before their children.
+    public func openDescendants(of id: String) -> [String] {
+        var kids: [String: [(id: String, state: String?)]] = [:]
+        var seen = Set<String>()
+        for i in items where seen.insert(i.id).inserted { if let p = i.parentId { kids[p, default: []].append((i.id, i.statusOptionId)) } }
+        for s in index ?? [] where seen.insert(s.id).inserted { if let p = s.parentId { kids[p, default: []].append((s.id, s.stateId)) } }
+        var out: [String] = []
+        var visited: Set<String> = [id]
+        func walk(_ p: String) {
+            for k in kids[p] ?? [] where visited.insert(k.id).inserted {
+                if !isClosed(k.state) { out.append(k.id) }
+                walk(k.id)
+            }
+        }
+        walk(id)
+        return out
+    }
+
+    /// The first state of a Plane group ("completed", "started"), else the first state of the category.
+    public func firstState(group: String, else category: StatusCategory) -> StatusOption? {
+        statusOptions.first { $0.group == group } ?? statusOptions.first { $0.category == category }
+    }
+
     private func countOpenBelow() -> [String: Int] {
         var state: [String: String?] = [:]
         var kids: [String: [String]] = [:]

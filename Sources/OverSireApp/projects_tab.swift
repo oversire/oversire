@@ -32,6 +32,9 @@ func runInTerminal(_ command: String) {
 final class StatusGlyph: NSView {
     let category: StatusCategory
     let color: NSColor
+    /// A Done item with open sub-items: a warning triangle at the lower right.
+    var warning = false { didSet { needsDisplay = true } }
+
     init(category: StatusCategory, color: NSColor, name: String) {
         self.category = category
         self.color = color
@@ -40,6 +43,16 @@ final class StatusGlyph: NSView {
         setAccessibilityLabel(name)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The glyph of an item. A Done item with open sub-items gets the warning and says so.
+    static func item(_ item: Item, snap: ProjectSnapshot) -> StatusGlyph {
+        let opt = snap.option(item.statusOptionId)
+        let open = snap.isDoneWithOpenSubItems(item) ? snap.openSubItems(of: item.id) : 0
+        let name = (opt?.name ?? "No status") + (open > 0 ? " · \(open) sub-item\(open == 1 ? "" : "s") open" : "")
+        let g = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: name)
+        g.warning = open > 0
+        return g
+    }
 
     // The shapes use a 16 pt box. Other sizes scale it.
     override func draw(_ dirtyRect: NSRect) {
@@ -78,6 +91,15 @@ final class StatusGlyph: NSView {
             p.line(to: NSPoint(x: 13, y: 12))
             p.lineWidth = 1.7; p.lineCapStyle = .round; p.lineJoinStyle = .round
             c.setStroke(); p.stroke()
+        }
+        if warning {
+            let t = NSBezierPath()
+            t.move(to: NSPoint(x: 8.5, y: 0))
+            t.line(to: NSPoint(x: 16, y: 0))
+            t.line(to: NSPoint(x: 12.25, y: 7))
+            t.close()
+            Palette.bg.setStroke(); t.lineWidth = 1.5; t.stroke()
+            Palette.bad.setFill(); t.fill()
         }
     }
 }
@@ -483,7 +505,7 @@ final class ProjectItemRow: NSView {
         wantsLayer = true
         layer?.backgroundColor = expanded ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.1).cgColor : nil
         let opt = snap.option(item.statusOptionId)
-        let glyph = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: opt?.name ?? "No status")
+        let glyph = StatusGlyph.item(item, snap: snap)
         glyph.frame.origin = NSPoint(x: 14, y: (ROW_H - 16) / 2)
         addSubview(glyph)
         if unread {

@@ -584,7 +584,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
             for lane in g.lanes {
                 if !lane.priority.isEmpty { list.add(WorkPage.laneRow(lane)) }
                 for e in lane.entries {
-                    list.add(ItemLine(e.item, snap: snap, stream: data.workstreams.stream(e.item.key), status: job.item(e.item.key), layout: subTable) { [weak self] in self?.go($0) })
+                    list.add(ItemLine(e.item, snap: snap, stream: data.workstreams.stream(e.item.key), status: job.item(e.item.key), layout: subTable,
+                                      cleanup: data.cleaner.lines(e.item.key, data: data)) { [weak self] in self?.go($0) })
                 }
             }
         }

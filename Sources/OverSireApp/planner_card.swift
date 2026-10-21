@@ -105,7 +105,9 @@ final class PlannerCard: Card {
         let found = store.item(key: r.item.key)
         let opt = found.flatMap { $0.snap.option($0.item.statusOptionId) }
         let status = found == nil ? "Not tracked" : (opt?.name ?? "No status")
-        let ring = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: status).sized(14)
+        let ring = StatusGlyph(category: opt?.category ?? .todo, color: projectColor(opt?.color ?? "GRAY"), name: status)
+        ring.warning = found.map { $0.snap.isDoneWithOpenSubItems($0.item) } ?? false
+        _ = ring.sized(14)
         let title = NSTextField.text(found?.item.title ?? r.item.key, size: 12.5)
         title.lineBreakMode = .byTruncatingTail
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

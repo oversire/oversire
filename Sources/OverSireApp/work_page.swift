@@ -56,6 +56,17 @@ final class WorkPage: Page {
         }
     }
 
+    /// Your finished root items: finished in the "Hide Done items after" window, or with cleanup left at any age. Newest first.
+    static func done(_ data: AppData, now: Date = Date()) -> [Entry] {
+        let days = PROJECTS_CFG.hideDoneAfterDays
+        return data.projectStore.snapshots.values.flatMap { snap in
+            snap.rootItems.filter { i in
+                guard i.isMine(snap.me), snap.isFinished(i) else { return false }
+                return !snap.isHiddenDone(i, afterDays: days == 0 ? 1 : days, now: now) || !data.cleaner.lines(i.key, data: data).isEmpty
+            }.map { ($0, snap, data.workstreams.stream($0.key)) }
+        }.sorted { $0.item.updatedAt > $1.item.updatedAt }
+    }
+
     /// The page title, the caption, the actions and the tabs. The Worktrees tab uses it too.
     static func header(_ page: Page, tab: Route.WorkTab, caption: String, actions: [NSView], trailing: [NSView] = [], in col: NSStackView) {
         let data = page.data
@@ -83,6 +94,7 @@ final class WorkPage: Page {
         if let g = groups.first(where: { $0.title == "In progress" }) { group(card, g, queue: false) }
         upNext(card)
         if let g = groups.first(where: { $0.title == "Not started" }) { group(card, g, queue: true) }
+        doneGroup(card)
         pageBusy = data.projectsLoading
         if card.isEmpty { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }
         col.addFull(card)
@@ -105,6 +117,24 @@ final class WorkPage: Page {
                 }
                 return row
             }
+        }
+    }
+
+    // Finished items. A row with cleanup left shows the "Done · cleanup" chip. The cleanup actions are on the item page.
+    private func doneGroup(_ card: StickyListCard) {
+        let list = WorkPage.done(data)
+        guard !list.isEmpty else { return }
+        let job = data.statusJob
+        let left = list.filter { !data.cleaner.lines($0.item.key, data: data).isEmpty }.count
+        card.addGroup("Done", count: list.count) { [
+            NSTextField.text(left > 0 ? "\(left) with cleanup left" : "Finished in the last \(max(1, PROJECTS_CFG.hideDoneAfterDays)) day\(PROJECTS_CFG.hideDoneAfterDays > 1 ? "s" : "")",
+                             size: 12, color: Palette.dim),
+        ] }
+        let m = more["Done"] ?? MoreRows()
+        more["Done"] = m
+        card.add(list, more: m) { [weak self, table, commands] e in
+            ItemLine(e.item, snap: e.snap, stream: e.stream, status: job.item(e.item.key), layout: table, commands: commands,
+                     cleanup: self.map { $0.data.cleaner.lines(e.item.key, data: $0.data) } ?? []) { self?.go($0) }
         }
     }
 

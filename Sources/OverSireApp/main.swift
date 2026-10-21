@@ -255,6 +255,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.reloadList()
             self?.updateIcon()
         }
+        NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { _ in
+            NotificationCenter.default.post(name: AppWindow.changed, object: nil)
+        }
         agentIndex.startTimer()
         startQuestions()
         NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
