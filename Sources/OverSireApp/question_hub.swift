@@ -15,6 +15,7 @@ final class QuestionHub {
     private let writes: StoreWrites
     private let lock = NSLock()
     private var refs: [SessionRef: String] = [:]          // Orca session → item key
+    private var intake: [SessionRef: ItemRef] = [:]       // Enhance worker → intake item
     private var drafts: [QuestionID: QuestionDraft] = [:]
     private var seeded: [QuestionBoard.Entry]?
     private var notified: Set<QuestionID> = []
@@ -56,9 +57,12 @@ final class QuestionHub {
     }
 
     /// For `--uishots`: fixed entries and no board.
-    func seed(_ entries: [QuestionBoard.Entry], keys: [SessionRef: String]) {
+    func seed(_ entries: [QuestionBoard.Entry], keys: [SessionRef: String], intake: [SessionRef: ItemRef] = [:]) {
         seeded = entries
-        lock.withLock { refs.merge(keys) { _, b in b } }
+        lock.withLock {
+            refs.merge(keys) { _, b in b }
+            self.intake.merge(intake) { _, b in b }
+        }
     }
 
     // MARK: Reads
@@ -69,7 +73,12 @@ final class QuestionHub {
 
     /// The item key of the question: its origin, else the work item of its Orca session.
     func key(_ q: SessionQuestion) -> String? {
-        q.origin.item?.key ?? lock.withLock { refs[q.session] }
+        origin(q).item?.key ?? lock.withLock { refs[q.session] }
+    }
+
+    /// The origin of the question. A question of an Enhance worker is about its intake item.
+    func origin(_ q: SessionQuestion) -> SessionQuestion.Origin {
+        lock.withLock { intake[q.session] }.map { .intake($0) } ?? q.origin
     }
 
     func entries(key: String) -> [QuestionBoard.Entry] { entries.filter { self.key($0.question) == key } }
@@ -78,6 +87,11 @@ final class QuestionHub {
     var open: [QuestionBoard.Entry] { entries.filter { $0.state == .open } }
 
     func open(key: String) -> [QuestionBoard.Entry] { entries(key: key).filter { $0.state == .open } }
+
+    func open(session: SessionRef) -> [QuestionBoard.Entry] { open.filter { $0.question.session == session } }
+
+    /// The open questions of one session. One round can hold up to 4.
+    func count(session: SessionRef) -> Int { open(session: session).reduce(0) { $0 + $1.question.items.count } }
 
     /// The Session column text of a work item: "✦ 2 questions", "✦ 1 question · in Orca" or "✓ Answered in Orca · works".
     func line(key: String) -> String? {
@@ -172,9 +186,17 @@ final class QuestionHub {
 
     // MARK: Sessions
 
+    /// The board asks the worker of an Enhance run, and its questions show in the intake row.
+    func track(intake s: SessionRef, item: ItemRef) {
+        lock.withLock { intake[s] = item }
+        board?.poke()
+    }
+
+    func untrack(intake s: SessionRef) { lock.withLock { intake[s] = nil } }
+
     /// The Orca sessions of the open work items, and the runner sessions that have not ended.
     private func sessions() -> [SessionRef] {
-        let orca = lock.withLock { Array(refs.keys) }
+        let orca = lock.withLock { Array(refs.keys) + Array(intake.keys) }
         return orca + writes.load(RunnerSession.self).filter { !$0.state.ended }.map(\.session)
     }
 

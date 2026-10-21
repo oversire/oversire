@@ -3,6 +3,7 @@ import AgentBinder
 import OverSireCore
 import OverSireAI
 import OverSireSync
+import RuntimeOrca
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
 // one PNG per route and theme. It sends no global input, so it is safe while someone uses the Mac.
@@ -25,8 +26,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
-    lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json",
-                                                                                       store: projectStore, trackers: ENV), memory: memory)
+    lazy var intakeAgent = IntakeAgent(store: projectStore, memory: memory, questions: questions)
     lazy var sessions = SessionNotes(path: UIShots.tmp + "/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
@@ -270,7 +270,57 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             QuestionBoard.Entry(question: q("m1", [store, tests], .askReply, 3), state: .open, firstSeen: ago(3)),
             QuestionBoard.Entry(question: q("f2", [store], .form, 41), state: .open, firstSeen: ago(41)),
             QuestionBoard.Entry(question: q("m3", [store], .askReply, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
-        ], keys: [runner: "OVERSIRE-137", s("m1"): "OVERSIRE-143", s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"])
+            QuestionBoard.Entry(question: q("e1", [UIShots.enhanceAsk, tests], .askReply, 2), state: .open, firstSeen: ago(2)),
+        ], keys: [runner: "OVERSIRE-137", s("m1"): "OVERSIRE-143", s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"],
+           intake: [s("e1"): UIShots.intakeRef])
+        seedEnhance(ago)
+    }
+
+    static let intakeRef = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p-trebi", key: "TREBI"),
+                                   id: "w-471", key: "TREBI-471", url: URL(string: "https://app.plane.so/ocral/browse/TREBI-471/")!)
+    static let enhanceAsk = QuestionItem(id: "q1", header: "Sync", text: "Which sync drops the labels: Plane to Trebi, or Trebi to Plane?",
+                                         why: "Both paths write labels.", kind: .single,
+                                         options: [.init(label: "Plane → Trebi"), .init(label: "Trebi → Plane")], allowsOther: true)
+
+    /// The first intake rows of the shot get the Enhance states in this order.
+    private func seedEnhance(_ ago: @escaping (Double) -> Date) {
+        let session = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w-e1"), id: "term-e1")
+        let run = { (n: String, at: Double, note: String) in
+            IntakeAgent.Run(worker: OrcaWorker(dispatch: "ctx_" + n, task: "task_" + n, terminal: "term-" + n),
+                            session: n == "e1" ? session : nil, item: UIShots.intakeRef, original: note, since: ago(at))
+        }
+        var asking = run("e1", 6, "labels get lost on sync")
+        asking.askedAt = ago(2)
+        let note = "label sync is broken again"
+        let enhanced = EnhanceResult(verdict: .vague, description: """
+            ## Problem
+            The Plane to Trebi sync drops the labels of an item when the item has more than 10 labels.
+
+            ## Steps
+            1. Add 11 labels to a Plane item.
+            2. Wait for the next sync.
+            3. The Trebi item has no labels.
+
+            ## Cause
+            `LabelMapper.map` reads only the first page of the Plane labels.
+            """, priority: "high", labels: ["bug", "sync"],
+            relations: [.init(kind: "blocked_by", key: "TREBI-466", reason: "the new label API"),
+                        .init(kind: "relates_to", key: "TREBI-402", reason: "the same mapper")],
+            findings: ["The mapper reads one page of 10 labels.", "The user said: Plane to Trebi."])
+        let states: [IntakeAgent.State] = [
+            .asking(asking, n: 2),
+            .enhancing(run("e2", 2, "")),
+            .ready(enhanced, run("e3", 14, note)),
+            .ready(EnhanceResult(verdict: .clear, description: "## Goal\nAdd a dark icon.", priority: "low"), run("e4", 30, "dark icon")),
+            .ready(EnhanceResult(verdict: .duplicate, description: "", relations: [.init(kind: "duplicate", key: "TREBI-388", reason: "same crash")]),
+                   run("e5", 40, "crash on start")),
+            .failed("The agent sent no result that OverSire can read. Its text is below.", kept: "I read the sync code.\nI could not finish the JSON."),
+        ]
+        var order: [String: Int] = [:]
+        intakeAgent.sample = { item in
+            if order[item.id] == nil { order[item.id] = order.count }
+            return order[item.id].flatMap { $0 < states.count ? states[$0] : nil }
+        }
     }
 
     /// The id of the blocked row that the Sessions shot opens.

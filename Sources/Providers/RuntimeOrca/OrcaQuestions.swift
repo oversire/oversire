@@ -9,6 +9,7 @@ struct OrcaMessage: Hashable, Sendable {
     let to: String
     let thread: String?
     let body: String
+    let payload: [String: String]
     let at: Date
 
     init?(_ d: [String: Any]) {
@@ -19,6 +20,8 @@ struct OrcaMessage: Hashable, Sendable {
         to = d["to_handle"] as? String ?? ""
         thread = d["thread_id"] as? String
         body = d["body"] as? String ?? ""
+        let raw = (d["payload"] as? String).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } ?? d["payload"]
+        payload = (raw as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
         at = (d["created_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) } ?? .distantPast
     }
 

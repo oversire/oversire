@@ -16,15 +16,18 @@ final class AskScripts: @unchecked Sendable {
 
     /// The prompt with the line about oversire-ask. The prompt stays as it is when the runtime takes no files or the write fails.
     func prompt(_ prompt: String, host: (any HostFileWriting)?, workspacePath: String) async -> String {
-        guard let host, host.capabilities.contains(.hostFiles) else { return prompt }
-        let fresh = lock.withLock { written[host.account].map { now().timeIntervalSince($0) < life } ?? false }
-        if !fresh {
-            let f = AskSkill.file
-            guard (try? await host.writeFiles([HostFile(name: f.name, data: f.data)], workspacePath: workspacePath, dir: AskSkill.dir) { _, _ in }) != nil
-            else { return prompt }
-            lock.withLock { written[host.account] = now() }
-        }
-        return prompt + "\n\n" + AskSkill.promptLine
+        await ready(host: host, workspacePath: workspacePath) ? prompt + "\n\n" + AskSkill.promptLine : prompt
+    }
+
+    /// Writes the script when the last write is old. False: the runtime takes no files or the write failed.
+    func ready(host: (any HostFileWriting)?, workspacePath: String) async -> Bool {
+        guard let host, host.capabilities.contains(.hostFiles) else { return false }
+        if lock.withLock({ written[host.account].map { now().timeIntervalSince($0) < life } ?? false }) { return true }
+        let f = AskSkill.file
+        guard (try? await host.writeFiles([HostFile(name: f.name, data: f.data)], workspacePath: workspacePath, dir: AskSkill.dir) { _, _ in }) != nil
+        else { return false }
+        lock.withLock { written[host.account] = now() }
+        return true
     }
 }
 

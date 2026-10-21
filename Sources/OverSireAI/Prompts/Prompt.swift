@@ -23,6 +23,9 @@ public struct PromptTemplate: Sendable {
     let system: String
     let user: String
 
+    /// The user template before the fill.
+    public var userTemplate: String { user }
+
     /// The prompt files in the app binary, by kind.
     public static let all: [AITaskKind: PromptTemplate] = Dictionary(uniqueKeysWithValues: PromptFiles.all.map { name, text in
         do { return (AITaskKind(rawValue: name), try PromptTemplate(parsing: text)) } catch {

@@ -97,7 +97,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         w.onError = { log.error("\($0)") }
         return w
     }()
-    lazy var intakeAgent = IntakeAgent(store: projectStore, writeBack: writeBack, memory: memory)
+    lazy var intakeAgent = IntakeAgent(store: projectStore, memory: memory, questions: questions)
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
@@ -263,6 +263,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
             }
+        }
+        NotificationCenter.default.addObserver(forName: ProjectStore.changed, object: projectStore, queue: .main) { [weak self] _ in
+            self?.intakeAgent.autoStart()
         }
         queue.areaBook = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.areas : nil }
         queue.planner = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.planner : nil }

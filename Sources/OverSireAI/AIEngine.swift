@@ -35,6 +35,7 @@ public struct AITaskKind: RawRepresentable, Hashable, Sendable, Codable, Express
 
     public static let ping: AITaskKind = "ping"
     public static let triage: AITaskKind = "triage"
+    public static let enhance: AITaskKind = "enhance"
     public static let failureReason: AITaskKind = "failureReason"
     public static let digest: AITaskKind = "digest"
     public static let changeSummary: AITaskKind = "changeSummary"

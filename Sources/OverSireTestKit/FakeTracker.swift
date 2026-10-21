@@ -18,6 +18,9 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var patchList: [ProjectSettingsPatch] = []
     private var relationList: [String: [ItemRelation]] = [:]   // item id → relations
     private var intakeList: [String: [IntakeItem]] = [:]       // project id → pending intake items
+    private var edits: [IntakeEdit] = []
+    /// The `update` actions, in order.
+    public var intakeEdits: [IntakeEdit] { base.lockedValue { edits } }
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
@@ -153,6 +156,10 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     }
 
     public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
+        if case .update(let e) = a {
+            base.lockedValue { edits.append(e) }
+            return
+        }
         try base.locked {
             intakeList[p.id]?.removeAll { $0.id == i.id }
             if a == .delete || a == .decline { itemList[p.id]?.removeAll { $0.id == i.workItemId } }

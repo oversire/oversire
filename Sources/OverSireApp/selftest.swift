@@ -752,14 +752,12 @@ func runSelfTest() {
         check(facts == ["6 runs in the last 24 h: 3 passed, 3 failed.", "Failures: r 3.", "2 items wait in the queue."], "digest facts \(facts)")
     }
 
-    // Intake agent: the last JSON with a verdict, also when the terminal wraps it.
+    // Enhance: the last JSON with a verdict, and the original note stays.
     do {
-        let lines = ["⏺ I read the code.", "{\"verdict\":\"vague\",\"findings\":[\"No steps\"],", "\"block\":\"## Missing\\n- steps\",\"priority\":\"low\",\"labels\":[\"bug\"]}", "> "]
-        let r = IntakeReport.parse(lines)
-        check(r?.verdict == "vague" && r?.findings == ["No steps"] && r?.labels == ["bug"] && r?.priority == "low", "intake: parse \(String(describing: r))")
-        check(IntakeReport.parse(["no result yet", "{\"other\":1}"]) == nil, "intake: no verdict, no report")
-        let pr = IntakeAgent.prompt("{KEY} {title} {url} {body}", key: "TREBI-9", title: "T", url: "u", body: "")
-        check(pr == "TREBI-9 T u (no description)", "intake: prompt fill")
+        let r = EnhanceResult.parse("I read the code.\n{\"verdict\":\"vague\",\"description\":\"## Goal\",\"priority\":\"low\",\"labels\":[\"bug\"]}")
+        check(r?.verdict == .vague && r?.labels == ["bug"] && r?.priority == "low", "enhance: parse \(String(describing: r))")
+        check(EnhanceResult.parse("no result yet {\"other\":1}") == nil, "enhance: no verdict, no result")
+        check(r?.description(keeping: "fix it") == "## Goal\n\n## Original note\n\nfix it", "enhance: original note")
     }
 
     // OverSire block: replace between the markers, keep the text around it.

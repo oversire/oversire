@@ -56,23 +56,12 @@ struct AgentsConfig: Codable, Equatable {
     var quietMinutes = 10.0             // an agent with no output this long gets a check
     var questionNotice = QuestionNotice.later
     var intakePrompt = AgentsConfig.defaultIntakePrompt
-    var intakeScratch = false           // the intake agent works in a scratch worktree, not in main
+    var intakeScratch = false           // Enhance works in a scratch worktree, not in main
+    var enhanceVague = true             // start Enhance for a new intake item with a short note
     var writeBack = WriteBackConfig()
 
-    static let defaultIntakePrompt = """
-    You check a new intake ticket. Do not change files. Read the code in this folder to understand the ticket.
-    If it is a bug, find the steps to reproduce it, and reproduce it with read-only commands if you can.
-    If the ticket is too vague, list the facts that are missing.
-    End with one JSON object on one line and nothing after it:
-    {"verdict":"clear|vague|reproduced|not_reproduced|duplicate|off_vision","findings":["..."],"block":"markdown to add to the ticket","priority":"urgent|high|medium|low|none","labels":["..."]}
-
-    {vision}
-
-    Ticket {KEY}: {title}
-    {url}
-
-    {body}
-    """
+    /// The user template of Contract/prompts/enhance.md.
+    static var defaultIntakePrompt: String { EnhancePrompt.template }
 
     init() {}
 
@@ -85,8 +74,10 @@ struct AgentsConfig: Codable, Equatable {
         aiMode = try c.decodeIfPresent(AIMode.self, forKey: .aiMode) ?? .ask
         quietMinutes = try c.decodeIfPresent(Double.self, forKey: .quietMinutes) ?? 10
         questionNotice = try c.decodeIfPresent(QuestionNotice.self, forKey: .questionNotice) ?? .later
-        intakePrompt = try c.decodeIfPresent(String.self, forKey: .intakePrompt) ?? AgentsConfig.defaultIntakePrompt
+        // A prompt of the old screen check has {KEY} fields. Enhance needs its own.
+        intakePrompt = try c.decodeIfPresent(String.self, forKey: .intakePrompt).flatMap { $0.contains("{KEY}") ? nil : $0 } ?? AgentsConfig.defaultIntakePrompt
         intakeScratch = try c.decodeIfPresent(Bool.self, forKey: .intakeScratch) ?? false
+        enhanceVague = try c.decodeIfPresent(Bool.self, forKey: .enhanceVague) ?? true
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()
     }
 

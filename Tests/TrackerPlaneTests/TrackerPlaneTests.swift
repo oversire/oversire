@@ -191,6 +191,18 @@ final class TrackerPlaneTests: XCTestCase {
         let body = http.body("PATCH", "\(ws)/projects/P1/intake-issues/w1/status/")
         XCTAssertEqual(body?["status"] as? Int, 2)
         XCTAssertEqual(body?["duplicate_to"] as? String, "i1")
+
+        http.on("PATCH", "\(ws)/projects/P1/issues/w1/", "{}")
+        http.on("POST", "\(ws)/projects/P1/work-items/w1/relations/", "{}")
+        let blocker = ItemRef(project: project, id: "i7", key: "ENG-7", url: URL(string: "https://x/ENG-7")!)
+        try await plane.triage(list[0], in: project, .update(IntakeEdit(patch: ItemPatch(priority: "high", bodyMarkdown: "**new**"),
+                                                                         relations: [ItemRelation(kind: .blockedBy, item: blocker)])))
+        let patch = http.body("PATCH", "\(ws)/projects/P1/issues/w1/")
+        XCTAssertEqual(patch?["priority"] as? String, "high")
+        XCTAssertEqual(patch?["description_html"] as? String, "<p><strong>new</strong></p>")
+        let rel = http.body("POST", "\(ws)/projects/P1/work-items/w1/relations/")
+        XCTAssertEqual(rel?["relation_type"] as? String, "blocked_by")
+        XCTAssertEqual(rel?["issues"] as? [String], ["i7"])
     }
 
     func testErrorsMapToProviderErrors() async {

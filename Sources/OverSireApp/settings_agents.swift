@@ -122,7 +122,8 @@ extension SettingsPage {
             self?.reload()
         }
         var rows: [NSView] = [
-            SwitchRow("Intake agent in a scratch worktree", note: ".wt/intake-<key>, not the main checkout", on: AGENTS.intakeScratch,
+            SwitchRow("Enhance vague items", note: "Start Enhance for a new intake item with a short note.", on: AGENTS.enhanceVague) { AGENTS.enhanceVague = $0 },
+            SwitchRow("Enhance in a scratch worktree", note: ".wt/enhance-<key>, not the main checkout", on: AGENTS.intakeScratch,
                       actions: [editPrompt]) { AGENTS.intakeScratch = $0 },
         ]
         if promptOpen { rows.append(intakePrompt()) }
@@ -143,7 +144,7 @@ extension SettingsPage {
         promptView.textColor = Palette.fg
         promptView.backgroundColor = Palette.raise
         promptView.delegate = self
-        promptView.setAccessibilityLabel("Intake prompt")
+        promptView.setAccessibilityLabel("Enhance prompt")
         let scroll = NSScrollView()
         scroll.documentView = promptView
         scroll.hasVerticalScroller = true
@@ -166,7 +167,7 @@ extension SettingsPage {
         }
         let v = NSStackView(v: [], spacing: 8)
         v.addFull(scroll)
-        v.addFull(NSStackView(h: [NSTextField.text("{KEY}, {title}, {url} and {body} take the values of the item. {vision} adds the project vision, or nothing.",
+        v.addFull(NSStackView(h: [NSTextField.text("{{key}}, {{title}}, {{url}} and {{text}} take the values of the item. {{#if vision}}…{{/if}} and {{#if ask}}…{{/if}} show only with a value.",
                                                    size: 11.5, color: Palette.dim, lines: 2), Spacer(), reset, save], spacing: 8))
         return Padded(v)
     }

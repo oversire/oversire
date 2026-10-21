@@ -448,9 +448,23 @@ public struct IntakeItem: Codable, Hashable, Sendable {
     }
 }
 
-// What the user can do with a pending intake item.
+// What the user can do with a pending intake item. `update` writes the checked properties of a review and keeps the item in the intake.
 public enum IntakeAction: Hashable, Sendable {
     case accept, decline, snooze(until: Date), duplicate(of: String), delete
+    case update(IntakeEdit)
+}
+
+/// The new description, properties and relations of an intake item. An empty edit writes nothing.
+public struct IntakeEdit: Hashable, Sendable {
+    public var patch: ItemPatch
+    public var relations: [ItemRelation]
+
+    public init(patch: ItemPatch = ItemPatch(), relations: [ItemRelation] = []) {
+        self.patch = patch
+        self.relations = relations
+    }
+
+    public var isEmpty: Bool { patch == ItemPatch() && relations.isEmpty }
 }
 
 public struct IntakeDetail: Sendable {

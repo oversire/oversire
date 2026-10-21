@@ -157,11 +157,13 @@ final class FeedLine: TableRow {
     ])
     var onKey: ((String) -> Bool)?
 
-    init(_ e: FeedEntry, layout: ColumnLayout = FeedLine.layout, onClick: @escaping () -> Void) {
+    /// `badge` shows after the title, for example the Enhance pill of an intake line.
+    init(_ e: FeedEntry, layout: ColumnLayout = FeedLine.layout, badge: NSView? = nil, onClick: @escaping () -> Void) {
+        let title = TwoLine(e.title, e.body)
         let cells: [String: NSView] = [
             "source": Chiplet(e.source.rawValue, color: e.source.color),
             "project": Chiplet(e.projectKey ?? "—", color: Palette.intake),
-            "title": TwoLine(e.title, e.body),
+            "title": badge.map { NSStackView(h: [title, $0], spacing: 8) } ?? title,
             "when": NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim),
         ]
         super.init(layout, cells: cells, height: 48, label: "\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)

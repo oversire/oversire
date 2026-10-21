@@ -1,103 +1,123 @@
 import Cocoa
 import OverSireCore
 import OverSireAI
+import RuntimeOrca
 
-// ─── Intake agent ────────────────────────────────────────────────────────────
-// A read-only Claude session in the main checkout of the project checks a new intake ticket:
-// it reads the code, tries to reproduce the bug and lists missing facts. The user then adds
-// its block to the ticket, and can accept it in the same step.
+// ─── Intake agent (Enhance) ──────────────────────────────────────────────────
+// A read-only Orca worker reads the code for a new intake item, asks the user what the code cannot tell
+// (oversire-ask, shown with QuestionCard), and sends a new description in its `worker_done`. The user then
+// checks the properties to write, and accepts the item in the same step.
 
-struct IntakeReport: Codable, Equatable {
-    var verdict: String
-    var findings: [String]
-    var block: String
-    var priority: String?
-    var labels: [String]
-
-    var tone: Tone {
-        switch verdict {
-        case "clear", "reproduced": return .ok
-        case "duplicate": return .info
-        default: return .warning
-        }
-    }
-    var word: String { offVision ? "Off vision" : verdict.replacingOccurrences(of: "_", with: " ").capitalized }
-    /// The ticket works against the project vision. It only informs: no action changes.
-    var offVision: Bool { verdict == "off_vision" }
-    /// The findings to show. Off vision shows one reason.
-    var shown: [String] { offVision ? Array(findings.prefix(1)) : Array(findings.prefix(6)) }
-
-    // The last JSON object in the output that has a verdict. Terminal lines can wrap, so lines join first.
-    static func parse(_ lines: [String]) -> IntakeReport? {
-        let text = lines.joined(separator: "\n")
-        var end = text.endIndex
-        while let close = text.range(of: "}", options: .backwards, range: text.startIndex..<end) {
-            var start = close.lowerBound
-            while let open = text.range(of: "{\"verdict\"", options: .backwards, range: text.startIndex..<start) {
-                let raw = String(text[open.lowerBound...close.lowerBound])
-                let flat = raw.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " ")
-                if let obj = try? JSONSerialization.jsonObject(with: Data(flat.utf8)) as? [String: Any], let v = obj["verdict"] as? String {
-                    return IntakeReport(verdict: v, findings: obj["findings"] as? [String] ?? [], block: obj["block"] as? String ?? "",
-                                        priority: obj["priority"] as? String, labels: obj["labels"] as? [String] ?? [])
-                }
-                start = open.lowerBound
-            }
-            end = close.lowerBound
-        }
-        return nil
-    }
+/// The calls of a runtime that runs an Enhance worker.
+protocol EnhanceHost: AnyObject, Sendable {
+    var account: AccountID { get }
+    var installed: Bool { get }
+    func startWorker(spec: String, title: String, path: String, agent: String) async throws -> OrcaWorker
+    func workerState(_ w: OrcaWorker) async throws -> OrcaWorkerState
+    func stopWorker(_ w: OrcaWorker) async throws
+    func releaseWorker(_ w: OrcaWorker) async throws
+    func reveal(_ s: SessionRef) async throws
 }
 
-/// A runtime that opens a plain terminal with a command and a first prompt.
-protocol TerminalOpening: AgentHost, InstallChecking {
-    func openTerminal(path: String, title: String, command: String, prompt: String) async throws -> SessionRef
-}
+extension OrcaRuntime: EnhanceHost {}
 
 /// A tracker with a web page for the intake of a project.
 protocol IntakePage: Tracker { func intakeURL(_ p: ProjectRef) -> String }
 
 final class IntakeAgent {
     static let changed = Notification.Name("IntakeAgentChanged")
+    /// The most work time of one run. The time that a question waits does not count.
+    static let timeout: TimeInterval = 1800
+
+    struct Run: Equatable {
+        var worker: OrcaWorker
+        var session: SessionRef?       // the worker terminal, that asks the questions
+        var item: ItemRef
+        var original: String
+        var since: Date
+        var waited: TimeInterval = 0
+        var askedAt: Date?
+
+        func worked(_ now: Date) -> TimeInterval { now.timeIntervalSince(since) - waited - (askedAt.map { now.timeIntervalSince($0) } ?? 0) }
+    }
 
     enum State: Equatable {
         case starting
-        case running(handle: SessionRef, since: Date, tail: [String])
-        case report(IntakeReport, handle: SessionRef)
+        case enhancing(Run)
+        case asking(Run, n: Int)
+        case ready(EnhanceResult, Run)
         case applied(accepted: Bool)
-        case failed(String)
+        case failed(String, kept: String?)
+
+        var run: Run? {
+            switch self {
+            case .enhancing(let r), .asking(let r, _), .ready(_, let r): return r
+            default: return nil
+            }
+        }
+    }
+
+    /// A property of the review that the user can leave out.
+    enum Pick: Hashable {
+        case description, priority, label(String), relation(String)
     }
 
     private(set) var states: [String: State] = [:]     // intake id → state
+    private(set) var picks: [String: Set<Pick>] = [:]  // intake id → the unchecked properties
     private var timer: Timer?
+    private var autoTried: Set<String> = []
     private let store: ProjectStore
-    private let writeBack: PlaneWriteBack
     private let memory: ProjectMemory
+    private let questions: QuestionHub
+    var host: () -> (any EnhanceHost)? = { ENV.runtime as? any EnhanceHost }
+    var now: () -> Date = { Date() }
+    /// For `--uishots`: a state for an item that has none.
+    var sample: ((IntakeItem) -> State?)?
 
-    init(store: ProjectStore, writeBack: PlaneWriteBack, memory: ProjectMemory) {
+    init(store: ProjectStore, memory: ProjectMemory, questions: QuestionHub) {
         self.store = store
-        self.writeBack = writeBack
         self.memory = memory
+        self.questions = questions
     }
 
-    private var runtime: (any TerminalOpening)? { ENV.runtime as? any TerminalOpening }
+    var available: Bool { AI_CFG.intakeAgent && host()?.installed == true }
 
-    var available: Bool { AI_CFG.intakeAgent && runtime?.installed == true }
+    func state(_ item: IntakeItem) -> State? { states[item.id] ?? sample?(item) }
 
-    func state(_ item: IntakeItem) -> State? { states[item.id] }
-
-    static func prompt(_ template: String, key: String, title: String, url: String, body: String, vision: String? = nil) -> String {
-        let input = AgentPrompts.triageInput(template: template, key: key, title: title, url: url, body: body, vision: vision)
-        return (try? AITaskKind.triage.prompt(input).user) ?? ""
+    func spec(key: String, title: String, url: String, body: String, vision: String?, ask: Bool) -> String {
+        EnhancePrompt.render(AGENTS.intakePrompt, EnhancePrompt.input(key: key, title: title, url: url, body: body, vision: vision,
+                                                                      ask: ask ? AskSkill.promptLine : ""))
     }
 
-    // Opens the session in Orca. The project needs a saved Orca workspace.
+    /// A short body with no steps. Quick triage starts Enhance for it when the setting is on.
+    static func vague(_ body: String) -> Bool {
+        body.split { $0.isWhitespace || $0.isNewline }.count < 25
+    }
+
+    /// Starts Enhance for the new vague items of the last day, at most two at a time.
+    func autoStart() {
+        guard AGENTS.enhanceVague, available else { return }
+        var room = 2 - states.values.filter { $0 == .starting || $0.run != nil && !$0.isReady }.count
+        for (pk, snap) in store.snapshots {
+            for item in snap.intake ?? [] where room > 0 && states[item.id] == nil && !autoTried.contains(item.id) {
+                autoTried.insert(item.id)
+                guard now().timeIntervalSince(item.createdAt) < 86400 else { continue }
+                store.intakeDetail(projectKey: pk, item: item) { [weak self] r in
+                    if case .success(let d) = r, IntakeAgent.vague(d.body) { self?.start(projectKey: pk, item: item) }
+                }
+                room -= 1
+            }
+        }
+    }
+
+    // Starts the worker in the Orca workspace of the project.
     func start(projectKey: String, item: IntakeItem) {
         guard let snap = store.snapshots[projectKey] else { return }
         guard let root = PROJECTS_CFG.orca.roots[projectKey], !root.isEmpty else {
-            set(item.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once."))
+            set(item.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once.", kept: nil))
             return
         }
-        guard let rt = runtime else { set(item.id, .failed("Add an agent runtime account in Settings › Accounts and sync.")); return }
+        guard let rt = host() else { set(item.id, .failed("Add an Orca account in Settings › Accounts and sync.", kept: nil)); return }
         let url = (ENV.tracker(snap.summary.ref.workspace) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
         set(item.id, .starting)
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
@@ -105,92 +125,168 @@ final class IntakeAgent {
             let detail = try? r.get()
             let body = detail?.body ?? ""
             let key = (self.store.intakeKeys[item.workItemId] ?? detail?.sequence).map { "\(snap.summary.identifier)-\($0)" } ?? snap.summary.identifier
+            let ref = ItemRef(project: snap.summary.ref, id: item.workItemId, key: key, url: URL(string: url) ?? URL(fileURLWithPath: "/"))
             let vision = self.memory.vision(of: snap.summary.ref)?.text
-            let prompt = IntakeAgent.prompt(AGENTS.intakePrompt, key: key, title: item.name, url: url, body: body, vision: vision)
-                .replacingOccurrences(of: "\n", with: " ")
-            let path = AGENTS.intakeScratch ? root + "/.wt/intake-" + key.lowercased() : root
-            let title = "intake-" + key
-            let command: String
-            do { command = try PROJECTS_CFG.runtime.intakeCommand.resolve(name: title, key: key, title: item.name) } catch {
-                set(item.id, .failed("The intake command is not valid: \(error)"))
-                return
-            }
+            let path = AGENTS.intakeScratch ? root + "/.wt/enhance-" + key.lowercased() : root
             Task {
                 if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
-                let r = await Result(awaiting: {
-                    try await rt.openTerminal(path: path, title: title, command: command, prompt: prompt)
-                })
+                let ask = await ASK_SCRIPTS.ready(host: rt as? any HostFileWriting, workspacePath: root)
+                let spec = self.spec(key: key, title: item.name, url: url, body: body, vision: vision, ask: ask)
+                let r = await Result(awaiting: { try await rt.startWorker(spec: spec, title: "Enhance " + key, path: path, agent: "claude") })
                 DispatchQueue.main.async {
                     switch r {
-                    case .success(let h): self.set(item.id, .running(handle: h, since: Date(), tail: []))
-                    case .failure(let e): self.set(item.id, .failed(e.message))
+                    case .success(let w):
+                        let s = w.terminal.map { SessionRef(workspace: WorkspaceRef(account: rt.account, id: "intake"), id: $0) }
+                        self.begin(item.id, Run(worker: w, session: s, item: ref, original: body, since: self.now()))
+                    case .failure(let e): self.set(item.id, .failed(e.message, kept: nil))
                     }
-                    self.startTimer()
                 }
             }
         }
+    }
+
+    /// Tracks the run and polls it. The tests call it with a made worker.
+    func begin(_ id: String, _ run: Run) {
+        if let s = run.session { questions.track(intake: s, item: run.item) }
+        set(id, .enhancing(run))
+        startTimer()
     }
 
     private func startTimer() {
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
+        let t = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { await self.poll() }
+        }
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
 
-    private func poll() {
-        let running = states.compactMap { id, s -> (String, SessionRef)? in
-            if case .running(let h, _, _) = s { return (id, h) }
-            return nil
+    /// One look at each run: its result, its open questions and its time.
+    func poll() async {
+        let runs = await MainActor.run { states.compactMap { id, s -> (String, Run)? in
+            switch s {
+            case .enhancing(let r), .asking(let r, _): return (id, r)
+            default: return nil
+            }
+        } }
+        guard !runs.isEmpty, let rt = host() else {
+            await MainActor.run { timer?.invalidate(); timer = nil }
+            return
         }
-        guard !running.isEmpty, let rt = runtime else { timer?.invalidate(); timer = nil; return }
-        for (id, h) in running {
-            Task { [weak self] in
-                let r = await Result(awaiting: { try await rt.output(h, lines: 400) })
-                DispatchQueue.main.async {
-                    guard let self, case .running(_, let since, _) = self.states[id] else { return }
-                    switch r {
-                    case .failure(let e): self.set(id, .failed(e.message))
-                    case .success(let lines):
-                        if let rep = IntakeReport.parse(lines) { self.set(id, .report(rep, handle: h)) }
-                        else if -since.timeIntervalSinceNow > 1800 { self.set(id, .failed("No result after 30 minutes. Open the terminal to look.")) }
-                        else { self.set(id, .running(handle: h, since: since, tail: Array(lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.suffix(6)))) }
-                    }
+        for (id, run) in runs {
+            let r = await Result(awaiting: { try await rt.workerState(run.worker) })
+            await MainActor.run { self.advance(id, run, r) }
+        }
+    }
+
+    private func advance(_ id: String, _ old: Run, _ r: Result<OrcaWorkerState, ProviderError>) {
+        guard states[id]?.run?.worker == old.worker else { return }
+        var run = states[id]?.run ?? old
+        let t = now()
+        switch r {
+        case .failure(let e): finish(id, run, .failed(e.message, kept: nil))
+        case .success(.done(_, let body)):
+            if let result = EnhanceResult.parse(body) {
+                if let at = run.askedAt { run.waited += t.timeIntervalSince(at); run.askedAt = nil }
+                if let s = run.session { questions.untrack(intake: s) }
+                set(id, .ready(result, run))
+            } else {
+                finish(id, run, .failed("The agent sent no result that OverSire can read. Its text is below.", kept: body))
+            }
+        case .success(.ended(let why)): finish(id, run, .failed("The worker stopped (\(why)) with no result.", kept: nil))
+        case .success(.running):
+            let n = run.session.map { questions.count(session: $0) } ?? 0
+            if n > 0 {
+                if run.askedAt == nil { run.askedAt = t }
+                set(id, .asking(run, n: n))
+            } else {
+                if let at = run.askedAt { run.waited += t.timeIntervalSince(at); run.askedAt = nil }
+                if run.worked(t) > Self.timeout {
+                    finish(id, run, .failed("No result after 30 minutes of work. Open it in Orca to look.", kept: nil))
+                } else {
+                    set(id, .enhancing(run))
                 }
             }
         }
     }
 
-    // Adds the block of the report to the ticket. With `accept`, also accepts the ticket.
+    private func finish(_ id: String, _ run: Run, _ s: State) {
+        if let s = run.session { questions.untrack(intake: s) }
+        set(id, s)
+    }
+
+    // MARK: Review
+
+    func isChecked(_ item: IntakeItem, _ p: Pick) -> Bool { !(picks[item.id] ?? []).contains(p) }
+
+    func toggle(_ item: IntakeItem, _ p: Pick) {
+        if picks[item.id, default: []].remove(p) == nil { picks[item.id, default: []].insert(p) }
+    }
+
+    /// The checked properties as one edit. Label names and relation keys that the project does not know drop.
+    func edit(_ item: IntakeItem, _ result: EnhanceResult, run: Run, labels: [StatusOption], keep: [String], items: [String: ItemRef]) -> IntakeEdit {
+        var patch = ItemPatch()
+        if isChecked(item, .description) { patch.bodyMarkdown = result.description(keeping: run.original) }
+        if let p = result.priority, isChecked(item, .priority) { patch.priority = p }
+        let add = result.labels.filter { isChecked(item, .label($0)) }.compactMap { name in
+            labels.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.id
+        }
+        if !add.isEmpty { patch.labels = keep + add.filter { !keep.contains($0) } }
+        let relations = result.relations.filter { isChecked(item, .relation($0.key)) }.compactMap { r -> ItemRelation? in
+            guard let kind = r.relationKind, let ref = items[r.key.uppercased()] else { return nil }
+            return ItemRelation(kind: kind, item: ref)
+        }
+        return IntakeEdit(patch: patch, relations: relations)
+    }
+
+    /// The checked duplicate, else nil.
+    func duplicate(_ item: IntakeItem, _ result: EnhanceResult, items: [String: ItemRef]) -> ItemRef? {
+        guard let d = result.duplicateOf, isChecked(item, .relation(d.key)) else { return nil }
+        return items[d.key.uppercased()]
+    }
+
+    // Writes the checked properties. With `accept`, also accepts the item, or marks it as a duplicate when that is checked.
     func apply(projectKey: String, item: IntakeItem, accept: Bool, done: @escaping (Bool) -> Void) {
-        guard case .report(let rep, let h) = states[item.id] else { done(false); return }
-        var md = "**Intake check: \(rep.word)**\n\n" + rep.findings.map { "- \($0)" }.joined(separator: "\n")
-        if !rep.block.isEmpty { md += "\n\n" + rep.block }
-        writeBack.addBlock(projectKey: projectKey, intake: item, markdown: md) { [weak self] ok in
+        guard case .ready(let result, let run) = states[item.id], let snap = store.snapshots[projectKey],
+              let tracker = ENV.tracker(snap.summary.ref.workspace) else { done(false); return }
+        let known = Dictionary(snap.items.compactMap { $0.ref(in: snap.summary.ref) }.map { ($0.key.uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
             guard let self else { return }
-            guard ok else { done(false); return }
-            if let rt = self.runtime { Task { try? await rt.close(h) } }
-            if !accept { self.set(item.id, .applied(accepted: false)); done(true); return }
-            self.store.triage(projectKey: projectKey, item: item, action: .accept) { ok in
-                self.set(item.id, .applied(accepted: ok))
-                done(ok)
+            Task {
+                let labels = (try? await (tracker as? any LabelManaging)?.labels(snap.summary.ref)) ?? []
+                let keep = (try? r.get())?.labels.compactMap { n in labels.first { $0.name == n }?.id } ?? []
+                let edit = self.edit(item, result, run: run, labels: labels, keep: keep, items: known)
+                let dup = self.duplicate(item, result, items: known)
+                await MainActor.run {
+                    let after: (Bool) -> Void = { ok in
+                        guard ok else { done(false); return }
+                        if let rt = self.host() { Task { try? await rt.releaseWorker(run.worker) } }
+                        guard accept else { self.set(item.id, .applied(accepted: false)); done(true); return }
+                        self.store.triage(projectKey: projectKey, item: item, action: dup.map { .duplicate(of: $0.id) } ?? .accept) { ok in
+                            self.set(item.id, .applied(accepted: ok))
+                            done(ok)
+                        }
+                    }
+                    if edit.isEmpty { after(true) } else { self.store.triage(projectKey: projectKey, item: item, action: .update(edit), done: after) }
+                }
             }
         }
     }
 
     func reveal(_ item: IntakeItem) {
-        switch states[item.id] {
-        case .running(let h, _, _), .report(_, let h): if let rt = runtime { Task { try? await rt.reveal(h) } }
-        default: break
-        }
+        guard let s = state(item)?.run?.session, let rt = host() else { return }
+        Task { try? await rt.reveal(s) }
     }
 
     func discard(_ item: IntakeItem) {
-        if let rt = runtime {
-            if case .report(_, let h) = states[item.id] { Task { try? await rt.close(h) } }
-            if case .running(let h, _, _) = states[item.id] { Task { try? await rt.close(h) } }
+        if let run = states[item.id]?.run, let rt = host() {
+            if let s = run.session { questions.untrack(intake: s) }
+            let ready = states[item.id]?.isReady == true
+            Task { ready ? try? await rt.releaseWorker(run.worker) : try? await rt.stopWorker(run.worker) }
         }
         states[item.id] = nil
+        picks[item.id] = nil
         NotificationCenter.default.post(name: IntakeAgent.changed, object: self)
     }
 
@@ -198,58 +294,120 @@ final class IntakeAgent {
         states[id] = s
         NotificationCenter.default.post(name: IntakeAgent.changed, object: self)
     }
+
+    // MARK: Words
+
+    /// The pill of the row: "Enhancing · 2m", "2 questions", "Enhanced · High", "Clear · Low", "Duplicate of K-1".
+    static func pill(_ s: State, now: Date = Date()) -> (tone: Tone, text: String)? {
+        switch s {
+        case .starting: return (.question, "Enhancing")
+        case .enhancing(let r): return (.question, "Enhancing · \(max(1, Int(r.worked(now) / 60)))m")
+        case .asking(_, let n): return (.question, "\(n) question\(n == 1 ? "" : "s")")
+        case .ready(let res, _):
+            if let d = res.duplicateOf { return (.question, "Duplicate of \(d.key)") }
+            let word = res.verdict == .vague ? "Enhanced" : res.verdict.word
+            return (.question, word + (res.priority.map { " · " + $0.capitalized } ?? ""))
+        case .applied(let accepted): return (.ok, accepted ? "Written and accepted" : "Written")
+        case .failed: return (.bad, "Enhance failed")
+        }
+    }
 }
 
-// The card under an intake line: progress, the verdict with findings, and the actions.
+extension IntakeAgent.State {
+    var isReady: Bool { if case .ready = self { return true } else { return false } }
+}
+
+// The card under an intake line: progress, the questions, the review with checkboxes, and the actions.
 final class IntakePanel: Card {
-    init(_ state: IntakeAgent.State, projectKey: String, item: IntakeItem, agent: IntakeAgent, after: @escaping (String?) -> Void) {
+    private let agent: IntakeAgent
+    private let item: IntakeItem
+    private var picks: [IntakeAgent.Pick] = []
+
+    init(_ state: IntakeAgent.State, projectKey: String, item: IntakeItem, agent: IntakeAgent, questions: QuestionHub,
+         after: @escaping (String?) -> Void) {
+        self.agent = agent
+        self.item = item
         super.init(title: nil, padding: 12, spacing: 8, fill: Palette.raise)
-        let head = NSStackView(h: [Glyph("sparkles", color: Palette.acc, size: 13),
-                                   NSTextField.text("Intake agent", size: 12.5, weight: .semibold),
-                                   Chiplet(AGENTS.intakeScratch ? "scratch worktree" : "main checkout", mono: true),
-                                   Chiplet("read-only · plan mode")], spacing: 6)
-        add(head)
+        var head: [NSView] = [Glyph("sparkles", color: Palette.acc, size: 13), NSTextField.text("Enhance", size: 12.5, weight: .semibold),
+                              Chiplet("Runs on: \(IntakePanel.place(agent))", mono: false),
+                              Chiplet(AGENTS.intakeScratch ? "scratch worktree" : "main checkout", mono: true), Chiplet("read-only")]
+        if let p = IntakeAgent.pill(state) { head.append(Pill(p.tone, text: p.text)) }
+        add(NSStackView(h: head, spacing: 6))
+        let open = ActionButton("Open in Orca ↗") { agent.reveal(item) }
         switch state {
         case .starting:
-            head.addArrangedSubview(Pill(.running, text: "Starting"))
-        case .running(_, _, let tail):
-            head.addArrangedSubview(Pill(.running, text: "Checking"))
-            add(TermView(lines: tail.isEmpty ? ["Waiting for output…"] : tail, height: 96))
-            add(NSStackView(h: [ActionButton("Open terminal") { agent.reveal(item) }, ActionButton("Stop") { agent.discard(item) }], spacing: 6))
-        case .report(let rep, _):
-            border = rep.tone.color.withAlphaComponent(0.55)
-            head.addArrangedSubview(Pill(rep.tone, text: rep.word))
-            for f in rep.shown {
-                let dot = NSTextField.text("•", color: Palette.dim)
-                dot.setContentCompressionResistancePriority(.required, for: .horizontal)
-                let text = NSTextField.text(f, size: 12.5, lines: 3)
-                text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-                add(NSStackView(h: [dot, text], spacing: 6, align: .top))
-            }
-            if !rep.block.isEmpty { add(TermView(lines: rep.block.components(separatedBy: "\n"), height: 110)) }
-            var sug: [NSView] = []
-            if let p = rep.priority { sug.append(Chiplet("Priority: \(p)")) }
-            sug += rep.labels.map { Chiplet("Label: \($0)") as NSView }
-            if !sug.isEmpty { add(NSStackView(h: [NSTextField.text("Suggested:", size: 12, color: Palette.dim)] + sug, spacing: 6)) }
+            add(NSTextField.text("OverSire starts a worker in Orca.", size: 12, color: Palette.mut))
+        case .enhancing:
+            add(NSTextField.text("The agent reads the code and the related items. It asks here when the code cannot tell.", size: 12, color: Palette.mut, lines: 2))
+            add(NSStackView(h: [open, ActionButton("Stop") { agent.discard(item) }], spacing: 6))
+        case .asking(let run, _):
+            for e in run.session.map({ questions.open(session: $0) }) ?? [] { add(questions.card(e)) }
+            add(NSStackView(h: [open, ActionButton("Stop") { agent.discard(item) }], spacing: 6))
+        case .ready(let res, let run):
+            review(res, run)
             add(NSStackView(h: [
-                ActionButton("Add the block to the item", style: .primary) {
-                    agent.apply(projectKey: projectKey, item: item, accept: false) { ok in after(ok ? nil : "Plane did not take the block.") }
+                ActionButton("Accept", style: .primary) {
+                    agent.apply(projectKey: projectKey, item: item, accept: true) { ok in after(ok ? nil : "Plane did not take the changes or the accept.") }
                 },
-                ActionButton("Add the block and accept") {
-                    agent.apply(projectKey: projectKey, item: item, accept: true) { ok in after(ok ? nil : "Plane did not take the block or the accept.") }
+                ActionButton("Write to the item") {
+                    agent.apply(projectKey: projectKey, item: item, accept: false) { ok in after(ok ? nil : "Plane did not take the changes.") }
                 },
-                ActionButton("Open terminal") { agent.reveal(item) },
+                open,
                 ActionButton("Discard") { agent.discard(item) },
             ], spacing: 6))
-        case .applied(let accepted):
-            head.addArrangedSubview(Pill(.ok, text: accepted ? "Added and accepted" : "Block added"))
-            add(NSTextField.text("OverSire added its block at the end of the ticket. The text of the author did not change.", size: 12, color: Palette.mut, lines: 2))
-        case .failed(let msg):
-            head.addArrangedSubview(Pill(.bad, text: "Failed"))
+        case .applied:
+            add(NSTextField.text("OverSire wrote the checked changes. The original text is in the section \"Original note\".", size: 12, color: Palette.mut, lines: 2))
+        case .failed(let msg, let kept):
             add(NSTextField.text(msg, size: 12, color: Palette.mut, lines: 3))
+            if let kept, !kept.isEmpty { add(TermView(lines: kept.components(separatedBy: "\n"), height: 96)) }
             add(NSStackView(h: [ActionButton("Try again") { agent.start(projectKey: projectKey, item: item) },
                                 ActionButton("Dismiss") { agent.discard(item) }], spacing: 6))
         }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    static func place(_ agent: IntakeAgent) -> String {
+        guard let rt = agent.host() as? OrcaRuntime else { return "Orca" }
+        return rt.environment.map { "Orca · \($0)" } ?? "Orca · this Mac"
+    }
+
+    private func review(_ res: EnhanceResult, _ run: IntakeAgent.Run) {
+        for f in res.findings.prefix(res.verdict == .offVision ? 1 : 6) {
+            add(NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(f, size: 12.5, lines: 3)], spacing: 6, align: .top))
+        }
+        let now = column("Now", run.original.isEmpty ? "(no description)" : run.original, color: Palette.mut)
+        let body = res.description.range(of: EnhancePrompt.originalHeading, options: .caseInsensitive).map { String(res.description[..<$0.lowerBound]) } ?? res.description
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let new = column("New description", text.isEmpty ? "(no new text)" : text, color: text.isEmpty ? Palette.mut : Palette.fg,
+                         foot: "Then \(EnhancePrompt.originalHeading) with the text in Now.")
+        let sides = NSStackView(h: [now, new], spacing: 10, align: .top)
+        sides.distribution = .fillEqually
+        add(sides)
+        var boxes: [NSView] = [check(.description, "Description")]
+        if let p = res.priority { boxes.append(check(.priority, "Priority: \(p.capitalized)")) }
+        boxes += res.labels.map { check(.label($0), "Label: \($0)") }
+        boxes += res.relations.map { r in
+            let word = ["blocked_by": "Blocked by", "blocks": "Blocks", "duplicate": "Duplicate of", "relates_to": "Relates to"][r.kind] ?? r.kind
+            return check(.relation(r.key), "\(word) \(r.key)" + (r.reason.isEmpty ? "" : " · \(r.reason)"))
+        }
+        add(NSStackView(v: boxes, spacing: 4))
+    }
+
+    private func column(_ title: String, _ text: String, color: NSColor, foot: String? = nil) -> NSView {
+        let box = Card(title: nil, padding: 10, spacing: 6, fill: Palette.panel)
+        box.add(NSTextField.text(title, size: 11.5, weight: .semibold, color: Palette.dim))
+        box.add(NSTextField.text(text, size: 12, color: color, lines: 24))
+        if let foot { box.add(NSTextField.text(foot, size: 11.5, color: Palette.dim)) }
+        return box
+    }
+
+    private func check(_ p: IntakeAgent.Pick, _ title: String) -> NSButton {
+        let b = NSButton(checkboxWithTitle: title, target: self, action: #selector(flip(_:)))
+        b.state = agent.isChecked(item, p) ? .on : .off
+        b.tag = picks.count
+        picks.append(p)
+        return b
+    }
+
+    @objc private func flip(_ b: NSButton) { agent.toggle(item, picks[b.tag]) }
 }

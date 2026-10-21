@@ -497,7 +497,7 @@ struct NeedsYou: Equatable {
             let first = q.items.first
             var text = (first?.text ?? "Asks a question").replacingOccurrences(of: "\n", with: " ")
             if q.via == .permission { text = "Allow " + [first?.header, text].compactMap { $0 }.joined(separator: ": ") }
-            let route: Route = q.origin.isIntake ? .intake(key?.split(separator: "-").first.map(String.init))
+            let route: Route = hub.origin(q).isIntake ? .intake(key?.split(separator: "-").first.map(String.init))
                 : key.map { .item($0, .session) } ?? .work(.worktrees)
             return NeedsYou(kind: q.via == .permission ? .permission : .question, key: key ?? "Session", reason: "\(text) · \(hub.place(q).text)",
                             at: q.askedAt, route: route, act: q.answerable ? .answer : .answerInOrca(e.id))

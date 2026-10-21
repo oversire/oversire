@@ -326,10 +326,13 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
     // The plain update endpoint refuses a status change, so status changes use /status/.
     public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
         let path = "\(ws)/projects/\(p.id)/intake-issues/\(i.workItemId)/"
-        if let body = a.planeBody {
-            _ = try await api.send("PATCH", path + "status/", body: body)
-        } else {
-            _ = try await api.send("DELETE", path)
+        switch a {
+        case .delete: _ = try await api.send("DELETE", path)
+        case .update(let e):
+            let ref = ItemRef(project: p, id: i.workItemId, key: p.key ?? "", url: URL(string: workspace.itemURL(p.key ?? ""))!)
+            if e.patch != ItemPatch() { try await update(ref, e.patch) }
+            if !e.relations.isEmpty { try await apply(RelationPatch(add: e.relations), to: ref) }
+        default: if let body = a.planeBody { _ = try await api.send("PATCH", path + "status/", body: body) }
         }
     }
 
@@ -584,7 +587,7 @@ extension IntakeAction {
         case .decline: return ["status": -1]
         case .snooze(let d): return ["status": 0, "snoozed_till": ISO8601DateFormatter().string(from: d)]
         case .duplicate(let id): return ["status": 2, "duplicate_to": id]
-        case .delete: return nil
+        case .delete, .update: return nil
         }
     }
 }

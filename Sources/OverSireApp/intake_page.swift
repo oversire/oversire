@@ -42,11 +42,11 @@ final class IntakeListPage: Page {
         let open = shown.compactMap(\.intake).filter { agent.state($0.item) == nil }
         var actions: [NSView] = []
         if agent.available, !open.isEmpty {
-            let b = ActionButton("AI triage all", symbol: "sparkles", style: .primary) { [weak self] in
+            let b = ActionButton("Enhance all", symbol: "sparkles", style: .primary) { [weak self] in
                 open.forEach { agent.start(projectKey: $0.projectKey, item: $0.item) }
                 self?.reload()
             }
-            b.setAccessibilityLabel("AI triage all \(open.count) items")
+            b.setAccessibilityLabel("Enhance all \(open.count) items")
             actions.append(b)
         }
         let today = IntakeListPage.addedToday(all)
@@ -58,6 +58,9 @@ final class IntakeListPage: Page {
         if !shown.isEmpty {
             col.addFull(NSTextField.text("Keys on a focused line: 1 accept · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
                                          size: 12, color: Palette.dim, lines: 2))
+            col.addFull(NSStackView(h: [Glyph("sparkles", color: Palette.acc, size: 11), NSTextField.text(
+                "Enhance: an agent reads the code, asks you what the code cannot tell, and writes a new description. You check what goes to Plane.",
+                size: 12, color: Palette.dim, lines: 2)], spacing: 6))
         }
         let list = StickyListCard.table(shown.isEmpty ? nil : FeedLine.intakeLayout)
         list.add(shown, more: more) { [unowned self] in self.row($0) }
@@ -74,7 +77,7 @@ final class IntakeListPage: Page {
             actions.append(Spinner())
         } else {
             if agent.available && agent.state(item) == nil {
-                actions.append(ActionButton("Check in Orca", symbol: "sparkles", style: .primary) { agent.start(projectKey: pk, item: item) })
+                actions.append(ActionButton("Enhance", symbol: "sparkles", style: .primary) { agent.start(projectKey: pk, item: item) })
             }
             actions.append(ActionButton("Accept  1") { [weak self] in self?.triage(pk, item, .accept) })
             actions.append(ActionButton("Duplicate  2") { IntakeWindow.show(projectKey: pk, workItemId: item.workItemId) })
@@ -82,7 +85,8 @@ final class IntakeListPage: Page {
             actions.append(ActionButton("Snooze  H") { [weak self] in self?.triage(pk, item, .snooze(until: Date().addingTimeInterval(86400))) })
         }
         actions.forEach { ($0 as? NSButton)?.controlSize = .small }
-        let r = FeedLine(e, layout: FeedLine.intakeLayout) { IntakeWindow.show(projectKey: pk, workItemId: item.workItemId) }
+        let pill = agent.state(item).flatMap { IntakeAgent.pill($0) }.map { Pill($0.tone, text: $0.text) }
+        let r = FeedLine(e, layout: FeedLine.intakeLayout, badge: pill) { IntakeWindow.show(projectKey: pk, workItemId: item.workItemId) }
         r.hoverViews = actions
         r.onKey = { [weak self] c in
             switch c {
@@ -97,7 +101,7 @@ final class IntakeListPage: Page {
         let canTriage = agent.available && agent.state(item) == nil
         commands.attach(r) { _ in RowMenu.activity(e, projectKey: nil, canTriage: canTriage) }
         guard let state = agent.state(item) else { return r }
-        let panel = IntakePanel(state, projectKey: pk, item: item, agent: agent) { [weak self] err in
+        let panel = IntakePanel(state, projectKey: pk, item: item, agent: agent, questions: data.questions) { [weak self] err in
             self?.note = err
             self?.reload()
         }
