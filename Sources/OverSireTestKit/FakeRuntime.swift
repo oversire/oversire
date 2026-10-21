@@ -15,6 +15,7 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     private var screens: [String: [String]] = [:]
     private var shown: [SessionRef] = []
     private var written: [String: Data] = [:]
+    private var writes = 0
     private var histories: [String: SessionDigest] = [:]
 
     public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory]) {
@@ -24,6 +25,8 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     public var revealed: [SessionRef] { (try? base.locked { shown }) ?? [] }
     /// The host files by path.
     public var hostFiles: [String: Data] { base.lockedValue { written } }
+    /// The number of writeFiles calls.
+    public var hostFileWrites: Int { base.lockedValue { writes } }
 
     /// The history that `history(of:)` gives for a session id (paneKey).
     public func setHistory(_ d: SessionDigest, paneKey: String) { base.lockedValue { histories[paneKey] = d } }
@@ -101,7 +104,8 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
         guard capabilities.contains(.hostFiles) else { throw ProviderError.unsupported(.hostFiles) }
         let total = files.reduce(0) { $0 + $1.data.count }
         let paths = try base.locked {
-            files.map { f in
+            writes += 1
+            return files.map { f in
                 let p = dir + "/" + f.name
                 written[p] = f.data
                 return p

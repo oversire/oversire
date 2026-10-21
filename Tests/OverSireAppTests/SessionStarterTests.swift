@@ -1,3 +1,4 @@
+import OverSireAI
 import OverSireCore
 import OverSireTestKit
 import XCTest
@@ -34,7 +35,7 @@ final class SessionStarterTests: XCTestCase {
         let tr: any OverSireCore.Tracker = t ?? tracker
         let ref = tracker.project, rt = runtime!, tm = term!, roots = self.roots, has = hasTerminal
         return SessionStarter(project: { $0 == ref.storeKey ? ref : nil }, tracker: { _ in tr }, terminal: { has ? tm : nil },
-                              hostFiles: { rt }, root: { roots[$0] })
+                              hostFiles: { rt }, root: { roots[$0] }, asks: AskScripts())
     }
 
     private func request(_ text: String, files: Int = 0, intake: Bool) -> SessionStarter.Request {
@@ -100,7 +101,7 @@ final class SessionStarterTests: XCTestCase {
         XCTAssertEqual(term.opened[0].title, "claude-why-is-the")
         let prompt = term.opened[0].prompt
         XCTAssertTrue(prompt.hasPrefix("Why is the sync slow?\nIt takes 2 min.\n\nThis request is intake item \(key). It is not a ticket yet."))
-        XCTAssertTrue(prompt.hasSuffix("Do not make a new ticket."), "no files: the files line drops")
+        XCTAssertTrue(prompt.hasSuffix("Do not make a new ticket.\n\n" + AskSkill.promptLine), "no files: the files line drops")
         XCTAssertEqual(steps, ["Creating item…", "Opening terminal…"])
         XCTAssertEqual(term.revealed, [r.session])
     }
@@ -115,7 +116,7 @@ final class SessionStarterTests: XCTestCase {
         XCTAssertTrue(p.hasPrefix("Look at {key} these\n\n"), "the user text keeps its braces: \(p)")
         XCTAssertTrue(p.contains("plane-cli wi attachment download \(item.id) -w fake -p FAKE --dir .oversire/\(item.key)"), p)
         XCTAssertEqual(steps, ["Creating item…", "Sending 2 files…", "Opening terminal…"])
-        XCTAssertTrue(runtime.hostFiles.isEmpty)
+        XCTAssertEqual(Array(runtime.hostFiles.keys), [AskSkill.path], "only the oversire-ask script")
     }
 
     func testFailedUploadListsMissingAndStillOpens() async throws {
@@ -130,8 +131,8 @@ final class SessionStarterTests: XCTestCase {
         XCTAssertNil(r.item)
         XCTAssertEqual(r.paths.count, 2)
         XCTAssertTrue(r.paths.allSatisfy { $0.hasPrefix("/tmp/oversire/") })
-        XCTAssertEqual(Set(runtime.hostFiles.keys), Set(r.paths))
-        XCTAssertEqual(term.opened[0].prompt, "Read the images\n\nAttached files:\n" + r.paths.joined(separator: "\n"))
+        XCTAssertEqual(Set(runtime.hostFiles.keys), Set(r.paths + [AskSkill.path]))
+        XCTAssertEqual(term.opened[0].prompt, "Read the images\n\nAttached files:\n" + r.paths.joined(separator: "\n") + "\n\n" + AskSkill.promptLine)
         let made = try await tracker.intake(tracker.project)
         XCTAssertTrue(made.isEmpty, "no tracker call")
         XCTAssertEqual(steps, ["Sending 2 files…", "Opening terminal…"])
@@ -139,9 +140,9 @@ final class SessionStarterTests: XCTestCase {
 
     func testDirectWithNoFilesSendsTheText() async throws {
         let (r, _) = try await start(request("Explain {paths} here\n\nplease", intake: false))
-        XCTAssertEqual(term.opened[0].prompt, "Explain {paths} here\n\nplease")
+        XCTAssertEqual(term.opened[0].prompt, "Explain {paths} here\n\nplease\n\n" + AskSkill.promptLine)
         XCTAssertTrue(r.paths.isEmpty)
-        XCTAssertTrue(runtime.hostFiles.isEmpty)
+        XCTAssertEqual(runtime.hostFiles[AskSkill.path], AskSkill.file.data)
     }
 
     func testChecksComeBeforeAnyChange() async throws {

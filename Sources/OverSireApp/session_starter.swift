@@ -130,19 +130,21 @@ final class SessionStarter {
     private let hostFiles: () -> (any HostFileWriting)?
     private let root: (String) -> String?
     private let uploader: AttachmentUploader
+    private let asks: AskScripts
 
     init(project: @escaping (String) -> ProjectRef?,
          tracker: @escaping (ProjectRef) -> (any OverSireCore.Tracker)?,
          terminal: @escaping () -> AgentTerminal?,
          hostFiles: @escaping () -> (any HostFileWriting)?,
          root: @escaping (String) -> String?,
-         uploader: AttachmentUploader = AttachmentUploader()) {
+         uploader: AttachmentUploader = AttachmentUploader(), asks: AskScripts = ASK_SCRIPTS) {
         self.project = project
         self.tracker = tracker
         self.terminal = terminal
         self.hostFiles = hostFiles
         self.root = root
         self.uploader = uploader
+        self.asks = asks
     }
 
     /// Makes an intake item (`intake`) or a work item, then sends the files to it. No terminal opens.
@@ -228,7 +230,8 @@ final class SessionStarter {
             prompt = r.text
         }
         progress("Opening terminal…")
-        let s = try await term.openTerminal(path: path, title: name, command: cmd, prompt: prompt)
+        let full = await asks.prompt(prompt, host: hostFiles(), workspacePath: path)
+        let s = try await term.openTerminal(path: path, title: name, command: cmd, prompt: full)
         try? await term.reveal(s)
         return Result(session: s, item: item, paths: paths, missing: missing, terminal: name)
     }

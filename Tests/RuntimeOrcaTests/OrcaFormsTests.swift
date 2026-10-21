@@ -168,9 +168,9 @@ final class OrcaFormsTests: XCTestCase {
         orca.on("terminal wait", #"{"ok":true,"result":{"wait":{"satisfied":true}}}"#)
         orca.on("terminal send", #"{"ok":true,"result":{"send":{"prompt":{"stages":["turn_started"]}}}}"#)
         let rt = runtime(nil)
-        try await rt.askAgainWithOverSire(rt.sessionRef(workspace: "w", handle: "term_form"), every: .zero)
+        try await rt.askAgainWithOverSire(rt.sessionRef(workspace: "w", handle: "term_form"), line: "Ask again.", every: .zero)
         XCTAssertEqual(orca.args("terminal read").count, 2)
-        XCTAssertEqual(orca.args("terminal send").first?[5], OrcaRuntime.askAgainLine)
+        XCTAssertEqual(orca.args("terminal send").first?[5], "Ask again.")
         let sends = orca.calls.firstIndex { $0.prefix(2) == ["terminal", "send"] }!
         let reads = orca.calls.lastIndex { $0.prefix(2) == ["terminal", "read"] }!
         XCTAssertGreaterThan(sends, reads, "no key while the form shows")

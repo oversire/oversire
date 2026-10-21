@@ -360,7 +360,8 @@ final class AgentIndex: NSObject {
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()
         Task { [weak self] in
-            let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: prompt,
+            let full = await ASK_SCRIPTS.prompt(prompt, host: rt as? any HostFileWriting, workspacePath: root)
+            let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: full,
                                     command: command)
             let r = await Result(awaiting: { try await rt.launch(req) })
             DispatchQueue.main.async {
