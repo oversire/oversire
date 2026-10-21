@@ -14,7 +14,6 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         var closed: () -> Void = {}
     }
 
-    static let width: CGFloat = 500
     private static let highlight = NSColor(srgbRed: 0x3d / 255, green: 0x7f / 255, blue: 0xd6 / 255, alpha: 1)
     private static let listen = NSColor(srgbRed: 0xD5 / 255, green: 0x5E / 255, blue: 0, alpha: 1)
 
@@ -23,6 +22,11 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     private let voice = SnapVoice()
     private var hostFilesFailed = false
     private var preview: [URL] = []
+    private(set) var frameSaved: NewPanelFrame
+    private let remembers: Bool
+    private var placing = false
+    private var widthC: NSLayoutConstraint!
+    private var promptC: NSLayoutConstraint!
 
     private let column = NSStackView(v: [], spacing: 12)
     private let modeControl = NSSegmentedControl()
@@ -47,10 +51,13 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     private let errorHolder = NSStackView(v: [], spacing: 0)
     private let footerHolder = NSStackView(v: [], spacing: 0)
 
-    init(model: NewSessionModel, actions: Actions) {
+    /// `saved` nil: the default size, and no save (--uishots).
+    init(model: NewSessionModel, actions: Actions, saved: NewPanelFrame? = nil) {
         self.model = model
         self.actions = actions
-        super.init(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 420), styleMask: [.borderless, .nonactivatingPanel],
+        frameSaved = saved ?? NewPanelFrame()
+        remembers = saved != nil
+        super.init(contentRect: NSRect(x: 0, y: 0, width: frameSaved.width, height: 420), styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         level = .floating
         isFloatingPanel = true
@@ -59,6 +66,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
+        isMovableByWindowBackground = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         setAccessibilityLabel("New")
 
@@ -67,12 +75,22 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         contentView = root
         column.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
         root.addSubview(column)
+        let grip = SessionSizeGrip()
+        grip.onDrag = { [weak self] dx, dy, start in self?.resize(from: start, dx: dx, dy: dy) }
+        grip.onEnd = { [weak self] in if self?.remembers == true { self?.frameSaved.save() } }
+        root.addSubview(grip)
+        widthC = column.widthAnchor.constraint(equalToConstant: frameSaved.width)
         NSLayoutConstraint.activate([
             column.leadingAnchor.constraint(equalTo: root.leadingAnchor), column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            column.topAnchor.constraint(equalTo: root.topAnchor), column.widthAnchor.constraint(equalToConstant: Self.width),
+            column.topAnchor.constraint(equalTo: root.topAnchor), widthC,
+            grip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -2), grip.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -2),
         ])
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: self, queue: nil) { [weak self] _ in
+            if self?.placing == false { self?.remember() }
+        }
 
-        let header = NSStackView(h: [NSTextField.text("New", size: 14, weight: .semibold), buildModes(), Spacer(),
+        let header = NSStackView(h: [Glyph("circle.grid.3x3.fill", color: Palette.dim, size: 9, label: "Drag to move"),
+                                     NSTextField.text("New", size: 14, weight: .semibold), buildModes(), Spacer(),
                                      NSTextField.text("⌘1–3 · Esc closes", size: 11.5, color: Palette.dim)], spacing: 10)
         column.addFull(header)
         column.addFull(buildCombo())
@@ -209,8 +227,9 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         let bottom = NSStackView(h: [promptHint, Spacer(), clip, micButton], spacing: 6)
         promptBox.addSubview(scroll)
         promptBox.addSubview(bottom)
+        promptC = promptBox.heightAnchor.constraint(equalToConstant: frameSaved.prompt)
         NSLayoutConstraint.activate([
-            promptBox.heightAnchor.constraint(equalToConstant: 146),
+            promptC,
             scroll.leadingAnchor.constraint(equalTo: promptBox.leadingAnchor, constant: 1), scroll.trailingAnchor.constraint(equalTo: promptBox.trailingAnchor, constant: -1),
             scroll.topAnchor.constraint(equalTo: promptBox.topAnchor, constant: 1), scroll.bottomAnchor.constraint(equalTo: bottom.topAnchor, constant: -4),
             bottom.leadingAnchor.constraint(equalTo: promptBox.leadingAnchor, constant: 10), bottom.trailingAnchor.constraint(equalTo: promptBox.trailingAnchor, constant: -6),
@@ -365,7 +384,20 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     }
 
     private func buildFooter() -> NSView {
-        let note = NSTextField.text(model.footerNote, size: 11.5, color: Palette.dim, lines: 2)
+        var lead: [NSView] = []
+        if model.picksAgent {
+            let pop = NSPopUpButton()
+            pop.controlSize = .small
+            pop.addItems(withTitles: PROJECTS_CFG.runtime.startAgents)
+            if pop.indexOfItem(withTitle: model.agent) < 0 { pop.addItem(withTitle: model.agent) }
+            pop.selectItem(withTitle: model.agent)
+            pop.isEnabled = !model.isStarting
+            pop.target = self
+            pop.action = #selector(agentPicked)
+            pop.setAccessibilityLabel("Agent")
+            pop.toolTip = "Agent"
+            lead = [pop, NSTextField.text("default: Settings › Agents", size: 11, color: Palette.dim)]
+        }
         let cancel = ActionButton("Cancel") { [weak self] in self?.dismiss() }
         let title: String
         if case .starting(let label) = model.phase { title = label } else { title = "\(model.button)  ⌘↩" }
@@ -374,7 +406,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         start.toolTip = model.blocker
         start.setAccessibilityLabel(model.button)
         if let b = model.blocker { start.setAccessibilityHelp(b) }
-        let row = NSStackView(h: [note, Spacer(), cancel, start], spacing: 8)
+        let row = NSStackView(h: lead + [Spacer(), cancel, start], spacing: 8)
         if let b = model.blocker, model.phase == .edit, model.selection != nil {
             return NSStackView(v: [row, NSTextField.text(b, size: 11.5, color: Palette.warn)], spacing: 4, align: .trailing)
         }
@@ -385,8 +417,31 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     private func fit() {
         column.layoutSubtreeIfNeeded()
         let h = column.fittingSize.height
-        guard abs(frame.height - h) > 0.5 else { return }
-        setFrame(NSRect(x: frame.minX, y: frame.maxY - h, width: Self.width, height: h), display: true)
+        guard abs(frame.height - h) > 0.5 || abs(frame.width - frameSaved.width) > 0.5 else { return }
+        placing = true
+        setFrame(NSRect(x: frame.minX, y: frame.maxY - h, width: frameSaved.width, height: h), display: true)
+        placing = false
+    }
+
+    /// The grip: `dx` changes the width, `dy` (down) the prompt height.
+    func resize(from start: NewPanelFrame, dx: CGFloat, dy: CGFloat) {
+        frameSaved = start.resized(width: start.width + dx, prompt: start.prompt + dy)
+        widthC.constant = frameSaved.width
+        promptC.constant = frameSaved.prompt
+        fit()
+    }
+
+    /// The controller places the panel. Only a move by the user saves the place.
+    func place(topLeft p: NSPoint) {
+        placing = true
+        setFrameTopLeftPoint(p)
+        placing = false
+    }
+
+    private func remember() {
+        guard remembers else { return }
+        frameSaved.topLeft = [frame.minX, frame.maxY]
+        frameSaved.save()
     }
 
     // MARK: Actions
@@ -440,6 +495,11 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         refresh()
         if m != .session && firstResponder === promptView && model.titleText.isEmpty && model.text.isEmpty { makeFirstResponder(titleField) }
         if m == .session && firstResponder === titleField.currentEditor() { makeFirstResponder(promptView) }
+    }
+
+    @objc private func agentPicked(_ sender: NSPopUpButton) {
+        model.agent = sender.titleOfSelectedItem ?? model.agent
+        refresh()
     }
 
     @objc private func fieldPicked() {
@@ -666,7 +726,7 @@ final class NewSessionController {
 
     /// Under `near` (the toolbar button), else at the top of the screen with the mouse.
     func show(near: NSView?) {
-        let p = panel ?? makePanel(NewSessionModel(choices: choices(), cfg: cfg, agent: PROJECTS_CFG.runtime.agent))
+        let p = panel ?? makePanel(NewSessionModel(choices: choices(), cfg: cfg, agent: PROJECTS_CFG.runtime.agent), saved: .load())
         place(p, near: near)
         p.orderFrontRegardless()
         p.makeKey()
@@ -677,13 +737,13 @@ final class NewSessionController {
     /// A panel with a fixed state, for --uishots.
     func present(_ m: NewSessionModel, near: NSView?) -> NewSessionPanel {
         panel?.orderOut(nil)
-        let p = makePanel(m)
+        let p = makePanel(m, saved: nil)
         place(p, near: near)
         p.orderFrontRegardless()
         return p
     }
 
-    private func makePanel(_ m: NewSessionModel) -> NewSessionPanel {
+    private func makePanel(_ m: NewSessionModel, saved: NewPanelFrame?) -> NewSessionPanel {
         var a = NewSessionPanel.Actions()
         a.start = { [weak self] m in self?.start(m) }
         a.chooseRoot = { [weak self] k in self?.chooseRoot(k) }
@@ -691,21 +751,26 @@ final class NewSessionController {
             self?.panel = nil
             NotificationCenter.default.post(name: Self.changed, object: self)
         }
-        let p = NewSessionPanel(model: m, actions: a)
+        let p = NewSessionPanel(model: m, actions: a, saved: saved)
         panel = p
         return p
     }
 
+    /// The saved place first, kept on the screen.
     private func place(_ p: NewSessionPanel, near: NSView?) {
+        if let t = p.frameSaved.topLeft, let s = NSScreen.screens.first(where: { $0.visibleFrame.contains(NSPoint(x: t[0] + 1, y: t[1] - 1)) }) {
+            let v = s.visibleFrame
+            return p.place(topLeft: NSPoint(x: min(t[0], v.maxX - p.frame.width), y: max(t[1], v.minY + p.frame.height)))
+        }
         if let v = near, let w = v.window {
             let r = w.convertToScreen(v.convert(v.bounds, to: nil))
-            p.setFrameTopLeftPoint(NSPoint(x: r.minX - 12, y: r.minY - 6))
+            p.place(topLeft: NSPoint(x: r.minX - 12, y: r.minY - 6))
             return
         }
         let mouse = NSEvent.mouseLocation
         guard let s = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
         let v = s.visibleFrame
-        p.setFrameTopLeftPoint(NSPoint(x: v.midX - NewSessionPanel.width / 2, y: v.maxY - v.height * 0.18))
+        p.place(topLeft: NSPoint(x: v.midX - p.frame.width / 2, y: v.maxY - v.height * 0.18))
     }
 
     private func summary(_ store: String) -> ProjectSummary? { projects().first { $0.ref.storeKey == store } }
@@ -740,7 +805,7 @@ final class NewSessionController {
         saveConfig()
         if m.makesItem { return create(m, in: p) }
         let req = SessionStarter.Request(project: m.selected, text: m.text, files: m.files, intake: m.intake,
-                                         title: m.titleText.isEmpty ? nil : m.itemTitle)
+                                         title: m.titleText.isEmpty ? nil : m.itemTitle, agent: m.agent)
         let root = m.selection?.root ?? ""
         p.setPhase(.starting("Starting…"))
         Task { @MainActor [weak self] in
@@ -1041,4 +1106,54 @@ final class SessionRemove: NSButton {
     required init?(coder: NSCoder) { fatalError() }
 
     @objc private func fire() { run() }
+}
+
+// The corner grip of the New panel. It reports the drag from the mouse down.
+final class SessionSizeGrip: NSView {
+    var onDrag: (_ dx: CGFloat, _ dy: CGFloat, _ start: NewPanelFrame) -> Void = { _, _, _ in }
+    var onEnd: () -> Void = {}
+    private var from: (point: NSPoint, frame: NewPanelFrame)?
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 16).isActive = true
+        heightAnchor.constraint(equalToConstant: 16).isActive = true
+        toolTip = "Drag to resize"
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let p = NSBezierPath()
+        p.move(to: NSPoint(x: 14, y: 10)); p.line(to: NSPoint(x: 6, y: 2))
+        p.move(to: NSPoint(x: 14, y: 6)); p.line(to: NSPoint(x: 10, y: 2))
+        p.lineWidth = 1.4
+        p.lineCapStyle = .round
+        Palette.dim.setStroke()
+        p.stroke()
+    }
+
+    override func resetCursorRects() {
+        if #available(macOS 15, *) { addCursorRect(bounds, cursor: .frameResize(position: .bottomRight, directions: .all)) }
+        else { addCursorRect(bounds, cursor: .crosshair) }
+    }
+
+    override func mouseDown(with e: NSEvent) {
+        guard let p = window as? NewSessionPanel else { return }
+        from = (NSEvent.mouseLocation, p.frameSaved)
+    }
+
+    override func mouseDragged(with e: NSEvent) {
+        guard let f = from else { return }
+        let m = NSEvent.mouseLocation
+        onDrag(m.x - f.point.x, f.point.y - m.y, f.frame)
+    }
+
+    override func mouseUp(with e: NSEvent) {
+        if from != nil { onEnd() }
+        from = nil
+    }
 }

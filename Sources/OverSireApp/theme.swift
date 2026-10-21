@@ -52,10 +52,11 @@ struct Tone {
     let symbol: String
     let color: NSColor
     let word: String
+    var spins = false   // the Glyph turns, unless Reduce motion is on
 
     static let ok = Tone(symbol: "checkmark.circle.fill", color: Palette.ok, word: "Passed")
     static let bad = Tone(symbol: "xmark.circle.fill", color: Palette.bad, word: "Failed")
-    static let running = Tone(symbol: "circle.dashed", color: Palette.run, word: "Running")
+    static let running = Tone(symbol: "circle.dashed", color: Palette.run, word: "Running", spins: true)
     static let queued = Tone(symbol: "clock", color: Palette.dim, word: "Queued")
     static let waiting = Tone(symbol: "exclamationmark.bubble.fill", color: Palette.warn, word: "Needs input")
     static let working = Tone(symbol: "bolt.circle.fill", color: Palette.run, word: "Working")
@@ -66,8 +67,8 @@ struct Tone {
     static let info = Tone(symbol: "info.circle.fill", color: Palette.acc, word: "Info")
     static let warning = Tone(symbol: "exclamationmark.triangle.fill", color: Palette.warn, word: "Warning")
 
-    init(symbol: String, color: NSColor, word: String) {
-        self.symbol = symbol; self.color = color; self.word = word
+    init(symbol: String, color: NSColor, word: String, spins: Bool = false) {
+        self.symbol = symbol; self.color = color; self.word = word; self.spins = spins
     }
 
     init(_ s: RunnerSession.State) {

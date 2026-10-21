@@ -1,4 +1,5 @@
 import Foundation
+import AgentBinder
 import OverSireCore
 import OverSireAI
 import AIEngineAgentBinder
@@ -283,10 +284,12 @@ struct ProjectsConfig: Codable {
     }
 
     // The agent, the prompt and the resolved start command for an item. The project settings come first, then the app defaults.
-    func launch(for item: Item) -> (agent: String, prompt: String, command: String?) {
+    /// `agent` starts this one time with another agent. The default does not change.
+    func launch(for item: Item, agent: String? = nil) -> (agent: String, prompt: String, command: String?) {
         let l = local(item.key.split(separator: "-").dropLast().joined(separator: "-"))
         var r = runtime
         if let a = l.agent, !a.isEmpty { r.agent = a }
+        if let agent { r.agent = agent }
         if let p = l.prompt, !p.isEmpty { r.prompt = p }
         let command = try? r.command(for: r.agent).resolve(name: item.key, key: item.key, title: item.title)
         return (r.agent, r.prompt(for: item), command)
@@ -529,7 +532,7 @@ struct RuntimeConfig: Codable, Equatable {
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? RuntimeConfig.defaultPrompt
         commands = try c.decodeIfPresent([String: String].self, forKey: .commands) ?? [:]
         snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
-        sessionIntakePrompt = try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault
+        sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
     }
 
@@ -546,6 +549,13 @@ struct RuntimeConfig: Codable, Equatable {
         let t = template.trimmingCharacters(in: .whitespacesAndNewlines)
         let added = !Self.knownAgents.contains(key) && key != Self.intakeKey
         commands[key] = t == defaultCommand(key).template && !added ? nil : t
+    }
+
+    /// The agents of the Start and New menus: the CLIs of AgentBinder, then the added agents.
+    var startAgents: [String] {
+        var out = Harness.allBuiltIn.filter { ![.opencode2, .fake, .native].contains($0) }.map(\.rawValue)
+        for a in agents where !out.contains(a) { out.append(a) }
+        return out
     }
 
     // The known agents, then the added agents and the default agent.

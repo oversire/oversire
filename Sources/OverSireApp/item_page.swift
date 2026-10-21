@@ -21,6 +21,7 @@ final class MenuChip: Chiplet {
 
 // The page of one work item: its summary, status, session, sub-items and activity.
 final class ItemPage: Page, NSTextFieldDelegate {
+    override var fillsHeight: Bool { tab == .subitems }
     private let subTable = ColumnLayout(id: "subitems", columns: ItemLine.columns())
     private enum Source: String, CaseIterable { case all = "All", plane = "Plane", github = "GitHub", orca = "Orca", oversire = "OverSire" }
 
@@ -158,12 +159,20 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let s = data.statusJob.item(key) {
             actions.append(StatusPill(s))
         } else {
+            // A split button: the left part starts with the default agent, the arrow picks another one for one start.
             let b = ActionButton("Start in Orca", symbol: "play.fill", style: .primary)
             b.onClick = { [weak self, weak b] in
                 guard let self, let b else { return }
                 self.data.agentIndex.start(item, snap: snap, anchor: b)
             }
-            actions.append(b)
+            let more = ActionButton("", symbol: "chevron.down", style: .primary)
+            more.setAccessibilityLabel("Start in Orca with")
+            more.toolTip = "Start in Orca with another agent"
+            more.onClick = { [weak self, weak b, weak more] in
+                guard let self, let b, let more else { return }
+                self.data.agentIndex.startMenu(item, snap: snap, anchor: b).popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
+            }
+            actions.append(NSStackView(h: [b, more], spacing: 1))
         }
         actions += [
             ActionButton("Copy for agent", symbol: "doc.on.doc") { [weak self] in self?.data.projectStore.copyForAgent(item.id) },
@@ -540,20 +549,44 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Sub-items
 
+    /// In progress and Not started in priority lanes, as on Work. Done has no lanes, the newest change first.
+    static func subGroups(_ kids: [Item], snap: ProjectSnapshot, status: (String) -> ItemStatus?) -> [(title: String, lanes: [WorkPage.Lane])] {
+        let done = kids.filter { snap.option($0.statusOptionId)?.category == .done }
+        let open = kids.filter { snap.option($0.statusOptionId)?.category != .done }.map { ($0, snap, nil as Workstream?) }
+        var out = WorkPage.groups(open, status: status)
+        if !done.isEmpty { out.append(("Done", [("", done.sorted { $0.updatedAt > $1.updatedAt }.map { ($0, snap, nil) })])) }
+        return out
+    }
+
     private func subItems(_ main: NSStackView, snap: ProjectSnapshot, item: Item, progress: (done: Int, total: Int)) {
         let kids = snap.children(of: item.id)
-        let list = ListCard()
         if progress.total > 0 {
-            list.add(Row([ProgressRing(done: progress.done, total: progress.total).sized(16),
-                          NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], height: 36))
+            main.addFull(NSStackView(h: [ProgressRing(done: progress.done, total: progress.total).sized(16),
+                                         NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], spacing: 8))
         }
-        for k in kids { list.add(ItemLine(k, snap: snap, stream: data.workstreams.stream(k.key), status: data.statusJob.item(k.key), layout: subTable) { [weak self] in self?.go($0) }) }
+        let job = data.statusJob
+        let list = StickyListCard.table(kids.isEmpty ? nil : subTable)
+        for g in ItemPage.subGroups(kids, snap: snap, status: job.item) {
+            list.addGroup(g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })
+            for lane in g.lanes {
+                if !lane.priority.isEmpty { list.add(WorkPage.laneRow(lane)) }
+                for e in lane.entries {
+                    list.add(ItemLine(e.item, snap: snap, stream: data.workstreams.stream(e.item.key), status: job.item(e.item.key), layout: subTable) { [weak self] in self?.go($0) })
+                }
+            }
+        }
         if progress.total > kids.count {
             list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in Plane", size: 12, color: Palette.acc)], height: 32) {
                 NSWorkspace.shared.open(URL(string: item.url)!) })
         }
         if list.isEmpty { list.add(EmptyNote("No sub-items.", symbol: "list.bullet.indent")) }
         main.addFull(list)
+        // Takes the rest when the table is short.
+        let rest = NSView()
+        rest.setContentHuggingPriority(.init(2), for: .vertical)
+        main.addArrangedSubview(rest)
+        main.distribution = .fill
+        main.setContentHuggingPriority(.init(1), for: .vertical)
     }
 
     // MARK: Activity

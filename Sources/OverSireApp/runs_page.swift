@@ -169,6 +169,7 @@ final class MiniBar: NSView {
 
 // All runs of the tracked repos, with filters. Linked runs show their item.
 final class RunsPage: Page {
+    override var fillsHeight: Bool { true }
     private static let latestKey = "runsLatestOnly"
     private static let orgKey = "runsOrg"
     private var latestOnly = UserDefaults.standard.object(forKey: RunsPage.latestKey) as? Bool ?? true
@@ -246,8 +247,7 @@ final class RunsPage: Page {
             col.addFull(NSTextField.text("A run links to an item by its branch, commit or title. See Settings › Projects and repos › Linking and write-back for the rules.", size: 12, color: Palette.dim, lines: 2))
         }
         let shown = all.filter { RunsPage.matches(filter, run: $0.run, linked: ws.link(runId: $0.run.id) != nil) }
-        let list = ListCard()
-        if !shown.isEmpty { list.add(TableHeader(RunLine.layout)) }
+        let list = StickyListCard.table(shown.isEmpty ? nil : RunLine.layout)
         list.add(shown, more: more) { [weak self, data, commands] r in RunLine(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) } }
         if list.isEmpty { list.add(data.firstLoad ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")) }
         col.addFull(list)

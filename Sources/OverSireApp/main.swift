@@ -939,9 +939,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return vc
     }
 
-    // An open window comes to the front in place of the popover.
+    // The rules are in `IconClick`.
     @objc func statusItemClicked() {
-        if appWindow.isVisible { showWindow() } else { toggle() }
+        // A transient panel can close on the mouse down, just before this click.
+        switch IconClick.action(appWindow.iconClickState, panelShown: popover.isShown || Date().timeIntervalSince(closeTime) <= 0.3) {
+        case .raise: showWindow()
+        case .panel, .closePanel: toggle()
+        }
     }
 
     @objc func toggle() {
@@ -1096,3 +1100,18 @@ app.setActivationPolicy(.accessory)
 let delegate = GHActionsBar()
 app.delegate = delegate
 app.run()
+
+/// What a click on the menu bar icon does. The panel is the popover.
+enum IconClick {
+    enum Window { case closed, minimized, background, front, elsewhere }
+    enum Action: Equatable { case panel, raise, closePanel }
+
+    /// With the panel open, the window is not key, so a second click only closes the panel.
+    static func action(_ w: Window, panelShown: Bool) -> Action {
+        if panelShown { return .closePanel }
+        switch w {
+        case .minimized, .background: return .raise
+        case .closed, .front, .elsewhere: return .panel
+        }
+    }
+}

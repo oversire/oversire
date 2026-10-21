@@ -1,12 +1,13 @@
 import AppKit
 import OverSireCore
 
-// The agents: runner sessions of the cloud, then the sessions that need you, all worktrees and the activity.
+// The agents: runner sessions of the cloud, then the sessions that need you and all worktrees. Views › Activity shows the Orca events.
 final class AgentsPage: Page {
     /// The prompt ids with an answer on the way.
     private var answering: Set<String> = []
     private var note: (Tone, String)?
     private var allWorktrees = false
+    override var fillsHeight: Bool { true }
     private var expanded: Set<String> = UIShots.sessions ? ["uishots-card-3"] : []     // card ids with the status open
     private let table = ColumnLayout(id: "worktrees-4", columns: [
         TableColumn(id: "worktree", title: "Worktree", width: 290, min: 140),
@@ -28,7 +29,16 @@ final class AgentsPage: Page {
             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() },
         ]
-        WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, in: col)
+        let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
+        let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
+        var trailing: [NSView] = []
+        if idx.ready != nil {
+            trailing = [Segmented(["With item \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
+                self?.allWorktrees = i == 1
+                self?.reload()
+            }]
+        }
+        WorkPage.header(self, tab: .worktrees, caption: caption, actions: actions, trailing: trailing, in: col)
         if let note { col.addFull(Banner(note.0, title: note.1)) }
         if let sessions = cloudAIRecords?.sessions, !sessions.isEmpty { runnerSessions(col, sessions) }
         guard idx.ready != nil else {
@@ -37,15 +47,7 @@ final class AgentsPage: Page {
             return
         }
 
-        let cards = idx.cards.sorted(by: { $0.lastActivity > $1.lastActivity })
-        let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
-        let filter = Segmented(["With item \(active.count)", "All \(cards.count)"], selected: allWorktrees ? 1 : 0, label: "Worktrees") { [weak self] i in
-            self?.allWorktrees = i == 1
-            self?.reload()
-        }
-        col.addFull(NSStackView(h: [Spacer(), filter], spacing: 0))
-        let list = ListCard()
-        list.add(TableHeader(table))
+        let list = StickyListCard.table(table)
         for c in allWorktrees ? cards : active { list.add(cardRow(c)) }
         if cards.isEmpty {
             list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed"))
@@ -57,12 +59,6 @@ final class AgentsPage: Page {
             }, Spacer()], height: 32, label: "Show all worktrees"))
         }
         col.addFull(list)
-
-        col.addFull(SectionTitle("Orca activity"))
-        let feed = ListCard()
-        for e in idx.feed.events.prefix(30) { feed.add(eventRow(e)) }
-        if feed.isEmpty { feed.add(EmptyNote("No session changed state since OverSire started.", symbol: "clock")) }
-        col.addFull(feed)
     }
 
     private func runnerSessions(_ col: NSStackView, _ sessions: [RunnerSession]) {
@@ -265,16 +261,5 @@ final class AgentsPage: Page {
     /// ⌘R: read each session again and write its status.
     func checkAgain() {
         data.statusJob.refresh(keys: data.statusJob.refreshable)
-    }
-
-    private func eventRow(_ e: OrcaEvent) -> NSView {
-        let tone = Tone(e.phase)
-        let key = Chiplet(e.key, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(e.key, .session)) }
-        let text = NSTextField.text(e.text, size: 12.5, lines: 1)
-        text.lineBreakMode = .byTruncatingTail
-        text.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        return Row([Glyph(tone, size: 12), fixed(key, 124), fixed(NSTextField.text(e.repo, size: 12, color: Palette.dim, mono: true), 130),
-                    text, Spacer(), NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim)],
-                   height: 34, label: "\(e.key): \(e.text), \(relativeTime(e.at))") { [weak self] in self?.go(.item(e.key, .session)) }
     }
 }

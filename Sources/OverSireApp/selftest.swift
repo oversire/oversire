@@ -208,6 +208,23 @@ func runSelfTest() {
         }.map(\.item.key)
         check(got == ["ENG-2", "ENG-5", "ENG-4", "ENG-3", "ENG-1"], "my items order: \(got)")
     }
+    // Sub-items: In progress and Not started in priority lanes, then Done with the newest change first.
+    do {
+        let doneOpt = StatusOption(id: "s3", name: "Done", color: "#22C55E", group: "completed")
+        func kid(_ id: String, _ status: String, _ priority: String? = nil, at: TimeInterval = 0) -> Item {
+            let i = projectItem(id, status: status, fields: priority.map { ["Priority": $0] } ?? [:])
+            return Item(id: i.id, key: i.key, title: i.title, url: i.url, statusOptionId: i.statusOptionId, fields: i.fields, assignees: [],
+                        labels: [], author: nil, updatedBy: nil, updatedAt: Date(timeIntervalSince1970: 1_700_000_000 + at),
+                        activityAt: i.activityAt, commentCount: 0, lastComment: nil, mentionsMe: false)
+        }
+        let kids = [kid("1", "s1"), kid("2", "s3", at: 10), kid("3", "s2", "Low"), kid("4", "s1", "Urgent"), kid("5", "s3", at: 50), kid("6", "s2", "High")]
+        let snap = ProjectSnapshot(summary: summary("acme", wsUUID, "Board"), statusOptions: [todoOpt, doingOpt, doneOpt],
+                                   items: kids, fetchedAt: Date(timeIntervalSince1970: 1_700_000_040), me: "ada")
+        let g = ItemPage.subGroups(kids, snap: snap) { _ in nil }
+        let shape = g.map { "\($0.title): " + $0.lanes.map { "\($0.priority)=" + $0.entries.map(\.item.key).joined(separator: ",") }.joined(separator: " ") }
+        check(shape == ["In progress: High=ENG-6 Low=ENG-3", "Not started: Urgent=ENG-4 No priority=ENG-1", "Done: =ENG-5,ENG-2"],
+              "sub-items order: \(shape)")
+    }
     check(ProjectStore.diff(nil, projectSnap([projectItem("a", status: "s1")])).isEmpty, "first snapshot is quiet")
     let before = projectSnap([projectItem("a", status: "s1", fields: ["Priority": "Low"], assignees: ["ada"])])
     let comment = Comment(id: "c1", author: "grace", createdAt: Date(timeIntervalSince1970: 1_700_000_050), url: "https://example/c1")
@@ -447,6 +464,12 @@ func runSelfTest() {
         let l = d.launch(for: Item(id: "u-2", key: "FRITZ-8", title: "x", url: "u", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
                                    author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false))
         check(l.agent == "claude" && l.command == "claude -n FRITZ-8 --dangerously-skip-permissions", "launch resolves the command")
+        let once = d.launch(for: Item(id: "u-2", key: "FRITZ-8", title: "x", url: "u", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
+                                      author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false),
+                            agent: "codex")
+        check(once.agent == "codex" && once.command?.hasPrefix("codex") == true && d.runtime.agent == "claude", "start with: one start, the default stays")
+        check(d.runtime.startAgents == ["claude", "codex", "opencode", "pi", "copilot", "cursor", "gemini", "gemini-work"],
+              "start menu agents \(d.runtime.startAgents)")
     } else { check(false, "runtime config decode") }
 
     // Routes: every route survives a round trip through its URL and its path.
@@ -816,8 +839,20 @@ func runSelfTest() {
 
     // New session: the shortcut and the prompt templates.
     check(SessionConfig().shortcutLabel == "⌃⌥⌘N", "session: shortcut label \(SessionConfig().shortcutLabel)")
-    let intakePrompt = SessionPrompt.intake(SessionPrompt.intakeDefault, values: ["text": "Fix it", "key": "K-1", "item": "i1", "workspace": "w", "project": "K"], files: false)
-    check(intakePrompt == "Fix it\n\nThis request is intake item K-1.", "session: intake prompt without files \(intakePrompt)")
+    let intakeValues = ["text": "Fix it", "key": "K-1", "item": "i1", "intake": "n1", "workspace": "w", "project": "K"]
+    let intakePrompt = SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: false)
+    check(intakePrompt.hasPrefix("Fix it\n\nThis request is intake item K-1. It is not a ticket yet.\nDo not implement it.")
+          && intakePrompt.contains("  plane-cli intake update n1 -w w -p K --status 1\n") && intakePrompt.hasSuffix("Do not make a new ticket."),
+          "session: intake prompt without files \(intakePrompt)")
+    check(SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: true).hasSuffix("download i1 -w w -p K --dir .oversire/K-1"),
+          "session: intake prompt with files")
+    check(SessionPrompt.migrate(intake: SessionPrompt.intakeOld) == SessionPrompt.intakeDefault, "session: the old intake default migrates")
+    check(SessionPrompt.migrate(intake: "{text} mine") == "{text} mine", "session: an edited intake template stays")
+    let clicks: [(IconClick.Window, Bool, IconClick.Action)] = [
+        (.closed, false, .panel), (.minimized, false, .raise), (.background, false, .raise),
+        (.front, false, .panel), (.elsewhere, false, .panel), (.background, true, .closePanel), (.closed, true, .closePanel),
+    ]
+    for (w, shown, a) in clicks { check(IconClick.action(w, panelShown: shown) == a, "icon click: \(w), panel \(shown) gives \(a)") }
     let filesPrompt = SessionPrompt.files(SessionPrompt.filesDefault, text: "Look", paths: ["/tmp/oversire/x/a.png"])
     check(filesPrompt == "Look\n\nAttached files:\n/tmp/oversire/x/a.png", "session: files prompt \(filesPrompt)")
 

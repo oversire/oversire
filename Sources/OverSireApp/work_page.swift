@@ -8,6 +8,7 @@ final class WorkPage: Page {
     private let table = ColumnLayout(id: "mine", columns: ItemLine.columns(keyWidth: 120))
     private var more: [String: MoreRows] = [:]
     override var buildsLater: Bool { true }
+    override var fillsHeight: Bool { true }
 
     /// In progress, then Not started. In each: priority lanes, Urgent first. In a lane: Needs input, Blocked on you,
     /// Looks stuck or CI failing, Working, then the rest. Last: the newest activity.
@@ -41,6 +42,12 @@ final class WorkPage: Page {
         groups(list.filter { !queued($0.item.key) }, status: status)
     }
 
+    /// The label row of a priority lane.
+    static func laneRow(_ lane: Lane) -> NSView {
+        Row([NSTextField.text(lane.priority.uppercased(), size: 10.5, weight: .semibold, color: Palette.dim),
+             NSTextField.text("\(lane.entries.count)", size: 10.5, color: Palette.dim), Spacer()], height: 22, inset: 22)
+    }
+
     /// The open root items of the user in all projects.
     static func mine(_ data: AppData) -> [Entry] {
         data.projectStore.snapshots.values.flatMap { snap in
@@ -50,14 +57,14 @@ final class WorkPage: Page {
     }
 
     /// The page title, the caption, the actions and the tabs. The Worktrees tab uses it too.
-    static func header(_ page: Page, tab: Route.WorkTab, caption: String, actions: [NSView], in col: NSStackView) {
+    static func header(_ page: Page, tab: Route.WorkTab, caption: String, actions: [NSView], trailing: [NSView] = [], in col: NSStackView) {
         let data = page.data
         let worktrees = data.agentIndex.cards.filter { AgentsPage.cardKey($0, data: data) != nil }.count
         let tabs: [Route.WorkTab] = [.items, .worktrees]
         let strip = TabStrip(["Items", "Worktrees"], selected: tabs.firstIndex(of: tab) ?? 0, counts: [mine(data).count, worktrees])
         strip.onSelect = { [weak page] i in page?.go(.work(tabs[i])) }
         col.addFull(PageHeader("Work", caption: caption, actions: actions))
-        col.addArrangedSubview(strip)
+        col.addFull(NSStackView(h: [strip, Spacer()] + trailing, spacing: 8))
     }
 
     override func build(_ col: NSStackView) {
@@ -72,29 +79,21 @@ final class WorkPage: Page {
 
         let job = data.statusJob
         let groups = WorkPage.itemGroups(list, queued: q.contains, status: job.item)
-        let card = ListCard()
-        card.add(TableHeader(table))
+        let card = StickyListCard.table(table)
         if let g = groups.first(where: { $0.title == "In progress" }) { group(card, g, queue: false) }
         upNext(card)
         if let g = groups.first(where: { $0.title == "Not started" }) { group(card, g, queue: true) }
         pageBusy = data.projectsLoading
-        if card.list.arrangedSubviews.count == 1 { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }
+        if card.isEmpty { card.add(data.projectsLoading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")) }
         col.addFull(card)
     }
 
-    private func head(_ card: ListCard, _ title: String, count: Int, trailing: [NSView] = []) {
-        let head = Row([NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()] + trailing, height: 32)
-        head.restFill = Palette.raise
-        card.add(head)
-    }
-
     // One group with a label row for each priority. `queue`: the rows show "＋ Queue" on hover.
-    private func group(_ card: ListCard, _ g: (title: String, lanes: [Lane]), queue: Bool) {
+    private func group(_ card: StickyListCard, _ g: (title: String, lanes: [Lane]), queue: Bool) {
         let job = data.statusJob
-        head(card, g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })
+        card.addGroup(g.title, count: g.lanes.reduce(0) { $0 + $1.entries.count })
         for lane in g.lanes {
-            card.add(Row([NSTextField.text(lane.priority.uppercased(), size: 10.5, weight: .semibold, color: Palette.dim),
-                          NSTextField.text("\(lane.entries.count)", size: 10.5, color: Palette.dim), Spacer()], height: 22, inset: 22))
+            card.add(WorkPage.laneRow(lane))
             let m = more[g.title + lane.priority] ?? MoreRows()
             more[g.title + lane.priority] = m
             card.add(lane.entries, more: m) { [weak self, table, commands] e in
@@ -110,18 +109,18 @@ final class WorkPage: Page {
     }
 
     // The queue: each lane in start order, with why an entry waits. ↑ ↓, Start now and ✕ show on hover.
-    private func upNext(_ card: ListCard) {
+    private func upNext(_ card: StickyListCard) {
         let q = data.queue
         let entries = q.lanes.flatMap { l in l.entries.map { (l, $0) } }
         guard !entries.isEmpty else { return }
         // The Planner plan changes show on the lane board.
         let plans = hasCloud ? data.suggestions.openPlans().count : 0
-        head(card, "Up next", count: entries.count, trailing: [
+        card.addGroup("Up next", count: entries.count) { [
             NSTextField.text("Starts in this order when a slot frees", size: 12, color: Palette.dim),
             ActionButton(plans > 0 ? "Lane board · \(plans) plan change\(plans == 1 ? "" : "s")" : "Lane board", style: .link) { [weak self] in
                 self?.go(.work(.lanes))
             },
-        ])
+        ] }
         let world = q.world(workstreams: data.workstreams)
         for lane in q.lanes {
             let pick = lane.pick(state: q.state(lane.project), world: world)

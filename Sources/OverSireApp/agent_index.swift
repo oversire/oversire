@@ -221,9 +221,9 @@ final class AgentIndex: NSObject {
 
     // Starts the item in the project's Orca workspace. Without a saved workspace, a menu
     // at `anchor` asks for one and saves the choice.
-    func start(_ item: Item, snap: ProjectSnapshot, anchor: NSView) {
+    func start(_ item: Item, snap: ProjectSnapshot, anchor: NSView, agent: String? = nil) {
         let pk = snap.summary.ref.storeKey
-        if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root) { _ in }; return }
+        if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root, agent: agent) { _ in }; return }
         guard let rt = runtime() else { return }
         Task { [weak self] in
             let r = await Result(awaiting: { try await rt.repos(in: nil) })
@@ -245,7 +245,7 @@ final class AgentIndex: NSObject {
                         mi.target = self
                         mi.toolTip = repo.path
                         mi.image = NSImage(systemSymbolName: repo.folder ? "folder" : "arrow.triangle.branch", accessibilityDescription: nil)
-                        mi.representedObject = PickContext(item: item, projectKey: pk, root: repo.path)
+                        mi.representedObject = PickContext(item: item, projectKey: pk, root: repo.path, agent: agent)
                         menu.addItem(mi)
                     }
                     if repos.isEmpty { menu.addItem(withTitle: "Orca has no workspaces", action: nil, keyEquivalent: "").isEnabled = false }
@@ -309,15 +309,37 @@ final class AgentIndex: NSObject {
     }
 
     private final class PickContext: NSObject {
-        let item: Item, projectKey: String, root: String
-        init(item: Item, projectKey: String, root: String) { (self.item, self.projectKey, self.root) = (item, projectKey, root) }
+        let item: Item, projectKey: String, root: String, agent: String?
+        init(item: Item, projectKey: String, root: String, agent: String?) { (self.item, self.projectKey, self.root, self.agent) = (item, projectKey, root, agent) }
     }
 
     @objc private func pick(_ sender: NSMenuItem) {
         guard let c = sender.representedObject as? PickContext else { return }
         PROJECTS_CFG.orca.roots[c.projectKey] = c.root
         saveConfig()
-        start(c.item, root: c.root) { _ in }
+        start(c.item, root: c.root, agent: c.agent) { _ in }
+    }
+
+    /// "Start in Orca with": one start with another agent. The default does not change.
+    /// `header`: false for a submenu, which has the title already.
+    func startMenu(_ item: Item, snap: ProjectSnapshot, anchor: NSView, header: Bool = true) -> NSMenu {
+        let menu = NSMenu()
+        if header { menu.addItem(withTitle: "Start in Orca with", action: nil, keyEquivalent: "").isEnabled = false }
+        let d = PROJECTS_CFG.launch(for: item).agent
+        for a in PROJECTS_CFG.runtime.startAgents {
+            let mi = MenuAction(a) { [weak self, weak anchor] in
+                guard let self, let anchor else { return }
+                self.start(item, snap: snap, anchor: anchor, agent: a == d ? nil : a)
+            }.item
+            if a == d {
+                mi.state = .on
+                mi.attributedTitle = NSAttributedString(string: a + "  default")
+            }
+            menu.addItem(mi)
+        }
+        menu.addItem(.separator())
+        menu.addItem(MenuAction("Change the default…") { (NSApp.delegate as? GHActionsBar)?.open(.settings(.agents)) }.item)
+        return menu
     }
 
     private func fail(_ key: String, _ message: String) {
@@ -330,10 +352,10 @@ final class AgentIndex: NSObject {
     }
 
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
-    func start(_ item: Item, root: String, done: @escaping (Result<Launch, ProviderError>) -> Void) {
+    func start(_ item: Item, root: String, agent: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let key = item.key.uppercased()
         guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
-        let (agent, prompt, command) = PROJECTS_CFG.launch(for: item)
+        let (agent, prompt, command) = PROJECTS_CFG.launch(for: item, agent: agent)
         launches[key] = PendingLaunch(at: now())
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()

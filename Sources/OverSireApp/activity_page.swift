@@ -177,6 +177,7 @@ final class FeedLine: TableRow {
 
 // Activity: the full feed. No unread state, no badge: Home and Intake hold what needs you.
 final class ActivityPage: Page {
+    override var fillsHeight: Bool { true }
     private var filter = FeedFilter.load() { didSet { filter.save(); reload() } }
     private weak var projectChip: MenuChip?
     private weak var sourceChip: MenuChip?
@@ -194,8 +195,7 @@ final class ActivityPage: Page {
         col.addFull(PageHeader("Activity", caption: "Plane, GitHub, Orca and AI in one feed. The newest is first."))
         col.addArrangedSubview(filterBar(all))
         let shown = all.filter(filter.pass)
-        let list = ListCard()
-        if !shown.isEmpty { list.add(TableHeader(FeedLine.layout)) }
+        let list = StickyListCard.table(shown.isEmpty ? nil : FeedLine.layout)
         list.add(shown, more: more) { [unowned self] in self.row($0) }
         if list.isEmpty, data.loadingFirst { list.add(LoadingNote("Loading the activity")) }
         if list.isEmpty { list.add(EmptyNote(filter.isOn ? "No entry matches the filters." : "No activity yet.")) }

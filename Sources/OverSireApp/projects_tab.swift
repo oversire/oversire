@@ -463,10 +463,12 @@ final class ProjectItemRow: NSView {
     var onToggle: (() -> Void)?
     var onAgent: (() -> Void)?
     var onStart: ((NSView) -> Void)?
+    var onStartMenu: ((_ anchor: NSView, _ header: Bool) -> NSMenu)?   // "Start in Orca with"
     var onPill: ((NSView) -> Void)?
     let urlStr: String
     let expanded: Bool
     private var play: NSButton?
+    private var startWith: NSButton?
     private var hasAgent = false
 
     // `agent` shows a pill. `canStart` shows ▶ on hover when no agent works on the item.
@@ -477,7 +479,7 @@ final class ProjectItemRow: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: ROW_H))
         let pill = agent.map { AgentPill($0, status: status) }
         hasAgent = agent != nil
-        let reserve: CGFloat = pill.map { $0.frame.width + 6 } ?? (canStart ? 28 : 0)
+        let reserve: CGFloat = pill.map { $0.frame.width + 6 } ?? (canStart ? 46 : 0)
         wantsLayer = true
         layer?.backgroundColor = expanded ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.1).cgColor : nil
         let opt = snap.option(item.statusOptionId)
@@ -555,14 +557,23 @@ final class ProjectItemRow: NSView {
             pill.onClick = { [weak self, weak pill] in if let pill { self?.onPill?(pill) } }
             addSubview(pill)
         } else if canStart {
-            let b = NSButton(frame: NSRect(x: w - 92, y: (ROW_H - 22) / 2, width: 28, height: 22))
+            let b = NSButton(frame: NSRect(x: w - 108, y: (ROW_H - 22) / 2, width: 26, height: 22))
             b.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Start in Orca")
             b.contentTintColor = AgentPill.orca
             b.isBordered = false; b.target = self; b.action = #selector(startAgent(_:))
-            b.toolTip = "Start \(item.key) in Orca"
+            b.toolTip = "Start \(item.key) in Orca with the default agent"
             b.alphaValue = 0
             addSubview(b)
             play = b
+            let m = NSButton(frame: NSRect(x: w - 82, y: (ROW_H - 22) / 2, width: 16, height: 22))
+            m.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Start in Orca with")
+            m.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
+            m.contentTintColor = AgentPill.orca
+            m.isBordered = false; m.target = self; m.action = #selector(startWithMenu(_:))
+            m.toolTip = "Start in Orca with another agent"
+            m.alphaValue = 0
+            addSubview(m)
+            startWith = m
         }
         let sub = progress.map { ", \($0.done) of \($0.total) sub-items done" } ?? ""
         setAccessibilityLabel("\(item.title), \(opt?.name ?? "no status")" + sub)
@@ -577,6 +588,25 @@ final class ProjectItemRow: NSView {
             menu.addItem(withTitle: hasAgent ? "Start another session in Orca" : "Start in Orca", action: #selector(startAgent(_:)), keyEquivalent: "").target = self
         }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+    }
+    @objc func startWithMenu(_ sender: NSButton) {
+        onStartMenu?(play ?? sender, true).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+    }
+    // The right-click menu: the Copy menu, plus "Start in Orca with ›".
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Copy link", action: #selector(copyLink), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Copy for agent", action: #selector(copyAgent), keyEquivalent: "").target = self
+        if onStart != nil {
+            menu.addItem(.separator())
+            menu.addItem(withTitle: hasAgent ? "Start another session in Orca" : "Start in Orca", action: #selector(startAgent(_:)), keyEquivalent: "").target = self
+            if let sub = onStartMenu?(self, false) {
+                let mi = NSMenuItem(title: "Start in Orca with", action: nil, keyEquivalent: "")
+                mi.submenu = sub
+                menu.addItem(mi)
+            }
+        }
+        return menu
     }
     @objc func startAgent(_ sender: Any) { onStart?(play ?? (sender as? NSView) ?? self) }
     @objc func openLink() { if let u = URL(string: urlStr) { NSWorkspace.shared.open(u) } }
@@ -605,6 +635,7 @@ final class ProjectItemRow: NSView {
         let base = expanded ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.1).cgColor : nil
         layer?.backgroundColor = on ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.15).cgColor : base
         play?.alphaValue = on ? 1 : 0
+        startWith?.alphaValue = on ? 1 : 0
         if on, let title = subviews.compactMap({ $0 as? NSTextField }).first, title.intrinsicContentSize.width > title.bounds.width {
             HoverCard.schedule(title.stringValue, from: title)
         }
@@ -810,6 +841,7 @@ extension TabVC {
                 row.onToggle = { ItemWindow.show(item.id) }
                 if let agents {
                     row.onStart = { [weak agents] anchor in agents?.start(item, snap: snap, anchor: anchor) }
+                    row.onStartMenu = { anchor, header in agents.startMenu(item, snap: snap, anchor: anchor, header: header) }
                     row.onPill = { [weak agents] anchor in agents?.pillClicked(item, snap: snap, anchor: anchor) }
                 }
                 row.onAgent = { [weak store] in store?.copyForAgent(item.id) }

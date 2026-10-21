@@ -97,8 +97,36 @@ final class Glyph: NSImageView {
         setContentCompressionResistancePriority(.required, for: .horizontal)
         if let label { setAccessibilityLabel(label); toolTip = label } else { setAccessibilityElement(false) }
     }
-    convenience init(_ tone: Tone, size: CGFloat = 14) { self.init(tone.symbol, color: tone.color, size: size, label: tone.word) }
+    convenience init(_ tone: Tone, size: CGFloat = 14) {
+        self.init(tone.symbol, color: tone.color, size: size, label: tone.word)
+        spins = tone.spins
+    }
     required init?(coder: NSCoder) { fatalError() }
+
+    // One turn in 3 s.
+    private var spins = false
+
+    override func layout() {
+        super.layout()
+        guard spins, let l = layer else { return }
+        l.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        l.position = CGPoint(x: frame.midX, y: frame.midY)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard spins else { return }
+        layer?.removeAnimation(forKey: "spin")
+        guard window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        wantsLayer = true
+        needsLayout = true
+        let a = CABasicAnimation(keyPath: "transform.rotation.z")
+        a.fromValue = 0
+        a.toValue = -2 * Double.pi
+        a.duration = 3
+        a.repeatCount = .infinity
+        layer?.add(a, forKey: "spin")
+    }
 }
 
 // A button that runs a closure. Styles: plain (bordered), primary (accent fill), link (text).
@@ -388,7 +416,14 @@ class Row: Box {
     }
     override var acceptsFirstResponder: Bool { onClick != nil }
     override var canBecomeKeyView: Bool { onClick != nil }
-    override func becomeFirstResponder() -> Bool { DispatchQueue.main.async { self.updateFill() }; return true }
+    // A row that gets the focus by key comes into view. The margin keeps it clear of a pinned group row.
+    override func becomeFirstResponder() -> Bool {
+        DispatchQueue.main.async {
+            self.updateFill()
+            self.scrollToVisible(self.bounds.insetBy(dx: 0, dy: -36))
+        }
+        return true
+    }
     override func resignFirstResponder() -> Bool { DispatchQueue.main.async { self.updateFill() }; return true }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 || event.keyCode == 49 || event.keyCode == 76 { onClick?(); return }
@@ -493,9 +528,11 @@ final class TabStrip: NSStackView {
             let on = i == selected
             var s = t
             if let count { s += "  \(count)" }
+            let para = NSMutableParagraphStyle()
+            para.alignment = .center
             b.attributedTitle = NSAttributedString(string: s, attributes: [
                 .font: NSFont.systemFont(ofSize: 12.5, weight: on ? .semibold : .regular),
-                .foregroundColor: on ? Palette.fg : Palette.mut])
+                .foregroundColor: on ? Palette.fg : Palette.mut, .paragraphStyle: para])
             b.setAccessibilityRole(.radioButton)
             b.setAccessibilityValue(on ? 1 : 0)
             let wrap = TabCell(v: [b, Box(fill: on ? Palette.acc : .clear, border: nil, radius: 1)], spacing: 6, align: .centerX)
@@ -632,11 +669,13 @@ final class TermView: Box {
 }
 
 // The scrolling column of a page. Rebuilds keep the scroll position.
+// A page that fills the height does not scroll. Its last view takes the free height and scrolls on its own.
 final class PageScroll: NSScrollView {
     private(set) var column: NSStackView
     private let maxWidth: CGFloat
     private var columnConstraints: [NSLayoutConstraint] = []
     private var fill: NSLayoutConstraint!
+    private var fillHeight: [NSLayoutConstraint] = []
 
     init(maxWidth: CGFloat = 1100) {
         self.maxWidth = maxWidth
@@ -665,8 +704,16 @@ final class PageScroll: NSScrollView {
             doc.topAnchor.constraint(equalTo: contentView.topAnchor),
         ])
         install(column)
+        // A page taller than the window scrolls as a whole, so nothing is cut off.
+        let atLeastHeight = doc.heightAnchor.constraint(greaterThanOrEqualTo: contentView.heightAnchor)
+        atLeastHeight.priority = .init(760)
+        let height = doc.heightAnchor.constraint(equalTo: contentView.heightAnchor)
+        height.priority = .init(755)
+        fillHeight = [atLeastHeight, height]
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    private(set) var fills = false
 
     override func layout() {
         super.layout()
@@ -698,25 +745,58 @@ final class PageScroll: NSScrollView {
     }
 
     // Builds into a new column and swaps it in. One swap is much cheaper than removing each old view from the stack.
-    func rebuild(_ build: (NSStackView) -> Void) {
+    // `fills`: the column fills the visible height, and the view with the lowest vertical hugging takes the free height.
+    func rebuild(fills: Bool = false, _ build: (NSStackView) -> Void) {
         let y = contentView.bounds.origin.y
+        let inner = PageScroll.kept(in: column).map { ($0.identifier, $0.contentView.bounds.origin.y) }
         let next = PageScroll.makeColumn()
         next.edgeInsets = column.edgeInsets
         next.spacing = column.spacing
+        if fills {
+            next.distribution = .fill
+            next.setHuggingPriority(.init(1), for: .vertical)
+        }
         build(next)
+        if fills {
+            // Takes the rest when the table is short. A view with hugging 1 and no fit (SidePane) wins over it.
+            let rest = NSView()
+            rest.setContentHuggingPriority(.init(2), for: .vertical)
+            rest.setContentCompressionResistancePriority(.init(1), for: .vertical)
+            next.addArrangedSubview(rest)
+        }
         NSLayoutConstraint.deactivate(columnConstraints)
         column.removeFromSuperview()
         column = next
         install(next)
+        self.fills = fills
+        fillHeight.forEach { $0.isActive = fills }
         layoutSubtreeIfNeeded()
         let maxY = max(0, (documentView?.frame.height ?? 0) - contentView.bounds.height)
         contentView.scroll(to: NSPoint(x: 0, y: min(y, maxY)))
         reflectScrolledClipView(contentView)
+        for s in PageScroll.kept(in: next) {
+            guard let y = inner.first(where: { $0.0 == s.identifier })?.1, let doc = s.documentView else { continue }
+            s.contentView.scroll(to: NSPoint(x: 0, y: min(y, max(0, doc.frame.height - s.contentView.bounds.height))))
+            s.reflectScrolledClipView(s.contentView)
+        }
+    }
+
+    // The inner scroll views that keep their position over a rebuild. Their identifier names them.
+    static let keepPrefix = "keep."
+    private static func kept(in v: NSView) -> [NSScrollView] {
+        var out: [NSScrollView] = []
+        if let s = v as? NSScrollView, s.identifier?.rawValue.hasPrefix(keepPrefix) == true { out.append(s) }
+        for sub in v.subviews { out += kept(in: sub) }
+        return out
     }
 
     func toTop() {
         contentView.scroll(to: .zero)
         reflectScrolledClipView(contentView)
+        for s in PageScroll.kept(in: column) {
+            s.contentView.scroll(to: .zero)
+            s.reflectScrolledClipView(s.contentView)
+        }
     }
 
     func toEnd() {
@@ -740,8 +820,38 @@ final class EmptyNote: NSStackView {
     required init(coder: NSCoder) { fatalError() }
 }
 
+// A list of rows with a line between them.
+protocol RowList: AnyObject {
+    var list: NSStackView { get }
+    func add(_ v: NSView)
+}
+
+extension RowList {
+    var isEmpty: Bool { list.arrangedSubviews.isEmpty }
+
+    // Adds the first rows of a long list, and a "Show more" row for the rest. Each row costs layout time.
+    func add<T>(_ items: [T], more: MoreRows, _ make: @escaping (T) -> NSView) { add(items, more: more, from: 0, make) }
+
+    private func add<T>(_ items: [T], more: MoreRows, from: Int, _ make: @escaping (T) -> NSView) {
+        let end = min(items.count, max(from, more.count))
+        items[from..<end].forEach { add(make($0)) }
+        guard end < items.count else { return }
+        let left = items.count - end
+        let b = ActionButton("Show \(min(left, MoreRows.step)) more", symbol: "chevron.down") { [weak self] in
+            guard let self else { return }
+            more.count = end + MoreRows.step
+            // The button row and its line go. The next rows take their place.
+            self.list.arrangedSubviews.suffix(2).forEach { $0.removeFromSuperview() }
+            self.add(items, more: more, from: end, make)
+        }
+        let row = NSStackView(h: [b, NSTextField.text("\(left) more in the list", size: 11.5, color: Palette.dim), Spacer()], spacing: 8)
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        add(row)
+    }
+}
+
 // A list in a card: rows with a line between them.
-final class ListCard: Box {
+final class ListCard: Box, RowList {
     let list: NSStackView
 
     init() {
@@ -764,28 +874,6 @@ final class ListCard: Box {
             list.addFull(sep)
         }
         list.addFull(v)
-    }
-
-    var isEmpty: Bool { list.arrangedSubviews.isEmpty }
-
-    // Adds the first rows of a long list, and a "Show more" row for the rest. Each row costs layout time.
-    func add<T>(_ items: [T], more: MoreRows, _ make: @escaping (T) -> NSView) { add(items, more: more, from: 0, make) }
-
-    private func add<T>(_ items: [T], more: MoreRows, from: Int, _ make: @escaping (T) -> NSView) {
-        let end = min(items.count, max(from, more.count))
-        items[from..<end].forEach { add(make($0)) }
-        guard end < items.count else { return }
-        let left = items.count - end
-        let b = ActionButton("Show \(min(left, MoreRows.step)) more", symbol: "chevron.down") { [weak self] in
-            guard let self else { return }
-            more.count = end + MoreRows.step
-            // The button row and its line go. The next rows take their place.
-            self.list.arrangedSubviews.suffix(2).forEach { $0.removeFromSuperview() }
-            self.add(items, more: more, from: end, make)
-        }
-        let row = NSStackView(h: [b, NSTextField.text("\(left) more in the list", size: 11.5, color: Palette.dim), Spacer()], spacing: 8)
-        row.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
-        add(row)
     }
 }
 
@@ -1074,48 +1162,68 @@ final class HealthBar: NSStackView {
 }
 
 // A list card with a fixed header and a body that scrolls. The header of the group at the top stays in place.
-final class StickyListCard: Box {
-    let scroll = NSScrollView()
-    private let body = NSStackView(v: [], spacing: 0)
+// With no `maxHeight`, the card takes the free height of a page that fills the window (a table page).
+final class StickyListCard: Box, RowList {
+    let scroll: NSScrollView = OverlayScroll()
+    let list = NSStackView(v: [], spacing: 0)
     private var groups: [(head: NSView, pinned: NSView, top: NSLayoutConstraint)] = []
     private var observer: Any?
 
-    init(header: NSView, maxHeight: CGFloat = 520) {
+    init(header: NSView?, maxHeight: CGFloat? = 520, inset: NSEdgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14), keep: String = "list") {
         super.init(fill: Palette.panel, border: Palette.line, radius: 10)
         layer?.masksToBounds = true
-        let head = Box(fill: Palette.raise, border: nil, radius: 0)
-        head.addSubview(header)
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let sep = Box(fill: Palette.line, border: nil, radius: 0)
         let doc = Flipped()
         doc.translatesAutoresizingMaskIntoConstraints = false
-        doc.addSubview(body)
+        doc.addSubview(list)
         scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.identifier = NSUserInterfaceItemIdentifier(PageScroll.keepPrefix + keep)
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.documentView = doc
-        for v in [head, sep, scroll] as [NSView] { addSubview(v) }
-        let fit = scroll.heightAnchor.constraint(equalTo: doc.heightAnchor)
-        fit.priority = .defaultHigh
+        addSubview(scroll)
+        var top = topAnchor
+        if let header {
+            let head = Box(fill: Palette.raise, border: nil, radius: 0)
+            head.addSubview(header)
+            header.translatesAutoresizingMaskIntoConstraints = false
+            let sep = Box(fill: Palette.line, border: nil, radius: 0)
+            addSubview(head)
+            addSubview(sep)
+            NSLayoutConstraint.activate([
+                header.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: inset.left),
+                header.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -inset.right),
+                header.topAnchor.constraint(equalTo: head.topAnchor, constant: inset.top),
+                header.bottomAnchor.constraint(equalTo: head.bottomAnchor, constant: -inset.bottom),
+                head.leadingAnchor.constraint(equalTo: leadingAnchor), head.trailingAnchor.constraint(equalTo: trailingAnchor),
+                head.topAnchor.constraint(equalTo: topAnchor),
+                sep.leadingAnchor.constraint(equalTo: leadingAnchor), sep.trailingAnchor.constraint(equalTo: trailingAnchor),
+                sep.topAnchor.constraint(equalTo: head.bottomAnchor), sep.heightAnchor.constraint(equalToConstant: 1),
+            ])
+            top = sep.bottomAnchor
+        }
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: head.leadingAnchor, constant: 14),
-            header.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -14),
-            header.topAnchor.constraint(equalTo: head.topAnchor, constant: 10),
-            header.bottomAnchor.constraint(equalTo: head.bottomAnchor, constant: -10),
-            head.leadingAnchor.constraint(equalTo: leadingAnchor), head.trailingAnchor.constraint(equalTo: trailingAnchor),
-            head.topAnchor.constraint(equalTo: topAnchor),
-            sep.leadingAnchor.constraint(equalTo: leadingAnchor), sep.trailingAnchor.constraint(equalTo: trailingAnchor),
-            sep.topAnchor.constraint(equalTo: head.bottomAnchor), sep.heightAnchor.constraint(equalToConstant: 1),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: sep.bottomAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scroll.heightAnchor.constraint(lessThanOrEqualToConstant: maxHeight), fit,
+            scroll.topAnchor.constraint(equalTo: top), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
             doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
             doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            body.leadingAnchor.constraint(equalTo: doc.leadingAnchor), body.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
-            body.topAnchor.constraint(equalTo: doc.topAnchor), body.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
+            list.leadingAnchor.constraint(equalTo: doc.leadingAnchor), list.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            list.topAnchor.constraint(equalTo: doc.topAnchor), list.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
         ])
+        if let maxHeight {
+            let fit = scroll.heightAnchor.constraint(equalTo: doc.heightAnchor)
+            fit.priority = .defaultHigh
+            NSLayoutConstraint.activate([scroll.heightAnchor.constraint(lessThanOrEqualToConstant: maxHeight), fit])
+        } else {
+            setContentHuggingPriority(.init(1), for: .vertical)
+            setContentCompressionResistancePriority(.init(1), for: .vertical)
+            // Below `PageScroll.fillHeight`: a long table fills the page, a short one fits its rows.
+            // Below the window size (500), so a long table cannot make the window taller.
+            let fit = scroll.heightAnchor.constraint(equalTo: doc.heightAnchor)
+            fit.priority = .init(490)
+            NSLayoutConstraint.activate([scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 44), fit])
+        }
         scroll.contentView.postsBoundsChangedNotifications = true
         observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) {
             [weak self] _ in self?.pin()
@@ -1126,28 +1234,32 @@ final class StickyListCard: Box {
 
     // A row with no group, or a row of the last group.
     func add(_ v: NSView) {
-        if !body.arrangedSubviews.isEmpty {
+        if !list.arrangedSubviews.isEmpty {
             let sep = Box(fill: Palette.line, border: nil, radius: 0)
             sep.heightAnchor.constraint(equalToConstant: 1).isActive = true
-            body.addFull(sep)
+            list.addFull(sep)
         }
-        body.addFull(v)
+        list.addFull(v)
     }
 
     // A group header. `make` runs twice: once for the list, once for the pinned copy.
     func addGroup(_ make: () -> NSView) {
         let head = make()
         add(head)
-        let pinned = Box(fill: Palette.side, border: nil, radius: 0)
+        let pinned = Box(fill: (head as? Row)?.restFill ?? Palette.side, border: nil, radius: 0)
         let content = make()
         content.translatesAutoresizingMaskIntoConstraints = false
         pinned.addSubview(content)
+        let line = Box(fill: Palette.line, border: nil, radius: 0)
+        pinned.addSubview(line)
         pinned.isHidden = true
         addSubview(pinned)
         let top = pinned.topAnchor.constraint(equalTo: scroll.topAnchor)
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: pinned.leadingAnchor), content.trailingAnchor.constraint(equalTo: pinned.trailingAnchor),
             content.topAnchor.constraint(equalTo: pinned.topAnchor), content.bottomAnchor.constraint(equalTo: pinned.bottomAnchor),
+            line.leadingAnchor.constraint(equalTo: pinned.leadingAnchor), line.trailingAnchor.constraint(equalTo: pinned.trailingAnchor),
+            line.bottomAnchor.constraint(equalTo: pinned.bottomAnchor), line.heightAnchor.constraint(equalToConstant: 1),
             pinned.leadingAnchor.constraint(equalTo: scroll.leadingAnchor), pinned.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
             top,
         ])
@@ -1156,7 +1268,7 @@ final class StickyListCard: Box {
 
     // Removes the rows and the groups, and keeps the header.
     func clear() {
-        body.clear()
+        list.clear()
         groups.forEach { $0.pinned.removeFromSuperview() }
         groups = []
     }
@@ -1180,6 +1292,65 @@ final class StickyListCard: Box {
         super.layout()
         pin()
     }
+}
+
+extension StickyListCard {
+    // The table of a table page: the column header stays at the top, the rows take the free height and scroll.
+    static func table(_ layout: ColumnLayout?) -> StickyListCard {
+        StickyListCard(header: layout.map { TableHeader($0) }, maxHeight: nil, inset: NSEdgeInsets(top: 3, left: 0, bottom: 3, right: 0), keep: "table")
+    }
+
+    // A group row: a title and a count. It stays at the top while its rows scroll.
+    func addGroup(_ title: String, count: Int, lead: @escaping () -> [NSView] = { [] }, trailing: @escaping () -> [NSView] = { [] }) {
+        addGroup {
+            let head = Row(lead() + [NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()]
+                           + trailing(), height: 32, label: "\(title), \(count)")
+            head.restFill = Palette.raise
+            return head
+        }
+    }
+}
+
+// Scrollers over the rows, in all scroller settings. A scroller at the side would move the columns away from the header.
+// A fixed side column and a body that scrolls on its own. It takes the free page height (`Page.fillsHeight`).
+final class SidePane: NSView {
+    let pane: NSScrollView = OverlayScroll()
+
+    init(side: NSView, body: NSView, sideWidth: CGFloat, keep: String) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.init(1), for: .vertical)
+        setContentCompressionResistancePriority(.init(1), for: .vertical)
+        let doc = Flipped()
+        [doc, body, side, pane].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
+        doc.addSubview(body)
+        pane.identifier = NSUserInterfaceItemIdentifier(PageScroll.keepPrefix + keep)
+        pane.drawsBackground = false
+        pane.hasVerticalScroller = true
+        pane.autohidesScrollers = true
+        pane.documentView = doc
+        addSubview(side)
+        addSubview(pane)
+        // Not required: a narrow page scrolls sideways.
+        let fit = doc.widthAnchor.constraint(equalTo: pane.contentView.widthAnchor)
+        fit.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            side.leadingAnchor.constraint(equalTo: leadingAnchor), side.topAnchor.constraint(equalTo: topAnchor),
+            side.widthAnchor.constraint(equalToConstant: sideWidth), side.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            pane.leadingAnchor.constraint(equalTo: side.trailingAnchor, constant: 16), pane.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pane.topAnchor.constraint(equalTo: topAnchor), pane.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+            doc.leadingAnchor.constraint(equalTo: pane.contentView.leadingAnchor), doc.topAnchor.constraint(equalTo: pane.contentView.topAnchor),
+            fit, doc.widthAnchor.constraint(greaterThanOrEqualTo: pane.contentView.widthAnchor),
+            body.leadingAnchor.constraint(equalTo: doc.leadingAnchor), body.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            body.topAnchor.constraint(equalTo: doc.topAnchor), body.bottomAnchor.constraint(equalTo: doc.bottomAnchor, constant: -16),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+private final class OverlayScroll: NSScrollView {
+    override var scrollerStyle: NSScroller.Style { get { .overlay } set {} }
 }
 
 // A provider card: icon, name, a detail line, a status pill and actions.

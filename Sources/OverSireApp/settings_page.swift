@@ -42,6 +42,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private lazy var search = SettingsSearchField(Self.query)
     private var hits: [SettingsIndex.Entry] = []
     private var scrolled: Route?
+    private weak var pane: NSScrollView?
+    override var fillsHeight: Bool { true }
     private var branchTest = ""
     let promptView = NSTextView()
     var promptDirty = false
@@ -96,19 +98,12 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .notifications: notifications(body)
         case .logs: logs(body)
         }
-        let filler = NSView()
-        filler.setContentHuggingPriority(.init(1), for: .vertical)
         let navCol = NSStackView(v: [], spacing: 8)
         navCol.addFull(search)
         navCol.addFull(nav)
-        navCol.addArrangedSubview(filler)
-        let two = NSStackView(h: [navCol, body], spacing: 16, align: .top)
+        let two = SidePane(side: navCol, body: body, sideWidth: 210, keep: "settings-\(route)")
+        pane = two.pane
         col.addFull(two)
-        navCol.widthAnchor.constraint(equalToConstant: 210).isActive = true
-        // Not required: an embedded menu bar pane has a fixed width, and a narrow page scrolls sideways.
-        let bw = body.widthAnchor.constraint(equalTo: two.widthAnchor, constant: -226)
-        bw.priority = .defaultHigh
-        bw.isActive = true
         if let a = anchor, route != scrolled {
             scrolled = route
             let flash = Self.flash
@@ -158,7 +153,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 
     // Scrolls to the section, and flashes the row with the title.
     private func reveal(_ anchor: String, flash: String?) {
-        guard let doc = scroll.documentView, let section = doc.find(NSUserInterfaceItemIdentifier("anchor-" + anchor)) else { return }
+        guard let scroll = pane, let doc = scroll.documentView, let section = doc.find(NSUserInterfaceItemIdentifier("anchor-" + anchor)) else { return }
         doc.layoutSubtreeIfNeeded()
         let target = flash.flatMap { t in section.findBox { $0.accessibilityLabel() == t } }
         let top = section.convert(section.bounds, to: doc).minY

@@ -156,10 +156,8 @@ struct NewSessionModel: Equatable {
         }
     }
 
-    var footerNote: String {
-        guard mode == .session else { return "" }
-        return intake ? "The agent gets the prompt and the item key." : "The prompt goes to the agent as typed."
-    }
+    /// Only a session starts an agent. The intake check box does not change it.
+    var picksAgent: Bool { mode == .session }
 
     /// The name of the next pasted image.
     var pasteName: String {
@@ -209,4 +207,32 @@ struct NewSessionModel: Equatable {
     }
 
     mutating func remove(_ id: UUID) { files.removeAll { $0.id == id } }
+}
+
+// The size and the place of the New panel. They stay after a restart.
+struct NewPanelFrame: Equatable {
+    static let widths: ClosedRange<Double> = 420...1000, prompts: ClosedRange<Double> = 100...520
+    private static let key = "newPanel.frame"
+
+    var width = 500.0
+    var prompt = 146.0
+    var topLeft: [Double]?      // x, y on the screen; nil: the default place
+
+    /// Clamps to the limits.
+    func resized(width w: Double, prompt p: Double) -> NewPanelFrame {
+        var f = self
+        f.width = min(max(w, Self.widths.lowerBound), Self.widths.upperBound)
+        f.prompt = min(max(p, Self.prompts.lowerBound), Self.prompts.upperBound)
+        return f
+    }
+
+    static func load(_ d: UserDefaults = .standard) -> NewPanelFrame {
+        let v = d.array(forKey: key) as? [Double] ?? []
+        guard v.count >= 2 else { return NewPanelFrame() }
+        return NewPanelFrame(topLeft: v.count >= 4 ? [v[2], v[3]] : nil).resized(width: v[0], prompt: v[1])
+    }
+
+    func save(_ d: UserDefaults = .standard) {
+        d.set([width, prompt] + (topLeft ?? []), forKey: Self.key)
+    }
 }

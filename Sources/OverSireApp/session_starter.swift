@@ -33,9 +33,27 @@ enum SessionPrompt {
     static let intakeDefault = """
         {text}
 
+        This request is intake item {key}. It is not a ticket yet.
+        Do not implement it. Refine the details with the user:
+        ask questions, and give a preview or a plan.
+        When the user approves, accept the intake item, so that it
+        becomes a real work item with the same ID ({key}):
+          plane-cli intake update {intake} -w {workspace} -p {project} --status 1
+        Then replace its description with the refined details
+        (--description-md), and add sub-items if the work needs them.
+        Do not make a new ticket.
+        Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
+        """
+    /// The default before OVERSIRE-193. A saved copy of it moves to `intakeDefault`.
+    static let intakeOld = """
+        {text}
+
         This request is intake item {key}.
         Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
         """
+
+    /// An edited template stays. The old default becomes the new one.
+    static func migrate(intake t: String) -> String { t == intakeOld ? intakeDefault : t }
     static let filesDefault = "{text}\n\nAttached files:\n{paths}"
 
     /// With no files, the template lines that hold {item} drop.
@@ -71,6 +89,7 @@ final class SessionStarter {
         var title: String? = nil
         var state: String? = nil
         var priority: String? = nil
+        var agent: String? = nil     // nil: the default agent
     }
 
     /// The item of the Intake and Item modes.
@@ -161,10 +180,11 @@ final class SessionStarter {
         guard let path = root(r.project), !path.isEmpty else { throw SessionStartError.noRoot(key) }
         guard let term = terminal() else { throw SessionStartError.noRuntime }
         let cfg = PROJECTS_CFG.runtime
-        let name = NewSessionModel.termName(agent: cfg.agent, text: r.text)
+        let agent = r.agent ?? cfg.agent
+        let name = NewSessionModel.termName(agent: agent, text: r.text)
         let title = NewSessionModel.title(r.text)
         let cmd: String
-        do { cmd = try cfg.command(for: cfg.agent).resolve(name: name, key: key, title: title) } catch {
+        do { cmd = try cfg.command(for: agent).resolve(name: name, key: key, title: title) } catch {
             throw SessionStartError.badCommand(String(describing: error))
         }
         var intake: (any IntakeTracker)?

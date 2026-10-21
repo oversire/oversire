@@ -134,6 +134,9 @@ class Page: NSViewController {
     private(set) var builtAt = Date.distantPast
     private var built = false
 
+    // A table page: the page does not scroll. Its title and tabs stay at the top, and the table takes the free height.
+    var fillsHeight: Bool { false }
+
     // Pages with long lists show a skeleton first and build on the next turn, so a click shows at once.
     var buildsLater: Bool { false }
     static var deferBuilds = true
@@ -158,7 +161,7 @@ class Page: NSViewController {
         built = true
         stale = false
         builtAt = Date()
-        scroll.rebuild { build($0) }
+        scroll.rebuild(fills: fillsHeight) { build($0) }
     }
 
     // One build for many async answers that come close together, for example account probes.
@@ -287,8 +290,18 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
 
     var isVisible: Bool { window?.isVisible == true }
 
+    /// The window state that a click on the menu bar icon reads. A full-screen app is a Space of its own.
+    var iconClickState: IconClick.Window {
+        guard let w = window else { return .closed }
+        if w.isMiniaturized { return .minimized }
+        guard w.isVisible else { return .closed }
+        if !w.isOnActiveSpace { return .elsewhere }
+        return NSApp.isActive && w.isKeyWindow ? .front : .background
+    }
+
     func show(_ route: Route? = nil) {
         if let route { router.go(route) }
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         // macOS 14+ can refuse the activation, for example for a link opened from a terminal.

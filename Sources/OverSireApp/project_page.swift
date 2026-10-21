@@ -82,6 +82,7 @@ final class BoardCard: Row {
 // Items of one project: a list grouped by status, or a board.
 final class ProjectPage: Page {
     private static let layoutKey = "projectLayout"
+    override var fillsHeight: Bool { !board }
     private var board = UserDefaults.standard.string(forKey: ProjectPage.layoutKey) == "board"
     private var onlyAgent = false
     private var onlyFailing = false
@@ -143,19 +144,16 @@ final class ProjectPage: Page {
 
         let groups = statusGroups(snap, items)
         if board { col.addFull(boardView(groups, ws, snap)); return }
-        let list = ListCard()
-        list.add(TableHeader(table))
+        let list = StickyListCard.table(table)
         for (opt, its) in groups where !its.isEmpty {
-            let head = Row([StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
-                            NSTextField.text(opt.name, size: 12.5, weight: .semibold),
-                            NSTextField.text("\(its.count)", size: 12, color: Palette.dim), Spacer()], height: 32)
-            head.restFill = Palette.raise
-            list.add(head)
+            list.addGroup(opt.name, count: its.count, lead: {
+                [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16)]
+            })
             let m = more[opt.id] ?? MoreRows()
             more[opt.id] = m
             list.add(its, more: m) { [weak self, table] i in ItemLine(i, snap: snap, stream: ws.stream(i.key), status: self?.data.statusJob.item(i.key), layout: table) { self?.go($0) } }
         }
-        if list.list.arrangedSubviews.count == 1 { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
+        if list.isEmpty { list.add(EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle")) }
         col.addFull(list)
     }
 

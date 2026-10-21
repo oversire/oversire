@@ -107,7 +107,7 @@ final class NewSessionModelTests: XCTestCase {
         XCTAssertEqual(m.button, "Create intake")
         m.mode = .item
         XCTAssertEqual(m.button, "Create item")
-        XCTAssertEqual(m.footerNote, "")
+        XCTAssertFalse(m.picksAgent)
         m.mode = .session
         XCTAssertEqual(m.button, "Start claude")
         XCTAssertEqual(m.blocker, "Choose an Orca workspace folder for FRITZ.")
@@ -162,14 +162,25 @@ final class NewSessionModelTests: XCTestCase {
     func testHintsFollowIntakeAndFiles() {
         var m = model()
         XCTAssertEqual(m.intakeHint, "Tracks this work. The prompt is the description.")
-        XCTAssertEqual(m.footerNote, "The agent gets the prompt and the item key.")
+        XCTAssertTrue(m.picksAgent)
         m.add([.init(name: "a.png", data: Data(count: 3))])
         XCTAssertEqual(m.intakeHint, "The prompt is the description. The files go on the item.")
         m.intake = false
         XCTAssertEqual(m.intakeHint, "No item. The files go to the Orca host and the prompt gets their paths.")
-        XCTAssertEqual(m.footerNote, "The prompt goes to the agent as typed.")
+        XCTAssertTrue(m.picksAgent)
         m.files = []
         XCTAssertEqual(m.intakeHint, "No item. Good for a question or a quick chat.")
+    }
+
+    func testPanelFrameClampsAndPersists() throws {
+        let d = try XCTUnwrap(UserDefaults(suiteName: "NewPanelFrameTests"))
+        defer { d.removePersistentDomain(forName: "NewPanelFrameTests") }
+        XCTAssertEqual(NewPanelFrame.load(d), NewPanelFrame())
+        var f = NewPanelFrame().resized(width: 2000, prompt: 10)
+        XCTAssertEqual([f.width, f.prompt], [1000, 100])
+        f.topLeft = [40, 900]
+        f.save(d)
+        XCTAssertEqual(NewPanelFrame.load(d), f)
     }
 
     func testPasteNameSkipsTakenNames() {

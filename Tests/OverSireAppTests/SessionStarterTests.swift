@@ -98,7 +98,9 @@ final class SessionStarterTests: XCTestCase {
         XCTAssertEqual(term.opened.count, 1)
         XCTAssertEqual(term.opened[0].path, "/src/fake")
         XCTAssertEqual(term.opened[0].title, "claude-why-is-the")
-        XCTAssertEqual(term.opened[0].prompt, "Why is the sync slow?\nIt takes 2 min.\n\nThis request is intake item \(key).")
+        let prompt = term.opened[0].prompt
+        XCTAssertTrue(prompt.hasPrefix("Why is the sync slow?\nIt takes 2 min.\n\nThis request is intake item \(key). It is not a ticket yet."))
+        XCTAssertTrue(prompt.hasSuffix("Do not make a new ticket."), "no files: the files line drops")
         XCTAssertEqual(steps, ["Creating item…", "Opening terminal…"])
         XCTAssertEqual(term.revealed, [r.session])
     }
@@ -183,9 +185,11 @@ final class SessionStarterTests: XCTestCase {
 
     func testPromptResolveIsOnePass() {
         XCTAssertEqual(SessionPrompt.resolve("{text} {key} {nope}", ["text": "{key}", "key": "K-1"]), "{key} K-1 {nope}")
-        XCTAssertEqual(SessionPrompt.intake(SessionPrompt.intakeDefault, values: ["text": "hi", "key": "K-1", "item": "i1", "workspace": "w", "project": "K"],
+        XCTAssertEqual(SessionPrompt.intake(SessionPrompt.intakeOld, values: ["text": "hi", "key": "K-1", "item": "i1", "workspace": "w", "project": "K"],
                                             files: true),
-                       "hi\n\nThis request is intake item K-1.\nIts files: plane-cli wi attachment download i1 -w w -p K --dir .oversire/K-1")
+                       SessionPrompt.intakeOld.replacingOccurrences(of: "{text}", with: "hi").replacingOccurrences(of: "{key}", with: "K-1")
+                           .replacingOccurrences(of: "{item}", with: "i1").replacingOccurrences(of: "{workspace}", with: "w")
+                           .replacingOccurrences(of: "{project}", with: "K"))
     }
 
     func testToastDetail() {

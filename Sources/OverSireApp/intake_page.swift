@@ -3,6 +3,7 @@ import OverSireCore
 
 // Intake: the items that wait for triage, with a tab for each project. The AI suggestion shows under its row.
 final class IntakeListPage: Page {
+    override var fillsHeight: Bool { true }
     private var busy: Set<String> = []
     private var note: String?
     private let more = MoreRows()
@@ -58,8 +59,7 @@ final class IntakeListPage: Page {
             col.addFull(NSTextField.text("Keys on a focused line: 1 accept · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
                                          size: 12, color: Palette.dim, lines: 2))
         }
-        let list = ListCard()
-        if !shown.isEmpty { list.add(TableHeader(FeedLine.intakeLayout)) }
+        let list = StickyListCard.table(shown.isEmpty ? nil : FeedLine.intakeLayout)
         list.add(shown, more: more) { [unowned self] in self.row($0) }
         if list.isEmpty, data.loadingFirst { list.add(LoadingNote("Loading the intake")) }
         if list.isEmpty { list.add(EmptyNote("No intake waits for triage.")) }

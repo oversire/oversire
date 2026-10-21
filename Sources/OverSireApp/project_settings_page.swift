@@ -168,6 +168,7 @@ final class ProjectSettingsPage: Page {
     }
     private var local: ProjectLocalSettings { PROJECTS_CFG.local(key) }
 
+    override var fillsHeight: Bool { project != nil }
     override var isEditing: Bool { super.isEditing || !draft.isEmpty || visionDraft != nil }
 
     override func viewDidLoad() {
@@ -208,20 +209,7 @@ final class ProjectSettingsPage: Page {
         case .notifications: notifications(body)
         default: tracker(body, p)
         }
-        let filler = NSView()
-        filler.setContentHuggingPriority(.init(1), for: .vertical)
-        filler.setContentCompressionResistancePriority(.init(1), for: .vertical)
-        let navCol = NSStackView(v: [], spacing: 0)
-        navCol.addFull(nav)
-        navCol.addArrangedSubview(filler)
-        let rest = NSView()
-        rest.setContentHuggingPriority(.init(1), for: .vertical)
-        rest.setContentCompressionResistancePriority(.init(1), for: .vertical)
-        body.addArrangedSubview(rest)
-        let two = NSStackView(h: [navCol, body], spacing: 16, align: .top)
-        col.addFull(two)
-        navCol.widthAnchor.constraint(equalToConstant: 200).isActive = true
-        body.widthAnchor.constraint(equalTo: two.widthAnchor, constant: -216).isActive = true
+        col.addFull(SidePane(side: nav, body: body, sideWidth: 200, keep: "project-settings-\(section)"))
     }
 
     private func groupTitle(_ t: String) -> NSView {

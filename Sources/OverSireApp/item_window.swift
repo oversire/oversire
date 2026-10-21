@@ -314,8 +314,14 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
             } else {
                 let c = Chip("▶ Start in Orca", menu: false, tint: AgentPill.orca)
                 c.target = self; c.action = #selector(startOrca(_:))
-                c.toolTip = "Open a Claude session for \(item.key) in Orca and send the prompt"
+                c.toolTip = "Open a session for \(item.key) in Orca with the default agent and send the prompt"
                 place(c)
+                x -= 6
+                let m = Chip("▾", menu: false, tint: AgentPill.orca)
+                m.target = self; m.action = #selector(startOrcaWith(_:))
+                m.toolTip = "Start in Orca with another agent"
+                m.setAccessibilityLabel("Start in Orca with")
+                place(m)
             }
         }
         if let error {
@@ -783,6 +789,11 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         agents?.start(found.item, snap: found.snap, anchor: sender)
     }
 
+    @objc private func startOrcaWith(_ sender: NSButton) {
+        guard let id = itemId, let found = store.item(id), let agents else { return }
+        agents.startMenu(found.item, snap: found.snap, anchor: sender).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+    }
+
     @objc private func agentChip(_ sender: NSButton) {
         guard let id = itemId, let found = store.item(id) else { return }
         agents?.pillClicked(found.item, snap: found.snap, anchor: sender)
@@ -963,7 +974,7 @@ private final class TabBar: Flipped {
             let on = i == selected
             let color: NSColor = on ? .labelColor : .secondaryLabelColor
             let tab = Flipped(frame: .zero)
-            var tx: CGFloat = 8
+            var tx: CGFloat = 6
             if let img = NSImage(systemSymbolName: t.symbol, accessibilityDescription: nil) {
                 let iv = NSImageView(image: img)
                 iv.symbolConfiguration = .init(pointSize: 12, weight: on ? .semibold : .regular)
@@ -1006,7 +1017,9 @@ private final class TabBar: Flipped {
                 tab.addSubview(pill)
                 tx = pill.frame.maxX + 4
             }
-            tab.frame = NSRect(x: x, y: 0, width: tx + 6, height: 34)
+            // The line spans the content, so the content is centered over it.
+            let end = tab.subviews.map(\.frame.maxX).max() ?? tx
+            tab.frame = NSRect(x: x, y: 0, width: end + 6, height: 34)
             if on {
                 let line = NSView(frame: NSRect(x: 6, y: 32, width: tab.frame.width - 12, height: 2))
                 line.wantsLayer = true

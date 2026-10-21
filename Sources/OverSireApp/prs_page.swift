@@ -6,6 +6,7 @@ final class PRsPage: Page {
     private var busy: [String: String] = [:]   // row id → verb
     private var errors: [String: String] = [:]
     override var buildsLater: Bool { true }
+    override var fillsHeight: Bool { true }
     private let table = ColumnLayout(id: "prs", columns: [
         TableColumn(id: "kind", title: "", width: 58, min: 48),
         TableColumn(id: "title", title: "Pull request", width: 300, min: 160, flexible: true),
@@ -39,13 +40,12 @@ final class PRsPage: Page {
             return
         }
         let reviews = all.filter { !$0.pr.mine }, mine = all.filter { $0.pr.mine }
+        let card = StickyListCard.table(table)
         for (title, list) in [("Review requests", reviews), ("My pull requests", mine)] where !list.isEmpty {
-            col.addFull(SectionTitle(title, count: list.count))
-            let card = ListCard()
-            card.add(TableHeader(table))
+            card.addGroup(title, count: list.count)
             for e in list { card.add(row(e.repo, e.pr)) }
-            col.addFull(card)
         }
+        col.addFull(card)
     }
 
     private func linkedKey(_ repo: String, _ p: ChangeRequest) -> String? {

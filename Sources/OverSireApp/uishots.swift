@@ -598,6 +598,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("session:") {
                         self.sessionWindow?.orderOut(nil)
                         self.sessionWindow = UIShots.sessionSample(String(p.dropFirst(8)), shooting: w)
+                    } else if p.hasPrefix("startmenu:"), let found = self.projectStore.item(key: String(p.dropFirst(10))),
+                              let more = w.window?.contentView.flatMap({ UIShots.find($0) { $0.accessibilityLabel() == "Start in Orca with" } }) {
+                        // startmenu:<KEY>: the agent list of the item page split button.
+                        self.shootMenu(self.agentIndex.startMenu(found.item, snap: found.snap, anchor: more), under: more, name: "\(theme.rawValue)-startmenu")
                     } else if p == "popover" {
                         self.glance = self.popoverSample()
                     } else if p == "menuicon" {
@@ -743,11 +747,13 @@ extension UIShots {
             }
         }
         if frame == "listening" { m.text = "Why is the sync slow"; m.phase = .listening }
+        if frame == "wide" { m.text = "When I scroll down tables I want to see the top and the columns." }
         if frame == "failed" { m.intake = false; m.phase = .failed(SessionStartError.hostFiles("runs.png did not arrive whole on the Orca host.").localizedDescription) }
         let p = c.present(m, near: nil)
         p.promptView.string = m.text
         p.titleField.stringValue = m.titleText
         p.setPhase(m.phase, hostFiles: frame == "failed")
+        if frame == "wide" { p.resize(from: p.frameSaved, dx: 180, dy: 90) }
         return p
     }
 }
@@ -800,6 +806,25 @@ extension UIShots {
 
     /// Opens the Send menu, shoots the panel and the menu as one screen area, then closes the menu.
     /// The menu blocks the default run loop mode, so the timer runs in the common modes.
+    /// Opens `menu` under `v` and shoots the area around it.
+    func shootMenu(_ menu: NSMenu, under v: NSView, name: String) {
+        guard let win = v.window else { return }
+        let out = (dir as NSString).appendingPathComponent(name + ".png")
+        let f = win.convertToScreen(v.convert(v.bounds, to: nil))
+        let t = Timer(timeInterval: 0.8, repeats: false) { _ in
+            let top = NSScreen.screens[0].frame.maxY
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            p.arguments = ["-x", "-R", "\(Int(f.minX) - 300),\(Int(top - f.maxY) - 40),560,340", out]
+            try? p.run()
+            p.waitUntilExit()
+            print("UISHOTS \(out)")
+            menu.cancelTracking()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.height + 2), in: v)
+    }
+
     func shootMenu(of panel: BasketPanel, name: String) {
         guard let menu = panel.popSendMenu() else { return }
         let out = (dir as NSString).appendingPathComponent(name + ".png")
