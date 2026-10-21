@@ -554,80 +554,114 @@ final class Banner: Box {
 
 // Tabs over a page part. Arrow keys move, the selected tab has a line and bold text.
 final class TabStrip: NSStackView {
+    /// One tab: the title, an optional count, and views before and after the title.
+    /// `label` is the accessibility label and the tooltip, for a tab whose views say more than its title.
+    struct Tab {
+        var title: String
+        var count: Int?
+        var lead: [NSView] = []
+        var trail: [NSView] = []
+        var label: String?
+    }
+
     var onSelect: ((Int) -> Void)?
-    private var buttons: [NSButton] = []
+    private var cells: [TabCell] = []
     private let selected: Int
     // An arrow key rebuilds the page. The new strip then takes the focus back.
     private static var refocus = false
 
-    init(_ titles: [String], selected: Int, counts: [Int?] = []) {
+    convenience init(_ titles: [String], selected: Int, counts: [Int?] = []) {
+        self.init(tabs: titles.enumerated().map { i, t in Tab(title: t, count: i < counts.count ? counts[i] : nil) }, selected: selected)
+    }
+
+    init(tabs: [Tab], selected: Int) {
         self.selected = selected
         super.init(frame: .zero)
         orientation = .horizontal
+        alignment = .bottom
         spacing = 2
         translatesAutoresizingMaskIntoConstraints = false
-        for (i, t) in titles.enumerated() {
-            let count = i < counts.count ? counts[i] : nil
-            let b = NSButton(title: t, target: self, action: #selector(pick(_:)))
-            b.isBordered = false
-            b.tag = i
-            b.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let on = i == selected
-            var s = t
-            if let count { s += "  \(count)" }
-            let para = NSMutableParagraphStyle()
-            para.alignment = .center
-            b.attributedTitle = NSAttributedString(string: s, attributes: [
-                .font: NSFont.systemFont(ofSize: 12.5, weight: on ? .semibold : .regular),
-                .foregroundColor: on ? Palette.fg : Palette.mut, .paragraphStyle: para])
-            b.setAccessibilityRole(.radioButton)
-            b.setAccessibilityValue(on ? 1 : 0)
-            let wrap = TabCell(v: [b, Box(fill: on ? Palette.acc : .clear, border: nil, radius: 1)], spacing: 6, align: .centerX)
-            wrap.onTap = { [weak self] in self?.onSelect?(i) }
-            let line = wrap.arrangedSubviews[1]
-            line.heightAnchor.constraint(equalToConstant: 2).isActive = true
-            line.widthAnchor.constraint(equalTo: wrap.widthAnchor).isActive = true
-            wrap.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 0, right: 8)
-            // Else a tie with the page column can stretch one tab over the full width.
-            wrap.setHuggingPriority(.required, for: .horizontal)
-            addArrangedSubview(wrap)
-            buttons.append(b)
+        for (i, t) in tabs.enumerated() {
+            let cell = TabCell(t, on: i == selected)
+            cell.onTap = { [weak self] in self?.onSelect?(i) }
+            addArrangedSubview(cell)
+            cells.append(cell)
         }
         setAccessibilityRole(.tabGroup)
         setHuggingPriority(.required, for: .horizontal)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func pick(_ b: NSButton) { onSelect?(b.tag) }
-
     override func keyDown(with event: NSEvent) {
         guard event.keyCode == 123 || event.keyCode == 124 else { return super.keyDown(with: event) }
         let next = selected + (event.keyCode == 124 ? 1 : -1)
-        guard buttons.indices.contains(next) else { return }
+        guard cells.indices.contains(next) else { return }
         TabStrip.refocus = true
         onSelect?(next)
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard TabStrip.refocus, let w = window, buttons.indices.contains(selected) else { return }
+        guard TabStrip.refocus, let w = window, cells.indices.contains(selected) else { return }
         TabStrip.refocus = false
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            w.makeFirstResponder(self.buttons[self.selected])
+            w.makeFirstResponder(self.cells[self.selected])
         }
     }
 }
 
-// The full tab takes the click, padding and line too. The button only gives focus and Space.
-private final class TabCell: NSStackView {
+// One tab: a centered label row over a line at the bottom. The full cell takes the click, the focus and Space or Return.
+private final class TabCell: NSView {
+    static let height: CGFloat = 30
     var onTap: (() -> Void)?
+
+    init(_ tab: TabStrip.Tab, on: Bool) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let title = NSTextField.text(tab.title, size: 12.5, weight: on ? .semibold : .regular, color: on ? Palette.fg : Palette.mut)
+        title.setContentCompressionResistancePriority(.required, for: .horizontal)
+        var views = tab.lead + [title]
+        if let count = tab.count { views.append(NSTextField.text("\(count)", size: 12, color: Palette.dim)) }
+        let row = NSStackView(h: views + tab.trail, spacing: 5)
+        let line = Box(fill: on ? Palette.acc : .clear, border: nil, radius: 1)
+        addSubview(row)
+        addSubview(line)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: TabCell.height),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -1),
+            line.leadingAnchor.constraint(equalTo: leadingAnchor), line.trailingAnchor.constraint(equalTo: trailingAnchor),
+            line.bottomAnchor.constraint(equalTo: bottomAnchor), line.heightAnchor.constraint(equalToConstant: 2),
+        ])
+        // Else a tie with the page column can stretch one tab over the full width.
+        setContentHuggingPriority(.required, for: .horizontal)
+        focusRingType = .exterior
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioButton)
+        setAccessibilityLabel(tab.label ?? (tab.count.map { "\(tab.title), \($0)" } ?? tab.title))
+        setAccessibilityValue(on ? 1 : 0)
+        toolTip = tab.label
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
     override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
     override func mouseDown(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onTap?() }
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4).fill() }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 49 || event.keyCode == 76 { onTap?(); return }
+        super.keyDown(with: event)
+    }
+    override func accessibilityPerformPress() -> Bool { onTap?(); return true }
 }
 
 // Page title line: big title, a small caption, then actions on the right.

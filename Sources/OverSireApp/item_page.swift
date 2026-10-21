@@ -107,7 +107,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let prog = snap.progress(of: item.id)
         let tabs = Route.ItemTab.allCases
         let asks = data.questions.count(key: key)
-        let strip = TabStrip(["Overview", asks > 0 ? "Session ✦ \(asks)" : "Session", prog.total > 0 ? "\(snap.isDoneWithOpenSubItems(item) ? "⚠ " : "")Sub-items \(prog.done)/\(prog.total)" : "Sub-items", "Activity"],
+        var sub = TabStrip.Tab(title: "Sub-items")
+        if prog.total > 0 {
+            let warn = snap.isDoneWithOpenSubItems(item)
+            sub.lead = [ProgressRing(done: prog.done, total: prog.total).sized(14)]
+            if warn { sub.trail = [Glyph("exclamationmark.triangle.fill", color: Palette.warn, size: 11)] }
+            sub.label = "Sub-items, \(prog.done) of \(prog.total) done" + (warn ? ", Done with open sub-items" : "")
+        }
+        let sessionTab = TabStrip.Tab(title: "Session", count: asks > 0 ? asks : nil,
+                                   label: asks > 0 ? "Session, \(asks) question\(asks == 1 ? "" : "s")" : nil)
+        let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview"), sessionTab, sub, TabStrip.Tab(title: "Activity")],
                              selected: tabs.firstIndex(of: tab) ?? 0)
         strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
         main.addArrangedSubview(strip)
