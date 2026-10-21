@@ -241,6 +241,7 @@ public final class QuestionBoard: @unchecked Sendable {
     private var table: [QuestionID: Entry] = [:]
     private var seen: [QuestionID: SessionQuestion] = [:]     // the last good read of each id
     private var failures: [AccountID: Int] = [:]
+    private var reads: [AccountID: Date] = [:]
     private var dismissed: Set<QuestionID> = []
     private var loops: [Task<Void, Never>] = []
     private var sleeper: Task<Void, Never>?
@@ -355,6 +356,7 @@ public final class QuestionBoard: @unchecked Sendable {
             let before = table
             for (account, read) in reads {
                 failures[account] = 0
+                self.reads[account] = t
                 let ids = Set(read.map(\.id))
                 dismissed = dismissed.intersection(ids)
                 for q in read where !dismissed.contains(q.id) {
@@ -446,6 +448,9 @@ public final class QuestionBoard: @unchecked Sendable {
     public func open(for item: ItemRef) -> [Entry] {
         lock.withLock { table.values.filter { $0.question.origin.item == item }.sorted { $0.question.askedAt < $1.question.askedAt } }
     }
+
+    /// The time of the last good read of the channel of this account.
+    public func checkedAt(_ account: AccountID) -> Date? { lock.withLock { reads[account] } }
 
     /// The questions that wait for the user: Home and the menu bar.
     public var openCount: Int { lock.withLock { table.values.filter { $0.state == .open }.count } }

@@ -101,6 +101,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
+    lazy var questions: QuestionHub = {
+        let h = QuestionHub(agents: agentIndex, writes: STORE_WRITES)
+        h.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "agent:" + (key ?? "question")) }
+        return h
+    }()
     lazy var itemSummaries = ItemSummaries(path: ITEM_SUMMARIES_PATH)
     lazy var stats = WorkStats(path: WORK_STATS_PATH)
     lazy var appWindow: AppWindow = {
@@ -221,6 +226,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             WorkstreamIndex.formats = ENV.keyFormats
             self.applyRepoSelection()
             self.relay.update()
+            self.startQuestions()
             for w in ENV.trackerIds where self.projectCatalog.projects(of: w).isEmpty { self.projectCatalog.refresh(w, force: true) }
             self.applyProjectSelection()
             NotificationCenter.default.post(name: AppWindow.changed, object: self)
@@ -247,6 +253,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         agentIndex.startTimer()
+        startQuestions()
+        NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
+            self?.reloadList()
+            self?.updateIcon()
+            NotificationCenter.default.post(name: AppWindow.changed, object: self)
+        }
         for n in [WorkQueue.changed, WorkStats.changed, StatusJob.changed, IntakeAgent.changed, SessionNotes.changed, CIAssist.changed, ItemAreaBook.changed, SuggestionBook.changed, PlannerBook.changed] {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in
                 NotificationCenter.default.post(name: AppWindow.changed, object: self)
@@ -669,12 +681,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
     }
 
+    func startQuestions() {
+        questions.start(channels: ENV.accounts(.runtime).compactMap { ENV.provider($0.account) as? any QuestionChannel })
+    }
+
     // MARK: - Icon
 
     func updateIcon() {
         let k = MenuIconState(runs: visibleGrouped(grouped), waitingAgents: agentIndex.agents.values.filter { $0.phase == .waiting }.count,
                               unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot,
-                              problems: openProblems.count)
+                              problems: openProblems.count, questions: questions.open.count)
         statusItem.button?.toolTip = "OverSire \u{2014} \(k.label)"
         // The shots in the open snap baskets, as a count next to the icon.
         let shots = snap.shotCount

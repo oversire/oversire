@@ -79,8 +79,9 @@ final class AgentsPage: Page {
         let key = s.item?.key
         let name: NSView = key.map { k in Chiplet(k, color: Palette.fg, mono: true) { [weak self] in self?.go(.item(k, .overview)) } }
             ?? NSTextField.text(runnerTitle(s), size: 12.5, mono: true)
-        let note = s.error ?? s.summary ?? ""
-        let text = NSTextField.text(note, size: 12.5, color: s.error == nil ? Palette.fg : Palette.bad, lines: 1)
+        let asks = key.flatMap { data.questions.line(key: $0) }
+        let note = s.error ?? asks ?? s.summary ?? ""
+        let text = NSTextField.text(note, size: 12.5, color: s.error != nil ? Palette.bad : asks != nil ? Palette.acc : Palette.fg, lines: 1)
         text.lineBreakMode = .byTruncatingTail
         text.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         let label = "\(runnerTitle(s)), \(s.agent), \(tone.word)" + (note.isEmpty ? "" : ": \(note)") + ", \(relativeTime(s.updatedAt))"
@@ -183,7 +184,12 @@ final class AgentsPage: Page {
         worktree.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: worktree.widthAnchor).isActive = true }
 
         var head = "—", meta = "", headColor = Palette.dim
-        if reading {
+        let asks = key.flatMap { data.questions.line(key: $0) }
+        if let asks {
+            head = asks
+            headColor = asks.hasPrefix("✦") ? Palette.acc : Palette.ok
+            meta = asks.hasPrefix("✦") ? "Open the item to answer" : "The session goes on"
+        } else if reading {
             head = "Reading the last turn…"
             meta = "Status requested"
         } else if let s = status {
@@ -224,7 +230,9 @@ final class AgentsPage: Page {
             + (status.map { ". \($0.word): \($0.reply.headline)" } ?? "")
         let row = TableRow(table, cells: cells, trailing: trailing, height: 54, label: label) { [weak self] in
             guard let self else { return }
-            if detail != nil {
+            if asks != nil, let key {
+                self.go(.item(key, .session))
+            } else if detail != nil {
                 if self.expanded.remove(c.id) == nil { self.expanded.insert(c.id) }
                 self.reload()
             } else if let key { self.go(.item(key, .overview)) } else { self.data.agentIndex.reveal(card: c.id) }

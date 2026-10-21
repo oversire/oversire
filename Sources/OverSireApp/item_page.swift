@@ -45,6 +45,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var sending = false
     private var pendingComment: String?
     private var relationObserver: Any?
+    private var questionObserver: Any?
+    private var questionCards: [QuestionCard] = []
     private lazy var needsYou = NeedsYouCard(page: self)
 
     override var pageWidth: CGFloat { 960 }
@@ -62,13 +64,17 @@ final class ItemPage: Page, NSTextFieldDelegate {
             guard let self, self.tab == .overview, !self.isEditing else { return }
             self.reload()
         }
+        questionObserver = NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.isEditing else { return }
+            self.reload()
+        }
         summaryObserver = NotificationCenter.default.addObserver(forName: ItemSummaries.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self, self.tab == .overview, !self.isEditing else { return }
             self.reload()
         }
     }
 
-    deinit { [relationObserver, summaryObserver].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver) }
+    deinit { [relationObserver, summaryObserver, questionObserver].compactMap { $0 }.forEach(NotificationCenter.default.removeObserver) }
 
     override func show(_ r: Route) {
         if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = []; descriptionOpen = false }; tailAt = .distantPast }
@@ -77,6 +83,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     override var isEditing: Bool {
         super.isEditing || !(replyField?.stringValue.isEmpty ?? true) || !(commentField?.stringValue.isEmpty ?? true) || !(askField?.stringValue.isEmpty ?? true)
+            || questionCards.contains { $0.isTyping }
     }
 
     override func build(_ col: NSStackView) {
@@ -102,7 +109,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let note { main.addFull(Banner(note.0, title: note.1)) }
         let prog = snap.progress(of: item.id)
         let tabs = Route.ItemTab.allCases
-        let strip = TabStrip(["Overview", "Session", prog.total > 0 ? "Sub-items \(prog.done)/\(prog.total)" : "Sub-items", "Activity"],
+        let asks = data.questions.count(key: key)
+        let strip = TabStrip(["Overview", asks > 0 ? "Session ✦ \(asks)" : "Session", prog.total > 0 ? "Sub-items \(prog.done)/\(prog.total)" : "Sub-items", "Activity"],
                              selected: tabs.firstIndex(of: tab) ?? 0)
         strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
         main.addArrangedSubview(strip)
@@ -145,7 +153,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
             NSPasteboard.general.setString(item.key, forType: .string)
             copy?.flash("Copied")
         }
-        let keyLine = NSStackView(h: [copy, project, Spacer()], spacing: 8)
+        var top: [NSView] = [copy, project, Spacer()]
+        let asks = data.questions.count(key: key)
+        if asks > 0 { top.append(Pill(.question, text: "Waits for you · \(asks) question\(asks == 1 ? "" : "s")")) }
+        let keyLine = NSStackView(h: top, spacing: 8)
         var chips: [NSView] = [statusChip(snap: snap, item: item), priorityChip(item)]
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
         if !item.assignees.isEmpty { chips.append(Chiplet(item.assignees.joined(separator: ", "), symbol: "person")) }
@@ -450,6 +461,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
     // MARK: Session
 
     private func session(_ main: NSStackView, stream: Workstream?) {
+        questionCards = data.questions.entries(key: key).map { data.questions.card($0) }
+        questionCards.forEach { main.addFull($0) }
         if let a = stream?.agent {
             let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
             let s = data.statusJob.item(key)

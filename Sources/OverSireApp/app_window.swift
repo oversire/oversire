@@ -19,6 +19,7 @@ protocol AppData: AnyObject {
     var statusJob: StatusJob { get }
     var intakeAgent: IntakeAgent { get }
     var sessions: SessionNotes { get }
+    var questions: QuestionHub { get }
     var ciAssist: CIAssist { get }
     var itemSummaries: ItemSummaries { get }
     var stats: WorkStats { get }

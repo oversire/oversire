@@ -39,6 +39,13 @@ enum AIMode: String, Codable, CaseIterable {
     var label: String { self == .off ? "Off" : self == .ask ? "Ask me" : "Auto" }
 }
 
+// When a question of a session gets a macOS notification.
+enum QuestionNotice: String, Codable, CaseIterable {
+    case now, later, never
+    var label: String { self == .now ? "At once" : self == .later ? "After 30 min" : "Never" }
+    var delay: TimeInterval? { self == .now ? 0 : self == .later ? 1800 : nil }
+}
+
 // The queue, the AI checks of agents, the intake agent and the write-back to Plane.
 struct AgentsConfig: Codable, Equatable {
     var autoStart = true                // the queue starts the next item when its condition holds
@@ -47,6 +54,7 @@ struct AgentsConfig: Codable, Equatable {
     var botUser = ""                    // a Plane assignee that adds the item to the queue
     var aiMode = AIMode.ask
     var quietMinutes = 10.0             // an agent with no output this long gets a check
+    var questionNotice = QuestionNotice.later
     var intakePrompt = AgentsConfig.defaultIntakePrompt
     var intakeScratch = false           // the intake agent works in a scratch worktree, not in main
     var writeBack = WriteBackConfig()
@@ -76,6 +84,7 @@ struct AgentsConfig: Codable, Equatable {
         botUser = try c.decodeIfPresent(String.self, forKey: .botUser) ?? ""
         aiMode = try c.decodeIfPresent(AIMode.self, forKey: .aiMode) ?? .ask
         quietMinutes = try c.decodeIfPresent(Double.self, forKey: .quietMinutes) ?? 10
+        questionNotice = try c.decodeIfPresent(QuestionNotice.self, forKey: .questionNotice) ?? .later
         intakePrompt = try c.decodeIfPresent(String.self, forKey: .intakePrompt) ?? AgentsConfig.defaultIntakePrompt
         intakeScratch = try c.decodeIfPresent(Bool.self, forKey: .intakeScratch) ?? false
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()

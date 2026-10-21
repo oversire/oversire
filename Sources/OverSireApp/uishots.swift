@@ -31,6 +31,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: UIShots.tmp + "/ci.json")
+    lazy var questions = QuestionHub(agents: agentIndex, writes: writes)
     lazy var stats: WorkStats = {
         let s = WorkStats(path: UIShots.tmp + "/work-stats.json") { _ in nil }
         let week = WorkStats.week(Date(), calendar: .current)
@@ -238,12 +239,33 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                      ticks: [], at: ago(1), trigger: .idle, byAI: true, phase: .quiet, screen: "fp-OVERSIRE-140",
                                      message: agentIndex.agent("OVERSIRE-140")?.messageHash, since: ago(13),
                                      read: "Read 3 turns, 6 closing messages, the screen and the description"))
+        seedQuestions(ago)
         guard let found = projectStore.item(key: "OVERSIRE-137") else { print("UISHOTS no OVERSIRE project"); return }
         let snap = found.snap, pk = snap.summary.ref.storeKey
         AGENTS.slots[pk] = 7
         for k in ["OVERSIRE-145", "OVERSIRE-139"] {
             if let f = projectStore.item(key: k), queue.lane(pk)?.entries.contains(where: { $0.key == k }) != true { queue.add(f.item, snap: snap) }
         }
+    }
+
+    /// One ask of OVERSIRE-143 (found by its terminal), one Orca form of OVERSIRE-140, one answer in Orca for OVERSIRE-142.
+    private func seedQuestions(_ ago: @escaping (Double) -> Date) {
+        let account = AccountID(provider: "orca", id: "local")
+        let s = { (id: String) in SessionRef(workspace: WorkspaceRef(account: account, id: "w-" + id), id: "term-" + id) }
+        let store = QuestionItem(id: "q1", header: "Inbox", text: "Do you want the Inbox to show the blocked rows too?",
+                                 why: "Sessions shows them now.", kind: .single,
+                                 options: [.init(label: "Both"), .init(label: "Only Sessions")], allowsOther: true)
+        let tests = QuestionItem(id: "q2", header: "Tests", text: "Which tests do you want?", kind: .multi,
+                                 options: [.init(label: "Unit"), .init(label: "uishots")])
+        let q = { (id: String, items: [QuestionItem], via: SessionQuestion.Via, at: Double) in
+            SessionQuestion(id: QuestionID(rawValue: "orca:local:\(id)"), session: s(id), origin: .session, items: items, via: via, askedAt: ago(at))
+        }
+        let answer = QuestionAnswer(question: "orca:local:m3", items: [.init(id: "q1", choices: ["Both"])])
+        questions.seed([
+            QuestionBoard.Entry(question: q("m1", [store, tests], .askReply, 3), state: .open, firstSeen: ago(3)),
+            QuestionBoard.Entry(question: q("f2", [store], .form, 41), state: .open, firstSeen: ago(41)),
+            QuestionBoard.Entry(question: q("m3", [store], .askReply, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
+        ], keys: [s("m1"): "OVERSIRE-143", s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"])
     }
 
     /// The id of the blocked row that the Sessions shot opens.

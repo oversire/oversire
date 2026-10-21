@@ -84,6 +84,7 @@ extension SettingsPage {
     private func queue(_ b: NSStackView) {
         let modes = AIMode.allCases
         let quiet = Self.quietMinutes
+        let notices = QuestionNotice.allCases
         let label = TextInput(AGENTS.startLabel, placeholder: "agent", label: "Start label", mono: true) { v in
             AGENTS.startLabel = v.trimmingCharacters(in: .whitespaces)
             saveConfig()
@@ -106,6 +107,11 @@ extension SettingsPage {
                 settingsChanged()
             }),
             FieldRow("Add to the queue by", note: "Label or assignee in Plane.", NSStackView(h: [label, bot], spacing: 8)),
+            FieldRow("Tell me about a question", note: "One notification when a session waits for an answer.",
+                     Segmented(notices.map(\.label), selected: notices.firstIndex(of: AGENTS.questionNotice) ?? 1, label: "Tell me about a question") {
+                AGENTS.questionNotice = notices[$0]
+                saveConfig()
+            }),
         ]))
     }
 

@@ -380,7 +380,7 @@ final class NeedsYouCard: NSObject {
 
 // One row of Needs you: one item, or one run or PR with no item. Home, its badge and the menu bar list them.
 struct NeedsYou: Equatable {
-    enum Kind: Int { case needsInput, blocked, usageLimit, stuck, notFinished, done, runFailed, review, mention }
+    enum Kind: Int { case question, needsInput, blocked, usageLimit, stuck, notFinished, done, runFailed, review, mention }
 
     // The chips over the list.
     enum Filter: Int, CaseIterable {
@@ -389,7 +389,7 @@ struct NeedsYou: Equatable {
         func has(_ k: Kind) -> Bool {
             switch self {
             case .all: return true
-            case .blocked: return k == .needsInput || k == .blocked
+            case .blocked: return k == .question || k == .needsInput || k == .blocked
             case .stuck: return k == .stuck || k == .usageLimit
             case .notFinished: return k == .notFinished
             }
@@ -398,9 +398,11 @@ struct NeedsYou: Equatable {
 
     // The action that shows on hover.
     enum Act: Equatable {
-        case reply(String), checklist(String), nudge(String), ask(String), approve(String), rerun(repo: String, run: Run), open(String)
+        case answer, answerInOrca(QuestionID), reply(String), checklist(String), nudge(String), ask(String), approve(String), rerun(repo: String, run: Run), open(String)
         var title: String {
             switch self {
+            case .answer: return "Answer"
+            case .answerInOrca: return "Answer in Orca ↗"
             case .reply: return "Reply"
             case .checklist: return "Checklist"
             case .nudge: return "Send nudge"
@@ -425,6 +427,7 @@ struct NeedsYou: Equatable {
 
     var tone: Tone {
         switch kind {
+        case .question: return .question
         case .needsInput: return Tone(SessionState.needsInput)
         case .blocked: return Tone(SessionState.blocked)
         case .usageLimit: return Tone(symbol: "hourglass.circle.fill", color: Palette.warn, word: "Usage limit")
@@ -485,8 +488,20 @@ struct NeedsYou: Equatable {
             || (prs.first { $0.0 == repo }?.1.contains { $0.mine && $0.headRefName == r.headBranch } ?? false)
     }
 
+    /// The rows of the open questions. A form question gets its answer in Orca.
+    static func questions(_ hub: QuestionHub) -> [NeedsYou] {
+        hub.open.map { e in
+            let q = e.question
+            let key = hub.key(q) ?? "Session"
+            let text = (q.items.first?.text ?? "Asks a question").replacingOccurrences(of: "\n", with: " ")
+            let route: Route = q.origin.isIntake ? .intake(key.split(separator: "-").first.map(String.init)) : .item(key, .session)
+            return NeedsYou(kind: .question, key: key, reason: "\(text) · \(hub.place(q).text)", at: q.askedAt, route: route,
+                            act: q.answerable ? .answer : .answerInOrca(e.id))
+        }
+    }
+
     static func collect(_ data: AppData, snoozes: Snoozes = SNOOZES, now: Date = Date()) -> [NeedsYou] {
-        var out: [NeedsYou] = []
+        var out = questions(data.questions)
         let agents = data.agentIndex
         for (key, a) in agents.agents where agents.state(key) == .needsInput {
             let ask = (a.message ?? "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
@@ -568,6 +583,8 @@ final class NeedsYouRow: Row {
             actions.append(ActionButton(a.title, style: .primary) {
                 let job = data.statusJob
                 switch a {
+                case .answer: go(n.route)
+                case .answerInOrca(let id): if let e = data.questions.entries.first(where: { $0.id == id }) { data.questions.reveal(e.question) }
                 case .reply(let k): go(.item(k, .session))
                 case .checklist(let k): go(.item(k, .overview))
                 case .nudge(let id), .approve(let id): job.approve(id)

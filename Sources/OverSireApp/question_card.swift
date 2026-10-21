@@ -58,6 +58,8 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         var askAgain: (() -> Void)?
         var dismiss: () -> Void = {}
         var stop: (() -> Void)?
+        /// Each change of the draft, so a page rebuild keeps it.
+        var draft: (QuestionDraft) -> Void = { _ in }
     }
 
     /// After this time the card shows an amber "Waits n min".
@@ -75,8 +77,10 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     private var fields: [String: NSTextField] = [:]
     private let dash = CAShapeLayer()
 
-    init(_ e: QuestionBoard.Entry, place: QuestionPlace, checkedAt: Date?, now: @escaping () -> Date = Date.init, actions: Actions) {
+    init(_ e: QuestionBoard.Entry, place: QuestionPlace, checkedAt: Date?, draft: QuestionDraft = QuestionDraft(), now: @escaping () -> Date = Date.init,
+         actions: Actions) {
         entry = e
+        self.draft = draft
         self.place = place
         self.checkedAt = checkedAt
         self.now = now
@@ -95,6 +99,12 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     var question: SessionQuestion { entry.question }
 
     /// Send is on when the question is open and each item has a valid answer.
+    /// True while a text field of the card has the focus. A page does not rebuild then.
+    var isTyping: Bool {
+        guard let t = window?.firstResponder as? NSText, let f = t.delegate as? NSView else { return false }
+        return f.isDescendant(of: self)
+    }
+
     var canSend: Bool { entry.state == .open && question.answerable && draft.isValid(question) }
 
     /// A new entry redraws the card. The same entry only moves the "Checked" time.
@@ -112,6 +122,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         guard entry.state == .open, question.answerable, let item = question.items.first(where: { $0.id == itemID }),
               item.kind != .free, index < item.options.count else { return }
         draft.pick(item.options[index].label, in: item)
+        actions.draft(draft)
         if item.kind != .multi { fields[item.id]?.stringValue = "" }
         if item.kind == .approve, canSend { send(); return }
         fillOptions(item)
@@ -121,6 +132,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     func write(_ text: String, in itemID: String) {
         guard let item = question.items.first(where: { $0.id == itemID }) else { return }
         draft.write(text, in: item)
+        actions.draft(draft)
         fillOptions(item)
         refreshSend()
     }

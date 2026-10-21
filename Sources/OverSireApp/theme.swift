@@ -63,6 +63,7 @@ struct Tone {
     static let done = Tone(symbol: "checkmark.seal.fill", color: Palette.ok, word: "Done")
     static let idle = Tone(symbol: "moon.zzz", color: Palette.dim, word: "Idle")
     static let cancelled = Tone(symbol: "slash.circle", color: Palette.dim, word: "Cancelled")
+    static let question = Tone(symbol: "sparkles", color: Palette.acc, word: "Waits for you")
     static let intake = Tone(symbol: "tray.and.arrow.down.fill", color: Palette.intake, word: "Intake")
     static let info = Tone(symbol: "info.circle.fill", color: Palette.acc, word: "Info")
     static let warning = Tone(symbol: "exclamationmark.triangle.fill", color: Palette.warn, word: "Warning")
