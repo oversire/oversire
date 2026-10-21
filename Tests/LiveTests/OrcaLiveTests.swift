@@ -33,4 +33,30 @@ final class OrcaLiveTests: XCTestCase {
             XCTAssertEqual(paths, [dir + "/random-2mb.bin"], t ?? "local")
         }
     }
+
+    /// One ask/reply round. The test terminal of Orca (ORCA_TERMINAL_HANDLE) asks; OverSire answers as the coordinator.
+    func testAskReplyRound() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OVERSIRE_LIVE"] == "1" else { throw XCTSkip("set OVERSIRE_LIVE=1") }
+        guard let me = env["ORCA_TERMINAL_HANDLE"] else { throw XCTSkip("run inside an Orca terminal") }
+        let rt = OrcaRuntime(environment: env["ORCA_ENV"], commands: LiveCommands())
+        guard rt.installed else { throw XCTSkip("Orca is not installed") }
+        let coord = try await rt.coordinator()
+        let body = #"{"round":1,"questions":[{"id":"q1","type":"single","text":"Live test: which store?","options":["SQLite","JSON files"]}]}"#
+        var args = ["orchestration", "send", "--to", coord.address, "--from", me, "--type", "question", "--subject", "Question", "--body", body, "--json"]
+        if let e = env["ORCA_ENV"], !e.isEmpty { args += ["--environment", e] }
+        _ = try await LiveCommands().run(rt.exe, args, stdin: nil, timeout: .seconds(20))
+        let session = rt.sessionRef(workspace: "live", handle: me)
+        let q = try await rt.openQuestions(in: [session]).first { $0.items.first?.text == "Live test: which store?" }
+        let open = try XCTUnwrap(q)
+        let a = QuestionAnswer(question: open.id, items: [.init(id: "q1", choices: ["SQLite"])])
+        let res1 = try await rt.answer(open, a)
+        let res2 = try await rt.answer(open, a)
+        XCTAssertEqual(res1, .sent)
+        XCTAssertEqual(res2, .alreadyAnswered)
+        let given = try await rt.answerGiven(open)
+        XCTAssertEqual(given, a)
+        let after = try await rt.openQuestions(in: [session])
+        XCTAssertFalse(after.contains { $0.id == open.id })
+    }
 }
