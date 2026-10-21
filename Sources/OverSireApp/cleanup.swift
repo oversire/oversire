@@ -216,6 +216,11 @@ final class Cleaner {
     }
 
     /// Finished items with leftovers, by key.
+    /// The line of one Orca card of a finished item: a worktree, a folder card or a live session. Else nil.
+    func line(card c: Workspace, key: String, data: AppData) -> CleanupLine? {
+        lines(key, data: data).first { [.worktree, .card, .session].contains($0.kind) && $0.id.hasSuffix("|" + c.id) }
+    }
+
     func pending(_ data: AppData) -> [String: [CleanupLine]] {
         var out: [String: [CleanupLine]] = [:]
         for k in Self.attachedKeys(data) {

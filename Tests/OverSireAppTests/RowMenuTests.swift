@@ -107,6 +107,8 @@ final class RowMenuTests: XCTestCase {
         XCTAssertEqual(m.command("Copy worktree path"), .copy("/w/.wt/sling-7"))
         let bare = RowMenu.session(card: card, key: nil, checkout: nil, hasAgent: false, caps: [])
         XCTAssertEqual(bare.titles, ["Copy worktree path", "Show in Finder", "Open in Terminal"])
+        let done = RowMenu.session(card: card, key: "SLING-7", checkout: co, hasAgent: false, caps: [], removable: true)
+        XCTAssertEqual(done.command("Remove worktree…"), .removeWorktree(card: "c1"))
     }
 
     func testActivityMenuHasNoReadState() {

@@ -26,6 +26,7 @@ enum RowCommand: Equatable {
     case refreshProject(String)
     case useTrackerIcon(String)
     case hideProject(String)
+    case removeWorktree(card: String)
 }
 
 // One line of a row menu.
@@ -133,7 +134,8 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func session(card: Workspace, key: String?, checkout: Checkout?, hasAgent: Bool, caps: Set<Capability>) -> [MenuEntry] {
+    static func session(card: Workspace, key: String?, checkout: Checkout?, hasAgent: Bool, caps: Set<Capability>,
+                        removable: Bool = false) -> [MenuEntry] {
         var out: [MenuEntry] = []
         if let key { out.append(.action("Open item", .open(.item(key, .overview)))) }
         if caps.contains(.reveal) { out.append(.action("Reveal in Orca", .revealCard(card.id))) }
@@ -143,6 +145,7 @@ enum RowMenu {
         if let b = checkout?.branch, !b.isEmpty { out.append(.action("Copy branch name", .copy(b))) }
         if !path.isEmpty { out += [.action("Show in Finder", .finder(path: path)), .action("Open in Terminal", .terminal(path: path))] }
         if let key, hasAgent, caps.contains(.sessionInput) { out += [.separator, .action("Send input…", .sendInput(key: key))] }
+        if removable { out += [.separator, .action("Remove worktree…", .removeWorktree(card: card.id))] }
         return out.tidy
     }
 
@@ -251,6 +254,7 @@ final class RowCommander {
         case .refreshProject(let k): store.refresh([k], force: true) { _ in }
         case .useTrackerIcon(let k): editLocal(k) { $0.icon = .tracker }
         case .hideProject(let k): editLocal(k) { $0.hidden = true }
+        case .removeWorktree: break   // the Worktrees page handles it
         case .triage, .onlyProject: break
         }
     }

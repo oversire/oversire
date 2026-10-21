@@ -46,8 +46,33 @@ final class AgentsPage: Page {
             return
         }
 
+        let shown = allWorktrees ? cards : active
+        let lines = Dictionary(uniqueKeysWithValues: shown.compactMap { c in
+            cardKey(c).flatMap { data.cleaner.line(card: c, key: $0, data: data) }.map { (c.id, $0) }
+        })
+        let safe = shown.filter { lines[$0.id].map { $0.safe && $0.removable } == true }
+        let unsafe = shown.filter { lines[$0.id].map { !($0.safe && $0.removable) } == true }
+        let rest = shown.filter { lines[$0.id] == nil }
+        if !safe.isEmpty {
+            let n = safe.count
+            col.addFull(Banner(.ok, title: "\(n) worktree\(n == 1 ? " is" : "s are") finished and safe to remove.",
+                               body: "The items are finished, the branches are merged or have no own commits, and no agent is live.",
+                               actions: [ActionButton("Remove \(n) worktree\(n == 1 ? "" : "s")…", symbol: "trash") { [weak self] in self?.removeAll(safe) }]))
+        }
+        commands.intercept = { [weak self] c in
+            guard case .removeWorktree(let id) = c else { return false }
+            if let self, let card = shown.first(where: { $0.id == id }), let l = lines[id], let key = self.cardKey(card) {
+                self.remove(l, key: key, card: card, ask: true)
+            }
+            return true
+        }
+
         let list = StickyListCard.table(table)
-        for c in allWorktrees ? cards : active { list.add(cardRow(c)) }
+        let grouped = !safe.isEmpty || !unsafe.isEmpty
+        for (title, group) in [("Finished", safe), ("Done, but not safe to remove", unsafe), ("In progress", rest)] where !group.isEmpty {
+            if grouped { list.addGroup(title, count: group.count) }
+            for c in group { list.add(cardRow(c, cleanup: lines[c.id])) }
+        }
         if cards.isEmpty {
             list.add(EmptyNote(idx.lastError == nil ? "Orca has no worktrees." : "OverSire could not read Orca.", symbol: "circle.dashed"))
         } else if !allWorktrees, active.count < cards.count {
@@ -103,7 +128,62 @@ final class AgentsPage: Page {
 
     private func cardKey(_ c: Workspace) -> String? { Self.cardKey(c, data: data) }
 
-    private func cardRow(_ c: Workspace) -> NSView {
+    // MARK: Remove
+
+    /// A safe line runs at once. Any other line asks first and forces the removal.
+    private func remove(_ l: CleanupLine, key: String, card c: Workspace, ask: Bool) {
+        guard l.removable else { return }
+        let run = { [weak self] in
+            guard let self else { return }
+            self.data.cleaner.run([l], key: key, data: self.data) { [weak self] errors in self?.failed(errors) }
+            self.reload()
+        }
+        guard ask || !l.safe else { run(); return }
+        let a = NSAlert()
+        a.messageText = "Remove \(c.name)?"
+        a.informativeText = l.safe ? "OverSire runs orca worktree rm. The Plane item does not change."
+            : "\(l.detail) OverSire forces the removal. Changes that are not in the base branch are lost."
+        a.addButton(withTitle: "Remove")
+        a.addButton(withTitle: "Cancel")
+        if !l.safe { a.alertStyle = .critical }
+        let done: (NSApplication.ModalResponse) -> Void = { if $0 == .alertFirstButtonReturn { run() } }
+        if let w = view.window { a.beginSheetModal(for: w, completionHandler: done) } else { done(a.runModal()) }
+    }
+
+    /// Runs the safe lines of each finished item that has a safe worktree.
+    private func removeAll(_ cards: [Workspace]) {
+        let keys = Array(Set(cards.compactMap { cardKey($0) })).sorted()
+        let a = NSAlert()
+        a.messageText = "Remove \(cards.count) worktree\(cards.count == 1 ? "" : "s")?"
+        a.informativeText = """
+            • OverSire runs orca worktree rm for each worktree.
+            • A local branch is deleted only when it is merged.
+            • A remote branch is deleted only when its PR is merged.
+            • The Plane items do not change.
+            """
+        a.addButton(withTitle: "Remove")
+        a.addButton(withTitle: "Cancel")
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            guard let self, r == .alertFirstButtonReturn else { return }
+            for k in keys {
+                let lines = self.data.cleaner.lines(k, data: self.data).filter { $0.safe && $0.removable && $0.kind != .group }
+                self.data.cleaner.run(lines, key: k, data: self.data) { [weak self] errors in self?.failed(errors) }
+            }
+            self.reload()
+        }
+        if let w = view.window { a.beginSheetModal(for: w, completionHandler: done) } else { done(a.runModal()) }
+    }
+
+    private func failed(_ errors: [String]) {
+        guard !errors.isEmpty else { reload(); return }
+        let a = NSAlert()
+        a.messageText = "OverSire could not remove all of it."
+        a.informativeText = errors.joined(separator: "\n")
+        if let w = view.window { a.beginSheetModal(for: w) } else { a.runModal() }
+        reload()
+    }
+
+    private func cardRow(_ c: Workspace, cleanup: CleanupLine? = nil) -> NSView {
         let key = cardKey(c)
         let co = data.workstreams.checkouts.first { $0.cardId == c.id || $0.path == c.path }
         let job = data.statusJob
@@ -158,6 +238,12 @@ final class AgentsPage: Page {
             head = "No status yet."
             meta = job.on ? "Next status after \(Int(AGENTS.quietMinutes)) min idle, or press refresh" : data.agentIndex.screenText(key)
         }
+        if let l = cleanup, asks == nil {
+            let ok = l.safe && l.removable
+            head = ok ? "Finished. Safe to remove." : l.kind == .session ? "Done. An agent is live." : "Done. Not safe to remove."
+            meta = l.detail
+            headColor = ok ? Palette.ok : Palette.warn
+        }
         let statusCell = TwoLine(head, meta, titleSize: 12.5, weight: .regular, titleColor: headColor)
         statusCell.toolTip = head
         let cells: [String: NSView] = [
@@ -172,6 +258,16 @@ final class AgentsPage: Page {
         r.isEnabled = canRead && !reading
         if !canRead { r.alphaValue = 0; r.setAccessibilityElement(false) }
         var trailing: [NSView] = [r]
+        if let l = cleanup, l.removable, let key {
+            let running = data.cleaner.running.contains(key.uppercased())
+            let b = ActionButton(running ? "Removing…" : l.safe ? "Remove" : "Remove…", symbol: running ? nil : "trash") { [weak self] in
+                self?.remove(l, key: key, card: c, ask: false)
+            }
+            b.isEnabled = !running
+            b.setAccessibilityLabel("Remove the worktree \(c.name)")
+            b.toolTip = l.safe ? "orca worktree rm" : l.detail
+            trailing.append(b)
+        }
         let open = ActionButton("Open", style: .plain) { [weak self] in
             if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
         }
@@ -193,7 +289,7 @@ final class AgentsPage: Page {
         if let box = row.cells.boxes["worktree"] { worktree.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true }
         if detail != nil { row.setAccessibilityExpanded(isOpen) }
         let hasAgent = key.flatMap { data.agentIndex.agent($0) } != nil
-        commands.attach(row) { RowMenu.session(card: c, key: key, checkout: co, hasAgent: hasAgent, caps: $0) }
+        commands.attach(row) { RowMenu.session(card: c, key: key, checkout: co, hasAgent: hasAgent, caps: $0, removable: cleanup?.removable == true) }
         guard isOpen, let s = detail else { return row }
         return expandedRow(row, s)
     }
