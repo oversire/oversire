@@ -94,6 +94,10 @@ enum ActivityFeed {
                                      body: a.message ?? "", at: a.since, route: .item(key, .session),
                                      itemKey: key, itemURL: store.item(key: key)?.2.url))
         }
+        for r in data.cleaner.records {
+            out.append(FeedEntry(id: "cleanup|\(r.at.timeIntervalSince1970)|\(r.text)", source: .agent, title: r.text, body: "Cleanup · Plane does not change",
+                                 at: r.at, route: .item(r.key, .overview), itemKey: r.key, itemURL: store.item(key: r.key)?.2.url))
+        }
         for c in data.statusJob.statuses.prefix(30) where c.byAI && c.state != .working {
             out.append(FeedEntry(id: "ai|" + c.id, source: .ai, title: "Status: \(c.key) · \(c.word)", body: c.reply.headline, at: c.at,
                                      route: .item(c.key, .session), itemKey: c.key))

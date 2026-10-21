@@ -12,6 +12,7 @@ extension SettingsPage {
         orcaStatus(b)
         newSessions(b)
         queue(b)
+        worktrees(b)
         intakeAndPlanner(b)
     }
 
@@ -112,6 +113,33 @@ extension SettingsPage {
                 AGENTS.questionNotice = notices[$0]
                 saveConfig()
             }),
+        ]))
+    }
+
+    private func worktrees(_ b: NSStackView) {
+        let c = AGENTS.cleanup
+        let waits = CleanupConfig.waits
+        let safe = NSStackView(v: [NSTextField.text("Safe to remove means", size: 13, weight: .medium)] + [
+            "The item and all its sub-items are finished.",
+            "No agent works or waits in the worktree.",
+            "The worktree has no changes, and its branch is merged or has no own commits.",
+            "A remote branch goes only when its PR is merged. An open PR stays.",
+        ].map { NSTextField.text("• " + $0, size: 12, color: Palette.mut, lines: 2) }, spacing: 4)
+        safe.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        b.addFull(section(.worktrees, [
+            SwitchRow("Remove finished worktrees automatically",
+                      note: "Only worktrees that are safe to remove. The others stay and show the reason.", on: c.auto) { AGENTS.cleanup.auto = $0 },
+            FieldRow("Wait after the item is finished", note: "OverSire does not remove a worktree before this time.",
+                     Segmented(waits.map { CleanupConfig.waitText($0).replacingOccurrences(of: " minutes", with: " min") },
+                               selected: waits.firstIndex(of: c.waitMinutes) ?? 1, label: "Wait after the item is finished") { i in
+                AGENTS.cleanup.waitMinutes = waits[i]
+                settingsChanged()
+            }),
+            SwitchRow("Only worktrees that OverSire started", note: "Worktrees that you made in Orca stay.", on: c.onlyOurs) { AGENTS.cleanup.onlyOurs = $0 },
+            SwitchRow("Run the repo archive hooks", note: "orca worktree rm --run-hooks. A failed hook stops the removal.", on: c.runHooks) {
+                AGENTS.cleanup.runHooks = $0
+            },
+            safe,
         ]))
     }
 

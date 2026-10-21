@@ -5,7 +5,7 @@ enum SettingsAnchor: String, CaseIterable {
     case appearance, menubar, runs, capture, startup, shortcuts
     case services, live
     case projects, refresh, repos, linking, writeback
-    case sessions, queue, planner
+    case sessions, queue, worktrees, planner
     case engine, localCLI = "local-cli", apiKey = "api-key", use, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
     case problems, log, logSettings = "log-settings"
@@ -27,6 +27,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .writeback: return "Write back to Plane"
         case .sessions: return "New sessions"
         case .queue: return "Queue"
+        case .worktrees: return "Worktrees"
         case .planner: return "Intake and planner"
         case .engine: return "Engine"
         case .localCLI: return "Local CLI"
@@ -49,7 +50,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .appearance, .menubar, .runs, .capture, .startup, .shortcuts: return .general
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
-        case .sessions, .queue, .planner: return .agents
+        case .sessions, .queue, .worktrees, .planner: return .agents
         case .engine, .localCLI, .apiKey, .use, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
         case .problems, .log, .logSettings: return .logs
@@ -135,6 +136,10 @@ struct SettingsIndex {
         Entry("Write back", .writeback, "plane read only labels links block comment review"),
         Entry("Default agent", .sessions, "claude codex harness"),
         Entry("Prompt", .sessions, "template"),
+        Entry("Remove finished worktrees automatically", .worktrees, "cleanup clean delete auto done branch"),
+        Entry("Wait after the item is finished", .worktrees, "cleanup delay"),
+        Entry("Only worktrees that OverSire started", .worktrees, "cleanup orca"),
+        Entry("Run the repo archive hooks", .worktrees, "cleanup orca run-hooks"),
         Entry("Agent commands", .sessions, "command line start"),
         Entry("Snap basket prompt", .sessions, "template screenshot"),
         Entry("New session prompt", .sessions, "template intake files paths"),
