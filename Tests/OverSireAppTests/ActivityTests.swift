@@ -12,6 +12,14 @@ final class ActivityTests: XCTestCase {
     private lazy var list = [entry("a", project: "SLING"), entry("b", project: "TREBI", source: .mention),
                              entry("c", project: nil, source: .run), entry("d", project: nil, source: .agent)]
 
+    func testIntakeLineShowsTheIDOrTheFallback() {
+        var e = entry("i", project: "TREBI", source: .intake)
+        XCTAssertEqual(e.shownID, "TREBI-–", "no UUID while the number loads")
+        e.intakeKey = "TREBI-471"
+        XCTAssertEqual(e.shownID, "TREBI-471")
+        XCTAssertEqual(FeedLine(e, layout: FeedLine.intakeLayout) {}.accessibilityLabel()?.hasPrefix("TREBI-471 "), true)
+    }
+
     func testEmptyFilterPassesAll() {
         let f = FeedFilter()
         XCTAssertFalse(f.isOn)

@@ -30,6 +30,10 @@ struct FeedEntry {
     var itemKey: String? = nil
     var itemURL: String? = nil
     var projectKey: String? = nil     // "SLING"
+    var intakeKey: String? = nil      // "SLING-102"; nil while the number loads
+
+    /// The ID cell of an intake line. "SLING-–" while the number loads: never the work item UUID.
+    var shownID: String { intakeKey ?? "\(projectKey ?? "")-–" }
     /// The item of a Plane change, also when the item is gone.
     var groupKey: String? = nil
 }
@@ -111,12 +115,12 @@ enum ActivityFeed {
         var out: [FeedEntry] = []
         for (pk, snap) in store.snapshots {
             for i in snap.intake ?? [] {
-                let num = store.intakeKeys[i.workItemId].map { "\(snap.summary.identifier)-\($0)" } ?? snap.summary.identifier
-                var e = FeedEntry(id: "intake|" + i.id, source: .intake, title: "\(num) \(i.name)",
+                var e = FeedEntry(id: "intake|" + i.id, source: .intake, title: i.name,
                                       body: [i.author.map { "by \($0)" }, i.priority, i.source?.replacingOccurrences(of: "_", with: " ").lowercased()]
                                         .compactMap { $0 }.joined(separator: " · "),
                                       at: i.createdAt, route: nil, intake: (pk, i))
                 e.projectKey = snap.summary.identifier.uppercased()
+                e.intakeKey = store.intakeKeys[i.workItemId].map { "\(snap.summary.identifier)-\($0)" }
                 out.append(e)
             }
         }
@@ -143,7 +147,7 @@ enum ActivityFeed {
     }
 }
 
-// A feed line. Intake lines show the project in place of the source and take the triage keys 1, 2, 3 and H.
+// A feed line. Intake lines show the item ID in place of the source and take the triage keys 1, Q, 2, 3 and H.
 final class FeedLine: TableRow {
     static let layout = ColumnLayout(id: "activity", columns: [
         TableColumn(id: "source", title: "Source", width: 64, min: 48),
@@ -151,7 +155,7 @@ final class FeedLine: TableRow {
         TableColumn(id: "when", title: "When", width: 56, min: 40, optional: true),
     ])
     static let intakeLayout = ColumnLayout(id: "intake", columns: [
-        TableColumn(id: "project", title: "Project", width: 72, min: 48),
+        TableColumn(id: "id", title: "ID", width: 96, min: 64),
         TableColumn(id: "title", title: "Title", width: 300, min: 160, flexible: true),
         TableColumn(id: "when", title: "When", width: 56, min: 40, optional: true),
     ])
@@ -162,11 +166,11 @@ final class FeedLine: TableRow {
         let title = TwoLine(e.title, e.body)
         let cells: [String: NSView] = [
             "source": Chiplet(e.source.rawValue, color: e.source.color),
-            "project": Chiplet(e.projectKey ?? "—", color: Palette.intake),
+            "id": Chiplet(e.shownID, color: e.intakeKey == nil ? Palette.dim : Palette.intake),
             "title": badge.map { NSStackView(h: [title, $0], spacing: 8) } ?? title,
             "when": NSTextField.text(relativeTime(e.at), size: 11.5, color: Palette.dim),
         ]
-        super.init(layout, cells: cells, height: 48, label: "\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
+        super.init(layout, cells: cells, height: 48, label: "\(e.intakeKey.map { $0 + " " } ?? "")\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
     }
     required init?(coder: NSCoder) { fatalError() }
 
