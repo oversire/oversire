@@ -34,6 +34,7 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let assets: Capability = "assets"
     public static let webhooks: Capability = "webhooks"
     public static let changeActions: Capability = "changeActions"
+    public static let deleteBranch: Capability = "deleteBranch"
     public static let rerun: Capability = "rerun"
     public static let rerunJob: Capability = "rerunJob"
     public static let cancel: Capability = "cancel"

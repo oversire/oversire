@@ -88,6 +88,23 @@ final class CodeHostGitHubTests: XCTestCase {
         check(.close, "PATCH", "repos/acme/app/pulls/7", ["state": "closed"])
     }
 
+    func testBranchCleanup() async throws {
+        gh.on("GET", "repos/acme/app/pulls?state=all&per_page=20&head=acme%3Aoversire-1%2Fx", answer("200 OK", #"""
+            [{"number":9,"title":"B","state":"closed","merged_at":"2026-10-20T10:00:00Z","user":{"login":"ada"},"head":{"ref":"oversire-1/x"},"base":{"ref":"main"},"html_url":"u"},
+             {"number":8,"title":"A","state":"closed","merged_at":null,"head":{"ref":"oversire-1/x"},"base":{"ref":"main"}},
+             {"number":7,"title":"C","state":"open","head":{"ref":"oversire-1/x"},"base":{"ref":"main"}}]
+            """#))
+        let list = try await host.changes(repo, head: "oversire-1/x")
+        XCTAssertEqual(list.map(\.state), ["MERGED", "CLOSED", "OPEN"])
+        XCTAssertEqual(list.first?.headRefName, "oversire-1/x")
+        gh.on("DELETE", "repos/acme/app/git/refs/heads/oversire-1/x", answer("204 No Content", ""))
+        try await host.deleteBranch(repo, name: "oversire-1/x")
+        gh.on("DELETE", "repos/acme/app/git/refs/heads/gone", answer("422 Unprocessable Entity", #"{"message":"Reference does not exist"}"#))
+        try await host.deleteBranch(repo, name: "gone")
+        gh.on("DELETE", "repos/acme/app/git/refs/heads/locked", answer("403 Forbidden", #"{"message":"no"}"#))
+        do { try await host.deleteBranch(repo, name: "locked"); XCTFail("no error") } catch {}
+    }
+
     func testPerformSendsTheBody() async throws {
         gh.on("PUT", "repos/acme/app/pulls/7/merge", answer("200 OK", #"{"merged":true}"#))
         try await host.perform(.merge(.rebase), on: ChangeRef(repo: repo, number: 7, url: URL(string: "https://github.com/acme/app/pull/7")!))

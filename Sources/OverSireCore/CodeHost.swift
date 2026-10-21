@@ -154,3 +154,11 @@ public protocol CodeHost: Provider {
     func perform(_ a: ChangeAction, on c: ChangeRef) async throws
     func commitMessage(_ r: RepoRef, sha: String) async throws -> String
 }
+
+/// Cleans up the branches of finished work.
+public protocol BranchDeleting: CodeHost {
+    /// All changes with the head `branch` in the repo: open, merged and closed, newest first.
+    func changes(_ r: RepoRef, head branch: String) async throws -> [ChangeRequest]
+    /// Deletes a branch. A branch that is not there is no error.
+    func deleteBranch(_ r: RepoRef, name: String) async throws
+}

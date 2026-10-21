@@ -3,11 +3,11 @@ import GitHubKit
 import OverSireCore
 
 /// One GitHub owner (a user or an org). `repos` limits the poll. Empty polls nothing.
-public final class GitHubCodeHost: CodeHost, RateReporting, @unchecked Sendable {
+public final class GitHubCodeHost: CodeHost, BranchDeleting, RateReporting, @unchecked Sendable {
     public let id: ProviderID = .github
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.changeActions] }
+    public var capabilities: Set<Capability> { [.changeActions, .deleteBranch] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 5000) }
 
     let client: GitHubClient
@@ -113,6 +113,34 @@ public final class GitHubCodeHost: CodeHost, RateReporting, @unchecked Sendable 
                              updatedAt: n["updatedAt"] as? String ?? "", reviewDecision: n["reviewDecision"] as? String,
                              additions: n["additions"] as? Int ?? 0, deletions: n["deletions"] as? Int ?? 0,
                              isDraft: n["isDraft"] as? Bool ?? false, labels: labels, body: n["body"] as? String)
+    }
+
+    public func changes(_ r: RepoRef, head branch: String) async throws -> [ChangeRequest] {
+        let owner = r.path.split(separator: "/").first.map(String.init) ?? ""
+        let q = "head=" + (owner + ":" + branch).addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-._~")))!
+        let list = try await client.json("GET", "repos/\(r.path)/pulls?state=all&per_page=20&\(q)") as? [[String: Any]] ?? []
+        return list.compactMap(Self.restChange)
+    }
+
+    /// A pull of the REST API. State is OPEN, MERGED or CLOSED, as in GraphQL.
+    static func restChange(_ p: [String: Any]) -> ChangeRequest? {
+        guard let number = p["number"] as? Int, let title = p["title"] as? String else { return nil }
+        let state = p["merged_at"] is String ? "MERGED" : (p["state"] as? String == "open" ? "OPEN" : "CLOSED")
+        return ChangeRequest(number: number, title: title, state: state,
+                             author: .init(login: (p["user"] as? [String: Any])?["login"] as? String ?? "ghost"),
+                             headRefName: (p["head"] as? [String: Any])?["ref"] as? String ?? "",
+                             baseRefName: (p["base"] as? [String: Any])?["ref"] as? String ?? "",
+                             url: p["html_url"] as? String ?? "", createdAt: p["created_at"] as? String ?? "",
+                             updatedAt: p["updated_at"] as? String ?? "", reviewDecision: nil, additions: 0, deletions: 0,
+                             isDraft: p["draft"] as? Bool ?? false, labels: [], body: p["body"] as? String)
+    }
+
+    public func deleteBranch(_ r: RepoRef, name: String) async throws {
+        do {
+            _ = try await client.json("DELETE", "repos/\(r.path)/git/refs/heads/\(name)")
+        } catch ProviderError.notFound {
+        } catch ProviderError.vendor(let code, let message) where code == "422" || message.contains("Reference does not exist") {
+        }
     }
 
     public func perform(_ a: ChangeAction, on c: ChangeRef) async throws {

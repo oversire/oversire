@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory code host with one repo "fake/app" and one open change.
-public final class FakeCodeHost: CodeHost, @unchecked Sendable {
+public final class FakeCodeHost: CodeHost, BranchDeleting, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -12,8 +12,9 @@ public final class FakeCodeHost: CodeHost, @unchecked Sendable {
     private var repoList: [Repo] = []
     private var changeList: [RepoRef: [ChangeRequest]] = [:]
     private var done: [(ChangeAction, ChangeRef)] = []
+    private var gone: [String] = []
 
-    public init(account: String = "fake", capabilities: Set<Capability> = [.changeActions]) {
+    public init(account: String = "fake", capabilities: Set<Capability> = [.changeActions, .deleteBranch]) {
         base = FakeProvider(id: "fake-code", account: account, capabilities: capabilities)
         let repo = RepoRef(account: base.account, path: "fake/app", url: URL(string: "https://code.fake/fake/app")!)
         repoList = [Repo(ref: repo, isPrivate: false)]
@@ -25,6 +26,8 @@ public final class FakeCodeHost: CodeHost, @unchecked Sendable {
 
     public var repo: RepoRef { repoList[0].ref }
     public var performed: [(ChangeAction, ChangeRef)] { (try? base.locked { done }) ?? [] }
+    /// The deleted branches, as "owner/name:branch".
+    public var deletedBranches: [String] { base.lockedValue { gone } }
 
     public func probe() async throws -> Identity { try await base.probe() }
     public func poll(since: Cursor?) async throws -> EventPage { try await base.poll(since: since) }
@@ -35,6 +38,15 @@ public final class FakeCodeHost: CodeHost, @unchecked Sendable {
         try base.locked {
             Array((changeList[r] ?? []).filter { (f.includeDrafts || !$0.isDraft) && $0.state == "OPEN" }.prefix(f.limit))
         }
+    }
+
+    public func changes(_ r: RepoRef, head branch: String) async throws -> [ChangeRequest] {
+        try base.locked { (changeList[r] ?? []).filter { $0.headRefName == branch }.reversed() }
+    }
+
+    public func deleteBranch(_ r: RepoRef, name: String) async throws {
+        guard capabilities.contains(.deleteBranch) else { throw ProviderError.unsupported(.deleteBranch) }
+        try base.locked { gone.append(r.path + ":" + name) }
     }
 
     public func perform(_ a: ChangeAction, on c: ChangeRef) async throws {

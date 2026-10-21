@@ -132,6 +132,10 @@ public enum CodeHostConformance {
                 try await h.perform(.comment("x"), on: ref)
             }
         }
+        if let bd = h as? any BranchDeleting, let heads = await r.step("changes of head", { try await bd.changes(repo, head: c.headRefName) }) {
+            r.expect(heads.contains { $0.number == c.number }, "changes of head \(c.headRefName) do not list #\(c.number)")
+            r.expect(heads.allSatisfy { $0.headRefName == c.headRefName }, "changes of head list an other head")
+        }
         return r
     }
 }

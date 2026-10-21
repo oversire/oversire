@@ -56,6 +56,7 @@ public enum ProviderConformance {
         (.assets, "AssetResolving", { $0 is any AssetResolving }),
         (.webhooks, "WebhookManaging", { $0 is any WebhookManaging }),
         (.logs, "LogReading", { $0 is any LogReading }),
+        (.deleteBranch, "BranchDeleting", { $0 is any BranchDeleting }),
         (.rerunJob, "JobRerunning", { $0 is any JobRerunning }),
         (.sessionInput, "SessionIO", { $0 is any SessionIO }),
         (.sessionTail, "SessionIO", { $0 is any SessionIO }),

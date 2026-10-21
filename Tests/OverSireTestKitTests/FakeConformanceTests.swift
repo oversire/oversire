@@ -47,7 +47,7 @@ final class FakeConformanceTests: XCTestCase {
     }
 
     func testBrokenFakesFail() async {
-        let logs = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.changeActions, .logs]))
+        let logs = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.changeActions, .deleteBranch, .logs]))
         XCTAssertEqual(logs.problems, ["capability logs needs LogReading"])
         let mute = ProviderConformance.capabilities(FakeRuntime(capabilities: []))
         XCTAssertEqual(Set(mute.problems), ["SessionIO needs the capability sessionInput", "SessionIO needs the capability sessionTail",
