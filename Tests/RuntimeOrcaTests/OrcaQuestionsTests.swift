@@ -78,6 +78,7 @@ final class OrcaQuestionsTests: XCTestCase {
     func bound() {
         orca.on("terminal list", F.terminals)
         orca.on("orchestration run-current", F.bound)
+        orca.on("worktree ps", #"{"ok":true,"result":{"worktrees":[]}}"#)
     }
 
     func testCoordinatorIsFoundAgainAndKept() async throws {

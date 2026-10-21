@@ -95,14 +95,17 @@ extension OrcaRuntime {
     /// An ask older than this is not open any more.
     static let askLife: TimeInterval = 24 * 3600
 
-    /// The asks to the coordinator that have no reply. A newer ask of the same sender replaces an older one.
+    /// The asks to the coordinator that have no reply, then the native forms of the other sessions.
+    /// A newer ask of the same sender replaces an older one.
     public func openQuestions(in sessions: [SessionRef]) async throws -> [SessionQuestion] {
         let coord = try await coordinator()
         let mail = try await inbox()
         let byHandle = Dictionary(sessions.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return Self.openAsks(mail, to: coord, now: now()).compactMap { m in
+        let asks = Self.openAsks(mail, to: coord, now: now()).compactMap { m in
             byHandle[m.from].map { question(m, session: $0) }
         }
+        let asked = Set(asks.map(\.session))
+        return asks + (try await formQuestions(in: sessions.filter { !asked.contains($0) }))
     }
 
     public func answer(_ q: SessionQuestion, _ a: QuestionAnswer) async throws -> AnswerResult {
@@ -123,6 +126,7 @@ extension OrcaRuntime {
     }
 
     public func answerGiven(_ q: SessionQuestion) async throws -> QuestionAnswer? {
+        if q.via == .form { return try await formAnswer(q) }
         guard let msg = messageID(q.id), let r = try await inbox().first(where: { $0.replyTo == msg }) else { return nil }
         return OrcaAskBody.answer(r.body, to: q)
     }
