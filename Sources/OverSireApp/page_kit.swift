@@ -1052,6 +1052,15 @@ final class Wrap: NSView {
 
     private var lastHeight: CGFloat = -1
 
+    // A new width can change the line count. Ask for the new height in the same pass.
+    override func setFrameSize(_ size: NSSize) {
+        let old = frame.width
+        super.setFrameSize(size)
+        guard size.width != old, size.width > 0 else { return }
+        let h = place(width: size.width, apply: false)
+        if h != lastHeight { lastHeight = h; invalidateIntrinsicContentSize() }
+    }
+
     override func layout() {
         super.layout()
         let h = place(width: bounds.width, apply: true)
@@ -1553,6 +1562,38 @@ final class SidePane: NSView {
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        if let doc = pane.documentView, Self.fitLabels(doc) { doc.needsLayout = true }
+    }
+
+    // Some views find their height only in a second pass. Run it on the next turn, not on the next event.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in self?.settle() }
+    }
+
+    func settle() {
+        guard let doc = pane.documentView else { return }
+        Self.fitLabels(doc)
+        layoutSubtreeIfNeeded()
+        pane.reflectScrolledClipView(pane.contentView)
+    }
+
+    // A wrapped label measures its height at its real width. True when a width changed.
+    @discardableResult
+    static func fitLabels(_ v: NSView) -> Bool {
+        var changed = false
+        if let f = v as? NSTextField, f.maximumNumberOfLines != 1, !f.isEditable, f.frame.width > 0, f.preferredMaxLayoutWidth != f.frame.width {
+            f.preferredMaxLayoutWidth = f.frame.width
+            f.invalidateIntrinsicContentSize()
+            changed = true
+        }
+        for sub in v.subviews where fitLabels(sub) { changed = true }
+        return changed
+    }
 }
 
 private final class OverlayScroll: NSScrollView {

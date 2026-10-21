@@ -153,6 +153,7 @@ class Page: NSViewController {
     func show(_ r: Route) {
         let tabChanged = r != route
         route = r
+        if tabChanged { scroll.toTop() }
         reload(reason: "route")
         if tabChanged { scroll.toTop() }
     }
