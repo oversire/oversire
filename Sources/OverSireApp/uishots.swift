@@ -1215,6 +1215,7 @@ extension MachinesSnapshot {
         var s = MachinesSnapshot()
         s.installed = scene != "machines-empty"
         s.onPath = scene != "machines-found"
+        s.latest = scene == "machines-found" ? "0.5.0" : "0.4.0"
         guard scene != "machines-empty" else { return s }
         func info(_ m: MachineName, _ ip: String, roles: [String]) -> DaemonInfo {
             DaemonInfo(machine: m, version: "0.4.0", contract: 1, roles: roles, runtimes: ["orca"], harnesses: [],

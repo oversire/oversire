@@ -12,6 +12,8 @@ struct MachinesSnapshot: Equatable {
     var path = "~/.local/bin/oversire"
     /// The login shell finds an `oversire` command.
     var onPath = true
+    /// The version of the latest CLI release. nil: not known.
+    var latest: String?
     /// The local daemon. nil: no daemon answers on loopback.
     var info: DaemonInfo?
     var group: Group?
@@ -81,6 +83,8 @@ struct MachinesModel: Equatable {
     var installed: Bool
     var path: String
     var onPath: Bool
+    /// A newer CLI release than the local daemon.
+    var update: String?
     /// The Orca account choices: ids, then nil for none.
     var accounts: [String?]
 
@@ -99,6 +103,7 @@ struct MachinesModel: Equatable {
         installed = s.installed
         path = s.path
         onPath = s.onPath
+        if let l = s.latest, let v = s.info?.version, Updater.isNewer(l, than: v) { update = l } else { update = nil }
         let me = s.info?.machine.rawValue
         let members = s.group?.members ?? []
         if s.info == nil { state = .noDaemon } else { state = members.count > 1 ? .group : .solo }
@@ -168,6 +173,10 @@ final class MachinesController {
     var local = DaemonClient(base: DaemonClient.loopback, token: nil, http: URLSessionTransport())
     var installed: () -> Bool = { DaemonSetup.shared.installer.isInstalled }
     var path: () -> String = { (DaemonSetup.shared.installer.exe.path as NSString).abbreviatingWithTildeInPath }
+    /// One HEAD request to github.com. The page asks at most once in one hour.
+    var latest: () async -> String? = { try? await DaemonSetup.shared.installer.latest().version }
+    private var latestAt: Date?
+    private var latestVersion: String?
     var onPath: () async -> Bool = {
         let i = DaemonSetup.shared.installer
         if i.onPath { return true }
@@ -203,6 +212,11 @@ final class MachinesController {
         s.installed = installed()
         s.path = path()
         if s.installed { s.onPath = await onPath() }
+        if latestAt.map({ Date().timeIntervalSince($0) > 3600 }) ?? true, let v = await latest() {
+            latestVersion = v
+            latestAt = Date()
+        }
+        s.latest = latestVersion
         s.info = try? await local.whoami()
         if s.info != nil { s.group = try? await local.group() } else if let hub { s.group = await hub.machines.group }
         if let me = s.info {
@@ -443,9 +457,15 @@ extension SettingsPage {
         guard let d = m.daemon else { return }
         let where_ = ["loopback \(d.listen.loopback)", d.listen.tailscale.map { "tailnet \($0)" }].compactMap { $0 }.joined(separator: " · ")
         let runner = d.roles.contains("runner")
+        var top: [NSView] = [TwoLine("oversire \(d.version)", where_), Spacer(), Pill(Tone(symbol: "circle.fill", color: Palette.ok, word: "Running"))]
+        if let u = m.update {
+            let busy = MachinesController.shared.busy
+            let up = ActionButton(busy ? "Updating…" : "Update to \(u)", style: .plain) { MachinesController.shared.install() }
+            up.isEnabled = !busy
+            top.append(up)
+        }
         b.addFull(section(.daemon, [
-            Row([TwoLine("oversire \(d.version)", where_), Spacer(), Pill(Tone(symbol: "circle.fill", color: Palette.ok, word: "Running"))],
-                height: 52, label: "oversire \(d.version), running"),
+            Row(top, height: 52, label: "oversire \(d.version), running\(m.update.map { ", update to \($0)" } ?? "")"),
             Row([TwoLine("Runner", "Do work orders from the cloud hub and from your other Macs."), Spacer(),
                  Pill(runner ? Tone(symbol: "checkmark.circle.fill", color: Palette.acc, word: "On") : Tone(symbol: "circle", color: Palette.dim, word: "Off"))],
                 height: 52, label: "Runner, \(runner ? "on" : "off")"),

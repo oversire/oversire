@@ -203,6 +203,15 @@ final class ApproveCenterTests: XCTestCase {
 // MARK: MachinesModel
 
 final class MachinesModelTests: XCTestCase {
+    func testUpdateOnlyForANewerRelease() {
+        var s = snapshot()
+        let v = s.info!.version
+        for (latest, want) in [(nil, nil), (v, nil), ("0.0.1", nil), ("99.0.0", "99.0.0")] as [(String?, String?)] {
+            s.latest = latest
+            XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).update, want, "\(latest ?? "nil")")
+        }
+    }
+
     private func snapshot() -> MachinesSnapshot {
         var s = MachinesSnapshot()
         s.installed = true

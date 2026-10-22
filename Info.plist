@@ -38,6 +38,12 @@
             </array>
         </dict>
     </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <!-- The daemons of the group answer on plain HTTP at their tailnet IPs. WireGuard encrypts that traffic. -->
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
     <key>NSSupportsAutomaticTermination</key>
     <false/>
     <key>NSSupportsSuddenTermination</key>
