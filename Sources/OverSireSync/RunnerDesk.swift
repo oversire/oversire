@@ -128,24 +128,39 @@ public final class RunnerDesk: RunnerAnswerSending, @unchecked Sendable {
     /// The hub never sees this suggestion as accepted, so it does not make a second order.
     public func run(_ s: Suggestion, draft: WorkOrderDraft, on link: MachineLink) async -> Suggestion {
         var next = s
+        do {
+            _ = try await send(draft, on: link, suggestion: s.id)
+            next.state = .done
+        } catch {
+            next.state = .failed
+            next.error = Self.reason(error)
+        }
+        return next
+    }
+
+    /// Sends one order to the daemon of the machine and keeps it in the store. A failed send stays as a failed order.
+    /// `suggestion` is empty for an order without a suggestion, for example from the assistant.
+    public func send(_ draft: WorkOrderDraft, on link: MachineLink, suggestion: String = "") async throws -> WorkOrder {
         var d = draft
         d.order = d.order.onTarget
-        let order = d.order(suggestion: s.id, runner: link.machine, now: now())
+        let order = d.order(suggestion: suggestion, runner: link.machine, now: now())
         do {
             try await store.put(order)
             onWrite(WorkOrder.collection)
             try await transport(link).send(order)
-            next.state = .done
+            return order
         } catch {
-            next.state = .failed
-            next.error = String(((error as? LocalizedError)?.errorDescription ?? (error as? ProviderError)?.message ?? "\(error)").prefix(500))
             var failed = order
             failed.state = .failed
-            failed.result = WorkOrderResult(error: next.error)
+            failed.result = WorkOrderResult(error: Self.reason(error))
             try? await store.put(failed)
             onWrite(WorkOrder.collection)
+            throw error
         }
-        return next
+    }
+
+    private static func reason(_ error: Error) -> String {
+        String(((error as? LocalizedError)?.errorDescription ?? (error as? ProviderError)?.message ?? "\(error)").prefix(500))
     }
 
     // MARK: Answers
