@@ -394,3 +394,33 @@ public struct DaemonAnswerResult: Codable, Hashable, Sendable {
         self.message = message
     }
 }
+
+/// The body of POST /v1/sessions/{id}/ask.
+public struct SessionAsk: Codable, Hashable, Sendable {
+    public var text: String
+    public var timeoutSec: Int?
+    public var readOnly: Bool?
+
+    public init(text: String, timeoutSec: Int? = nil, readOnly: Bool? = nil) {
+        self.text = text
+        self.timeoutSec = timeoutSec
+        self.readOnly = readOnly
+    }
+}
+
+/// The answer of POST /v1/sessions/{id}/ask. A 409 or 504 has error and screenTail, no reply.
+public struct SessionAskReply: Codable, Hashable, Sendable {
+    public var reply: String?
+    public var turnEndedAt: Date?
+    public var screenTail: String?
+    public var error: String?               // busy, timeout
+    public var message: String?
+
+    public init(reply: String? = nil, turnEndedAt: Date? = nil, screenTail: String? = nil, error: String? = nil, message: String? = nil) {
+        self.reply = reply
+        self.turnEndedAt = turnEndedAt
+        self.screenTail = screenTail
+        self.error = error
+        self.message = message
+    }
+}

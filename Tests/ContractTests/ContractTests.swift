@@ -57,6 +57,8 @@ final class ContractTests: XCTestCase {
         "daemon-question": roundTrip(DaemonQuestion.self),
         "daemon-questions-page": roundTrip(DaemonQuestionsPage.self),
         "daemon-answer-result": roundTrip(DaemonAnswerResult.self),
+        "session-ask": roundTrip(SessionAsk.self),
+        "session-ask-reply": roundTrip(SessionAskReply.self),
         "daemon-info": roundTrip(DaemonInfo.self),
         "group": roundTrip(Group.self),
         "group-invite": roundTrip(GroupInvite.self),
