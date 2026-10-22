@@ -390,6 +390,18 @@ public final class QuestionBoard: @unchecked Sendable {
                 if let x = e.question.expiresAt, x <= t { table[id]?.state = .gone(at: t) }
             }
             var dropped: [QuestionID] = []
+            // A channel can name one pause with a new id (a form page, or a transcript found later).
+            // The old entry then left with no answer, and the read has a question of the same session and time.
+            for (id, e) in table {
+                switch e.state {
+                case .gone, .answeredElsewhere(nil, _): break
+                default: continue
+                }
+                guard let read = reads[e.question.session.workspace.account], !read.contains(where: { $0.id == id }),
+                      read.contains(where: { $0.session == e.question.session && $0.askedAt == e.question.askedAt }) else { continue }
+                table[id] = nil
+                dropped.append(id)
+            }
             for (id, e) in table {
                 guard let closed = e.state.closedAt, t.timeIntervalSince(closed) >= Self.fold else { continue }
                 if let read = reads[e.question.session.workspace.account], read.contains(where: { $0.id == id }) { continue }

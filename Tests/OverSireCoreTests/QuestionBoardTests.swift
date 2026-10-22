@@ -82,6 +82,28 @@ final class QuestionBoardTests: XCTestCase {
         XCTAssertEqual(b.entries[q.id]?.state, .gone(at: t0))
     }
 
+    /// The channel names the same pause with a new id. The old entry goes, and no "gone" card shows.
+    func testNewIdOfTheSamePauseDropsTheOld() async throws {
+        let ch = FakeQuestionChannel()
+        let box = Box(t0, [ch.session("s1")])
+        let b = board(ch, box)
+        let old = question(ch, "screen")
+        ch.ask(old)
+        await b.refresh()
+        ch.answerOutside(old.id, nil)
+        ch.ask(question(ch, "tool"))
+        await b.refresh()
+        XCTAssertEqual(b.entries.keys.map(\.rawValue), ["fake:tool"])
+        XCTAssertEqual(b.entries[QuestionID(rawValue: "fake:tool")]?.state, .open)
+
+        let other = SessionQuestion(id: QuestionID(rawValue: "fake:later"), session: ch.session("s1"), origin: .work(item),
+                                    items: old.items, via: .askReply, askedAt: t0.addingTimeInterval(60))
+        ch.answerOutside(QuestionID(rawValue: "fake:tool"), answer(old))
+        ch.ask(other)
+        await b.refresh()
+        XCTAssertEqual(Set(b.entries.keys.map(\.rawValue)), ["fake:tool", "fake:later"], "a question with an answer stays")
+    }
+
     func testSendThatWins() async throws {
         let ch = FakeQuestionChannel()
         let box = Box(t0, [ch.session("s1")])
