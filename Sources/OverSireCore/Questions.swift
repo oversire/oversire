@@ -188,6 +188,12 @@ public protocol QuestionChannel: AgentRuntime {
     func answerGiven(_ q: SessionQuestion) async throws -> QuestionAnswer?
     /// A channel that can push calls this when its questions change. The board then reads at once.
     var changes: AsyncStream<Void>? { get }
+    /// True when the id is one of this channel's. Two channels can share an account (Orca and a daemon of one machine).
+    func owns(_ id: QuestionID) -> Bool
+}
+
+extension QuestionChannel {
+    public func owns(_ id: QuestionID) -> Bool { true }
 }
 
 /// One question on the board, as the store keeps it.
@@ -243,7 +249,7 @@ public final class QuestionBoard: @unchecked Sendable {
     private let lock = NSLock()
     private var table: [QuestionID: Entry] = [:]
     private var seen: [QuestionID: SessionQuestion] = [:]     // the last good read of each id
-    private var failures: [AccountID: Int] = [:]
+    private var failures: [Int: Int] = [:]                    // channel index → failed reads in a row
     private var reads: [AccountID: Date] = [:]
     private var dismissed: Set<QuestionID> = []
     private var known: Set<SessionRef> = []                   // the sessions of this run
@@ -334,19 +340,23 @@ public final class QuestionBoard: @unchecked Sendable {
     /// Reads each channel once and moves the states.
     public func refresh() async {
         let all = sessions()
-        var reads: [AccountID: [SessionQuestion]] = [:]
-        for c in channels {
+        // One read for each channel, by index. A channel that failed keeps its entries as they are.
+        var reads: [Int: [SessionQuestion]] = [:]
+        for (i, c) in channels.enumerated() {
             let mine = all.filter { $0.workspace.account == c.account }
             do {
-                reads[c.account] = try await c.openQuestions(in: mine)
+                reads[i] = try await c.openQuestions(in: mine)
             } catch {
-                markFailed(c.account)
+                markFailed(i)
             }
         }
+        // All good reads of each account. A pause can move from one channel of the account to the other.
+        var byAccount: [AccountID: [SessionQuestion]] = [:]
+        for (i, read) in reads { byAccount[channels[i].account, default: []] += read }
         // Questions that left a good read. The board asks the channel how they ended.
         let missing: [Entry] = lock.withLock {
             table.values.filter { e in
-                guard e.state == .open, let read = reads[e.question.session.workspace.account] else { return false }
+                guard e.state == .open, let read = owner(e.question).flatMap({ reads[$0] }) else { return false }
                 return !read.contains { $0.id == e.id }
             }
         }
@@ -362,11 +372,14 @@ public final class QuestionBoard: @unchecked Sendable {
             known.formUnion(live)
             let start = firstRead ?? t
             firstRead = start
-            for (account, read) in reads {
-                failures[account] = 0
+            let readIDs = Set(reads.values.joined().map(\.id))
+            dismissed = dismissed.filter { id in
+                readIDs.contains(id) || seen[id].flatMap(owner).map { reads[$0] == nil } ?? false
+            }
+            for (i, read) in reads {
+                let account = channels[i].account
+                failures[i] = 0
                 self.reads[account] = t
-                let ids = Set(read.map(\.id))
-                dismissed = dismissed.intersection(ids)
                 for q in read where !dismissed.contains(q.id) {
                     seen[q.id] = q
                     if var e = table[q.id] {
@@ -383,7 +396,8 @@ public final class QuestionBoard: @unchecked Sendable {
                         table[q.id] = Entry(question: q, state: .open, firstSeen: t)
                     }
                 }
-                for (id, e) in table where e.question.session.workspace.account == account && e.state == .open && !ids.contains(id) {
+                let ids = Set(read.map(\.id))
+                for (id, e) in table where owner(e.question) == i && e.state == .open && !ids.contains(id) {
                     if let a = given[id] {
                         table[id]?.state = .answeredElsewhere(a, at: t)
                     } else if !live.contains(e.question.session) {
@@ -405,14 +419,14 @@ public final class QuestionBoard: @unchecked Sendable {
                 case .gone, .answeredElsewhere(nil, _): break
                 default: continue
                 }
-                guard let read = reads[e.question.session.workspace.account], !read.contains(where: { $0.id == id }),
+                guard let read = byAccount[e.question.session.workspace.account], !read.contains(where: { $0.id == id }),
                       read.contains(where: { $0.session == e.question.session && $0.askedAt == e.question.askedAt }) else { continue }
                 table[id] = nil
                 dropped.append(id)
             }
             for (id, e) in table {
                 guard let closed = e.state.closedAt, t.timeIntervalSince(closed) >= Self.fold else { continue }
-                if let read = reads[e.question.session.workspace.account], read.contains(where: { $0.id == id }) { continue }
+                if let read = byAccount[e.question.session.workspace.account], read.contains(where: { $0.id == id }) { continue }
                 table[id] = nil
                 dropped.append(id)
             }
@@ -476,17 +490,22 @@ public final class QuestionBoard: @unchecked Sendable {
     /// The questions that wait for the user: Home and the menu bar.
     public var openCount: Int { lock.withLock { table.values.filter { $0.state == .open }.count } }
 
-    private func channel(for q: SessionQuestion) -> (any QuestionChannel)? {
-        channels.first { $0.account == q.session.workspace.account }
+    private func channel(for q: SessionQuestion) -> (any QuestionChannel)? { owner(q).map { channels[$0] } }
+
+    /// The channel of the account that owns the id. Else the first channel of the account: an entry of a channel
+    /// that left the board then still closes.
+    private func owner(_ q: SessionQuestion) -> Int? {
+        let account = q.session.workspace.account
+        return channels.firstIndex { $0.account == account && $0.owns(q.id) } ?? channels.firstIndex { $0.account == account }
     }
 
     /// One failed read keeps the entries. The second marks them stale.
-    private func markFailed(_ account: AccountID) {
+    private func markFailed(_ channel: Int) {
         let changed: Bool = lock.withLock {
-            failures[account, default: 0] += 1
-            guard failures[account]! >= 2 else { return false }
+            failures[channel, default: 0] += 1
+            guard failures[channel]! >= 2 else { return false }
             var any = false
-            for (id, e) in table where e.question.session.workspace.account == account && !e.stale {
+            for (id, e) in table where owner(e.question) == channel && !e.stale {
                 table[id]?.stale = true
                 any = true
             }

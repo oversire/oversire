@@ -77,7 +77,20 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         a.visible = { [weak self] in (self?.popover.isShown ?? false) || ItemWindow.isOpen }
         a.onAlert = { [weak self] key, agent in self?.agentAlert(key, agent) }
         a.open = { [weak self] k in self.map { $0.projectStore.item(key: k) != nil && !$0.projectStore.isDone(key: k) } ?? false }
+        a.sessionsReader = { [weak self] account in self?.machineHub.sessionsReader(for: account) }
         return a
+    }()
+    lazy var machineHub: MachineHub = {
+        let h = MachineHub()
+        h.onLinks = { [weak self] in
+            self?.relay.update()
+            self?.startQuestions()
+        }
+        h.onSessions = { [weak self] account in
+            self?.agentIndex.hint(account: account)
+            self?.questions.board?.poke()
+        }
+        return h
     }()
     var catalogTimer: Timer?
     var captureHotKey: GlobalHotKey?
@@ -122,6 +135,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let c = LiveSync(secrets: cloudSetup.secrets)
         LiveSync.migrateCursor(into: c.cursors)
         c.sink = self
+        c.machines = machineHub
         c.unhooked = { [weak self] in self?.cloudSetup.unhookedRepos(REPOS) ?? [] }
         return c
     }()
@@ -198,6 +212,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             // Polling gives events for changes only, so the first load reads the PRs too.
             refresh(force: true)
         }
+        machineHub.start()
         relay.start()
         updatePolling()
         rateLimit.onChange = { [weak self] in
@@ -268,6 +283,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.agentIndex.didWake()
             self?.questions.didWake()
+            self?.machineHub.refresh()
         }
         NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
             self?.reloadList(DataChange(.questions, origin: .event))
@@ -705,7 +721,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func startQuestions() {
-        questions.start(channels: ENV.accounts(.runtime).compactMap { ENV.provider($0.account) as? any QuestionChannel })
+        machineHub.applyScreens()
+        questions.start(channels: ENV.accounts(.runtime).compactMap { ENV.provider($0.account) as? any QuestionChannel }
+                        + machineHub.questionChannels())
     }
 
     // MARK: - Icon

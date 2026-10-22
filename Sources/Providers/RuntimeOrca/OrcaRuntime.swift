@@ -30,6 +30,14 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHisto
     var formTries = 10
     var formWait: Duration = .milliseconds(200)
     let log: any LogSink
+    private let screenLock = NSLock()
+    private var screening = true
+
+    /// False while a daemon is live for this account: openQuestions then gives only the orchestration asks.
+    public var screenQuestions: Bool {
+        get { screenLock.withLock { screening } }
+        set { screenLock.withLock { screening = newValue } }
+    }
 
     public init(exe: String = OrcaRuntime.defaultPath, environment: String?, commands: any CommandRunner,
                 transcripts: (any TranscriptReading)? = nil, log: any LogSink = NoLog()) {

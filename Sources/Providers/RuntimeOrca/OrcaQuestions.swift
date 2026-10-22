@@ -100,6 +100,7 @@ extension OrcaRuntime {
 
     /// The asks to the coordinator that have no reply, then the native forms of the other sessions.
     /// A newer ask of the same sender replaces an older one.
+    /// Without screenQuestions (a daemon is live for the account), only the asks: the daemon finds the other pauses.
     public func openQuestions(in sessions: [SessionRef]) async throws -> [SessionQuestion] {
         let coord = try await coordinator()
         let mail = try await inbox()
@@ -107,10 +108,21 @@ extension OrcaRuntime {
         let asks = Self.openAsks(mail, to: coord, now: now()).compactMap { m in
             byHandle[m.from].map { question(m, session: $0) }
         }
+        guard screenQuestions else { return asks }
         let asked = Set(asks.map(\.session))
-        let supervised = Set(mail.filter { $0.to == coord.address || $0.to == coord.terminal }.map(\.from))
-        return asks + (try await formQuestions(in: sessions.filter { !asked.contains($0) }, supervised: supervised))
+        return asks + (try await formQuestions(in: sessions.filter { !asked.contains($0) }, supervised: Self.workers(mail, of: coord)))
     }
+
+    /// The terminals of the workers that the coordinator supervises. Their turn questions go to the coordinator, not to the user.
+    public func supervised() async throws -> Set<String> {
+        Self.workers(try await inbox(), of: try await coordinator())
+    }
+
+    static func workers(_ mail: [OrcaMessage], of coord: OrcaCoordinator) -> Set<String> {
+        Set(mail.filter { $0.to == coord.address || $0.to == coord.terminal }.map(\.from))
+    }
+
+    public func owns(_ id: QuestionID) -> Bool { messageID(id) != nil }
 
     public func answer(_ q: SessionQuestion, _ a: QuestionAnswer) async throws -> AnswerResult {
         guard q.answerable else { throw QuestionError.notAnswerable }

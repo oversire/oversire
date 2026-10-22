@@ -4,7 +4,7 @@ import OverSireSync
 import Network
 
 // ─── Live sync ───────────────────────────────────────────────────────────────
-// Polling and the cloud give one event stream. The events are hints: they name
+// Polling, the cloud and the daemons give one event stream. The events are hints: they name
 // the repos and projects to refresh, and the refresh reads the data.
 
 let CURSORS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("cursors.json")
@@ -24,9 +24,14 @@ struct RefreshPlan {
     var includePRs = false
     var completedRuns: [(String, String)] = []
     var projects: [(workspace: String, project: String?)] = []   // nil project: all projects of the tracker account
+    /// The Orca account ids whose sessions changed. AgentIndex polls them.
+    var sessionAccounts: [String] = []
+    /// The machines whose daemon has a new question or a new waiting session.
+    var questionMachines: [String] = []
 
     /// resyncs: tracker accounts that must refresh all their projects.
-    init(_ events: [ProviderEvent], resyncs: [AccountID] = [], knownRepos: [String]) {
+    /// machines: machine → Orca account id. A session event of a daemon names its machine in account.id.
+    init(_ events: [ProviderEvent], resyncs: [AccountID] = [], knownRepos: [String], machines: [String: String] = [:]) {
         let byLower = Dictionary(knownRepos.map { ($0.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
         for a in resyncs { project(a.id, nil) }
         for e in events {
@@ -39,6 +44,11 @@ struct RefreshPlan {
             case .repo(let r): _ = repo(r.path, byLower)
             case .project(let p): project(p.account.id, p.id)
             case .item(let i): project(i.project.account.id, i.project.id)
+            case .session:
+                let machine = e.account.id
+                guard let account = machines[machine] else { break }
+                if !sessionAccounts.contains(account) { sessionAccounts.append(account) }
+                if ["question", "waiting"].contains(e.action), !questionMachines.contains(machine) { questionMachines.append(machine) }
             default: break
             }
         }
@@ -66,6 +76,8 @@ final class LiveSync {
     enum State: Equatable { case off, connecting, live, error(String) }
 
     weak var sink: RelaySink?
+    /// The daemons. Each active link gets a source.
+    var machines: MachineHub?
     let secrets: SecretStore
     let cursors: CursorStore
 
@@ -91,6 +103,8 @@ final class LiveSync {
     private var polling: PollingSource?
     private var fallback: PollingSource?
     private var cloud: CloudSource?
+    private var daemons: [CloudSource] = []
+    private var healthTasks: [Task<Void, Never>] = []
     private var consumer: Task<Void, Never>?
     private var watching = false
     private var buffer: [ProviderEvent] = []
@@ -111,6 +125,7 @@ final class LiveSync {
         var normal: TimeInterval
         var active: TimeInterval
         var safety: TimeInterval?
+        var links: [MachineLink]
     }
 
     init(secrets: SecretStore, cursors: CursorStore = CursorStore(url: URL(fileURLWithPath: CURSORS_PATH))) {
@@ -150,14 +165,17 @@ final class LiveSync {
                             cursors: CursorStore(url: URL(fileURLWithPath: FALLBACK_CURSORS_PATH)),
                             intervals: PollIntervals(normal: .seconds(POLL_NORMAL), active: .seconds(POLL_NORMAL)), onPolled: onPolled)
         let cloud = makeCloud(generation: gen)
-        let merger = EventMerger(polling: polling, cloud: cloud, others: fallback.map { [$0] } ?? [], onCloudHealth: { h in
+        let daemons = makeDaemons(p.links, generation: gen)
+        let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons, onCloudHealth: { h in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.cloudHealth(h) } }
         })
         self.polling = polling
         self.fallback = fallback
         self.cloud = cloud
+        self.daemons = daemons
         self.merger = merger
-        if cloud == nil { state = .off } else { watchNetwork() }
+        if cloud == nil { state = .off }
+        if cloud != nil || !daemons.isEmpty { watchNetwork() }
         let stream = merger.events()
         consumer = Task { @MainActor [weak self] in
             for await e in stream { self?.received(e) }
@@ -174,7 +192,7 @@ final class LiveSync {
         let fallback = canRun ? Set(unhooked()) : []
         return Plan(polled: REPOS.filter { !fallback.contains($0) }, fallback: REPOS.filter(fallback.contains),
                     accounts: ENV.accounts, cloud: canRun,
-                    normal: POLL_NORMAL, active: POLL_ACTIVE, safety: RELAY.reconcileInterval)
+                    normal: POLL_NORMAL, active: POLL_ACTIVE, safety: RELAY.reconcileInterval, links: machines?.active ?? [])
     }
 
     func stop() {
@@ -197,6 +215,29 @@ final class LiveSync {
         polling = nil
         fallback = nil
         cloud = nil
+        daemons = []
+        healthTasks.forEach { $0.cancel() }
+        healthTasks = []
+    }
+
+    /// One source for each daemon. Its health goes to the machine hub. A gap in its log refreshes its sessions.
+    private func makeDaemons(_ links: [MachineLink], generation gen: Int) -> [CloudSource] {
+        guard let hub = machines else { return [] }
+        return links.map { l in
+            let machine = l.machine
+            let s = CloudSource(base: l.base, token: l.token, name: machine, cursorKey: l.cursorKey, http: URLSessionTransport(),
+                                socket: URLSessionWebSockets(), cursors: cursors, onResync: { _ in
+                DispatchQueue.main.async { [weak self] in
+                    if self?.generation == gen { hub.logGap(machine) }
+                }
+            }, onGroup: { DispatchQueue.main.async { hub.refresh() } })
+            healthTasks.append(Task { [weak self] in
+                for await h in await s.healthUpdates() {
+                    await MainActor.run { if self?.generation == gen { hub.setHealth(machine, h) } }
+                }
+            })
+            return s
+        }
     }
 
     private func makeCloud(generation gen: Int) -> CloudSource? {
@@ -221,7 +262,9 @@ final class LiveSync {
             guard path.status == .satisfied else { return }
             DispatchQueue.main.async {
                 STORE_WRITES.syncNow()
-                if let self, self.cloud != nil, self.state != .live { self.start() }
+                guard let self else { return }
+                let daemonDown = self.machines.map { hub in self.daemons.contains { !hub.isLive($0.name) } } ?? false
+                if (self.cloud != nil && self.state != .live) || daemonDown { self.start() }
             }
         }
         m.start(queue: .main)
@@ -298,7 +341,12 @@ final class LiveSync {
             return
         }
         let trackers = Set(ENV.trackerIds)
-        let plan = RefreshPlan(events, resyncs: accounts.filter { trackers.contains($0.id) }, knownRepos: REPOS)
+        let plan = RefreshPlan(events, resyncs: accounts.filter { trackers.contains($0.id) }, knownRepos: REPOS,
+                               machines: machines?.accountsByMachine ?? [:])
+        if let hub = machines {
+            plan.questionMachines.forEach(hub.pushQuestions)
+            plan.sessionAccounts.forEach(hub.sessionsChanged)
+        }
         if plan.wantsRepoRefresh {
             log.info("Sync: \(events.count) event(s) for \(plan.repos.count) repo(s)")
             sink.relayRefresh(repos: plan.repos, includePRs: plan.includePRs, completedRuns: plan.completedRuns) { _ in }

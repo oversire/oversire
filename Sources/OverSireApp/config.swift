@@ -2,6 +2,7 @@ import Foundation
 import AgentBinder
 import OverSireCore
 import OverSireAI
+import OverSireSync
 import AIEngineAgentBinder
 import TrackerPlane
 import CryptoKit
@@ -31,6 +32,7 @@ struct AppConfig: Codable {
     var agents: AgentsConfig?
     var logs: LogConfig?
     var accounts: [AccountConfig]?   // one entry for each connected vendor account
+    var machines: MachinesConfig?
 }
 
 // How much the AI checks may do. Auto acts only on "looks done". "Looks stuck" always asks.
@@ -787,6 +789,7 @@ var GENERAL = GeneralConfig()
 var LINKING = LinkRules()
 var AGENTS = AgentsConfig()
 var LOGS_CFG = LogConfig()
+var MACHINES = MachinesConfig()
 var ACCOUNTS: [AccountConfig] = []
 let DEFAULT_BRANCHES: Set<String> = ["main", "develop"]
 
@@ -830,6 +833,7 @@ func loadConfig() {
     if let l = c.linking { LINKING = l }
     if let a = c.agents { AGENTS = a }
     if let l = c.logs { LOGS_CFG = l }
+    if let m = c.machines { MACHINES = m }
     ACCOUNTS = AppEnvironment.accounts(from: c)
     AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
     ENV.load(ACCOUNTS)
@@ -850,6 +854,7 @@ func saveConfig() {
                       repoColors: REPO_COLORS.isEmpty ? nil : REPO_COLORS, autoUpdate: AUTO_UPDATE,
                       relay: RELAY, notifications: NOTIFICATIONS, tabs: TABS, projects: PROJECTS_CFG, ai: AI_CFG, general: GENERAL, linking: LINKING, agents: AGENTS, logs: LOGS_CFG)
     c.accounts = ACCOUNTS
+    c.machines = MACHINES == MachinesConfig() ? nil : MACHINES
     if let data = try? JSONEncoder().encode(c) {
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         if let pretty = try? JSONSerialization.data(withJSONObject: json as Any, options: .prettyPrinted) {

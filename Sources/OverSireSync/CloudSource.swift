@@ -13,12 +13,15 @@ public protocol WebSocketConnection: Sendable {
     func close()
 }
 
-/// The paid push path: a WebSocket to oversire/cloud that pokes, and a REST read of the event log.
+/// A WebSocket that pokes, and a REST read of the event log: the paid push path to oversire/cloud, and an oversire daemon.
 public actor CloudSource: EventSource {
     public static let cursorKey = "cloud"
 
     private let base: URL
-    private let token: String
+    private let token: String?
+    /// The subject of the health text, for example "The cloud" or "mbp".
+    public nonisolated let name: String
+    private let key: String
     private let http: any HTTPTransport
     private let socket: any WebSocketConnecting
     private let cursors: CursorStore
@@ -26,6 +29,7 @@ public actor CloudSource: EventSource {
     private let pingEvery: Duration
     private let onResync: @Sendable (AccountID?) -> Void
     private let onStore: @Sendable () -> Void
+    private let onGroup: @Sendable () -> Void
 
     private var state: SourceHealth = .off
     private var continuation: AsyncStream<ProviderEvent>.Continuation?
@@ -39,12 +43,17 @@ public actor CloudSource: EventSource {
 
     /// onResync: the log has a gap (nil: all accounts) or an event names no subject.
     /// onStore: the store op log has new ops. It also runs after each connect.
-    public init(base: URL, token: String, http: any HTTPTransport, socket: any WebSocketConnecting, cursors: CursorStore,
+    /// onGroup: a daemon sends {"type":"group"} after a change of the machine group.
+    /// A nil token sends no Authorization header (a daemon on loopback).
+    public init(base: URL, token: String?, name: String = "The cloud", cursorKey: String = CloudSource.cursorKey,
+                http: any HTTPTransport, socket: any WebSocketConnecting, cursors: CursorStore,
                 clock: any Clock<Duration> = ContinuousClock(), pingEvery: Duration = .seconds(30),
                 onResync: @escaping @Sendable (AccountID?) -> Void = { _ in },
-                onStore: @escaping @Sendable () -> Void = {}) {
+                onStore: @escaping @Sendable () -> Void = {}, onGroup: @escaping @Sendable () -> Void = {}) {
         self.base = base
         self.token = token
+        self.name = name
+        self.key = cursorKey
         self.http = http
         self.socket = socket
         self.cursors = cursors
@@ -52,6 +61,7 @@ public actor CloudSource: EventSource {
         self.pingEvery = pingEvery
         self.onResync = onResync
         self.onStore = onStore
+        self.onGroup = onGroup
     }
 
     public nonisolated func events() -> AsyncStream<ProviderEvent> {
@@ -124,7 +134,7 @@ public actor CloudSource: EventSource {
                     try await g.next()
                 }
             } catch ProviderError.unauthorized {
-                setHealth(.failed("The cloud rejected this Mac's token"))
+                setHealth(.failed(rejected))
                 return
             } catch {
                 if Task.isCancelled { return }
@@ -137,6 +147,7 @@ public actor CloudSource: EventSource {
     private func handle(_ message: String) {
         if message == "pong" { pongSeen = true; return }
         if message.contains("\"store\"") { pongSeen = true; onStore(); return }
+        if message.contains("\"group\"") { pongSeen = true; onGroup(); return }
         guard message.contains("\"poke\"") else { return }
         pongSeen = true
         Task { await self.sync() }
@@ -144,7 +155,7 @@ public actor CloudSource: EventSource {
 
     // "ping" text gets an auto-response from the Durable Object, so it does not wake it.
     private func ping(_ conn: any WebSocketConnection) async throws {
-        guard pongSeen else { throw ProviderError.transport("No pong from the cloud") }
+        guard pongSeen else { throw ProviderError.transport("No pong from \(name)") }
         pongSeen = false
         try await conn.send("ping")
     }
@@ -160,7 +171,7 @@ public actor CloudSource: EventSource {
                 try await catchUp()
                 lastSync = Date()
             } catch ProviderError.unauthorized {
-                setHealth(.failed("The cloud rejected this Mac's token"))
+                setHealth(.failed(rejected))
                 return
             } catch {
                 return
@@ -169,7 +180,7 @@ public actor CloudSource: EventSource {
     }
 
     private func catchUp() async throws {
-        let start = cursors[Self.cursorKey].flatMap { Int($0.rawValue) } ?? 0
+        let start = cursors[key].flatMap { Int($0.rawValue) } ?? 0
         var after = start, truncated = false, events: [CloudEntry] = []
         while true {
             let page: CloudEventsPage = try await get("/v1/events?after=\(after)&limit=500&schema=1")
@@ -190,7 +201,7 @@ public actor CloudSource: EventSource {
             }
         }
         guard after != start else { return }
-        cursors[Self.cursorKey] = Cursor(rawValue: String(after))
+        cursors[key] = Cursor(rawValue: String(after))
         _ = try? await send("POST", "/v1/ack", body: try JSONSerialization.data(withJSONObject: ["seq": after]))
     }
 
@@ -201,9 +212,11 @@ public actor CloudSource: EventSource {
             url = c.url!
         }
         var r = URLRequest(url: url)
-        r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return r
     }
+
+    private var rejected: String { "\(name) rejected this Mac's token" }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
         let data = try await send("GET", path)
