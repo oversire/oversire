@@ -19,6 +19,13 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _issued = 0
     private var _online = true
     private var _sessionsError: ProviderError?
+    private var _peers: [DaemonInfo] = []
+    private var _hooks: [HarnessHooks] = []
+    private var _codes: Set<String> = []
+    private var _pending: [JoinRequestFrame] = []
+    private var _decisions: [(id: String, approve: Bool)] = []
+    private var _asked: JoinPending?
+    private var _joined: JoinResult?
     private var sockets: [FakeDaemonSocket] = []
 
     /// The credential that a call must carry. nil: no check (loopback).
@@ -47,6 +54,25 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     /// The error of the next GET /v1/sessions calls.
     public var sessionsError: ProviderError? { get { with { _sessionsError } } set { with { _sessionsError = newValue } } }
     public var requests: [URLRequest] { with { _requests } }
+    /// GET /v1/group/peers.
+    public var peers: [DaemonInfo] { get { with { _peers } } set { with { _peers = newValue } } }
+    /// GET /v1/hooks/install. POST sets the named ones to installed, DELETE to missing.
+    public var hooks: [HarnessHooks] { get { with { _hooks } } set { with { _hooks = newValue } } }
+    /// The codes that POST /v1/group/join and POST /v1/group/enter accept. A code works once.
+    public var codes: Set<String> { get { with { _codes } } set { with { _codes = newValue } } }
+    /// GET /v1/group/requests.
+    public var pending: [JoinRequestFrame] { get { with { _pending } } set { with { _pending = newValue } } }
+    /// The answer of POST /v1/group/ask. nil: 502, the host does not answer.
+    public var asked: JoinPending? { get { with { _asked } } set { with { _asked = newValue } } }
+    /// The answer of POST /v1/group/join for a valid code. Default: the group with a credential for the app.
+    public var joined: JoinResult? { get { with { _joined } } set { with { _joined = newValue } } }
+    /// POST /v1/group/requests/{id}/approve and deny calls.
+    public var decisions: [(id: String, approve: Bool)] { with { _decisions } }
+    /// The body of each call, as a JSON object.
+    public func body(of call: String) -> [String: Any]? {
+        requests.last { "\($0.httpMethod ?? "GET") \($0.url!.path)" == call }
+            .flatMap { $0.httpBody }.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    }
     /// "<METHOD> <path>" of each call.
     public var calls: [String] { requests.map { "\($0.httpMethod ?? "GET") \($0.url!.path)" } }
     public var answers: [(id: String, answer: RunnerAnswer)] { with { _answers } }
@@ -147,6 +173,47 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         case ("POST", ["v1", "group", "devices"]):
             _issued += 1
             return try ok(DeviceCredential(deviceId: "APP\(_issued)", token: "osd1.APP\(_issued).secret"))
+        case ("GET", ["v1", "group", "peers"]): return try ok(_peers)
+        case ("POST", ["v1", "group", "invites"]):
+            let code = "K7Q2-M9XD"
+            _codes.insert(code)
+            return try ok(GroupInvite(code: code, via: _info.machine, expiresAt: Date().addingTimeInterval(600)))
+        case ("POST", ["v1", "group", "enter"]):
+            let d = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: String] ?? [:]
+            guard let code = d["code"], _codes.remove(code) != nil else { return (502, Data(#"{"error":"group: the code is not valid or was used"}"#.utf8)) }
+            return try _group.map(ok) ?? missing
+        case ("POST", ["v1", "group", "ask"]):
+            guard let p = _asked else { return (502, Data(#"{"error":"ask: the host does not answer"}"#.utf8)) }
+            return try ok(p)
+        case ("POST", ["v1", "group", "join"]):
+            let r = try Self.decoder.decode(JoinRequest.self, from: body ?? Data())
+            guard let code = r.code, _codes.remove(code) != nil else { return (403, Data(#"{"error":"group: the code is not valid or was used"}"#.utf8)) }
+            guard let g = _group else { return (409, Data(#"{"error":"group: this machine has no group"}"#.utf8)) }
+            _issued += 1
+            return try ok(_joined ?? JoinResult(group: g, credential: DeviceCredential(deviceId: "APP\(_issued)", token: "osd1.APP\(_issued).secret")))
+        case ("GET", ["v1", "group", "requests"]): return try ok(_pending)
+        case ("POST", let p) where p.count == 5 && p[1] == "group" && p[2] == "requests" && ["approve", "deny"].contains(p[4]):
+            guard _pending.contains(where: { $0.request == p[3] }) else { return missing }
+            _pending.removeAll { $0.request == p[3] }
+            _decisions.append((p[3], p[4] == "approve"))
+            return (200, Data(#"{"ok":true}"#.utf8))
+        case ("POST", ["v1", "group", "home"]):
+            let d = try JSONSerialization.jsonObject(with: body ?? Data()) as? [String: String] ?? [:]
+            guard let m = d["machine"], var g = _group, g.members.contains(where: { $0.machine.rawValue == m }) else { return missing }
+            g.home = MachineName(rawValue: m)
+            _group = g
+            return (200, Data(#"{"ok":true}"#.utf8))
+        case ("DELETE", let p) where p.count == 4 && p[1] == "group" && p[2] == "members":
+            guard var g = _group, g.members.contains(where: { $0.machine.rawValue == p[3] }) else { return missing }
+            g.members.removeAll { $0.machine.rawValue == p[3] }
+            _group = g
+            return (200, Data(#"{"ok":true}"#.utf8))
+        case ("GET", ["v1", "hooks", "install"]): return try ok(_hooks)
+        case (let m, ["v1", "hooks", "install"]) where m == "POST" || m == "DELETE":
+            let d = try body.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: [String]] } ?? [:]
+            let names = Set(d["harnesses"] ?? [])
+            _hooks = _hooks.map { h in names.contains(h.name) ? HarnessHooks(name: h.name, hooks: m == "POST" ? .installed : .missing) : h }
+            return try ok(_hooks)
         case ("GET", ["v1", "events"]):
             let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let after = q.first { $0.name == "after" }.flatMap { $0.value.flatMap(Int.init) } ?? 0

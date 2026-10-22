@@ -23,7 +23,6 @@ extension SettingsPage {
     func accounts(_ b: NSStackView) {
         providers(b)
         live(b)
-        if let records = cloudAIRecords, UIShots.cloud == nil { DaemonSetup.shared.offerOnce(records: records) }
     }
 
     private func live(_ b: NSStackView) {

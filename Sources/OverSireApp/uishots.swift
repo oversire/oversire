@@ -751,6 +751,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.glance = UIShots.questionsSample(String(p.dropFirst(10)))
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
+                    } else if MachinesSnapshot.scenes.contains(p) {
+                        UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {
                         w.router.go(r)
                     } else {
@@ -758,7 +760,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     }
                 }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -804,7 +806,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let out = (dir as NSString).appendingPathComponent(name + ".png")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = ["-x", "-o", "-l", "\(snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber ?? QueuePage.windowNumber ?? CommandPalette.windowNumber ?? HoverSummary.windowNumber ?? ExplainPopover.windowNumber ?? num)", out]
+        let panel: Int? = snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber
+        let popup: Int? = QueuePage.windowNumber ?? MachineSheets.windowNumber ?? CommandPalette.windowNumber
+        let tip: Int? = HoverSummary.windowNumber ?? ExplainPopover.windowNumber
+        p.arguments = ["-x", "-o", "-l", "\(panel ?? popup ?? tip ?? num)", out]
         try? p.run()
         p.waitUntilExit()
         print("UISHOTS \(out) sidebar=\(Int(w.sidebar.view.frame.width)) page=\(Int(w.page?.view.frame.width ?? 0))")
@@ -1197,5 +1202,76 @@ extension UIShots {
         page.rebuild { col in col.addArrangedSubview(NSStackView(h: columns, spacing: 20, align: .top)) }
         w.orderFrontRegardless()
         return w
+    }
+}
+
+// MARK: Machines samples
+
+extension MachinesSnapshot {
+    static let scenes: Set<String> = ["machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine"]
+
+    /// mbp is this Mac. mba and devbox are members, or found on the tailnet when this Mac is alone.
+    static func sample(_ scene: String, now: Date = Date()) -> MachinesSnapshot {
+        var s = MachinesSnapshot()
+        s.installed = scene != "machines-empty"
+        guard scene != "machines-empty" else { return s }
+        func info(_ m: MachineName, _ ip: String, roles: [String]) -> DaemonInfo {
+            DaemonInfo(machine: m, version: "0.4.0", contract: 1, roles: roles, runtimes: ["orca"], harnesses: [],
+                       listen: .init(loopback: "127.0.0.1:7690", tailscale: ip + ":7690"))
+        }
+        func member(_ m: MachineName, _ ip: String, roles: [String], seen: TimeInterval) -> GroupMember {
+            GroupMember(machine: m, host: m.rawValue, addrs: [ip], port: 7690, roles: roles, joinedAt: now.addingTimeInterval(-86400 * 9),
+                        lastSeen: now.addingTimeInterval(-seen))
+        }
+        s.info = info("mbp", "100.97.81.23", roles: ["serve", "runner"])
+        s.hooks = [HarnessHooks(name: "claude", hooks: .installed), HarnessHooks(name: "codex", hooks: .untrusted),
+                   HarnessHooks(name: "opencode", hooks: .missing)]
+        func session(_ n: Int, _ state: DaemonSession.State, on m: MachineName) -> DaemonSession {
+            DaemonSession(id: "s-\(m)-\(n)", machine: m, runtime: "orca", harness: "claude", cwd: "/src", state: state,
+                          stateSince: now, updatedAt: now, sources: ["hook"])
+        }
+        s.sessions["mbp"] = [session(1, .working, on: "mbp"), session(2, .working, on: "mbp"), session(3, .waiting, on: "mbp")]
+        if scene == "machines-found" || scene == "join-waiting" {
+            s.group = Group(id: "g-mbp", name: "My machines", home: "mbp", version: 1,
+                            members: [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: 0)], devices: [])
+            s.peers = [info("mba", "100.71.4.12", roles: ["serve"]), info("devbox", "100.88.20.3", roles: ["serve", "runner"])]
+            return s
+        }
+        s.group = Group(id: "g-mbp", name: "My machines", home: "mbp", version: 4,
+                        members: [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: 0),
+                                  member("mba", "100.71.4.12", roles: ["serve"], seen: 20),
+                                  member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
+        s.health = ["mba": .live, "devbox": .failed("no answer")]
+        s.sessions["mba"] = []
+        return s
+    }
+}
+
+extension UIShots {
+    /// Settings › Machines with sample data, and its dialogs.
+    static func machines(_ scene: String, in w: AppWindow) {
+        let c = MachinesController.shared
+        c.frozen = true
+        c.config = { MachinesConfig(runtimeAccounts: ["mba": "mbp", "devbox": ""], hooksConsent: true) }
+        c.environments = { ["mbp"] }
+        c.installed = { scene != "machines-empty" }
+        c.use(MachinesSnapshot.sample(scene))
+        w.router.go(.settings(.general))   // a fresh page, so the pane takes the new height
+        w.router.go(.settings(.machines))
+        let now = Date()
+        let r = JoinRequestFrame(request: "r-1", machine: "mba", host: "100.71.4.12", confirm: "4821", expiresAt: now.addingTimeInterval(292))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            MainActor.assumeIsolated {
+                switch scene {
+                case "join-waiting":
+                    MachineSheets.waiting(over: w.window, phase: .waiting(confirm: "4821", host: "mbp"), expires: now.addingTimeInterval(292)) {}
+                case "approve-dialog":
+                    MachineSheets.approve(r, group: "My machines", over: w.window) { _ in }
+                case "add-machine":
+                    MachineSheets.add(over: w.window, invite: GroupInvite(code: "K7Q2-M9XD", via: "mbp", expiresAt: now.addingTimeInterval(581)))
+                default: break
+                }
+            }
+        }
     }
 }

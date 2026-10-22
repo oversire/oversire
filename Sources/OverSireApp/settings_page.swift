@@ -95,6 +95,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             case .linking: linking(body); writeBack(body)
             }
         case .agents: agents(body)
+        case .machines: machines(body)
         case .ai: ai(body)
         case .notifications: notifications(body)
         case .logs: logs(body)

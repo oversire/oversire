@@ -34,6 +34,51 @@ public final class DaemonClient: Sendable {
         try await post("/v1/hooks/install", ["harnesses": install])
     }
 
+    /// Loopback only. The hook state of all harnesses.
+    public func hookState() async throws -> [HarnessHooks] { try await get("/v1/hooks/install") }
+
+    /// Loopback only. Removes the hooks of the named harnesses, and gives the hook state of all harnesses.
+    public func removeHooks(_ names: [String]) async throws -> [HarnessHooks] {
+        try await call("DELETE", "/v1/hooks/install", ["harnesses": names])
+    }
+
+    // MARK: Group (loopback)
+
+    /// The daemons on the tailnet that answer GET /v1/whoami.
+    public func peers() async throws -> [DaemonInfo] { try await get("/v1/group/peers") }
+
+    /// A one-use code that admits a new machine or app to the group of this daemon.
+    public func invite() async throws -> GroupInvite { try await post("/v1/group/invites", [String: String]()) }
+
+    /// This daemon joins the group of the member at host with a code from that member.
+    public func enter(host: String, code: String) async throws -> Group {
+        try await post("/v1/group/enter", ["host": host, "code": code])
+    }
+
+    /// This daemon asks the member at host to join. The decision comes as a joinResult frame on the local WebSocket.
+    public func ask(host: String) async throws -> JoinPending { try await post("/v1/group/ask", ["host": host]) }
+
+    /// The open join requests on this daemon.
+    public func joinRequests() async throws -> [JoinRequestFrame] { try await get("/v1/group/requests") }
+
+    public func decide(_ request: String, approve: Bool) async throws {
+        let _: Done = try await post("/v1/group/requests/\(Self.escape(request))/\(approve ? "approve" : "deny")", [String: String]())
+    }
+
+    public func setHome(_ machine: String) async throws {
+        let _: Done = try await post("/v1/group/home", ["machine": machine])
+    }
+
+    /// Removes a member from the group.
+    public func remove(_ machine: String) async throws {
+        let _: Done = try await call("DELETE", "/v1/group/members/\(Self.escape(machine))", Optional<[String: String]>.none)
+    }
+
+    /// Public route of a member: an app on a machine without a daemon joins with a code (kind app).
+    public func join(_ r: JoinRequest) async throws -> JoinResult { try await post("/v1/group/join", r) }
+
+    private struct Done: Decodable {}
+
     public func questions() async throws -> DaemonQuestionsPage { try await get("/v1/questions") }
 
     public func answer(_ id: String, _ a: RunnerAnswer) async throws -> DaemonAnswerResult {
@@ -66,12 +111,18 @@ public final class DaemonClient: Sendable {
     }
 
     private func post<T: Decodable, B: Encodable>(_ path: String, _ body: B) async throws -> T {
+        try await call("POST", path, body)
+    }
+
+    private func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B?) async throws -> T {
         var r = request(path)
-        r.httpMethod = "POST"
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        r.httpBody = try enc.encode(body)
+        r.httpMethod = method
+        if let body {
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let enc = JSONEncoder()
+            enc.dateEncodingStrategy = .iso8601
+            r.httpBody = try enc.encode(body)
+        }
         return try Self.decode(try await send(r))
     }
 

@@ -230,7 +230,10 @@ final class LiveSync {
                 DispatchQueue.main.async { [weak self] in
                     if self?.generation == gen { hub.logGap(machine) }
                 }
-            }, onGroup: { DispatchQueue.main.async { hub.refresh() } })
+            }, onGroup: { DispatchQueue.main.async { hub.refresh() } }, onFrame: { text in
+                guard l.local else { return }
+                DispatchQueue.main.async { hub.frame(text) }
+            })
             healthTasks.append(Task { [weak self] in
                 for await h in await s.healthUpdates() {
                     await MainActor.run { if self?.generation == gen { hub.setHealth(machine, h) } }

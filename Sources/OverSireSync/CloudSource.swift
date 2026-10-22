@@ -30,6 +30,7 @@ public actor CloudSource: EventSource {
     private let onResync: @Sendable (AccountID?) -> Void
     private let onStore: @Sendable () -> Void
     private let onGroup: @Sendable () -> Void
+    private let onFrame: @Sendable (String) -> Void
 
     private var state: SourceHealth = .off
     private var continuation: AsyncStream<ProviderEvent>.Continuation?
@@ -44,12 +45,14 @@ public actor CloudSource: EventSource {
     /// onResync: the log has a gap (nil: all accounts) or an event names no subject.
     /// onStore: the store op log has new ops. It also runs after each connect.
     /// onGroup: a daemon sends {"type":"group"} after a change of the machine group.
+    /// onFrame: each other frame that is not a poke, for example a joinRequest of the local daemon.
     /// A nil token sends no Authorization header (a daemon on loopback).
     public init(base: URL, token: String?, name: String = "The cloud", cursorKey: String = CloudSource.cursorKey,
                 http: any HTTPTransport, socket: any WebSocketConnecting, cursors: CursorStore,
                 clock: any Clock<Duration> = ContinuousClock(), pingEvery: Duration = .seconds(30),
                 onResync: @escaping @Sendable (AccountID?) -> Void = { _ in },
-                onStore: @escaping @Sendable () -> Void = {}, onGroup: @escaping @Sendable () -> Void = {}) {
+                onStore: @escaping @Sendable () -> Void = {}, onGroup: @escaping @Sendable () -> Void = {},
+                onFrame: @escaping @Sendable (String) -> Void = { _ in }) {
         self.base = base
         self.token = token
         self.name = name
@@ -62,6 +65,7 @@ public actor CloudSource: EventSource {
         self.onResync = onResync
         self.onStore = onStore
         self.onGroup = onGroup
+        self.onFrame = onFrame
     }
 
     public nonisolated func events() -> AsyncStream<ProviderEvent> {
@@ -148,7 +152,10 @@ public actor CloudSource: EventSource {
         if message == "pong" { pongSeen = true; return }
         if message.contains("\"store\"") { pongSeen = true; onStore(); return }
         if message.contains("\"group\"") { pongSeen = true; onGroup(); return }
-        guard message.contains("\"poke\"") else { return }
+        guard message.contains("\"poke\"") else {
+            if message.hasPrefix("{") { pongSeen = true; onFrame(message) }
+            return
+        }
         pongSeen = true
         Task { await self.sync() }
     }

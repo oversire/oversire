@@ -8,7 +8,7 @@ enum Route: Equatable {
     enum WorkTab: String, CaseIterable { case items, worktrees, lanes }
     enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
-        case general, accounts, projects, agents, ai, notifications, logs
+        case general, accounts, projects, agents, machines, ai, notifications, logs
 
         var title: String {
             switch self {
@@ -16,6 +16,7 @@ enum Route: Equatable {
             case .accounts: return "Accounts and sync"
             case .projects: return "Projects and repos"
             case .agents: return "Agents and queue"
+            case .machines: return "Machines"
             case .ai: return "AI"
             case .notifications: return "Notifications"
             case .logs: return "Logs"
@@ -28,6 +29,7 @@ enum Route: Equatable {
             case .accounts: return "square.stack.3d.up"
             case .projects: return "folder"
             case .agents: return "terminal"
+            case .machines: return "desktopcomputer"
             case .ai: return "sparkles"
             case .notifications: return "bell"
             case .logs: return "list.bullet.rectangle"

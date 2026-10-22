@@ -6,6 +6,7 @@ enum SettingsAnchor: String, CaseIterable {
     case services, live
     case projects, refresh, repos, linking, writeback
     case sessions, queue, worktrees, planner
+    case thisMac = "this-mac", joinOnly = "join-only", found, machines, hooks, daemon
     case engine, localCLI = "local-cli", apiKey = "api-key", use, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
     case problems, log, logSettings = "log-settings"
@@ -29,6 +30,12 @@ enum SettingsAnchor: String, CaseIterable {
         case .queue: return "Queue"
         case .worktrees: return "Worktrees"
         case .planner: return "Intake and planner"
+        case .thisMac: return "This Mac"
+        case .joinOnly: return "Use other machines only"
+        case .found: return "Found on your tailnet"
+        case .machines: return "My machines"
+        case .hooks: return "Agent hooks on this Mac"
+        case .daemon: return "Daemon"
         case .engine: return "Engine"
         case .localCLI: return "Local CLI"
         case .apiKey: return "API key"
@@ -51,6 +58,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .worktrees, .planner: return .agents
+        case .thisMac, .joinOnly, .found, .machines, .hooks, .daemon: return .machines
         case .engine, .localCLI, .apiKey, .use, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
         case .problems, .log, .logSettings: return .logs
@@ -197,6 +205,17 @@ struct SettingsIndex {
         Entry("New intake item", .mentions, "alert"),
         Entry("Session needs input", .mentions, "alert waiting agent"),
         Entry("Session is done", .mentions, "alert agent"),
+        Entry("Install the daemon", .thisMac, "oversire runner live session state"),
+        Entry("Join with code", .joinOnly, "group member pair tailnet"),
+        Entry("Join a found machine", .found, "tailnet group request approve"),
+        Entry("Add machine", .machines, "invite code group pair"),
+        Entry("Make home", .machines, "home state group"),
+        Entry("Orca account for a machine", .machines, "runtime environment"),
+        Entry("Mute sessions", .machines, "silence machine"),
+        Entry("Remove a machine", .machines, "group member delete"),
+        Entry("Install hooks", .hooks, "claude codex opencode live status"),
+        Entry("Remove hooks", .hooks, "claude codex opencode"),
+        Entry("Runner", .daemon, "work orders cloud hub"),
         Entry("Mute a project", .overrides, "unmute muted silence"),
     ]
 

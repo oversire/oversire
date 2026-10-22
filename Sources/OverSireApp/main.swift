@@ -165,6 +165,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
         let nc = UNUserNotificationCenter.current()
         nc.delegate = self
+        UserJoinNotifier.register(on: nc)
         nc.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if granted { log.info("Notification permission granted") }
             else { log.warning("Notification permission denied: \(error?.localizedDescription ?? "user declined")") }
@@ -211,6 +212,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         } else {
             // Polling gives events for changes only, so the first load reads the PRs too.
             refresh(force: true)
+        }
+        MachinesController.shared.hub = machineHub
+        MainActor.assumeIsolated {
+            machineHub.approvals.onShow = { [weak self] r in
+                guard NSApp.isActive, let self else { return }
+                self.showJoinRequest(r.request)
+            }
         }
         machineHub.start()
         relay.start()
@@ -439,6 +447,18 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     @objc func showWindow() {
         if popover?.isShown == true { popover.close() }
         appWindow.show()
+    }
+
+    /// Opens Settings › Machines with the dialog of an open join request.
+    func showJoinRequest(_ request: String) {
+        MainActor.assumeIsolated {
+            let approvals = machineHub.approvals
+            guard let r = approvals.request(request), MachineSheets.open == nil else { return }
+            open(.settings(.machines))
+            MachineSheets.approve(r, group: machineHub.groupName ?? "My machines", over: appWindow.window) { yes in
+                Task { @MainActor in try? await approvals.decide(request, approve: yes) }
+            }
+        }
     }
 
     func open(_ route: Route) {
@@ -976,6 +996,17 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 if self.popover.isShown { self.popover.close() }
                 let parts = id.dropFirst("intake:".count).split(separator: "|").map(String.init)
                 if let key = parts.first { IntakeWindow.show(projectKey: key, workItemId: parts.count > 1 ? parts[1] : nil) }
+                return
+            }
+            if id.hasPrefix(ApproveCenter.prefix) {
+                let request = String(id.dropFirst(ApproveCenter.prefix.count))
+                switch response.actionIdentifier {
+                case UserJoinNotifier.approve, UserJoinNotifier.deny:
+                    let yes = response.actionIdentifier == UserJoinNotifier.approve
+                    let approvals = self.machineHub.approvals
+                    Task { @MainActor in try? await approvals.decide(request, approve: yes) }
+                default: self.showJoinRequest(request)
+                }
                 return
             }
             if id.hasPrefix("project:") || id.hasPrefix("agent:") {

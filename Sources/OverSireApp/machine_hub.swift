@@ -20,6 +20,8 @@ final class MachineHub {
 
     let machines: Machines
     let http: any HTTPTransport
+    /// The daemon on this Mac. It trusts loopback.
+    let local: DaemonClient
     /// All links of the group. `active` leaves out the muted machines.
     private(set) var links: [MachineLink] = []
     /// The source health of each machine. A machine with no entry has no source yet.
@@ -41,7 +43,34 @@ final class MachineHub {
          keychain: any CredentialKeeping = SecretStore(), http: any HTTPTransport = URLSessionTransport(),
          cache: URL? = URL(fileURLWithPath: (CONFIG_DIR as NSString).appendingPathComponent("machines-group.json"))) {
         self.http = http
+        self.local = local
         machines = Machines(local: local, keychain: keychain, http: http, cache: cache)
+    }
+
+    // MARK: Joins
+
+    @MainActor lazy var joins: JoinFlow = {
+        let f = JoinFlow(local: local, machines: machines, http: http)
+        f.onJoined = { [weak self] in self?.refresh() }
+        return f
+    }()
+
+    @MainActor lazy var approvals: ApproveCenter = {
+        let a = ApproveCenter(local: local, notifier: UserJoinNotifier())
+        a.groupName = { [weak self] in self?.groupName ?? "My machines" }
+        return a
+    }()
+
+    /// The name of the group at the last read.
+    private(set) var groupName: String?
+
+    /// A frame of the local daemon that is not a poke.
+    @MainActor func frame(_ text: String) {
+        switch DaemonFrame.parse(text) {
+        case .joinRequest(let r)?: approvals.handle(r)
+        case .joinResult(let r)?: joins.received(r)
+        case nil: break
+        }
     }
 
     /// Reads the group now and each 5 minutes, and follows the changes of the links.
@@ -67,6 +96,10 @@ final class MachineHub {
 
     /// For tests and `--uishots`: links without a daemon.
     func use(_ links: [MachineLink]) {
+        Task { [weak self, machines] in
+            let name = await machines.group?.name
+            await MainActor.run { self?.groupName = name }
+        }
         guard links != self.links else { return }
         self.links = links
         health = health.filter { h in links.contains { $0.machine == h.key } }

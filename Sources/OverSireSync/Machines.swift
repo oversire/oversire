@@ -34,15 +34,18 @@ public protocol CredentialKeeping: Sendable {
 /// The choices of the user about the machines. config.json keeps them.
 public struct MachinesConfig: Codable, Equatable, Sendable {
     public var enabled = true
-    /// machine → the Orca account id in this app ("local", "mbp").
+    /// machine → the Orca account id in this app ("local", "mbp"). An empty id: no Orca account.
     public var runtimeAccounts: [String: String] = [:]
     /// The machines whose sessions the user hides.
     public var muted: Set<String> = []
+    /// The answer to "Install agent hooks for live status?". nil: the app did not ask yet.
+    public var hooksConsent: Bool?
 
-    public init(enabled: Bool = true, runtimeAccounts: [String: String] = [:], muted: Set<String> = []) {
+    public init(enabled: Bool = true, runtimeAccounts: [String: String] = [:], muted: Set<String> = [], hooksConsent: Bool? = nil) {
         self.enabled = enabled
         self.runtimeAccounts = runtimeAccounts
         self.muted = muted
+        self.hooksConsent = hooksConsent
     }
 
     public init(from decoder: Decoder) throws {
@@ -50,12 +53,13 @@ public struct MachinesConfig: Codable, Equatable, Sendable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         runtimeAccounts = try c.decodeIfPresent([String: String].self, forKey: .runtimeAccounts) ?? [:]
         muted = try c.decodeIfPresent(Set<String>.self, forKey: .muted) ?? []
+        hooksConsent = try c.decodeIfPresent(Bool.self, forKey: .hooksConsent)
     }
 
     /// The Orca account id of the machine: the choice of the user; else "local" for this machine;
     /// else the Orca environment of this app with the machine name. nil: the user must pick one.
     public func runtimeAccount(_ link: MachineLink, environments: [String]) -> String? {
-        if let a = runtimeAccounts[link.machine] { return a }
+        if let a = runtimeAccounts[link.machine] { return a.isEmpty ? nil : a }
         if link.local { return "local" }
         return environments.first { $0.caseInsensitiveCompare(link.machine) == .orderedSame }
     }
