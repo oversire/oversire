@@ -275,9 +275,6 @@ extension SettingsPage {
     }
 
     private func addArea(_ pk: String) {
-        let a = NSAlert()
-        a.messageText = "New area"
-        a.informativeText = "An area has lower-case letters, digits and hyphens. Use commas between the path rules."
         let name = NSTextField(frame: NSRect(x: 0, y: 30, width: 300, height: 24))
         name.placeholderString = "status-page"
         let globs = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
@@ -285,11 +282,9 @@ extension SettingsPage {
         let box = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 54))
         box.addSubview(name)
         box.addSubview(globs)
-        a.accessoryView = box
-        a.addButton(withTitle: "Add")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = name
-        guard a.runModal() == .alertFirstButtonReturn, let n = ItemAreas.clean([name.stringValue]).first else { return }
+        let r = AlertConfirm.run(.init(title: "New area", info: "An area has lower-case letters, digits and hyphens. Use commas between the path rules.",
+                                       buttons: ["Add", "Cancel"], accessory: box, focus: name))
+        guard r.button == 0, let n = ItemAreas.clean([name.stringValue]).first else { return }
         let rules = globs.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             .map { AreaRule(glob: $0, source: .user) }
         data.planner.update(catalog: pk) { c in
@@ -300,16 +295,11 @@ extension SettingsPage {
     }
 
     private func editRules(_ pk: String, _ area: AreaDef) {
-        let a = NSAlert()
-        a.messageText = "Path rules of \(area.name)"
-        a.informativeText = "Use commas between the rules. Learned and graph rules stay."
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
         f.stringValue = area.rules.filter { $0.source == .user }.map(\.glob).joined(separator: ", ")
-        a.accessoryView = f
-        a.addButton(withTitle: "Save")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = f
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let r = AlertConfirm.run(.init(title: "Path rules of \(area.name)", info: "Use commas between the rules. Learned and graph rules stay.",
+                                       buttons: ["Save", "Cancel"], accessory: f, focus: f))
+        guard r.button == 0 else { return }
         let user = f.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             .map { AreaRule(glob: $0, source: .user) }
         data.planner.update(catalog: pk) { c in

@@ -614,13 +614,9 @@ extension SettingsPage {
     }
 
     private func confirmRemove(_ machine: String, group: String) {
-        let a = NSAlert()
-        a.messageText = "Remove \(machine) from \(group)?"
-        a.informativeText = "\(machine) gets no more state from the group, and its credential stops. To add it again, use Add machine."
-        a.addButton(withTitle: "Remove")
-        a.addButton(withTitle: "Cancel")
-        let run = { (r: NSApplication.ModalResponse) in if r == .alertFirstButtonReturn { MachinesController.shared.remove(machine) } }
-        if let w = view.window { a.beginSheetModal(for: w, completionHandler: run) } else { run(a.runModal()) }
+        AlertConfirm.ask("Remove \(machine) from \(group)?",
+                         info: "\(machine) gets no more state from the group, and its credential stops. To add it again, use Add machine.",
+                         button: "Remove", in: view.window) { MachinesController.shared.remove(machine) }
     }
 }
 

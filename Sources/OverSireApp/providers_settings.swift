@@ -198,14 +198,12 @@ extension SettingsPage {
     }
 
     private func removeAccount(_ a: AccountConfig, _ d: ProviderDescriptor) {
-        let alert = NSAlert()
-        alert.messageText = "Remove the \(d.displayName) account \(a.account.id)?"
-        alert.informativeText = d.layer == .codeHost || d.layer == .ci
-            ? "OverSire stops to track the repos of \(a.account.id), for GitHub and GitHub Actions."
-            : "OverSire deletes its secrets from the Keychain and stops to read this account."
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let r = AlertConfirm.run(.init(title: "Remove the \(d.displayName) account \(a.account.id)?",
+                                       info: d.layer == .codeHost || d.layer == .ci
+                                           ? "OverSire stops to track the repos of \(a.account.id), for GitHub and GitHub Actions."
+                                           : "OverSire deletes its secrets from the Keychain and stops to read this account.",
+                                       buttons: ["Remove", "Cancel"]))
+        guard r.button == 0 else { return }
         ENV.remove(a.account)
         form.probes[a.account] = nil
         accountsChanged()

@@ -296,14 +296,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let list = NSStackView(v: boxes.map(\.0), spacing: 6)
         list.frame = NSRect(x: 0, y: 0, width: 380, height: list.fittingSize.height)
         let state = snap.firstState(group: "completed", else: .done)?.name ?? "Done"
-        let a = NSAlert()
-        a.messageText = "Close the open sub-items of \(item.key)?"
-        a.informativeText = "OverSire sets each checked sub-item to \(state) and adds a comment."
-        a.accessoryView = list
-        a.addButton(withTitle: "Close sub-items")
-        a.addButton(withTitle: "Cancel")
-        let run: (NSApplication.ModalResponse) -> Void = { [weak self] r in
-            guard let self, r == .alertFirstButtonReturn else { return }
+        AlertConfirm.show(.init(title: "Close the open sub-items of \(item.key)?", info: "OverSire sets each checked sub-item to \(state) and adds a comment.",
+                                buttons: ["Close sub-items", "Cancel"], accessory: list), in: view.window) { [weak self] r in
+            guard let self, r.button == 0 else { return }
             let chosen = boxes.filter { $0.0.state == .on }.flatMap(\.1)
             guard !chosen.isEmpty else { return }
             self.saving = "sub-items"
@@ -311,7 +306,6 @@ final class ItemPage: Page, NSTextFieldDelegate {
             self.reload()
             self.data.projectStore.closeSubItems(chosen, parentId: item.id) { [weak self] ok in self?.saved(ok) }
         }
-        if let w = view.window { a.beginSheetModal(for: w, completionHandler: run) } else { run(a.runModal()) }
     }
 
     private func saved(_ ok: Bool) {
@@ -580,18 +574,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func editAreas(_ item: Item) {
         guard let ref = itemRef(item) else { return }
-        let a = NSAlert()
-        a.messageText = "Code areas of \(item.key)"
-        a.informativeText = "The queue does not start two items with the same area at a time. Use commas between the areas. "
-            + "An area has lower-case letters, digits and hyphens. At most \(ItemAreas.maxAreas) areas."
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         f.stringValue = data.areas.areas(of: ref).joined(separator: ", ")
         f.placeholderString = "api, status-page"
-        a.accessoryView = f
-        a.addButton(withTitle: "Save")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = f
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let r = AlertConfirm.run(.init(title: "Code areas of \(item.key)",
+                                       info: "The queue does not start two items with the same area at a time. Use commas between the areas. "
+                                           + "An area has lower-case letters, digits and hyphens. At most \(ItemAreas.maxAreas) areas.",
+                                       buttons: ["Save", "Cancel"], accessory: f, focus: f))
+        guard r.button == 0 else { return }
         data.areas.save(f.stringValue.split(separator: ",").map(String.init), for: ref)
         reload()
     }

@@ -800,18 +800,8 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
 
     @objc private func sendAgent() {
         guard let id = itemId, let key = store.item(id)?.item.key, let win = window else { return }
-        let alert = NSAlert()
-        alert.messageText = "Send to the session of \(key)"
-        alert.informativeText = "OverSire types the text into the Orca terminal and presses Return."
-        let tf = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        tf.placeholderString = "also add a test"
-        alert.accessoryView = tf
-        alert.addButton(withTitle: "Send")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = tf
-        alert.beginSheetModal(for: win) { [weak self] r in
-            let text = tf.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard r == .alertFirstButtonReturn, !text.isEmpty else { return }
+        AlertConfirm.input("Send to the session of \(key)", info: "OverSire types the text into the Orca terminal and presses Return.",
+                           placeholder: "also add a test", button: "Send", in: win) { [weak self] text in
             self?.agents?.send(key, text: text) { e in
                 guard let self else { return }
                 self.error = e?.message

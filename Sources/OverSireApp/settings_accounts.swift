@@ -256,13 +256,10 @@ extension SettingsPage {
     }
 
     private func disconnect() {
-        let a = NSAlert()
-        a.messageText = "Disconnect this Mac?"
-        a.informativeText = "OverSire deletes the device token from the Keychain and goes back to polling. The webhooks and the other Macs stay."
-        a.alertStyle = .warning
-        a.addButton(withTitle: "Disconnect")
-        a.addButton(withTitle: "Cancel")
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let r = AlertConfirm.run(.init(title: "Disconnect this Mac?",
+                                       info: "OverSire deletes the device token from the Keychain and goes back to polling. The webhooks and the other Macs stay.",
+                                       buttons: ["Disconnect", "Cancel"], style: .warning))
+        guard r.button == 0 else { return }
         setup.disconnect()
         data.relay.forgetCloudCursor()
         data.relay.start()

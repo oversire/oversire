@@ -755,20 +755,11 @@ final class ProjectSettingsPage: Page {
     }
 
     private func newLabel() {
-        let a = NSAlert()
-        a.messageText = "New label in \(project?.title ?? key)"
-        a.informativeText = "The label is added in \(trackerName) when you save."
-        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        f.placeholderString = "Label name"
-        a.accessoryView = f
-        a.addButton(withTitle: "Add")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = f
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let name = f.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty else { return }
-        let color = Self.okabe[((draft.newLabels?.count ?? 0) + (remote?.settings.labels.count ?? 0)) % Self.okabe.count]
-        change { $0.newLabels = ($0.newLabels ?? []) + [LabelDraft(name: name, color: color)] }
+        AlertConfirm.input("New label in \(project?.title ?? key)", info: "The label is added in \(trackerName) when you save.",
+                           placeholder: "Label name", button: "Add", width: 240, in: nil) { [self] name in
+            let color = Self.okabe[((draft.newLabels?.count ?? 0) + (remote?.settings.labels.count ?? 0)) % Self.okabe.count]
+            change { $0.newLabels = ($0.newLabels ?? []) + [LabelDraft(name: name, color: color)] }
+        }
     }
 
     private func members(_ body: NSStackView, _ v: TrackerSettingsView) {

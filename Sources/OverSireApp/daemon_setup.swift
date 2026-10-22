@@ -34,29 +34,23 @@ final class DaemonSetup {
               FileManager.default.fileExists(atPath: DaemonInstaller.legacyConfig.path) else { return }
         UserDefaults.standard.set(true, forKey: Self.updateOfferedKey)
         DispatchQueue.main.async {
-            let a = NSAlert()
-            a.messageText = "Update the OverSire runner?"
-            a.informativeText = "oversire-runner is now the oversire CLI. The update keeps the pairing, the allow list and the orders, and starts the OverSire daemon in place of the runner."
-            a.addButton(withTitle: "Update")
-            a.addButton(withTitle: "Not now")
             NSApp.activate(ignoringOtherApps: true)
-            guard a.runModal() == .alertFirstButtonReturn else { return }
+            let r = AlertConfirm.run(.init(title: "Update the OverSire runner?",
+                                           info: "oversire-runner is now the oversire CLI. The update keeps the pairing, the allow list and the orders, and starts the OverSire daemon in place of the runner.",
+                                           buttons: ["Update", "Not now"]))
+            guard r.button == 0 else { return }
             self.install(keepAwake: false, pair: false)
         }
     }
 
     func offer() {
         guard !busy else { return }
-        let a = NSAlert()
-        a.messageText = "Make this Mac the runner?"
-        a.informativeText = "The runner starts the Orca sessions of the suggestions that you accept, also when you accept them on the phone. It takes only typed orders that your allow list permits. Edit the list in ~/.config/oversire/daemon/allow.json."
-        a.addButton(withTitle: "Use this Mac")
-        a.addButton(withTitle: "Not now")
-        a.showsSuppressionButton = true
-        a.suppressionButton?.title = "Keep this Mac awake on power while orders wait"
         NSApp.activate(ignoringOtherApps: true)
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        install(keepAwake: a.suppressionButton?.state == .on, pair: true)
+        let r = AlertConfirm.run(.init(title: "Make this Mac the runner?",
+                                       info: "The runner starts the Orca sessions of the suggestions that you accept, also when you accept them on the phone. It takes only typed orders that your allow list permits. Edit the list in ~/.config/oversire/daemon/allow.json.",
+                                       buttons: ["Use this Mac", "Not now"], suppression: "Keep this Mac awake on power while orders wait"))
+        guard r.button == 0 else { return }
+        install(keepAwake: r.checked, pair: true)
     }
 
     func install(keepAwake: Bool, pair: Bool) {

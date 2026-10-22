@@ -439,21 +439,15 @@ final class IntakeWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDel
 
     @objc private func duplicateItem() {
         guard let item = current, let snap, let win = window else { return }
-        let a = NSAlert()
-        a.messageText = "Mark “\(item.name)” as a duplicate"
-        a.informativeText = "Select or type the key of the work item that this item duplicates."
         let box = NSComboBox(frame: NSRect(x: 0, y: 0, width: 360, height: 26))
         box.completes = true
         box.numberOfVisibleItems = 12
         box.placeholderString = "\(snap.summary.identifier)-12"
         box.addItems(withObjectValues: snap.items.sorted { $0.key.count == $1.key.count ? $0.key > $1.key : $0.key.count > $1.key.count }
             .map { "\($0.key)  \($0.title)" })
-        a.accessoryView = box
-        a.addButton(withTitle: "Mark as duplicate")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = box
-        a.beginSheetModal(for: win) { [weak self] r in
-            guard let self, r == .alertFirstButtonReturn else { return }
+        AlertConfirm.show(.init(title: "Mark “\(item.name)” as a duplicate", info: "Select or type the key of the work item that this item duplicates.",
+                                buttons: ["Mark as duplicate", "Cancel"], accessory: box, focus: box), in: win) { [weak self] r in
+            guard let self, r.button == 0 else { return }
             let k = box.stringValue.split(separator: " ").first.map { String($0).uppercased() } ?? ""
             guard let target = snap.items.first(where: { $0.key.uppercased() == k }) else {
                 self.error = k.isEmpty ? "Type the key of a work item" : "No work item \(k) in \(snap.summary.title)"
@@ -479,13 +473,9 @@ final class IntakeWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDel
 
     private func confirm(_ verb: String, _ info: String, then: @escaping () -> Void) {
         guard let item = current, let win = window else { return }
-        let a = NSAlert()
-        a.messageText = "\(verb) “\(item.name)”?"
-        a.informativeText = info
-        a.addButton(withTitle: verb)
-        a.addButton(withTitle: "Cancel")
-        if verb == "Delete" { a.buttons[0].hasDestructiveAction = true }
-        a.beginSheetModal(for: win) { r in if r == .alertFirstButtonReturn { then() } }
+        AlertConfirm.show(.init(title: "\(verb) “\(item.name)”?", info: info, buttons: [verb, "Cancel"], destructive: verb == "Delete"), in: win) {
+            if $0.button == 0 { then() }
+        }
     }
 
     // After the change, the window shows the next item, or the list when no item is left.

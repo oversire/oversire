@@ -117,13 +117,8 @@ final class PRsPage: Page {
 
     // Asks first. A merge or an approval is seen by other people.
     private func act(_ repo: String, _ p: ChangeRequest, _ action: ChangeAction, verb: String) {
-        let a = NSAlert()
-        a.messageText = "\(verb): \(repo.split(separator: "/").last ?? "") #\(p.number)?"
-        a.informativeText = p.title
-        a.addButton(withTitle: verb)
-        a.addButton(withTitle: "Cancel")
-        let run = { [weak self] (r: NSApplication.ModalResponse) in
-            guard r == .alertFirstButtonReturn, let self else { return }
+        AlertConfirm.ask("\(verb): \(repo.split(separator: "/").last ?? "") #\(p.number)?", info: p.title, button: verb, in: view.window) { [weak self] in
+            guard let self else { return }
             let id = "\(repo)#\(p.number)"
             self.busy[id] = verb; self.errors[id] = nil
             self.reload()
@@ -139,6 +134,5 @@ final class PRsPage: Page {
                 }
             }
         }
-        if let w = view.window { a.beginSheetModal(for: w, completionHandler: run) } else { run(a.runModal()) }
     }
 }

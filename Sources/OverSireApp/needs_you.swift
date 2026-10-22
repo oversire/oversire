@@ -362,16 +362,11 @@ final class NeedsYouCard: NSObject {
     }
 
     private func report(_ e: SessionStatus) {
-        let a = NSAlert()
-        a.messageText = "Report a failure to \(e.key)"
-        a.informativeText = "Tell the agent what failed. OverSire sends it with the checklist."
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 60))
         f.placeholderString = "The capture on the second display is black."
-        a.accessoryView = f
-        a.addButton(withTitle: "Send")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = f
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let r = AlertConfirm.run(.init(title: "Report a failure to \(e.key)", info: "Tell the agent what failed. OverSire sends it with the checklist.",
+                                       buttons: ["Send", "Cancel"], accessory: f, focus: f))
+        guard r.button == 0 else { return }
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         tell(e, extra: "Failure: " + text)
@@ -635,19 +630,14 @@ final class NeedsYouRow: Row {
         let store = data.projectStore
         guard let f = store.item(key: key), f.snap.isDoneWithOpenSubItems(f.item) else { return }
         let open = f.snap.openDescendants(of: f.item.id)
-        let a = NSAlert()
-        a.messageText = "\(key) is Done, but \(open.count) sub-item\(open.count == 1 ? " is" : "s are") open."
-        a.informativeText = "OverSire counts this item as not finished. Close the sub-items, or move the parent back to In progress."
-        a.addButton(withTitle: "Close \(open.count) sub-item\(open.count == 1 ? "" : "s")")
-        a.addButton(withTitle: "Reopen parent")
-        a.addButton(withTitle: "Cancel")
-        let run: (NSApplication.ModalResponse) -> Void = { r in
-            switch r {
-            case .alertFirstButtonReturn: store.closeSubItems(open, parentId: f.item.id) { _ in }
-            case .alertSecondButtonReturn: store.reopen(itemId: f.item.id) { _ in }
+        AlertConfirm.show(.init(title: "\(key) is Done, but \(open.count) sub-item\(open.count == 1 ? " is" : "s are") open.",
+                                info: "OverSire counts this item as not finished. Close the sub-items, or move the parent back to In progress.",
+                                buttons: ["Close \(open.count) sub-item\(open.count == 1 ? "" : "s")", "Reopen parent", "Cancel"]), in: window) { r in
+            switch r.button {
+            case 0: store.closeSubItems(open, parentId: f.item.id) { _ in }
+            case 1: store.reopen(itemId: f.item.id) { _ in }
             default: break
             }
         }
-        if let window { a.beginSheetModal(for: window, completionHandler: run) } else { run(a.runModal()) }
     }
 }

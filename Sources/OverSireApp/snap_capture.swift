@@ -138,13 +138,11 @@ final class SnapCapturer {
     }
 
     private func askPermission() {
-        let a = NSAlert()
-        a.messageText = "Turn on Screen Recording"
-        a.informativeText = "OverSire needs the Screen Recording permission to take snaps. Turn it on for OverSire, then open OverSire again."
-        a.addButton(withTitle: "Turn on…")
-        a.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
-        if a.runModal() == .alertFirstButtonReturn { Self.requestPermission() }
+        let r = AlertConfirm.run(.init(title: "Turn on Screen Recording",
+                                       info: "OverSire needs the Screen Recording permission to take snaps. Turn it on for OverSire, then open OverSire again.",
+                                       buttons: ["Turn on…", "Cancel"]))
+        if r.button == 0 { Self.requestPermission() }
     }
 
     func cancel() {

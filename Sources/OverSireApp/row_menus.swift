@@ -277,27 +277,12 @@ final class RowCommander {
     }
 
     private func fail(_ title: String, _ detail: String, anchor: NSView?) {
-        let a = NSAlert()
-        a.alertStyle = .warning
-        a.messageText = title
-        a.informativeText = detail
-        if let w = anchor?.window { a.beginSheetModal(for: w) } else { a.runModal() }
+        AlertConfirm.tell(title, info: detail, in: anchor?.window)
     }
 
     private func sendInput(_ key: String, anchor: NSView?) {
-        let a = NSAlert()
-        a.messageText = "Send input to the \(key) session"
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        field.placeholderString = "Text for the terminal"
-        a.accessoryView = field
-        a.addButton(withTitle: "Send")
-        a.addButton(withTitle: "Cancel")
-        a.window.initialFirstResponder = field
-        let send = { [weak self] (r: NSApplication.ModalResponse) in
-            let text = field.stringValue
-            guard r == .alertFirstButtonReturn, !text.isEmpty else { return }
+        AlertConfirm.input("Send input to the \(key) session", placeholder: "Text for the terminal", button: "Send", in: anchor?.window) { [weak self] text in
             self?.data.agentIndex.send(key, text: text) { _ in }
         }
-        if let w = anchor?.window { a.beginSheetModal(for: w, completionHandler: send) } else { send(a.runModal()) }
     }
 }

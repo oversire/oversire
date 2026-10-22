@@ -155,47 +155,34 @@ final class AgentsPage: Page {
             self.reload()
         }
         guard ask || !l.safe else { run(); return }
-        let a = NSAlert()
-        a.messageText = "Remove \(c.name)?"
-        a.informativeText = l.safe ? "OverSire runs orca worktree rm. The Plane item does not change."
-            : "\(l.detail) OverSire forces the removal. Changes that are not in the base branch are lost."
-        a.addButton(withTitle: "Remove")
-        a.addButton(withTitle: "Cancel")
-        if !l.safe { a.alertStyle = .critical }
-        let done: (NSApplication.ModalResponse) -> Void = { if $0 == .alertFirstButtonReturn { run() } }
-        if let w = view.window { a.beginSheetModal(for: w, completionHandler: done) } else { done(a.runModal()) }
+        AlertConfirm.ask("Remove \(c.name)?",
+                         info: l.safe ? "OverSire runs orca worktree rm. The Plane item does not change."
+                             : "\(l.detail) OverSire forces the removal. Changes that are not in the base branch are lost.",
+                         button: "Remove", critical: !l.safe, in: view.window, run)
     }
 
     /// Runs the safe lines of each finished item that has a safe worktree.
     private func removeAll(_ cards: [Workspace]) {
         let keys = Array(Set(cards.compactMap { cardKey($0) })).sorted()
-        let a = NSAlert()
-        a.messageText = "Remove \(cards.count) worktree\(cards.count == 1 ? "" : "s")?"
-        a.informativeText = """
+        let info = """
             • OverSire runs orca worktree rm for each worktree.
             • A local branch is deleted only when it is merged.
             • A remote branch is deleted only when its PR is merged.
             • The Plane items do not change.
             """
-        a.addButton(withTitle: "Remove")
-        a.addButton(withTitle: "Cancel")
-        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
-            guard let self, r == .alertFirstButtonReturn else { return }
+        AlertConfirm.ask("Remove \(cards.count) worktree\(cards.count == 1 ? "" : "s")?", info: info, button: "Remove", in: view.window) { [weak self] in
+            guard let self else { return }
             for k in keys {
                 let lines = self.data.cleaner.lines(k, data: self.data).filter { $0.safe && $0.removable && $0.kind != .group }
                 self.data.cleaner.run(lines, key: k, data: self.data) { [weak self] errors in self?.failed(errors) }
             }
             self.reload()
         }
-        if let w = view.window { a.beginSheetModal(for: w, completionHandler: done) } else { done(a.runModal()) }
     }
 
     private func failed(_ errors: [String]) {
         guard !errors.isEmpty else { reload(); return }
-        let a = NSAlert()
-        a.messageText = "OverSire could not remove all of it."
-        a.informativeText = errors.joined(separator: "\n")
-        if let w = view.window { a.beginSheetModal(for: w) } else { a.runModal() }
+        AlertConfirm.tell("OverSire could not remove all of it.", info: errors.joined(separator: "\n"), in: view.window)
         reload()
     }
 
