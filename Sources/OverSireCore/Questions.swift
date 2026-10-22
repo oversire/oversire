@@ -231,6 +231,8 @@ public final class QuestionBoard: @unchecked Sendable {
 
     /// How long an answered or gone question stays on the board.
     public static let fold: TimeInterval = 600
+    /// After a launch, the app needs time to find its sessions. Before that, a missing session is not a stopped session.
+    public static let grace: TimeInterval = 120
 
     private let channels: [any QuestionChannel]
     private let sessions: @Sendable () -> [SessionRef]
@@ -244,6 +246,8 @@ public final class QuestionBoard: @unchecked Sendable {
     private var failures: [AccountID: Int] = [:]
     private var reads: [AccountID: Date] = [:]
     private var dismissed: Set<QuestionID> = []
+    private var known: Set<SessionRef> = []                   // the sessions of this run
+    private var firstRead: Date?
     private var loops: [Task<Void, Never>] = []
     private var sleeper: Task<Void, Never>?
     private var poked = false
@@ -355,6 +359,9 @@ public final class QuestionBoard: @unchecked Sendable {
         let t = now()
         let (changed, dropped) = lock.withLock { () -> ([Entry], [QuestionID]) in
             let before = table
+            known.formUnion(live)
+            let start = firstRead ?? t
+            firstRead = start
             for (account, read) in reads {
                 failures[account] = 0
                 self.reads[account] = t
@@ -380,6 +387,7 @@ public final class QuestionBoard: @unchecked Sendable {
                     if let a = given[id] {
                         table[id]?.state = .answeredElsewhere(a, at: t)
                     } else if !live.contains(e.question.session) {
+                        guard known.contains(e.question.session) || t.timeIntervalSince(start) >= Self.grace else { continue }
                         table[id]?.state = .gone(at: t)
                     } else {
                         table[id]?.state = .answeredElsewhere(nil, at: t)

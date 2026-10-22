@@ -104,6 +104,42 @@ final class QuestionBoardTests: XCTestCase {
         XCTAssertEqual(Set(b.entries.keys.map(\.rawValue)), ["fake:tool", "fake:later"], "a question with an answer stays")
     }
 
+    /// After a launch, the app does not know its sessions yet. A question of the last run stays open until the grace ends.
+    func testUnknownSessionAfterALaunchIsNotGone() async throws {
+        let ch = FakeQuestionChannel()
+        let store = MemoryStore()
+        let q = question(ch, "1")
+        try await store.put(QuestionRecord(question: q, state: .open, firstSeen: t0))
+        let box = Box(t0, [])
+        let b = board(ch, box, store: store)
+        await b.load()
+        await b.refresh()
+        XCTAssertEqual(b.entries[q.id]?.state, .open)
+
+        ch.ask(q)
+        box.sessions = [ch.session("s1")]
+        await b.refresh()
+        XCTAssertEqual(b.entries[q.id]?.state, .open)
+
+        box.sessions = []
+        await b.refresh()
+        XCTAssertEqual(b.entries[q.id]?.state, .gone(at: t0), "the session of this run stopped")
+    }
+
+    func testUnknownSessionIsGoneAfterTheGrace() async throws {
+        let ch = FakeQuestionChannel()
+        let store = MemoryStore()
+        let q = question(ch, "1")
+        try await store.put(QuestionRecord(question: q, state: .open, firstSeen: t0))
+        let box = Box(t0, [])
+        let b = board(ch, box, store: store)
+        await b.load()
+        await b.refresh()
+        box.date = t0.addingTimeInterval(QuestionBoard.grace)
+        await b.refresh()
+        XCTAssertEqual(b.entries[q.id]?.state, .gone(at: box.date))
+    }
+
     func testSendThatWins() async throws {
         let ch = FakeQuestionChannel()
         let box = Box(t0, [ch.session("s1")])
