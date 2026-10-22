@@ -86,16 +86,20 @@ public actor MCPServer {
         var last: Date
     }
 
-    let loop: AssistantLoop
+    /// Weak: the loop owns the engines, and the engines reach this server.
+    private weak var loop: AssistantLoop?
     let idle: TimeInterval
     let now: @Sendable () -> Date
     private var grants: [String: Grant] = [:]
 
-    public init(loop: AssistantLoop, idle: TimeInterval = 30 * 60, now: @escaping @Sendable () -> Date = Date.init) {
+    /// `loop` nil: the app calls attach after it makes the loop.
+    public init(loop: AssistantLoop? = nil, idle: TimeInterval = 30 * 60, now: @escaping @Sendable () -> Date = Date.init) {
         self.loop = loop
         self.idle = idle
         self.now = now
     }
+
+    public func attach(_ loop: AssistantLoop) { self.loop = loop }
 
     /// The bearer token of the thread. The same thread gets the same token while it is open.
     public func token(for thread: String) -> String {
@@ -162,7 +166,8 @@ public actor MCPServer {
         case "ping":
             return Self.result(id, [String: Any]())
         case "tools/list":
-            let tools = await loop.tools().map { t -> [String: Any] in
+            let specs: [ToolSpec] = await loop?.tools() ?? []
+            let tools = specs.map { t -> [String: Any] in
                 ["name": t.name, "title": t.title, "description": t.description, "inputSchema": t.input.any,
                  "annotations": ["readOnlyHint": t.kind == .read, "destructiveHint": t.kind == .outward, "openWorldHint": t.kind == .outward]]
             }
@@ -170,6 +175,7 @@ public actor MCPServer {
         case "tools/call":
             guard let name = params["name"] as? String else { return Self.error(id, -32602, "No tool name") }
             let args = (params["arguments"] as? [String: Any]).map { JSONValue(any: $0) } ?? .object([:])
+            guard let loop else { return Self.error(id, -32603, "The assistant is off") }
             let res = await loop.runTool(ToolCall(id: "mcp-\(UUID().uuidString.prefix(8).lowercased())", tool: name, args: args), thread: thread)
             return Self.result(id, ["content": [["type": "text", "text": Self.text(res)]], "isError": res.status != .ok])
         default:

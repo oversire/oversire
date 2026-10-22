@@ -6,6 +6,8 @@ import OverSireTestKit
 
 final class MCPServerTests: XCTestCase {
     var dir: URL!
+    /// The server holds the loop weakly.
+    var loops: [AssistantLoop] = []
 
     override func setUp() { dir = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-\(UUID().uuidString)") }
     override func tearDown() { try? FileManager.default.removeItem(at: dir) }
@@ -13,6 +15,7 @@ final class MCPServerTests: XCTestCase {
     func setup(_ engine: FakeChatEngine, _ specs: [ActionSpec], now: @escaping @Sendable () -> Date = Date.init) -> (AssistantLoop, MCPServer) {
         let loop = AssistantLoop(router: ChatRouter(engines: [engine]), catalog: ActionList(specs), policy: RuleConfirmPolicy(),
                                  store: ThreadStore(store: MemoryStore(), blobDir: dir), system: { _, _ in "" })
+        loops.append(loop)
         return (loop, MCPServer(loop: loop, now: now))
     }
 
@@ -134,5 +137,34 @@ final class MCPServerTests: XCTestCase {
         c.t = c.t.addingTimeInterval(2 * 60)
         empty = await s.prune()
         XCTAssertTrue(empty)
+    }
+}
+
+final class MCPListenerTests: XCTestCase {
+    func testTheSocketServesAndStops() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mcp-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let loop = AssistantLoop(router: ChatRouter(engines: [FakeChatEngine()]), catalog: ActionList([]), policy: RuleConfirmPolicy(),
+                                 store: ThreadStore(store: MemoryStore(), blobDir: dir), system: { _, _ in "" })
+        let l = MCPListener(server: MCPServer(loop: loop))
+        let (url, token) = try await l.endpoint(thread: "t-1")
+        XCTAssertEqual(url.host, "127.0.0.1")
+        XCTAssertTrue(l.isRunning)
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = Data(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#.utf8)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        XCTAssertEqual((resp as? HTTPURLResponse)?.statusCode, 200)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        XCTAssertEqual((obj?["result"] as? [String: Any])?["protocolVersion"] as? String, "2025-06-18")
+
+        req.setValue("Bearer nope", forHTTPHeaderField: "Authorization")
+        let (_, bad) = try await URLSession.shared.data(for: req)
+        XCTAssertEqual((bad as? HTTPURLResponse)?.statusCode, 401)
+
+        await l.closed(thread: "t-1")
+        XCTAssertFalse(l.isRunning, "no thread is left")
     }
 }
