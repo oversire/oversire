@@ -168,14 +168,14 @@ class Footer: NSView {
         let ts = stamp
         showUpdated(updated)
         ts.font = .systemFont(ofSize: 10); ts.textColor = .secondaryLabelColor; ts.alignment = .center
-        ts.frame = NSRect(x: 244, y: 11, width: w - 384, height: 16)
+        ts.frame = NSRect(x: 244, y: 11, width: w - 448, height: 16)
         addSubview(ts)
         if let v = (NSApp.delegate as? GHActionsBar)?.updater.readyVersion {
             ts.frame.size.height = 12; ts.frame.origin.y = 22
             let ub = NSButton(title: "v\(v) ready · Install", target: NSApp.delegate, action: #selector(GHActionsBar.showUpdates))
             ub.isBordered = false
             ub.attributedTitle = NSAttributedString(string: ub.title, attributes: [.foregroundColor: Palette.acc, .font: NSFont.systemFont(ofSize: 10.5, weight: .medium)])
-            ub.frame = NSRect(x: 244, y: 4, width: w - 384, height: 16)
+            ub.frame = NSRect(x: 244, y: 4, width: w - 448, height: 16)
             ub.setAccessibilityLabel("Version \(v) is ready. Open the update settings")
             addSubview(ub)
         }
@@ -186,6 +186,16 @@ class Footer: NSView {
             dot.toolTip = tip
             addSubview(dot)
         }
+
+        let ask = NSButton(title: "Ask", target: NSApp.delegate, action: #selector(GHActionsBar.askAssistant))
+        ask.bezelStyle = .inline; ask.font = .systemFont(ofSize: 11)
+        ask.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
+        ask.imagePosition = .imageLeading
+        ask.contentTintColor = AI_COLOR
+        ask.toolTip = "Ask the assistant (⌘J)"
+        ask.setAccessibilityLabel("Ask the assistant")
+        ask.frame = NSRect(x: w - 196, y: 8, width: 64, height: 24)
+        addSubview(ask)
 
         // Settings gear
         let gear = NSButton(frame: NSRect(x: w - 100, y: 8, width: 36, height: 24))

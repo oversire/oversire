@@ -104,6 +104,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var actions = AppActionCatalog(data: self)
     var pages: AppWindow? { appWindow }
+    /// The composition root sets up the loop here. Nil: the panel links to Settings › AI.
+    var assistant: AssistantController? { nil }
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
@@ -407,6 +409,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         sub("View", [
             mi("Toggle Sidebar", #selector(AppWindow.toggleSidebarNow(_:)), "s", [.command, .control]),
             mi("Refresh", #selector(AppWindow.refreshNow), "r"),
+            .separator(),
+            mi("Ask the Assistant", #selector(toggleAssistant), "j", target: self),
         ])
         let pages: [(String, String)] = [("Home", "home"), ("Inbox", "inbox"), ("My items", "mine"), ("Sessions", "sessions"),
                                          ("Queue", "queue"), ("Runs", "runs"), ("Pull requests", "prs"), ("Insights", "insights")]
@@ -482,6 +486,18 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func open(_ route: Route, focus: String? = nil) {
         if popover?.isShown == true { popover.close() }
         appWindow.show(route, focus: focus)
+    }
+
+    /// ⌘J: shows or hides the assistant panel. A hidden window shows with the panel.
+    @objc func toggleAssistant() {
+        if appWindow.window?.isKeyWindow == true { appWindow.toggleAssistant(nil) } else { askAssistant() }
+    }
+
+    /// The Ask buttons of the menu bar panels: the window with the assistant.
+    @objc func askAssistant() {
+        if popover?.isShown == true { popover.close() }
+        appWindow.show()
+        appWindow.showAssistant()
     }
 
     @objc func openPath(_ sender: NSMenuItem) {

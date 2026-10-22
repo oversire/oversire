@@ -3,6 +3,7 @@ import AgentBinder
 import OverSireCore
 import OverSireAI
 import OverSireSync
+import OverSireAssistant
 import RuntimeOrca
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
@@ -46,6 +47,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var itemSummaries = ItemSummaries(path: UIShots.tmp + "/summaries.json",
                                            ai: { UIShots.aiKey.map { AIClient(cfg: AI_CFG, key: $0) } })
     lazy var statusJob = StatusJob(path: UIShots.tmp + "/session-status.json", agents: agentIndex, queue: queue)
+    /// Scripted engines and sample tools. Nil while a shot shows the panel with no assistant.
+    lazy var shotAssistant = makeAssistant()
+    var assistantOff = false
+    var assistant: AssistantController? { assistantOff ? nil : shotAssistant }
     let relay = LiveSync(secrets: SecretStore(service: "com.oversire.app.cloud"), cursors: CursorStore(url: nil))
     private let dir: String
     struct FixturePR: Decodable { let repo: String; let mine: Bool; let pr: ChangeRequest }
@@ -752,6 +757,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.glance = UIShots.questionsSample(String(p.dropFirst(10)))
                     } else if p.hasPrefix("palette:") {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
+                    } else if p.hasPrefix("assistant:") {
+                        self.assistantState(String(p.dropFirst(10)), in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {
@@ -760,6 +767,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         print("UISHOTS bad path \(p)")
                     }
                 }
+                // The chat views and the Markdown web views need time.
+                if p.hasPrefix("assistant:") { steps += Array(repeating: {}, count: 4) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
                 steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
@@ -1279,5 +1288,209 @@ extension UIShots {
                 }
             }
         }
+    }
+}
+
+// MARK: Assistant samples
+
+/// A chat engine for the shots. A script belongs to one user text and has one step list for each turn.
+final class ShotChatEngine: ChatEngine, @unchecked Sendable {
+    enum Step {
+        case event(ChatEvent)
+        case wait(Double)
+        case fail(AIError)
+    }
+
+    let id: EngineID
+    private let lock = NSLock()
+    private var scripts: [String: [[Step]]] = [:]
+    private var turns: [String: Int] = [:]
+
+    init(id: EngineID) { self.id = id }
+
+    func script(_ user: String, _ turns: [[Step]]) { lock.withLock { scripts[user] = turns } }
+
+    func available() async -> Bool { true }
+
+    func turn(_ r: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+        let user = r.messages.last { $0.role == .user }?.parts.compactMap { p -> String? in
+            if case .text(let t) = p { return t }
+            return nil
+        }.joined() ?? ""
+        let steps: [Step] = lock.withLock {
+            let key = r.thread + "|" + user
+            let n = turns[key, default: 0]
+            turns[key] = n + 1
+            guard let list = scripts[user], n < list.count else { return [.event(.textDelta("Done.")), .event(.end(.done))] }
+            return list[n]
+        }
+        return AsyncThrowingStream { out in
+            let task = Task {
+                for s in steps {
+                    switch s {
+                    case .event(let e): out.yield(e)
+                    case .wait(let d): try? await Task.sleep(for: .seconds(d))
+                    case .fail(let e): out.finish(throwing: e); return
+                    }
+                }
+                out.finish()
+            }
+            out.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+extension UIShots {
+    static let assistantPrompts = [
+        "working": "Why is the CI of #212 red, and is OVERSIRE-141 stuck?",
+        "nav": "Show me the session of FRITZ-17.",
+        "approve": "Merge #212 when CI is green.",
+        "machines": "What does the agent on studio-mini do now?",
+        "problems": "Rerun the Linux tests of SLING-88 on studio-mini.",
+    ]
+
+    func makeAssistant() -> AssistantController? {
+        let dir = URL(fileURLWithPath: UIShots.tmp + "/assistant")
+        try? FileManager.default.removeItem(at: dir)
+        let store = ThreadStore(store: LocalStore(dir: dir.appendingPathComponent("store")), blobDir: dir.appendingPathComponent("blobs"))
+        let cli = ShotChatEngine(id: .localCLI)
+        let key = ShotChatEngine(id: .apiKey)
+        Self.script(cli, key)
+        let loop = AssistantLoop(router: ChatRouter(engines: [cli, key]), catalog: ActionList(Self.shotActions()),
+                                 policy: RuleConfirmPolicy(), store: store, system: { _, _ in "You are the OverSire assistant." })
+        return MainActor.assumeIsolated {
+            AssistantController(loop: loop, engines: [AssistantEngine(id: .localCLI, label: "Claude Code · this Mac"),
+                                                      AssistantEngine(id: .apiKey, label: "API key · Anthropic")],
+                                page: { [weak self] in self?.window?.pageContext })
+        }
+    }
+
+    private static func shotActions() -> [ActionSpec] {
+        func spec(_ id: String, _ title: String, _ kind: ActionKind, _ perform: @escaping @Sendable (ActionArgs) async -> ActionResult) -> ActionSpec {
+            ActionSpec(id: id, title: title, help: title, kind: kind, perform: perform)
+        }
+        return [
+            spec("item.context", "Read the item", .read) { a in .ok(summary: "\(a.string("key") ?? "Item") · In progress · 3 comments") },
+            spec("pr.status", "Read the PR", .read) { _ in .ok(summary: "#212 · CI green · 2 approvals") },
+            spec("run.log", "Read the CI log", .read) { _ in .ok(summary: "swift test failed: 2 tests in RouterTests") },
+            spec("session.tail", "Read the session", .read) { a in
+                if a.string("machine") == "studio-mini" { return .ok(summary: "SLING-88 · Claude Code · runs the tests") }
+                try? await Task.sleep(for: .seconds(600))
+                return .ok(summary: "The agent runs swift test again")
+            },
+            spec("machine.sessions", "List the sessions", .read) { a in .ok(summary: "\(a.string("machine") ?? "This Mac") · 2 sessions") },
+            spec("machine.status", "Read the machine", .read) { a in .failed("\(a.string("machine") ?? "The Mac") does not answer.") },
+            spec("queue.list", "Read the queue", .read) { _ in .ok(summary: "4 items wait") },
+            spec("pr.merge", "Merge the PR", .outward) { _ in .ok(summary: "#212 is merged") },
+            spec("ui.show", "Show a page", .read) { a in
+                let route = a.string("route") ?? "home"
+                return .ok(summary: "Shows \(route)", parts: [.navigation(route: route, focus: nil, from: "home")])
+            },
+        ]
+    }
+
+    private static func script(_ cli: ShotChatEngine, _ key: ShotChatEngine) {
+        typealias S = ShotChatEngine.Step
+        func call(_ id: String, _ tool: String, _ args: [String: JSONValue] = [:]) -> S { .event(.toolCall(ToolCall(id: id, tool: tool, args: .object(args)))) }
+        func text(_ t: String) -> S { .event(.textDelta(t)) }
+        let end: S = .event(.end(.done))
+        let usage: S = .event(.usage(AIUsage(input: 4200, output: 380)))
+        let p = assistantPrompts
+        cli.script(p["working"]!, [[
+            .event(.thoughtDelta("The user asks two things. First I read the PR and its failed run. Then I look at the session of the item.", signature: nil)),
+            text("I read the PR, the failed run and the session."),
+            call("w1", "item_context", ["key": .string("OVERSIRE-141")]),
+            call("w2", "pr_status", ["number": .int(212)]),
+            call("w3", "run_log", ["run": .string("9123")]),
+            call("w4", "session_tail", ["key": .string("OVERSIRE-141")]),
+            call("w5", "queue_list"),
+            usage, end,
+        ]])
+        cli.script(p["nav"]!, [
+            [call("n1", "ui_show", ["route": .string("item/FRITZ-17/session")]), usage, end],
+            [text("This is the session of **FRITZ-17**. The agent waits for your answer about the test plan.\n\nReplies: Answer it | Open the terminal"), usage, end],
+        ])
+        cli.script(p["approve"]!, [
+            [call("a1", "pr_status", ["number": .int(212)]), usage, end],
+            [text("CI is green and #212 has 2 approvals. I merge it with a squash."),
+             call("a2", "pr_merge", ["number": .int(212), "method": .string("squash")]), usage, end],
+        ])
+        cli.script(p["machines"]!, [
+            [call("m1", "machine_sessions", ["machine": .string("studio-mini")]),
+             call("m2", "session_tail", ["machine": .string("studio-mini")]), usage, end],
+            [text("On **studio-mini**, Claude Code works on SLING-88. It runs the Linux tests again after a fix in the parser.\n\n"
+                  + "- Started 12 min ago\n- 3 of 5 steps done\n\nReplies: Show the session | Ask it for a status"), usage, end],
+        ])
+        cli.script(p["problems"]!, [[.fail(.unavailable("Claude Code reached its usage limit."))]])
+        key.script(p["problems"]!, [
+            [text("First I check that studio-mini is on."),
+             call("p1", "machine_status", ["machine": .string("studio-mini")]), usage, end],
+            [.event(.error(code: "offline", message: "studio-mini does not answer.")), end],
+        ])
+    }
+
+    /// assistant:<state>: closed, setup, new, attach, working, nav, approve, machines, chats, problems.
+    func assistantState(_ state: String, in w: AppWindow) {
+        assistantOff = state == "setup"
+        if let p = w.assistantPanel, (p.controller == nil) != assistantOff { w.resetAssistant() }
+        if state == "closed" { w.hideAssistant(); return }
+        if w.router.current != .home { w.router.go(.home) }
+        w.showAssistant()
+        guard let p = w.assistantPanel, let c = p.controller else { return }
+        MainActor.assumeIsolated { if c.isRunning { c.stop() } }
+        p.composer.clear()
+        p.composer.showDrop(false)
+        p.newChat()
+        switch state {
+        case "new":
+            break
+        case "attach":
+            p.composer.textView.string = "The page is blank after the sign-in. Compare it with the log."
+            p.composer.add(AssistantAttachment(kind: .image(Self.sampleImage())))
+            p.composer.add(AssistantAttachment(kind: .file(name: "callback.log", data: Data(repeating: 65, count: 18_400))))
+            if let found = projectStore.item(key: "FRITZ-17"), let ref = found.item.ref(in: found.snap.summary.ref) {
+                p.composer.add(AssistantAttachment(kind: .mention(.item(ref), key: ref.key)))
+            }
+            p.composer.showDrop(true)
+        case "chats":
+            let store = c.loop.store
+            Task { @MainActor in
+                for t in Self.sampleThreads() { try? await store.save(t) }
+                p.showChats(true)
+            }
+        default:
+            guard let text = Self.assistantPrompts[state] else { print("UISHOTS bad assistant state \(state)"); return }
+            p.composer.textView.string = text
+            p.composer.submit()
+        }
+    }
+
+    private static func sampleThreads() -> [AssistantThread] {
+        let now = Date()
+        let day: TimeInterval = 86_400
+        let plane = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "SLING")
+        let item = ItemRef(project: plane, id: "i88", key: "SLING-88", url: URL(string: "https://plane.so/ocral/SLING-88")!)
+        return [
+            AssistantThread(title: "Release checklist for v1.4", createdAt: now - 6 * day, updatedAt: now - 2 * day, engine: .localCLI, pinned: true),
+            AssistantThread(title: "Why do the Linux tests of SLING-88 fail?", createdAt: now - day - 3600, updatedAt: now - day,
+                            engine: .localCLI, subjects: [.item(item)], machines: ["studio-mini"]),
+            AssistantThread(title: "Sort the intake of this week", createdAt: now - day - 7200, updatedAt: now - day - 5000, engine: .apiKey),
+            AssistantThread(title: "Plan the cloud relay work", createdAt: now - 9 * day, updatedAt: now - 8 * day, engine: .localCLI),
+        ]
+    }
+
+    /// A small screenshot for the image chip.
+    private static func sampleImage() -> Data {
+        let img = NSImage(size: NSSize(width: 320, height: 200), flipped: false) { r in
+            NSColor(srgbRed: 0.95, green: 0.95, blue: 0.97, alpha: 1).setFill()
+            r.fill()
+            NSColor(srgbRed: 0.34, green: 0.71, blue: 0.91, alpha: 1).setFill()
+            NSRect(x: 0, y: 170, width: 320, height: 30).fill()
+            NSColor(srgbRed: 0.8, green: 0.8, blue: 0.84, alpha: 1).setFill()
+            for i in 0..<4 { NSRect(x: 24, y: 120 - CGFloat(i) * 26, width: CGFloat(220 - i * 30), height: 12).fill() }
+            return true
+        }
+        guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return Data() }
+        return rep.representation(using: .png, properties: [:]) ?? Data()
     }
 }

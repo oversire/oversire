@@ -87,6 +87,7 @@ final class GlanceVC: NSViewController {
         strip.onSelect = { [weak self] i in self?.select(Tab(rawValue: i) ?? .now) }
         head.addArrangedSubview(strip)
         head.addArrangedSubview(Spacer())
+        head.addArrangedSubview(ActionButton("Ask", symbol: "sparkles") { (NSApp.delegate as? GHActionsBar)?.askAssistant() }.labeled("Ask the assistant"))
         head.addArrangedSubview(ActionButton("", symbol: "macwindow") { [weak self] in self?.open(.home) }.labeled("Open the window"))
     }
 

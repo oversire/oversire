@@ -122,6 +122,14 @@ public actor AssistantLoop {
 
     public func isRunning(_ thread: String) -> Bool { runs[thread] != nil }
 
+    /// The answer of the run so far, with the id that the store gets at the end. Nil when the thread does not run.
+    /// The UI reads it for the parts that come with no event, for example a navigation part.
+    public func liveMessage(_ thread: String) -> AssistantMessage? {
+        guard let run = runs[thread] else { return nil }
+        return AssistantMessage(id: run.messageID, thread: thread, role: .assistant, at: run.started, parts: run.parts,
+                                engine: run.thread.engine, usage: run.usage)
+    }
+
     /// The tools that apply now, for the MCP server.
     public func tools() async -> [ToolSpec] { ToolRegistry(await catalog.specs(for: await page())).tools }
 

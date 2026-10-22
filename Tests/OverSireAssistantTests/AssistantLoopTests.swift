@@ -110,6 +110,27 @@ final class AssistantLoopTests: XCTestCase {
         XCTAssertEqual(lines.value.first?.decision, .allowedByRule)
     }
 
+    func testLiveMessageHasTheExtraPartsAndTheStoredID() async throws {
+        let e = FakeChatEngine()
+        e.reply(.toolCall(ToolCall(id: "c1", tool: "ui_show")))
+        e.script([.event(.textDelta("Here.")), .wait(.seconds(5)), .event(.end(.done))])
+        let nav = AssistantPart.navigation(route: "item/OVERSIRE-1", focus: nil, from: "home")
+        let loop = makeLoop([e], [spec("ui.show", .read, result: .ok(summary: "Opened", parts: [nav]))])
+        var live: AssistantMessage?
+        for await ev in await loop.send([.text("Show it")], in: thread()) {
+            if case .textDelta = ev {
+                live = await loop.liveMessage("t-1")
+                await loop.cancel("t-1")
+            }
+        }
+        let m = try XCTUnwrap(live)
+        XCTAssertTrue(m.parts.contains(nav))
+        let isLive = await loop.liveMessage("t-1")
+        XCTAssertNil(isLive)
+        let stored = try await loop.store.messages("t-1")
+        XCTAssertEqual(stored.last?.id, m.id)
+    }
+
     func testTwoToolCallsInOneTurn() async throws {
         let e = FakeChatEngine()
         e.reply(.toolCall(ToolCall(id: "c1", tool: "item_get")), .toolCall(ToolCall(id: "c2", tool: "pr_list")))

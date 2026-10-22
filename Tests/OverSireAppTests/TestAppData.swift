@@ -53,6 +53,7 @@ final class TestAppData: AppData {
     var logs: LogStore? { nil }
     var caps: Set<Capability> = []
     lazy var actions = AppActionCatalog(data: self)
+    var assistant: AssistantController? { nil }
 
     init() { try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true) }
     deinit { try? FileManager.default.removeItem(atPath: tmp) }

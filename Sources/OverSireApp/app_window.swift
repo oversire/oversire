@@ -37,6 +37,8 @@ protocol AppData: AnyObject {
     var actions: AppActionCatalog { get }
     /// The main window. Nil in tests.
     var pages: AppWindow? { get }
+    /// Nil: the assistant is not set up. The panel then links to Settings › AI.
+    var assistant: AssistantController? { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func refresh(force: Bool, completion: (() -> Void)?)
@@ -311,6 +313,9 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private var holdCheck: Timer?
     private var popovers = Set<ObjectIdentifier>()
     private let makePage: (Route, AppData, Router) -> Page
+    private var assistantItem: NSSplitViewItem?
+    private(set) var assistantPanel: AssistantPanel?
+    private var askButton: NSButton?
 
     init(data: AppData, makePage: @escaping (Route, AppData, Router) -> Page = PageFactory.make) {
         self.data = data
@@ -563,6 +568,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     private let copyId = NSToolbarItem.Identifier("copy")
     private let newSessionId = NSToolbarItem.Identifier("newSession")
     private let updateId = NSToolbarItem.Identifier("update")
+    private let askId = NSToolbarItem.Identifier("ask")
     private var newSessionButton: NSButton?
 
     // apple.terminal with a small plus at the bottom right. SF Symbols has no such symbol.
@@ -583,7 +589,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     }()
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .flexibleSpace, navId, newSessionId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, copyId, refreshId, settingsId]
+        [.toggleSidebar, .flexibleSpace, navId, newSessionId, .sidebarTrackingSeparator, .flexibleSpace, paletteId, askId, copyId, refreshId, settingsId]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) + [updateId] }
 
@@ -630,6 +636,21 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             b.setAccessibilityLabel("Search or jump to, Command K")
             i.view = b
             i.label = "Search"
+            return i
+        case askId:
+            let i = NSToolbarItem(itemIdentifier: id)
+            let b = NSButton(title: "Ask  ⌘J", target: self, action: #selector(toggleAssistant(_:)))
+            b.bezelStyle = .texturedRounded
+            b.setButtonType(.pushOnPushOff)
+            b.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
+            b.imagePosition = .imageLeading
+            b.contentTintColor = AI_COLOR
+            b.toolTip = "Ask the assistant (⌘J)"
+            b.setAccessibilityLabel("Ask the assistant, Command J")
+            b.state = assistantShown ? .on : .off
+            askButton = b
+            i.view = b
+            i.label = "Ask"
             return i
         case refreshId:
             let i = NSToolbarItem(itemIdentifier: id)
@@ -699,6 +720,82 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     @objc func toggleSidebarNow(_ sender: Any?) { split.toggleSidebar(sender) }
     func setSidebarWidth(_ w: CGFloat) { split.splitView.setPosition(w, ofDividerAt: 0) }
     @objc func openPalette() { CommandPalette.show(over: self) }
+
+    // MARK: Assistant
+
+    static let assistantWidth: CGFloat = 404
+
+    var assistantShown: Bool { assistantItem?.isCollapsed == false }
+
+    /// ⌘J and the Ask button.
+    @objc func toggleAssistant(_ sender: Any?) {
+        if assistantShown { hideAssistant() } else { showAssistant() }
+    }
+
+    func showAssistant() {
+        if assistantItem == nil {
+            let p = AssistantPanel(controller: data.assistant, owner: self)
+            p.onClose = { [weak self] in self?.hideAssistant() }
+            let item = NSSplitViewItem(viewController: p)
+            item.minimumThickness = 320
+            item.maximumThickness = 560
+            item.canCollapse = true
+            item.isCollapsed = true
+            // The page gives way first when the window gets smaller.
+            item.holdingPriority = .init(260)
+            split.addSplitViewItem(item)
+            assistantItem = item
+            assistantPanel = p
+        }
+        guard let item = assistantItem, let win = window else { return }
+        if item.isCollapsed {
+            // The window grows when the page would get too narrow.
+            let side = split.splitViewItems.first?.isCollapsed == false ? sidebar.view.frame.width : 0
+            let need = side + 520 + Self.assistantWidth + 2
+            if win.frame.width < need, let screen = win.screen?.visibleFrame {
+                var f = win.frame
+                f.size.width = min(need, screen.width)
+                f.origin.x = max(screen.minX, min(f.origin.x, screen.maxX - f.width))
+                win.setFrame(f, display: true)
+            }
+            item.isCollapsed = false
+            split.splitView.layoutSubtreeIfNeeded()
+            let w = item.viewController.view.frame.width
+            if w < item.minimumThickness || w > item.maximumThickness || abs(w - Self.assistantWidth) > 1 && !assistantSized {
+                split.splitView.setPosition(split.splitView.bounds.width - Self.assistantWidth - split.splitView.dividerThickness,
+                                            ofDividerAt: split.splitViewItems.count - 2)
+            }
+            assistantSized = true
+        }
+        askButton?.state = .on
+        assistantPanel?.render()
+        assistantPanel?.focusComposer()
+    }
+
+    private var assistantSized = false
+
+    /// Removes the panel. The next show makes it again from data.assistant, for example after a change in Settings › AI.
+    func resetAssistant() {
+        guard let item = assistantItem else { return }
+        let shown = assistantShown
+        split.removeSplitViewItem(item)
+        assistantItem = nil
+        assistantPanel = nil
+        assistantSized = false
+        askButton?.state = .off
+        if shown { showAssistant() }
+    }
+
+    func hideAssistant() {
+        assistantItem?.isCollapsed = true
+        askButton?.state = .off
+        window?.makeFirstResponder(page?.view)
+    }
+
+    /// What the assistant sees: the route and the title of the page.
+    var pageContext: PageContext {
+        PageContext(route: router.current.path, title: router.current.title)
+    }
     @objc func openNewSession(_ sender: NSButton) {
         guard let s = (NSApp.delegate as? GHActionsBar)?.newSession else { return }
         if s.isOpen { s.panel?.cancelOperation(nil) } else { s.show(near: sender) }
