@@ -22,6 +22,27 @@ public final class DaemonClient: Sendable {
 
     public func sessions() async throws -> DaemonSessionsPage { try await get("/v1/sessions") }
 
+    /// Member route. 404: the daemon has no session with this id.
+    public func session(id: String) async throws -> DaemonSession { try await get("/v1/sessions/\(Self.escape(id))") }
+
+    /// Member route. The state of a direct work order. 404: the daemon does not know the order.
+    public func order(id: String) async throws -> DaemonOrderState { try await get("/v1/orders/\(Self.escape(id))") }
+
+    /// Member route. The daemon sends the text to the session and waits for the end of its turn.
+    /// The daemon accepts 1 to 600 s. The HTTP request waits 30 s more than the ask.
+    /// Throws SessionAskError for 409 (busy, unsupported) and 504 (timeout), and ProviderError.notFound for 404.
+    public func ask(session id: String, text: String, timeout: TimeInterval = 180, readOnly: Bool = true) async throws -> SessionAskReply {
+        let sec = min(max(Int(timeout.rounded(.up)), 1), 600)
+        var r = try json("POST", "/v1/sessions/\(Self.escape(id))/ask", SessionAsk(text: text, timeoutSec: sec, readOnly: readOnly))
+        r.timeoutInterval = TimeInterval(sec + 30)
+        let (data, resp) = try await exchange(r)
+        if resp.statusCode >= 300, ![401, 403, 404].contains(resp.statusCode),
+           let reply = try? Self.decode(data) as SessionAskReply, let code = reply.error {
+            throw SessionAskError(status: resp.statusCode, code: code, message: reply.message ?? "", screenTail: reply.screenTail)
+        }
+        return try Self.decode(try Self.check(data, resp))
+    }
+
     public func group() async throws -> Group { try await get("/v1/group") }
 
     /// Member route. The daemon installs a newer CLI and then restarts. A download can take minutes.
@@ -124,6 +145,10 @@ public final class DaemonClient: Sendable {
     }
 
     private func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B?) async throws -> T {
+        try Self.decode(try await send(try json(method, path, body)))
+    }
+
+    private func json<B: Encodable>(_ method: String, _ path: String, _ body: B?) throws -> URLRequest {
         var r = request(path)
         r.httpMethod = method
         if let body {
@@ -132,14 +157,21 @@ public final class DaemonClient: Sendable {
             enc.dateEncodingStrategy = .iso8601
             r.httpBody = try enc.encode(body)
         }
-        return try Self.decode(try await send(r))
+        return r
+    }
+
+    private func exchange(_ r: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        do { return try await http.send(r) } catch let e as ProviderError { throw e } catch {
+            throw ProviderError.transport(error.localizedDescription)
+        }
     }
 
     private func send(_ r: URLRequest) async throws -> Data {
-        let (data, resp): (Data, HTTPURLResponse)
-        do { (data, resp) = try await http.send(r) } catch let e as ProviderError { throw e } catch {
-            throw ProviderError.transport(error.localizedDescription)
-        }
+        let (data, resp) = try await exchange(r)
+        return try Self.check(data, resp)
+    }
+
+    private static func check(_ data: Data, _ resp: HTTPURLResponse) throws -> Data {
         switch resp.statusCode {
         case 200..<300: return data
         case 401: throw ProviderError.unauthorized
@@ -160,4 +192,30 @@ public final class DaemonClient: Sendable {
         }
         do { return try dec.decode(T.self, from: data) } catch { throw ProviderError.decoding(String(describing: error)) }
     }
+}
+
+/// The daemon did not give a reply to an ask. The status is 409 (busy, unsupported), 504 (timeout), 410 (gone) or 502 (sendFailed).
+public struct SessionAskError: Error, Hashable, Sendable, LocalizedError {
+    /// A turn is active and the session takes no steering.
+    public static let busy = "busy"
+    /// OverSire cannot type into the session.
+    public static let unsupported = "unsupported"
+    /// The turn did not end in time.
+    public static let timeout = "timeout"
+
+    public let status: Int
+    /// Open set: busy, unsupported, timeout, gone, sendFailed.
+    public let code: String
+    public let message: String
+    /// The last lines of the screen, when the runtime has a screen.
+    public let screenTail: String?
+
+    public init(status: Int, code: String, message: String, screenTail: String? = nil) {
+        self.status = status
+        self.code = code
+        self.message = message
+        self.screenTail = screenTail
+    }
+
+    public var errorDescription: String? { message.isEmpty ? "The ask failed: \(code)" : message }
 }

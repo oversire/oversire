@@ -424,3 +424,14 @@ public struct SessionAskReply: Codable, Hashable, Sendable {
         self.message = message
     }
 }
+
+/// GET /v1/orders/{id}: the state of a direct work order, and its result when it ended.
+public struct DaemonOrderState: Codable, Hashable, Sendable {
+    public var state: WorkOrder.State
+    public var result: WorkOrderResult?
+
+    public init(state: WorkOrder.State, result: WorkOrderResult? = nil) {
+        self.state = state
+        self.result = result
+    }
+}
