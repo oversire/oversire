@@ -296,6 +296,18 @@ A release build (from the [releases page](https://github.com/oversire/oversire/r
 
 **Settings › General › Startup and updates** shows the current version. Use it to turn off automatic installs, or to check now. Builds from source have a `-dev` version and do not update themselves. Use `./update.sh` for those.
 
+## The OverSire daemon (optional, free)
+
+The [oversire CLI](https://github.com/oversire/cli) runs a daemon on each machine with agents. The daemon watches the agent sessions (agent hooks and Orca), finds their questions, and sends live events to the app on loopback or over Tailscale. The machines of one user make one group ("My machines"). The app finds the members of the group, and no machine name must be typed. Without a daemon, the app polls as before.
+
+| Free (self-hosted daemon) | Paid (cloud hub) |
+|---|---|
+| Live agent state on the LAN or Tailscale | Public webhook ingress (GitHub, Plane) |
+| Work orders from a paired app | Relay when the client cannot reach the daemon |
+| Home store between the Macs of the user | Phone and web clients, mobile push |
+| | Team features: Planner, area claims, more users |
+| | AI credits |
+
 ## Cloud (beta, optional)
 
 By default, OverSire polls GitHub and Plane. OverSire cloud adds a push path: GitHub and Plane send webhooks to the cloud, and the cloud tells each Mac about changes in about one second. Polling stays on as a slow fallback (every 10 minutes by default).
