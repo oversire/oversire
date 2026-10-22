@@ -1,0 +1,13 @@
+{
+  "command": [
+    "gh",
+    "api",
+    "-i",
+    "-X",
+    "GET",
+    "repos/acme/app/collaborators?per_page=100"
+  ],
+  "status": 0,
+  "stderr": "",
+  "stdout": "HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nEtag: W/\"c0ll4b\"\r\nX-Ratelimit-Limit: 5000\r\nX-Ratelimit-Remaining: 4987\r\nX-Ratelimit-Reset: 1792184456\r\n\r\n[{\"login\":\"ada\",\"id\":7671010,\"node_id\":\"MDQ6VXNlcjc2NzEwMTA=\",\"html_url\":\"https://github.com/ada\",\"type\":\"User\",\"site_admin\":false,\"permissions\":{\"admin\":true,\"maintain\":true,\"push\":true,\"triage\":true,\"pull\":true},\"role_name\":\"admin\"},{\"login\":\"dependabot[bot]\",\"id\":49699333,\"node_id\":\"MDM6Qm90NDk2OTkzMzM=\",\"html_url\":\"https://github.com/apps/dependabot\",\"type\":\"Bot\",\"site_admin\":false,\"permissions\":{\"admin\":false,\"maintain\":false,\"push\":true,\"triage\":true,\"pull\":true},\"role_name\":\"write\"},{\"login\":\"bo\",\"id\":1001,\"node_id\":\"MDQ6VXNlcjEwMDE=\",\"html_url\":\"https://github.com/bo\",\"type\":\"User\",\"site_admin\":false,\"permissions\":{\"admin\":false,\"maintain\":false,\"push\":true,\"triage\":true,\"pull\":true},\"role_name\":\"write\"}]"
+}

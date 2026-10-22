@@ -42,3 +42,9 @@ public final class TemplateCodeHost: CodeHost {
     public func perform(_ a: ChangeAction, on c: ChangeRef) async throws { throw ProviderError.unsupported(.changeActions) }
     public func commitMessage(_ r: RepoRef, sha: String) async throws -> String { throw ProviderError.unsupported("commitMessage") }
 }
+
+// Optional: search and people. Conform, and add .changeSearch and .collaborators to capabilities.
+// extension TemplateCodeHost: ChangeSearching, CollaboratorListing {
+//     public func search(_ query: String, limit: Int) async throws -> [ChangeRequest] { throw ProviderError.unsupported(.changeSearch) }
+//     public func collaborators(_ repo: RepoRef) async throws -> [PersonRef] { throw ProviderError.unsupported(.collaborators) }
+// }

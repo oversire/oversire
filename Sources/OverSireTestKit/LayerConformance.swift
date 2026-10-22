@@ -28,6 +28,11 @@ public enum TrackerConformance {
         if let one = await r.step("items limit 1", { try await t.items(p, since: nil, limit: 1) }) {
             r.expect(one.count <= 1, "items gave \(one.count) items for limit 1")
         }
+        if let s = t as? any ItemSearching, t.capabilities.contains(.itemSearch),
+           let hits = await r.step("search", { try await s.search(title, in: [p], limit: 10) }) {
+            r.expect(hits.count <= 10, "search gave \(hits.count) items for limit 10")
+            r.expect(hits.contains { $0.id == ref.id }, "search for \"\(title)\" does not find \(ref.key)")
+        }
         if let d = await r.step("detail", { try await t.detail(ref) }) {
             r.expect(d.item.title == title && d.item.key == ref.key, "detail gave \(d.item.key) \(d.item.title)")
         }
@@ -123,8 +128,18 @@ public enum CodeHostConformance {
         guard let changes = await r.step("changes", { try await h.changes(repo, ChangeFilter(limit: 5)) }) else { return r }
         r.expect(changes.count <= 5, "changes gave \(changes.count) for limit 5")
         _ = await r.step("commitMessage", { try await h.commitMessage(repo, sha: sha) })
+        if let cl = h as? any CollaboratorListing, h.capabilities.contains(.collaborators),
+           let people = await r.step("collaborators", { try await cl.collaborators(repo) }) {
+            r.expect(!people.isEmpty, "collaborators of \(repo.path) gave no person")
+            r.expect(people.allSatisfy { !$0.id.isEmpty }, "a collaborator has no id")
+        }
         guard let c = changes.first, let url = URL(string: c.url) else { return r }
         let ref = ChangeRef(repo: repo, number: c.number, url: url)
+        if let cs = h as? any ChangeSearching, h.capabilities.contains(.changeSearch),
+           let hits = await r.step("search", { try await cs.search(c.title, limit: 5) }) {
+            r.expect(hits.count <= 5, "search gave \(hits.count) changes for limit 5")
+            r.expect(!hits.isEmpty, "search for \"\(c.title)\" gave no change")
+        }
         if h.capabilities.contains(.changeActions) {
             _ = await r.step("perform comment", { try await h.perform(.comment("Conformance comment"), on: ref) })
         } else {

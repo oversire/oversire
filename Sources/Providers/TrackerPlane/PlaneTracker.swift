@@ -3,11 +3,11 @@ import OverSireCore
 
 /// The Plane adapter. One instance for each workspace, because a token works only in its own workspace.
 public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, TimelineReading, LabelManaging, LinkManaging, ItemIndexing,
-    RelationManaging, AssetResolving, WebhookManaging, @unchecked Sendable {
+    RelationManaging, AssetResolving, WebhookManaging, ItemSearching, @unchecked Sendable {
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit] }
+    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
@@ -15,7 +15,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
     let api: PlaneAPI
     private let lock = NSLock()
     private var meCache: PersonRef?
-    private var memberCache: (names: [String: String], at: Date)?
+    private var memberCache: (people: [PersonDetail], names: [String: String], at: Date)?
     private var identifiers: [String: String] = [:]                    // project id → "ENG"
     private var indexCache: [String: (stubs: [ItemStub], at: Date)] = [:]
     private var itemCache: [String: [String: Item]] = [:]               // project id → the last items
@@ -46,18 +46,31 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
     }
 
     /// User id → display name. Kept for one hour. The last names stay on a failure.
-    public func memberNames() async -> [String: String] {
-        if let c = lock.withLock({ memberCache }), -c.at.timeIntervalSinceNow < 3600 { return c.names }
-        guard let obj = try? await api.send("GET", "\(ws)/members/") else { return lock.withLock { memberCache?.names ?? [:] } }
+    public func memberNames() async -> [String: String] { await members().names }
+
+    /// The people of the workspace, without bots. The display name is the login, as in `me()`.
+    public func memberDetails() async -> [PersonDetail] { await members().people }
+
+    private func members() async -> (people: [PersonDetail], names: [String: String]) {
+        if let c = lock.withLock({ memberCache }), -c.at.timeIntervalSinceNow < 3600 { return (c.people, c.names) }
+        guard let obj = try? await api.send("GET", "\(ws)/members/") else {
+            return lock.withLock { (memberCache?.people ?? [], memberCache?.names ?? [:]) }
+        }
         let rows = (obj as? [[String: Any]]) ?? ((obj as? [String: Any])?["results"] as? [[String: Any]]) ?? []
-        var names: [String: String] = [:]
+        var names: [String: String] = [:], people: [PersonDetail] = []
         for r in rows {
             let u = (r["member"] as? [String: Any]) ?? r
             guard let id = PlaneAPI.id(u["id"]) else { continue }
-            names[id] = (u["display_name"] as? String) ?? (u["email"] as? String) ?? id
+            let login = (u["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let email = (u["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            names[id] = (u["display_name"] as? String) ?? email ?? id
+            if u["is_bot"] as? Bool != true {
+                people.append(PersonDetail(id: id, name: login ?? email ?? id, login: login, email: email,
+                                           sources: ["\(account.provider.rawValue):\(account.id)"]))
+            }
         }
-        lock.withLock { memberCache = (names, Date()) }
-        return names
+        lock.withLock { memberCache = (people, names, Date()) }
+        return (people, names)
     }
 
     // MARK: Projects and items
@@ -481,6 +494,45 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
         let ref = ItemRef(project: p, id: id, key: key, url: URL(string: workspace.itemURL(key))!)
         lock.withLock { refCache[id] = ref }
         return ref
+    }
+
+    // MARK: Search
+
+    /// Plane matches the name, the key and the description. A hit has only the id, the name and the key.
+    /// An item in the item cache comes back in full. Another hit has no status, no people and the date distantPast.
+    public func search(_ query: String, in projects: [ProjectRef]?, limit: Int) async throws -> [Item] {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, limit > 0, projects?.isEmpty != true else { return [] }
+        var q = [URLQueryItem(name: "search", value: text)]
+        let only = projects.map { Set($0.map(\.id)) }
+        if let only, only.count == 1 {
+            q += [URLQueryItem(name: "project_id", value: only.first), URLQueryItem(name: "workspace_search", value: "false"),
+                  URLQueryItem(name: "limit", value: String(limit))]
+        } else {
+            // Many projects: search the workspace and filter. More rows leave room for the filter.
+            q += [URLQueryItem(name: "workspace_search", value: "true"),
+                  URLQueryItem(name: "limit", value: String(only == nil ? limit : max(limit, 50)))]
+        }
+        let obj = try await api.send("GET", "\(ws)/work-items/search/", query: q)
+        var out: [Item] = []
+        for r in (obj as? [String: Any])?["issues"] as? [[String: Any]] ?? [] where out.count < limit {
+            guard let id = PlaneAPI.id(r["id"]), let pid = PlaneAPI.id(r["project_id"]), only?.contains(pid) != false,
+                  let seq = PlaneAPI.int(r["sequence_id"]) else { continue }
+            let identifier = r["project__identifier"] as? String ?? ""
+            let cached: Item? = lock.withLock {
+                if !identifier.isEmpty { identifiers[pid] = identifier }
+                return itemCache[pid]?[id]
+            }
+            if let cached {
+                out.append(cached)
+                continue
+            }
+            let key = "\(identifier)-\(seq)"
+            out.append(Item(id: id, key: key, title: r["name"] as? String ?? key, url: workspace.itemURL(key), statusOptionId: nil,
+                            fields: [:], assignees: [], labels: [], author: nil, updatedBy: nil, updatedAt: .distantPast,
+                            activityAt: .distantPast, commentCount: 0, lastComment: nil, mentionsMe: false))
+        }
+        return out
     }
 
     // MARK: Labels, links, assets

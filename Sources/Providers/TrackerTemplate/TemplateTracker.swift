@@ -54,3 +54,10 @@ public final class TemplateTracker: Tracker {
 //         throw ProviderError.unsupported(.projectSettingsEdit)
 //     }
 // }
+
+// Optional: search. Conform, and add .itemSearch to capabilities.
+// extension TemplateTracker: ItemSearching {
+//     public func search(_ query: String, in projects: [ProjectRef]?, limit: Int) async throws -> [Item] {
+//         throw ProviderError.unsupported(.itemSearch)
+//     }
+// }

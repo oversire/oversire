@@ -65,6 +65,17 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertEqual(lossy.problems, ["update did not change the title"])
     }
 
+    func testSearchSteps() async {
+        let tracker = await TrackerConformance.run { SearchingTracker(blind: false) }
+        XCTAssertTrue(tracker.passed, tracker.description)
+        let blind = await TrackerConformance.run { SearchingTracker(blind: true) }
+        XCTAssertEqual(blind.problems, [#"search for "Conformance item" does not find FAKE-1"#])
+        let host = await CodeHostConformance.run { SearchingHost(blind: false) }
+        XCTAssertTrue(host.passed, host.description)
+        let blindHost = await CodeHostConformance.run { SearchingHost(blind: true) }
+        XCTAssertEqual(blindHost.problems, ["collaborators of fake/app gave no person", #"search for "Add the fake" gave no change"#])
+    }
+
     func testFakeQuestionChannelPassesItsSuite() async {
         let r = await QuestionChannelConformance.run(sessions: [FakeQuestionChannel().session("s1")]) {
             let ch = FakeQuestionChannel()
@@ -126,4 +137,52 @@ final class LossyTracker: Tracker, @unchecked Sendable {
     func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef { try await inner.create(d, in: p) }
     func update(_ i: ItemRef, _ patch: ItemPatch) async throws {}
     func comment(_ i: ItemRef, markdown: String) async throws { try await inner.comment(i, markdown: markdown) }
+}
+
+/// Searches the items of a fake tracker. A blind one finds nothing.
+final class SearchingTracker: Tracker, ItemSearching, @unchecked Sendable {
+    let inner = FakeTracker()
+    let blind: Bool
+    init(blind: Bool) { self.blind = blind }
+    var id: ProviderID { inner.id }
+    var account: AccountID { inner.account }
+    var capabilities: Set<Capability> { [.itemSearch] }
+    var pollPolicy: PollPolicy { inner.pollPolicy }
+    var keyFormat: KeyFormat { inner.keyFormat }
+    func probe() async throws -> Identity { try await inner.probe() }
+    func poll(since: Cursor?) async throws -> EventPage { try await inner.poll(since: since) }
+    func projects() async throws -> [ProjectSummary] { try await inner.projects() }
+    func statuses(_ p: ProjectRef) async throws -> [StatusOption] { try await inner.statuses(p) }
+    func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] { try await inner.items(p, since: since, limit: limit) }
+    func detail(_ i: ItemRef) async throws -> ItemDetail { try await inner.detail(i) }
+    func comments(_ i: ItemRef) async throws -> [Comment] { try await inner.comments(i) }
+    func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef { try await inner.create(d, in: p) }
+    func update(_ i: ItemRef, _ patch: ItemPatch) async throws { try await inner.update(i, patch) }
+    func comment(_ i: ItemRef, markdown: String) async throws { try await inner.comment(i, markdown: markdown) }
+    func search(_ query: String, in projects: [ProjectRef]?, limit: Int) async throws -> [Item] {
+        if blind { return [] }
+        return Array(try await inner.items(inner.project, since: nil, limit: 100).filter { $0.matches(query) }.prefix(limit))
+    }
+}
+
+/// Searches the changes of a fake code host. A blind one finds nothing.
+final class SearchingHost: CodeHost, ChangeSearching, CollaboratorListing, @unchecked Sendable {
+    let inner = FakeCodeHost()
+    let blind: Bool
+    init(blind: Bool) { self.blind = blind }
+    var id: ProviderID { inner.id }
+    var account: AccountID { inner.account }
+    var capabilities: Set<Capability> { [.changeActions, .changeSearch, .collaborators] }
+    var pollPolicy: PollPolicy { inner.pollPolicy }
+    func probe() async throws -> Identity { try await inner.probe() }
+    func poll(since: Cursor?) async throws -> EventPage { try await inner.poll(since: since) }
+    func repos() async throws -> [Repo] { try await inner.repos() }
+    func changes(_ r: RepoRef, _ f: ChangeFilter) async throws -> [ChangeRequest] { try await inner.changes(r, f) }
+    func perform(_ a: ChangeAction, on c: ChangeRef) async throws { try await inner.perform(a, on: c) }
+    func commitMessage(_ r: RepoRef, sha: String) async throws -> String { try await inner.commitMessage(r, sha: sha) }
+    func search(_ query: String, limit: Int) async throws -> [ChangeRequest] {
+        if blind { return [] }
+        return Array(try await inner.changes(inner.repo, ChangeFilter(limit: 100)).filter { $0.title.contains(query) }.prefix(limit))
+    }
+    func collaborators(_ repo: RepoRef) async throws -> [PersonRef] { blind ? [] : [PersonRef(id: "1", name: "me", login: "me")] }
 }

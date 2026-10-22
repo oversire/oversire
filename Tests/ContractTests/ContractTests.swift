@@ -71,6 +71,7 @@ final class ContractTests: XCTestCase {
         "join-request": roundTrip(JoinRequest.self),
         "join-pending": roundTrip(JoinPending.self),
         "join-result": roundTrip(JoinResult.self),
+        "person-detail": roundTrip(PersonDetail.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.

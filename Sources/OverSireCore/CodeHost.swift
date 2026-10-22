@@ -162,3 +162,14 @@ public protocol BranchDeleting: CodeHost {
     /// Deletes a branch. A branch that is not there is no error.
     func deleteBranch(_ r: RepoRef, name: String) async throws
 }
+
+/// Finds change requests of the account by text.
+public protocol ChangeSearching: CodeHost {
+    /// Best match first, up to limit. Open, merged and closed changes. An empty query gives no changes.
+    func search(_ query: String, limit: Int) async throws -> [ChangeRequest]
+}
+
+/// Lists the people with access to a repo.
+public protocol CollaboratorListing: CodeHost {
+    func collaborators(_ repo: RepoRef) async throws -> [PersonRef]
+}

@@ -50,7 +50,7 @@ let package = Package(
         .testTarget(name: "AIEngineAgentBinderTests", dependencies: ["AIEngineAgentBinder", "OverSireTestKit", .product(name: "AgentBinder", package: "agent-binder")]),
         .testTarget(name: "OverSireTestKitTests", dependencies: ["OverSireTestKit"]),
         .testTarget(name: "TrackerPlaneTests", dependencies: ["TrackerPlane", "OverSireTestKit"], exclude: ["Fixtures"]),
-        .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"]),
+        .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "OverSireTestKit"]),
         .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),
         .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "RuntimeTemplate", "OverSireTestKit"]),

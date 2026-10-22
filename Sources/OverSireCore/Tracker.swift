@@ -757,6 +757,12 @@ public protocol ItemIndexing: Tracker {
     func index(_ p: ProjectRef) async throws -> [ItemStub]
 }
 
+/// Finds items by text. The vendor decides which fields match.
+public protocol ItemSearching: Tracker {
+    /// Best match first, up to limit. Nil projects searches all projects of the account. An empty query gives no items.
+    func search(_ query: String, in projects: [ProjectRef]?, limit: Int) async throws -> [Item]
+}
+
 public protocol AssetResolving: Tracker {
     /// A signed download link for an uploaded file.
     func assetURL(_ id: String) async throws -> URL

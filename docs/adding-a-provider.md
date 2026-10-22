@@ -117,6 +117,7 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
   - `detail` shows the title from `update`.
   - `comments` contains the body of the new comment.
   - With `RelationManaging`, a new `blockedBy` relation shows on both items (the other item gets `blocks`), and the remove takes it away. `TrackerConformance.relations(_:item:project:)` runs it alone.
+  - With `ItemSearching`, a search for the title of the new item finds it, and gives no more items than the limit.
   - With `ProjectSettingsReading`, `settings` gives a name and the statuses. With `ProjectSettingsEditing`, an empty patch works and a field that is not in `editableSettings` throws `.unsupported(.projectSettingsEdit)`. This part writes nothing. `TrackerConformance.settings(_:project:)` runs it alone.
 - Relations (optional): map the vendor types to `blockedBy`, `blocks` and `relatesTo`. Drop the other types. `apply` adds before it removes. The Planner card, the lane board and the queue gate read the relations. Relations live only in the tracker.
 - Project settings (optional): fill the fields of `ProjectSettings` that the vendor has. Leave the others empty. Put only the features that the vendor has in `features`. Put a feature that you can read but not switch in `readOnlyFeatures`. List the fields that you can write in `editableSettings`. The settings page shows "Edit in <vendor>" for the others. Also set `ProjectSummary.logo` in `projects` when the vendor has a project logo.
@@ -125,6 +126,7 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 
 - `repos`, `changes`, `commitMessage`.
 - `perform(_:on:)` merges, closes or approves a change. Without the `changeActions` capability, throw `.unsupported(.changeActions)`.
+- Search (optional): `ChangeSearching` finds the changes of the account by text. `CollaboratorListing` gives the people with access to a repo. `CodeHostConformance` checks that each gives a result.
 
 ### CI
 
@@ -158,6 +160,9 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.relations` | `RelationManaging` |
 | `.projectSettings` | `ProjectSettingsReading` |
 | `.projectSettingsEdit` | `ProjectSettingsEditing` |
+| `.itemSearch` | `ItemSearching` |
+| `.changeSearch` | `ChangeSearching` |
+| `.collaborators` | `CollaboratorListing` |
 
 Add the capability to `capabilities` and conform to the protocol. The suite fails when one is there without the other. The UI hides a feature that no account supports.
 

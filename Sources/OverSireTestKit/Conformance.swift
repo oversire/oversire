@@ -67,6 +67,9 @@ public enum ProviderConformance {
         (.questions, "QuestionChannel", { $0 is any QuestionChannel }),
         (.projectSettings, "ProjectSettingsReading", { $0 is any ProjectSettingsReading }),
         (.projectSettingsEdit, "ProjectSettingsEditing", { $0 is any ProjectSettingsEditing }),
+        (.itemSearch, "ItemSearching", { $0 is any ItemSearching }),
+        (.changeSearch, "ChangeSearching", { $0 is any ChangeSearching }),
+        (.collaborators, "CollaboratorListing", { $0 is any CollaboratorListing }),
     ]
 
     /// The capabilities agree with the protocols. No I/O.

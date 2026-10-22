@@ -133,6 +133,14 @@ public struct GitHubClient: Sendable {
         return text
     }
 
+    /// A gh command other than `gh api`, for example `gh search prs`. It uses the login of the gh CLI, never the token.
+    public func cli(_ args: [String]) async throws -> Data {
+        guard FileManager.default.isExecutableFile(atPath: gh) else { throw ProviderError.transport("GitHub CLI not found at \(gh)") }
+        let out = try await commands.run(gh, args, stdin: nil, timeout: .seconds(60))
+        guard out.ok else { throw Self.error(stderr: out.stderr) }
+        return out.stdout
+    }
+
     func cliToken() async throws -> String? {
         guard FileManager.default.isExecutableFile(atPath: gh) else { return nil }
         let out = try await commands.run(gh, ["auth", "token"], stdin: nil, timeout: .seconds(10))

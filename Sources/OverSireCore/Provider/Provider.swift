@@ -51,6 +51,9 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let cloudDispatch: Capability = "cloudDispatch"
     public static let projectSettings: Capability = "projectSettings"
     public static let projectSettingsEdit: Capability = "projectSettingsEdit"
+    public static let itemSearch: Capability = "itemSearch"
+    public static let changeSearch: Capability = "changeSearch"
+    public static let collaborators: Capability = "collaborators"
 }
 
 /// The user of a token.

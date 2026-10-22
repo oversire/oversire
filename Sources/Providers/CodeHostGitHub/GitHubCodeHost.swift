@@ -3,11 +3,11 @@ import GitHubKit
 import OverSireCore
 
 /// One GitHub owner (a user or an org). `repos` limits the poll. Empty polls nothing.
-public final class GitHubCodeHost: CodeHost, BranchDeleting, RateReporting, @unchecked Sendable {
+public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, CollaboratorListing, RateReporting, @unchecked Sendable {
     public let id: ProviderID = .github
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.changeActions, .deleteBranch] }
+    public var capabilities: Set<Capability> { [.changeActions, .deleteBranch, .changeSearch, .collaborators] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 5000) }
 
     let client: GitHubClient
@@ -160,6 +160,42 @@ public final class GitHubCodeHost: CodeHost, BranchDeleting, RateReporting, @unc
         case .comment(let b): return ("POST", "repos/\(c.repo.path)/issues/\(c.number)/comments", ["body": b])
         case .merge(let m): return ("PUT", pr + "/merge", ["merge_method": m.rawValue])
         case .close: return ("PATCH", pr, ["state": "closed"])
+        }
+    }
+
+    // MARK: Search and people
+
+    static let searchFields = "number,title,state,author,url,createdAt,updatedAt,isDraft,labels,body"
+
+    /// The pull requests of the owner. Each word must match. The search has no branches, no review state and no line counts.
+    public func search(_ query: String, limit: Int) async throws -> [ChangeRequest] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty, limit > 0 else { return [] }
+        let args = ["search", "prs", "--owner", account.id, "--limit", String(min(100, limit)), "--json", Self.searchFields, "--"] + words
+        let rows = try JSONSerialization.jsonObject(with: try await client.cli(args)) as? [[String: Any]] ?? []
+        return rows.compactMap(Self.searchChange)
+    }
+
+    /// A row of `gh search prs`. State is OPEN, MERGED or CLOSED, as in GraphQL.
+    static func searchChange(_ p: [String: Any]) -> ChangeRequest? {
+        guard let number = p["number"] as? Int, let title = p["title"] as? String else { return nil }
+        let labels = (p["labels"] as? [[String: Any]] ?? []).compactMap { l in
+            (l["name"] as? String).map { ChangeRequest.Label(name: $0, color: l["color"] as? String) }
+        }
+        return ChangeRequest(number: number, title: title, state: (p["state"] as? String ?? "open").uppercased(),
+                             author: .init(login: (p["author"] as? [String: Any])?["login"] as? String ?? "ghost"),
+                             headRefName: "", baseRefName: "", url: p["url"] as? String ?? "",
+                             createdAt: p["createdAt"] as? String ?? "", updatedAt: p["updatedAt"] as? String ?? "",
+                             reviewDecision: nil, additions: 0, deletions: 0, isDraft: p["isDraft"] as? Bool ?? false,
+                             labels: labels, body: p["body"] as? String)
+    }
+
+    /// The users with access to the repo, first 100, without bots. GitHub gives no email here.
+    public func collaborators(_ repo: RepoRef) async throws -> [PersonRef] {
+        let rows = try await client.json("GET", "repos/\(repo.path)/collaborators?per_page=100") as? [[String: Any]] ?? []
+        return rows.compactMap { u in
+            guard let login = u["login"] as? String, u["type"] as? String != "Bot" else { return nil }
+            return PersonRef(id: (u["id"] as? NSNumber)?.stringValue ?? login, name: login, login: login)
         }
     }
 

@@ -1,0 +1,19 @@
+{
+  "command": [
+    "gh",
+    "search",
+    "prs",
+    "--owner",
+    "acme",
+    "--limit",
+    "5",
+    "--json",
+    "number,title,state,author,url,createdAt,updatedAt,isDraft,labels,body",
+    "--",
+    "fix",
+    "login"
+  ],
+  "status": 0,
+  "stderr": "",
+  "stdout": "[{\"author\":{\"id\":\"MDQ6VXNlcjc2NzEwMTA=\",\"is_bot\":false,\"login\":\"ada\",\"type\":\"User\",\"url\":\"https://github.com/ada\"},\"body\":\"Fix the login loop after a token refresh.\",\"createdAt\":\"2026-10-20T14:02:11Z\",\"isDraft\":false,\"labels\":[{\"color\":\"d73a4a\",\"description\":\"Something isn't working\",\"id\":\"LA_kwDOAAAAAc8AAAABbug\",\"name\":\"bug\"}],\"number\":12,\"state\":\"open\",\"title\":\"Fix login loop\",\"updatedAt\":\"2026-10-21T09:15:40Z\",\"url\":\"https://github.com/acme/app/pull/12\"},{\"author\":{\"id\":\"MDQ6VXNlcjEwMDE=\",\"is_bot\":false,\"login\":\"bo\",\"type\":\"User\",\"url\":\"https://github.com/bo\"},\"body\":\"\",\"createdAt\":\"2026-09-30T08:00:00Z\",\"isDraft\":false,\"labels\":[],\"number\":9,\"state\":\"merged\",\"title\":\"Fix the login page title\",\"updatedAt\":\"2026-10-01T10:30:00Z\",\"url\":\"https://github.com/acme/app/pull/9\"}]"
+}
