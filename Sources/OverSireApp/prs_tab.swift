@@ -400,9 +400,7 @@ func buildPRContent(_ w: CGFloat) -> [NSView] {
 }
 
 func handlePRAction(repo: String, pr: ChangeRequest, action: ChangeAction) {
-    Task {
-        await REPO_CLIENT.perform(action, repo: repo, number: pr.number)
-        await MainActor.run { (NSApp.delegate as? GHActionsBar)?.doRefresh() }
-    }
+    let (id, args) = action.action(repo: repo, number: pr.number)
+    (NSApp.delegate as? AppData)?.actions.click(id, args, in: NSApp.keyWindow)
 }
 }

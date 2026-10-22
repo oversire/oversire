@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 
 // Intake: the items that wait for triage, with a tab for each project. The AI suggestion shows under its row.
 final class IntakeListPage: Page {
@@ -152,10 +153,11 @@ final class IntakeListPage: Page {
     private func triage(_ pk: String, _ item: IntakeItem, _ action: IntakeAction) {
         busy.insert(item.id)
         reload()
-        data.projectStore.triage(projectKey: pk, item: item, action: action) { [weak self] ok in
+        guard let (id, args) = action.action(project: pk, id: item.id) else { busy.remove(item.id); return }
+        data.actions.run(id, args) { [weak self] r in
             guard let self else { return }
             self.busy.remove(item.id)
-            self.note = ok ? nil : (self.data.projectStore.lastError ?? "Plane did not accept the change.")
+            if case .ok = r { self.note = nil } else { self.note = r.summary }
             self.reload()
         }
     }

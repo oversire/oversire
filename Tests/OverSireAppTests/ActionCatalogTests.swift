@@ -118,6 +118,40 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(action, .notAllowed("No action no.such."))
     }
 
+    func testPageActionsMapToSpecs() {
+        let catalog = TestAppData().actions
+        let pr: [ChangeAction] = [.approve(nil), .approve("ok"), .requestChanges("fix"), .comment("hi"), .merge(.rebase), .close]
+        let intake: [IntakeAction] = [.accept, .decline, .delete, .snooze(until: Date()), .duplicate(of: "i9")]
+        let pairs = pr.map { $0.action(repo: "o/r", number: 3) } + intake.compactMap { $0.action(project: "k", id: "w1") }
+        XCTAssertEqual(pairs.count, pr.count + intake.count)
+        for (id, args) in pairs {
+            guard let s = catalog.spec(id) else { XCTFail("no spec \(id)"); continue }
+            let required = Set(s.input["required"]?.array?.compactMap(\.string) ?? [])
+            XCTAssertTrue(required.isSubset(of: args.keys), "\(id) misses \(required.subtracting(args.keys))")
+            XCTAssertTrue(Set(args.keys).isSubset(of: s.input["properties"]?.object?.keys ?? [:].keys), id)
+        }
+        XCTAssertEqual(ChangeAction.merge(.rebase).action(repo: "o/r", number: 3).args["method"], .string("rebase"))
+        XCTAssertNil(IntakeAction.update(IntakeEdit()).action(project: "k", id: "w1"))
+    }
+
+    func testDomainActionsRefuseUnknownTargets() async {
+        let d = seeded()
+        let cases: [(String, [String: JSONValue], String)] = [
+            ("worktree.remove", ["key": .string("SLING-1")], "SLING-1 has nothing to remove that is safe."),
+            ("question.answer", ["id": .string("q9"), "answer": .string("yes")], "No open question q9."),
+            ("status.approve", ["key": .string("SLING-1")], "No session result for SLING-1."),
+            ("pr.deleteBranch", ["repo": .string("o/r"), "number": .int(4)], "OverSire has no loaded PR o/r#4."),
+            ("plan.accept", ["id": .string("s9")], "No open plan change s9."),
+            ("intake.accept", ["project": .string("SLING"), "id": .string("w1")], "No pending intake item w1 in SLING."),
+            ("session.start", ["key": .string("SLING-1"), "machine": .string("far-away-mac")], "session.start runs on this Mac. Use order.start for far-away-mac."),
+            ("queue.setSlots", ["project": .string("NOPE"), "slots": .int(2)], "OverSire has no loaded project NOPE."),
+        ]
+        for (id, args, want) in cases {
+            let r = await d.actions.run(id, ActionArgs(.object(args)))
+            XCTAssertEqual(r, .notAllowed(want), id)
+        }
+    }
+
     /// All alerts go through AlertConfirm.
     func testNoAlertOutsideTheHelper() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
@@ -125,5 +159,28 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertFalse(files.isEmpty)
         let hits = try files.filter { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8).contains("NSAlert(") }
         XCTAssertEqual(hits, [])
+    }
+
+    /// Pages run domain changes through the catalog. A UI-only button (copy, open, a form field) keeps its closure.
+    func testPagesDoNotCallDomainMutators() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
+        let pages = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter {
+            ["_page.swift", "_window.swift", "_tab.swift"].contains(where: $0.hasSuffix) || ["needs_you.swift", "glance.swift"].contains($0)
+        }
+        XCTAssertGreaterThan(pages.count, 10)
+        let mutator = try NSRegularExpression(pattern: #"""
+            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate)\(|\
+            (projectStore|store)\.update\(itemId|queue\.(add|remove|move|start)\(|agentIndex\.(send|reveal|start)\(|\
+            statusJob\.(approve|hold|markBlocked|snooze)\(|job\.(approve|hold|markBlocked|snooze)\(|questions\.(answer|dismiss)\(|\
+            cleaner\.run\(|REPO_CLIENT\.(perform|rerunJob)\(|suggestions\.(accept|dismiss)\(
+            """#)
+        var hits: [String] = []
+        for f in pages {
+            let lines = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8).components(separatedBy: "\n")
+            for (i, l) in lines.enumerated() where !l.contains("ItemPatch(labels:") {
+                if mutator.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil { hits.append("\(f):\(i + 1): \(l.trimmingCharacters(in: .whitespaces))") }
+            }
+        }
+        XCTAssertEqual(hits, [], hits.joined(separator: "\n"))
     }
 }

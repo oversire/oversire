@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 
 // The intake (triage) queue of one project: a list of pending items, and one item with its description.
 // Accept or Decline, then the window shows the next item. Back or Esc goes to the list.
@@ -490,13 +491,14 @@ final class IntakeWindow: NSWindowController, NSWindowDelegate, NSSearchFieldDel
         default: busy = "other"
         }
         rebuild()
-        store.triage(projectKey: projectKey, item: item, action: action) { [weak self] ok in
+        guard let (id, args) = action.action(project: projectKey, id: item.id), let actions = (NSApp.delegate as? AppData)?.actions else { busy = nil; return }
+        actions.run(id, args) { [weak self] r in
             guard let self else { return }
             self.busy = nil
-            if ok {
+            if case .ok = r {
                 self.select(after?.workItemId)
             } else {
-                self.error = self.store.lastError ?? "Plane did not change the item"
+                self.error = r.summary
                 self.rebuild()
             }
         }

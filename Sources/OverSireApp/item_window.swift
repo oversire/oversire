@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 import OverSireAI
 
 // Draft text of an item in edit mode. The window keeps it, so a rebuild does not lose it.
@@ -500,7 +501,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
                                      status: (NSApp.delegate as? GHActionsBar)?.statusJob.item(kid.key),
                                      canStart: agents != nil && agent == nil && snap.option(kid.statusOptionId)?.category ?? .todo == .todo)
             row.onToggle = { [weak self] in self?.open(kid.id, push: true) }
-            if let agents {
+            if agents != nil {
                 row.onStart = { [weak self] anchor in self?.starter?.start(kid, snap: snap, at: anchor) }
                 row.onPill = { [weak self] anchor in self?.starter?.pill(kid, snap: snap, at: anchor) }
             }
@@ -677,38 +678,51 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         guard let pair = sender.representedObject as? [String], pair.count == 2, let id = itemId,
               let found = store.item(id) else { return }
         let (field, value) = (pair[0], pair[1])
-        let patch: ItemPatch
-        switch field {
-        case "labels", "assignees":
-            // The item keeps names. The menu options map them to ids.
-            let list = (field == "labels" ? options?.labels : options?.members) ?? []
-            let names = field == "labels" ? found.item.labels : found.item.assignees
+        let key = JSONValue.string(found.item.key)
+        // The item keeps names. The menu options map them to ids.
+        func toggled(_ list: [StatusOption], _ names: [String]) -> [String] {
             var ids = list.filter { o in names.contains { $0.caseInsensitiveCompare(o.name) == .orderedSame } }.map(\.id)
             if let i = ids.firstIndex(of: value) { ids.remove(at: i) } else { ids.append(value) }
-            patch = field == "labels" ? ItemPatch(labels: ids) : ItemPatch(assignees: ids)
-        case "state": patch = ItemPatch(status: value)
-        case "priority": patch = ItemPatch(priority: value)
-        default: return
+            return ids
+        }
+        let done: (Bool, String?) -> Void = { [weak self] ok, e in
+            guard let self else { return }
+            self.saving = nil
+            self.error = ok ? nil : e
+            self.rebuild()
         }
         saving = field
         error = nil
         rebuild()
-        store.update(itemId: id, patch, failure: "Could not change the \(field == "state" ? "status" : field)") { [weak self] ok in
-            guard let self else { return }
-            self.saving = nil
-            self.error = ok ? nil : self.store.lastError
-            self.rebuild()
+        switch field {
+        case "labels":
+            // The catalog has no label action: the snapshot does not hold the label options.
+            store.update(itemId: id, ItemPatch(labels: toggled(options?.labels ?? [], found.item.labels)), failure: "Could not change the labels") { [weak self] ok in
+                done(ok, self?.store.lastError)
+            }
+            return
+        case "assignees": run("item.assign", ["key": key, "people": .array(toggled(options?.members ?? [], found.item.assignees).map(JSONValue.string))], done)
+        case "state": run("item.setStatus", ["key": key, "status": .string(value)], done)
+        case "priority": run("item.setPriority", ["key": key, "priority": .string(value)], done)
+        default: done(true, nil)
+        }
+    }
+
+    private func run(_ id: String, _ args: [String: JSONValue], _ done: @escaping (Bool, String?) -> Void) {
+        guard let actions = (NSApp.delegate as? AppData)?.actions else { done(false, "The app is closing."); return }
+        actions.run(id, args) { r in
+            if case .ok = r { done(true, nil) } else { done(false, r.summary) }
         }
     }
 
     @objc private func start() {
-        guard let id = itemId else { return }
+        guard let id = itemId, let key = store.item(id)?.item.key else { return }
         saving = "state"
         rebuild()
-        store.start(itemId: id) { [weak self] ok in
+        run("item.start", ["key": .string(key)]) { [weak self] ok, e in
             guard let self else { return }
             self.saving = nil
-            self.error = ok ? nil : (self.store.lastError ?? "Could not start the item")
+            self.error = ok ? nil : e
             self.rebuild()
         }
     }
@@ -797,7 +811,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     private var starter: SessionStartMenu? { (NSApp.delegate as? AppData).map(SessionStartMenu.init) }
 
     @objc private func revealAgent() {
-        if let id = itemId, let key = store.item(id)?.item.key { agents?.reveal(key) }
+        if let id = itemId, let key = store.item(id)?.item.key { run("session.reveal", ["key": .string(key)]) { _, _ in } }
     }
 
     @objc private func sendAgent() {
@@ -838,13 +852,13 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     @objc private func markRead() { if let id = itemId { store.markRead(itemId: id) } }
 
     @objc private func sendComment() {
-        guard let id = itemId else { return }
+        guard let id = itemId, let key = store.item(id)?.item.key else { return }
         let body = commentField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !body.isEmpty else { return }
         commentField?.isEnabled = false
-        store.comment(itemId: id, body: body) { [weak self] ok in
+        run("item.comment", ["key": .string(key), "body": .string(body)]) { [weak self] ok, e in
             guard let self else { return }
-            self.error = ok ? nil : (self.store.lastError ?? "Could not post the comment")
+            self.error = ok ? nil : e
             if ok { self.commentField?.stringValue = "" }
             self.commentField?.isEnabled = true
             self.loadTimeline()

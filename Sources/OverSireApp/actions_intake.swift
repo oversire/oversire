@@ -12,12 +12,13 @@ struct IntakeActions {
             triage("intake.accept", "Accept", "Accepts an intake item: it becomes a work item.", .change) { _ in .accept },
             triage("intake.decline", "Decline", "Declines an intake item.", .change) { _ in .decline },
             triage("intake.snooze", "Snooze", "Hides an intake item until a day at 9:00.", .change,
-                   extra: ["days": ("integer", "Days from today. Default 1.")]) { a in
+                   extra: ["days": ("integer", "Days from today. Default 1."), "until": ("string", "An ISO 8601 time, in place of days.")]) { a in
+                if let t = a.string("until").flatMap({ ISO8601DateFormatter().date(from: $0) }) { return .snooze(until: t) }
                 let d = Calendar.current.date(byAdding: .day, value: max(1, a.int("days") ?? 1), to: Date()) ?? Date()
                 return .snooze(until: Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: d) ?? d)
             },
             triage("intake.merge", "Mark as duplicate", "Marks an intake item as a duplicate of a work item.", .change,
-                   extra: ["of": ("string", "The key of the work item that it duplicates.")], required: ["of"]) { a in
+                   extra: ["of": ("string", "The key or id of the work item that it duplicates.")], required: ["of"]) { a in
                 nil
             },
             triage("intake.delete", "Delete", "Deletes an intake item and its work item. This cannot be undone.", .outward) { _ in .delete },
@@ -50,7 +51,7 @@ struct IntakeActions {
                 }
                 var act = action(a)
                 if act == nil, let of = a.string("of") {
-                    guard let target = d.projectStore.item(key: of) else { done(.notAllowed("OverSire has no loaded item \(of).")); return }
+                    guard let target = d.projectStore.item(key: of) ?? d.projectStore.item(of) else { done(.notAllowed("OverSire has no loaded item \(of).")); return }
                     act = .duplicate(of: target.item.id)
                 }
                 guard let act else { done(.notAllowed("Give the key of the work item.")); return }
@@ -58,6 +59,21 @@ struct IntakeActions {
                     done(ActionLink.stored(d, $0, "\(title): \(item.name)."))
                 }
             }
+        }
+    }
+}
+
+extension IntakeAction {
+    /// The catalog action of a triage. nil for an edit: only the AI worker writes one.
+    func action(project: String, id: String) -> (id: String, args: [String: JSONValue])? {
+        var args: [String: JSONValue] = ["project": .string(project), "id": .string(id)]
+        switch self {
+        case .accept: return ("intake.accept", args)
+        case .decline: return ("intake.decline", args)
+        case .delete: return ("intake.delete", args)
+        case .snooze(let t): args["until"] = .string(ISO8601DateFormatter().string(from: t)); return ("intake.snooze", args)
+        case .duplicate(let of): args["of"] = .string(of); return ("intake.merge", args)
+        case .update: return nil
         }
     }
 }

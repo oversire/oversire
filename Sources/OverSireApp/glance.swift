@@ -198,7 +198,7 @@ final class GlanceVC: NSViewController {
     }
 
     private func orcaButton(_ key: String) -> NSView {
-        ActionButton("", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(key) }.labeled("Open \(key) in Orca")
+        ActionButton("", symbol: "terminal", action: "session.reveal", ["key": .string(key)]).labeled("Open \(key) in Orca")
     }
 
     private func section(_ title: String, count: Int?, _ rows: [NSView], more: (String, Route)? = nil, empty: String) {

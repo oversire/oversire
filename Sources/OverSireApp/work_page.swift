@@ -160,7 +160,7 @@ final class WorkPage: Page {
                 return PageRow(e.item.key, hash: PageRow.hash([ItemLine.hash(e.item, snap: e.snap, stream: e.stream, status: st), queue])) {
                     let row = ItemLine(e.item, snap: e.snap, stream: e.stream, status: st, layout: table, commands: commands) { self?.go($0) }
                     if queue {
-                        let add = ActionButton("Queue", symbol: "plus") { self?.data.queue.add(e.item, snap: e.snap); self?.reload() }
+                        let add = ActionButton("Queue", symbol: "plus", action: "queue.add", ["key": .string(e.item.key)]) { _ in self?.reload() }
                         add.setAccessibilityLabel("Add \(e.item.key) to the queue")
                         row.hoverViews = [add]
                     }

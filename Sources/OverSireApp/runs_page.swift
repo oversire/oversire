@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 
 // "org / repo" with the org color. The org text is dim.
 final class RepoLabel: NSStackView {
@@ -598,14 +599,11 @@ final class RunPage: Page {
         let (repo, id) = (self.repo, self.runId)
         busy = Self.cancelling
         reload()
-        Task { [weak self] in
-            let err = await REPO_CLIENT.perform(.cancel, repo: repo, id: id)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.busy = nil
-                self.note = err.map { (.bad, "Could not cancel: \($0)") } ?? (.info, "GitHub cancels the run.")
-                self.load()
-            }
+        data.actions.run("run.cancel", ["repo": .string(repo), "runId": .string(id)]) { [weak self] r in
+            guard let self else { return }
+            self.busy = nil
+            if case .ok = r { self.note = (.info, "GitHub cancels the run.") } else { self.note = (.bad, "Could not cancel: \(r.summary)") }
+            self.load()
         }
     }
 }

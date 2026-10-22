@@ -848,7 +848,7 @@ extension TabVC {
                                          canStart: agents != nil && agents?.agent(item.key) == nil
                                             && snap.option(item.statusOptionId)?.category ?? .todo == .todo)
                 row.onToggle = { ItemWindow.show(item.id) }
-                if let agents {
+                if agents != nil {
                     let starter = (NSApp.delegate as? AppData).map(SessionStartMenu.init)
                     row.onStart = { anchor in starter?.start(item, snap: snap, at: anchor) }
                     row.onStartMenu = { anchor, header in starter?.agents(item, snap: snap, at: anchor, header: header) ?? NSMenu() }

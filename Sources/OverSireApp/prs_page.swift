@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 
 // Review requests and my open PRs, with the linked item and the CI of the branch.
 final class PRsPage: Page {
@@ -122,16 +123,12 @@ final class PRsPage: Page {
             let id = "\(repo)#\(p.number)"
             self.busy[id] = verb; self.errors[id] = nil
             self.reload()
-            lastFetchError = nil
-            Task { [weak self] in
-                await REPO_CLIENT.perform(action, repo: repo, number: p.number)
-                await MainActor.run { [weak self] in
+            let (aid, args) = action.action(repo: repo, number: p.number)
+            self.data.actions.run(aid, args) { [weak self] r in
                 guard let self else { return }
                 self.busy[id] = nil
-                if let e = lastFetchError { self.errors[id] = "\(verb) failed: \(e)" }
-                self.data.refresh(force: true, completion: nil)
+                if case .ok = r {} else { self.errors[id] = "\(verb) failed: \(r.summary)" }
                 self.reload()
-                }
             }
         }
     }

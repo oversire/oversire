@@ -91,12 +91,14 @@ struct ItemActions {
                     d.projectStore.reopen(itemId: f.item.id) { done(ActionLink.stored(d, $0, "\(f.item.key) is open again.")) }
                 }
             },
-            ActionSpec(id: "item.closeSubItems", title: "Close sub-items", help: "Sets the open sub-items of an item to done, each with a comment. `keys` limits the list.",
+            ActionSpec(id: "item.closeSubItems", title: "Close sub-items", help: "Sets the open sub-items of an item to done, each with a comment. `keys` limits the list: keys or item ids.",
                        kind: .outward, input: ActionSpec.args(["key": Self.key, "keys": ("array", "The sub-item keys to close. Empty: all open sub-items.")], required: ["key"])) { a in
                 await link.item(a) { d, f, done in
                     var ids = f.snap.openDescendants(of: f.item.id)
                     let only = Set(a.list("keys").map { $0.uppercased() })
-                    if !only.isEmpty { ids = ids.filter { id in f.snap.items.first { $0.id == id }.map { only.contains($0.key.uppercased()) } ?? false } }
+                    if !only.isEmpty {
+                        ids = ids.filter { id in only.contains(id.uppercased()) || f.snap.items.first { $0.id == id }.map { only.contains($0.key.uppercased()) } ?? false }
+                    }
                     guard !ids.isEmpty else { done(.notAllowed("\(f.item.key) has no open sub-items to close.")); return }
                     d.projectStore.closeSubItems(ids, parentId: f.item.id) { done(ActionLink.stored(d, $0, "\(ids.count) sub-item\(ids.count == 1 ? "" : "s") of \(f.item.key) closed.")) }
                 }

@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import OverSireAssistant
 import OverSireSync
 
 // The agents: runner sessions of the cloud, then the sessions that need you and all worktrees. Views › Activity shows the Orca events.
@@ -151,7 +152,7 @@ final class AgentsPage: Page {
         guard l.removable else { return }
         let run = { [weak self] in
             guard let self else { return }
-            self.data.cleaner.run([l], key: key, data: self.data) { [weak self] errors in self?.failed(errors) }
+            self.data.actions.run("worktree.remove", ["key": .string(key), "lines": .array([.string(l.id)]), "force": .bool(!l.safe)]) { [weak self] in self?.failed($0) }
             self.reload()
         }
         guard ask || !l.safe else { run(); return }
@@ -173,16 +174,15 @@ final class AgentsPage: Page {
         AlertConfirm.ask("Remove \(cards.count) worktree\(cards.count == 1 ? "" : "s")?", info: info, button: "Remove", in: view.window) { [weak self] in
             guard let self else { return }
             for k in keys {
-                let lines = self.data.cleaner.lines(k, data: self.data).filter { $0.safe && $0.removable && $0.kind != .group }
-                self.data.cleaner.run(lines, key: k, data: self.data) { [weak self] errors in self?.failed(errors) }
+                self.data.actions.run("worktree.remove", ["key": .string(k)]) { [weak self] in self?.failed($0) }
             }
             self.reload()
         }
     }
 
-    private func failed(_ errors: [String]) {
-        guard !errors.isEmpty else { reload(); return }
-        AlertConfirm.tell("OverSire could not remove all of it.", info: errors.joined(separator: "\n"), in: view.window)
+    // An item with nothing safe to remove gives notAllowed. Only a failed removal tells.
+    private func failed(_ r: ActionResult) {
+        if case .failed(let m) = r { AlertConfirm.tell("OverSire could not remove all of it.", info: m, in: view.window) }
         reload()
     }
 
@@ -297,7 +297,7 @@ final class AgentsPage: Page {
         }
         trailing.append(slot)
         let open = ActionButton("Open", style: .plain) { [weak self] in
-            if let key { self?.go(.item(key, .session)) } else { self?.data.agentIndex.reveal(card: c.id) }
+            if let key { self?.go(.item(key, .session)) } else { self?.data.actions.run("session.reveal", ["card": .string(c.id)]) }
         }
         open.setAccessibilityLabel(key.map { "Open the session of \($0)" } ?? "Open \(c.name) in Orca")
         trailing.append(open)
@@ -312,7 +312,7 @@ final class AgentsPage: Page {
             } else if detail != nil {
                 if self.expanded.remove(c.id) == nil { self.expanded.insert(c.id) }
                 self.reload()
-            } else if let key { self.go(.item(key, .overview)) } else { self.data.agentIndex.reveal(card: c.id) }
+            } else if let key { self.go(.item(key, .overview)) } else { self.data.actions.run("session.reveal", ["card": .string(c.id)]) }
         }
         if let box = row.cells.boxes["worktree"] { worktree.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true }
         if detail != nil { row.setAccessibilityExpanded(isOpen) }

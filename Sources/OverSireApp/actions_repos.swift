@@ -80,6 +80,23 @@ struct RepoActions {
                 guard let m = MergeMethod(rawValue: a.string("method") ?? "squash") else { return .notAllowed("The method is squash, merge or rebase.") }
                 return await after(await REPO_CLIENT.perform(.merge(m), repo: repo, number: n), "\(repo)#\(n) is merged (\(m.rawValue)).")
             },
+            ActionSpec(id: "pr.requestChanges", title: "Request changes", help: "Sends a review that asks for changes.", kind: .outward,
+                       input: ActionSpec.args(["repo": Self.repo, "number": Self.number, "body": ("string", "What to change.")], required: ["repo", "number", "body"]),
+                       capability: .changeActions) { a in
+                guard let repo = a.string("repo"), let n = a.int("number"), let body = a.string("body"), !body.isEmpty else { return .notAllowed("Give the repo, the PR number and the text.") }
+                return await after(await REPO_CLIENT.perform(.requestChanges(body), repo: repo, number: n), "Changes are requested on \(repo)#\(n).")
+            },
+            ActionSpec(id: "pr.comment", title: "Comment on PR", help: "Adds a Markdown comment to a pull request.", kind: .outward,
+                       input: ActionSpec.args(["repo": Self.repo, "number": Self.number, "body": ("string", "The Markdown comment.")], required: ["repo", "number", "body"]),
+                       capability: .changeActions) { a in
+                guard let repo = a.string("repo"), let n = a.int("number"), let body = a.string("body"), !body.isEmpty else { return .notAllowed("Give the repo, the PR number and the text.") }
+                return await after(await REPO_CLIENT.perform(.comment(body), repo: repo, number: n), "Comment added to \(repo)#\(n).")
+            },
+            ActionSpec(id: "pr.close", title: "Close PR", help: "Closes a pull request without a merge.", kind: .outward,
+                       input: ActionSpec.args(["repo": Self.repo, "number": Self.number], required: ["repo", "number"]), capability: .changeActions) { a in
+                guard let repo = a.string("repo"), let n = a.int("number") else { return .notAllowed("Give the repo and the PR number.") }
+                return await after(await REPO_CLIENT.perform(.close, repo: repo, number: n), "\(repo)#\(n) is closed.")
+            },
             ActionSpec(id: "pr.deleteBranch", title: "Delete branch", help: "Deletes the head branch of a merged or closed pull request on the code host.", kind: .outward,
                        input: ActionSpec.args(["repo": Self.repo, "number": Self.number], required: ["repo", "number"]), capability: .deleteBranch) { a in
                 guard let repo = a.string("repo"), let n = a.int("number") else { return .notAllowed("Give the repo and the PR number.") }
@@ -91,5 +108,19 @@ struct RepoActions {
                 return await after(nil, "Branch \(pr.headRefName) is deleted.")
             },
         ]
+    }
+}
+
+extension ChangeAction {
+    /// The catalog action of a PR action.
+    func action(repo: String, number: Int) -> (id: String, args: [String: JSONValue]) {
+        var args: [String: JSONValue] = ["repo": .string(repo), "number": .int(number)]
+        switch self {
+        case .approve(let body): if let body { args["body"] = .string(body) }; return ("pr.approve", args)
+        case .requestChanges(let body): args["body"] = .string(body); return ("pr.requestChanges", args)
+        case .comment(let body): args["body"] = .string(body); return ("pr.comment", args)
+        case .merge(let m): args["method"] = .string(m.rawValue); return ("pr.merge", args)
+        case .close: return ("pr.close", args)
+        }
     }
 }

@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import OverSireAssistant
 import OverSireAI
 
 extension Tone {
@@ -103,7 +104,9 @@ final class NeedsYouCard: NSObject {
         var trailing: [NSView] = []
         let freeing = checks.filter(StatusJob.frees)
         if freeing.count >= 2 {
-            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") { job.approve(all: freeing.map(\.id)) })
+            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") {
+                freeing.forEach { d.actions.run("status.approve", ["id": .string($0.id)]) }
+            })
         }
         trailing.append(NeedsYouCard.refreshButton(d, title: "Refresh"))
         let c = Card(title: "Needs you · \(n)", trailing: trailing, padding: 10, spacing: 2,
@@ -179,13 +182,15 @@ final class NeedsYouCard: NSObject {
         switch st.state {
         case .stuck:
             pill = Chiplet("Nudge", symbol: "text.bubble")
-            buttons = [ActionButton("Send nudge", style: .primary) { job.approve(st.id) }, ActionButton("Hold") { job.hold(st.id) }]
+            buttons = [ActionButton("Send nudge", style: .primary, action: "status.approve", ["id": .string(st.id)]),
+                       ActionButton("Hold", action: "status.hold", ["id": .string(st.id)])]
         case .unfinished:
             pill = Chiplet("Not finished", symbol: "circle.lefthalf.filled")
-            buttons = [ActionButton("Ask the agent", style: .primary) { job.ask(st.id) }, ActionButton("Mark as blocked on you") { job.markBlocked(st.id) }]
+            buttons = [ActionButton("Ask the agent", style: .primary) { job.ask(st.id) }, ActionButton("Mark as blocked on you", action: "status.markBlocked", ["id": .string(st.id)])]
         default:
             pill = Chiplet(frees ? "Free slot" : "Seen", symbol: "square.dashed")
-            buttons = [ActionButton("Approve", style: .primary) { job.approve(st.id) }, ActionButton("Hold") { job.hold(st.id) }]
+            buttons = [ActionButton("Approve", style: .primary, action: "status.approve", ["id": .string(st.id)]),
+                       ActionButton("Hold", action: "status.hold", ["id": .string(st.id)])]
         }
         let menu: () -> [MenuAction] = { [weak self] in
             [MenuAction("Refresh") { job.refresh(keys: [st.key]) },
@@ -231,7 +236,7 @@ final class NeedsYouCard: NSObject {
         }
         let menu: () -> [MenuAction] = { [weak self] in
             [MenuAction("Open session") { self?.page?.go(.item(key, .session)) },
-             MenuAction("Show in Orca") { self?.data?.agentIndex.reveal(key) }]
+             MenuAction("Show in Orca") { self?.data?.actions.run("session.reveal", ["key": .string(key)]) }]
         }
         let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(key),
                        NSTextField.text(tone.word, size: 12.5, weight: .medium, color: tone.color), text, Spacer(), reply,
@@ -298,7 +303,7 @@ final class NeedsYouCard: NSObject {
         let menu: () -> [MenuAction] = { [weak self] in
             [MenuAction("Refresh") { job.refresh(keys: [e.key]) },
              MenuAction("Open session") { self?.page?.go(.item(e.key, .session)) },
-             MenuAction("Snooze 1 day") { job.snooze(e.id) }]
+             MenuAction("Snooze 1 day") { self?.data?.actions.run("status.snooze", ["id": .string(e.id)]) }]
         }
         cells.append(moreButton(e.key, menu))
         let row = Row(cells, height: 34, inset: 6,
@@ -312,7 +317,6 @@ final class NeedsYouCard: NSObject {
     func needsYou(_ e: SessionStatus, session: Bool = true) -> NSView {
         let detail = NSStackView(v: [], spacing: 4)
         guard let d = data else { return detail }
-        let job = d.statusJob
         if !e.reply.headline.isEmpty { detail.addFull(NSTextField.text(e.reply.headline, size: 12, color: Palette.mut, lines: 2)) }
         for (i, s) in e.reply.needsYou.enumerated() {
             let box = NSButton(checkboxWithTitle: s.text, target: self, action: #selector(ticked(_:)))
@@ -330,13 +334,13 @@ final class NeedsYouCard: NSObject {
         if let found = d.projectStore.item(key: e.key), let blockedOpt = found.snap.statusOptions.first(where: { $0.category == .blocked }),
            found.item.statusOptionId != blockedOpt.id {
             actions.append(ActionButton("Set Plane to Blocked") { [weak self] in
-                d.projectStore.setStatus(itemId: found.item.id, optionId: blockedOpt.id) { ok in
-                    self?.notes[e.id] = ok ? (.ok, "Plane status set to Blocked.") : (.bad, "Could not set the Plane status.")
+                d.actions.run("item.setStatus", ["key": .string(found.item.key), "status": .string(blockedOpt.id)]) { r in
+                    if case .ok = r { self?.notes[e.id] = (.ok, "Plane status set to Blocked.") } else { self?.notes[e.id] = (.bad, "Could not set the Plane status: \(r.summary)") }
                     self?.page?.reload()
                 }
             })
         }
-        actions.append(ActionButton("Snooze 1 day") { job.snooze(e.id) })
+        actions.append(ActionButton("Snooze 1 day", action: "status.snooze", ["id": .string(e.id)]))
         actions.append(Spacer())
         detail.addFull(NSStackView(h: actions, spacing: 6))
         if let (t, n) = notes[e.id] { detail.addFull(NSTextField.text(n, size: 11.5, color: t.color)) }
@@ -604,7 +608,7 @@ final class NeedsYouRow: Row {
                 case .answerInOrca(let id): if let e = data.questions.entries.first(where: { $0.id == id }) { data.questions.reveal(e.question) }
                 case .reply(let k): go(.item(k, .session))
                 case .checklist(let k): go(.item(k, .overview))
-                case .nudge(let id), .approve(let id): job.approve(id)
+                case .nudge(let id), .approve(let id): data.actions.run("status.approve", ["id": .string(id)])
                 case .ask(let id): job.ask(id)
                 case .rerun(let repo, let r): data.rerun(repo: repo, runs: [r], failedOnly: true)
                 case .open(let url): if let u = URL(string: url) { NSWorkspace.shared.open(u) }
@@ -634,8 +638,8 @@ final class NeedsYouRow: Row {
                                 info: "OverSire counts this item as not finished. Close the sub-items, or move the parent back to In progress.",
                                 buttons: ["Close \(open.count) sub-item\(open.count == 1 ? "" : "s")", "Reopen parent", "Cancel"]), in: window) { r in
             switch r.button {
-            case 0: store.closeSubItems(open, parentId: f.item.id) { _ in }
-            case 1: store.reopen(itemId: f.item.id) { _ in }
+            case 0: data.actions.click("item.closeSubItems", ["key": .string(key), "keys": .array(open.map(JSONValue.string))], in: window, asked: true)
+            case 1: data.actions.click("item.reopen", ["key": .string(key)], in: window)
             default: break
             }
         }

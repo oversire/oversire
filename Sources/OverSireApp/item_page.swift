@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 
 // A chip that opens a menu of choices, for status, priority and the like.
 final class MenuChip: Chiplet {
@@ -197,7 +198,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if !snap.isDoneWithOpenSubItems(item),
            let c = ItemLine.finishChip(item, snap: snap, cleanup: cleanup) { chips.append(c) }
         if snap.canCloseParent(item), let done = snap.firstState(group: "completed", else: .done) {
-            let b = ActionButton("Close parent?", style: .link) { [weak self] in self?.save("status", ItemPatch(status: done.id)) }
+            let b = ActionButton("Close parent?", style: .link) { [weak self] in self?.save("status", "item.setStatus", done.id) }
             b.toolTip = "All sub-items are finished. Set \(item.key) to \(done.name)."
             chips.append(b)
         }
@@ -252,7 +253,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let glyph = StatusGlyph.item(item, snap: snap).sized(12)
         return MenuChip(name, icon: glyph) { [weak self] in
             snap.statusOptions.map { o in
-                let a = MenuAction(o.name) { self?.save("status", ItemPatch(status: o.id)) }
+                let a = MenuAction(o.name) { self?.save("status", "item.setStatus", o.id) }
                 a.item.state = o.id == item.statusOptionId ? .on : .off
                 return a
             }
@@ -279,7 +280,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                             guard let self else { return }
                             self.saving = "status"
                             self.reload()
-                            self.data.projectStore.reopen(itemId: item.id) { [weak self] ok in self?.saved(ok) }
+                            self.data.actions.run("item.reopen", ["key": .string(item.key)]) { [weak self] in self?.saved($0) }
                         },
                       ])
     }
@@ -304,13 +305,13 @@ final class ItemPage: Page, NSTextFieldDelegate {
             self.saving = "sub-items"
             self.note = nil
             self.reload()
-            self.data.projectStore.closeSubItems(chosen, parentId: item.id) { [weak self] ok in self?.saved(ok) }
+            self.data.actions.run("item.closeSubItems", ["key": .string(item.key), "keys": .array(chosen.map(JSONValue.string))]) { [weak self] in self?.saved($0) }
         }
     }
 
-    private func saved(_ ok: Bool) {
+    private func saved(_ r: ActionResult) {
         saving = nil
-        if !ok { note = (.bad, data.projectStore.lastError ?? "Plane did not take the change.") }
+        if case .ok = r {} else { note = (.bad, r.summary) }
         reload()
     }
 
@@ -335,9 +336,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
     // The Cleaner posts a change for this item when the run starts and ends.
     private func runCleanup() {
         let chosen = data.cleaner.lines(key, data: data).filter { $0.safe && $0.removable && !cleanupOff.contains($0.id) }
-        data.cleaner.run(chosen, key: key, data: data) { [weak self] errors in
-            guard let self, !errors.isEmpty || self.note != nil else { return }
-            self.note = errors.isEmpty ? nil : (.bad, errors.joined(separator: " "))
+        guard !chosen.isEmpty else { return }
+        data.actions.run("worktree.remove", ["key": .string(key), "lines": .array(chosen.map { .string($0.id) })]) { [weak self] r in
+            guard let self else { return }
+            let failed: Bool = { if case .ok = r { return false } else { return true } }()
+            guard failed || self.note != nil else { return }
+            self.note = failed ? (.bad, r.summary) : nil
             self.reload()
         }
     }
@@ -346,24 +350,19 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let cur = item.fields["Priority"] ?? "None"
         return MenuChip(cur == "None" ? "No priority" : cur, symbol: "flag") { [weak self] in
             StatusOption.priorities.map { p in
-                let a = MenuAction(p.name) { self?.save("priority", ItemPatch(priority: p.id)) }
+                let a = MenuAction(p.name) { self?.save("priority", "item.setPriority", p.id) }
                 a.item.state = p.name == cur ? .on : .off
                 return a
             }
         }
     }
 
-    private func save(_ what: String, _ patch: ItemPatch) {
-        guard let (_, _, item) = data.projectStore.item(key: key) else { return }
+    // `what` names the busy chip. `action` takes the key and one option id.
+    private func save(_ what: String, _ action: String, _ option: String) {
         saving = what
         note = nil
         reload()
-        data.projectStore.update(itemId: item.id, patch, failure: "Could not change the \(what)") { [weak self] ok in
-            guard let self else { return }
-            self.saving = nil
-            if !ok { self.note = (.bad, self.data.projectStore.lastError ?? "Plane did not take the change.") }
-            self.reload()
-        }
+        data.actions.run(action, ["key": .string(key), what == "status" ? "status" : "priority": .string(option)]) { [weak self] in self?.saved($0) }
     }
 
     // MARK: Overview
@@ -611,10 +610,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
         guard !text.isEmpty, !sending else { return }
         sending = true
         reload()
-        data.agentIndex.send(key, text: text) { [weak self] err in
+        // The Send click is the consent: no second ask.
+        data.actions.run("session.send", ["key": .string(key), "text": .string(text)]) { [weak self] r in
             guard let self else { return }
             self.sending = false
-            if let err { self.note = (.bad, "Could not send: \(err.message)") } else { self.replyField?.stringValue = ""; self.note = nil; self.tailAt = .distantPast }
+            if case .ok = r { self.replyField?.stringValue = ""; self.note = nil; self.tailAt = .distantPast } else { self.note = (.bad, "Could not send: \(r.summary)") }
             self.reload()
         }
     }
@@ -652,7 +652,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func terminalCard(_ a: AgentSession, status s: ItemStatus?) -> NSView {
-        let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal") { [weak self] in self?.data.agentIndex.reveal(self?.key ?? "") }])
+        let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal", action: "session.reveal", ["key": .string(key)])])
         c.add(NSStackView(h: [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"),
                               RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()], spacing: 6))
         if let h = s?.headline, !h.isEmpty { c.add(NSTextField.text(h, size: 12.5, color: Palette.mut, lines: 3)) }
@@ -889,17 +889,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     @objc private func sendComment() {
-        guard let f = commentField, let (_, _, item) = data.projectStore.item(key: key) else { return }
+        guard let f = commentField else { return }
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, pendingComment == nil else { return }
         pendingComment = text
         f.stringValue = ""
         reload()
-        data.projectStore.comment(itemId: item.id, body: text) { [weak self] ok in
+        data.actions.run("item.comment", ["key": .string(key), "body": .string(text)]) { [weak self] r in
             guard let self else { return }
             self.pendingComment = nil
-            if !ok { self.commentField?.stringValue = text }
-            if ok { self.commentField?.stringValue = ""; self.timeline = nil; self.note = nil } else { self.note = (.bad, self.data.projectStore.lastError ?? "Plane did not take the comment.") }
+            if case .ok = r { self.commentField?.stringValue = ""; self.timeline = nil; self.note = nil } else { self.commentField?.stringValue = text; self.note = (.bad, r.summary) }
             self.reload()
         }
     }

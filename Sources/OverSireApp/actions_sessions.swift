@@ -111,12 +111,16 @@ struct SessionActions {
             status("status.hold", "Hold result", "Keeps the result open for later.") { $0.hold($1) },
             status("status.markBlocked", "Mark blocked", "Marks the session as not finished: it waits for the developer.") { $0.markBlocked($1) },
             status("status.snooze", "Snooze result", "Hides the result for one day.") { $0.snooze($1) },
-            ActionSpec(id: "worktree.remove", title: "Remove worktree", help: "Removes the finished worktrees of the item: orca worktree rm, plus merged branches. `force` also removes worktrees with changes that are not in the base branch.",
-                       kind: .outward, input: ActionSpec.args(["key": key, "force": ("boolean", "Remove also the lines that are not safe.")], required: ["key"]),
+            ActionSpec(id: "worktree.remove", title: "Remove worktree", help: "Removes the finished worktrees of the item: orca worktree rm, plus merged branches. `force` also removes worktrees with changes that are not in the base branch. `lines` limits the cleanup lines.",
+                       kind: .outward, input: ActionSpec.args(["key": key, "force": ("boolean", "Remove also the lines that are not safe."),
+                                                               "lines": ("array", "Cleanup line ids. Empty: all lines.")], required: ["key"]),
                        capability: .removeWorkspace) { a in
                 await link.run { d, done in
                     guard let k = a.string("key")?.uppercased() else { done(.notAllowed("Give the item key.")); return }
-                    let lines = d.cleaner.lines(k, data: d).filter { $0.removable && $0.kind != .group && ($0.safe || a.bool("force") == true) }
+                    let only = Set(a.list("lines"))
+                    let lines = d.cleaner.lines(k, data: d).filter {
+                        $0.removable && $0.kind != .group && ($0.safe || a.bool("force") == true) && (only.isEmpty || only.contains($0.id))
+                    }
                     guard !lines.isEmpty else { done(.notAllowed("\(k) has nothing to remove\(a.bool("force") == true ? "" : " that is safe").")); return }
                     d.cleaner.run(lines, key: k, data: d) { errors in
                         done(errors.isEmpty ? .ok(summary: "Removed \(lines.count) thing\(lines.count == 1 ? "" : "s") of \(k).") : .failed(errors.joined(separator: "\n")))
