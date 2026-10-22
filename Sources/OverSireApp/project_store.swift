@@ -183,10 +183,10 @@ final class ProjectStore {
         let stamp = isoFmt.string(from: found.item.activityAt)
         let cacheKey = itemId + "|" + stamp
         if let hit = timelineCache[cacheKey] { done(hit.entries); return }
+        guard let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
         if timelineWaiters[cacheKey] != nil { timelineWaiters[cacheKey]?.append(done); return }
         timelineWaiters[cacheKey] = [done]
         let projectKey = found.key
-        guard let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
         let states = found.snap.statusOptions
         let current = found.snap.option(found.item.statusOptionId)?.name
         Task { [weak self] in

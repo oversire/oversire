@@ -19,7 +19,7 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         self.people = people
         all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs
             + RepoActions(link: link).specs + IntakeActions(link: link).specs + MachineActions(link: link).specs
-            + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
+            + ReadActions(link: link).specs + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
         byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 

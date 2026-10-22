@@ -807,11 +807,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
             out.append(Event(source: .github, text: "\(r.run.workflowName ?? r.run.name) #\(r.run.number) \(t.word.lowercased()) on \(r.run.headBranch)",
                              at: lastActivity(r.run), route: .run(repo: r.repo, id: r.run.id)))
         }
-        for p in stream?.prs ?? [] {
-            out.append(Event(source: .github, text: "PR #\(p.pr.number) \(p.pr.title)", at: parseISO(p.pr.updatedAt) ?? .distantPast))
+        // PRs and sessions come from the work facts, as in the assistant. Sessions on other machines show too.
+        let facts = WorkContext(data).facts(item.key)
+        for p in facts.prs {
+            out.append(Event(source: .github, text: "PR #\(p.number) \(p.title)", at: parseISO(p.updatedAt) ?? .distantPast))
         }
-        if let a = stream?.agent {
-            out.append(Event(source: .orca, text: "Session: \(a.label())" + (a.message.map { " · \($0)" } ?? ""), at: a.since))
+        for s in facts.sessions {
+            let label = s.local ? stream?.agent?.label() ?? s.state : "\(s.state) on \(s.machine)"
+            out.append(Event(source: .orca, text: "Session: \(label)" + (s.message.map { " · \($0)" } ?? ""), at: s.since))
         }
         for j in data.statusJob.statuses where j.key == key {
             out.append(Event(source: .oversire, text: "Status: \(j.word) · \(j.reply.headline)", at: j.at,
