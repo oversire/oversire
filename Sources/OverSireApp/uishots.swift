@@ -1221,9 +1221,9 @@ extension MachinesSnapshot {
             DaemonInfo(machine: m, version: "0.4.0", contract: 1, roles: roles, runtimes: ["orca"], harnesses: [],
                        listen: .init(loopback: "127.0.0.1:7690", tailscale: ip + ":7690"))
         }
-        func member(_ m: MachineName, _ ip: String, roles: [String], seen: TimeInterval) -> GroupMember {
+        func member(_ m: MachineName, _ ip: String, roles: [String], seen: TimeInterval, version: String = "0.4.0") -> GroupMember {
             GroupMember(machine: m, host: m.rawValue, addrs: [ip], port: 7690, roles: roles, joinedAt: now.addingTimeInterval(-86400 * 9),
-                        lastSeen: now.addingTimeInterval(-seen))
+                        lastSeen: now.addingTimeInterval(-seen), version: version)
         }
         s.info = info("mbp", "100.97.81.23", roles: ["serve", "runner"])
         s.hooks = [HarnessHooks(name: "claude", hooks: .installed), HarnessHooks(name: "codex", hooks: .untrusted),
@@ -1241,9 +1241,12 @@ extension MachinesSnapshot {
         }
         s.group = Group(id: "g-mbp", name: "My machines", home: "mbp", version: 4,
                         members: [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: 0),
-                                  member("mba", "100.71.4.12", roles: ["serve"], seen: 20),
+                                  member("mba", "100.71.4.12", roles: ["serve"], seen: 20, version: "0.3.2"),
                                   member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
         s.health = ["mba": .live, "devbox": .failed("no answer")]
+        s.latest = "0.4.1"
+        s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-7200), latest: "0.4.1",
+                                      error: "update: no write access to /usr/local/bin. Give your user write access to it, or remove /usr/local/bin/oversire and install the CLI again from the OverSire app")
         s.sessions["mba"] = []
         return s
     }

@@ -24,6 +24,14 @@ public final class DaemonClient: Sendable {
 
     public func group() async throws -> Group { try await get("/v1/group") }
 
+    /// Member route. The daemon installs a newer CLI and then restarts. A download can take minutes.
+    public func update() async throws -> DaemonUpdate {
+        var r = request("/v1/update")
+        r.httpMethod = "POST"
+        r.timeoutInterval = 360
+        return try Self.decode(try await send(r))
+    }
+
     /// Loopback only. The daemon issues a group credential for an app on this machine.
     public func issueApp(name: String) async throws -> DeviceCredential {
         try await post("/v1/group/devices", ["name": name, "kind": DeviceKind.app.rawValue])

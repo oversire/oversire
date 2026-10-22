@@ -42,6 +42,12 @@ struct MachinesModel: Equatable {
         /// The Orca account id. nil: none.
         var account: String?
         var muted: Bool
+        /// The CLI version. nil: not known, a CLI before 0.2.2.
+        var version: String?
+        /// The machine runs an older CLI than the newest in the group or on GitHub.
+        var behind: Bool
+
+        var hostText: String { "\(host) · oversire \(version ?? "before 0.2.2")" }
 
         var sessionsText: String {
             let n = sessions == 0 ? "No sessions" : sessions == 1 ? "1 session" : "\(sessions) sessions"
@@ -85,6 +91,10 @@ struct MachinesModel: Equatable {
     var onPath: Bool
     /// A newer CLI release than the local daemon.
     var update: String?
+    /// The last self-update check of the local daemon.
+    var updateStatus: DaemonUpdate?
+    /// The machines run different CLI versions. nil: one version.
+    var mismatch: String?
     /// The Orca account choices: ids, then nil for none.
     var accounts: [String?]
 
@@ -104,6 +114,7 @@ struct MachinesModel: Equatable {
         path = s.path
         onPath = s.onPath
         if let l = s.latest, let v = s.info?.version, Updater.isNewer(l, than: v) { update = l } else { update = nil }
+        updateStatus = s.info?.update
         let me = s.info?.machine.rawValue
         let members = s.group?.members ?? []
         if s.info == nil { state = .noDaemon } else { state = members.count > 1 ? .group : .solo }
@@ -128,10 +139,22 @@ struct MachinesModel: Equatable {
             else if isThis { account = "local" }
             else { account = environments.first { $0.caseInsensitiveCompare(name) == .orderedSame } }
             let addr = m.addrs.first ?? m.host
+            let version = isThis ? s.info?.version ?? m.version : m.version
             return Machine(name: name, host: m.port == 7690 || addr.contains(":") ? addr : "\(addr):\(m.port)", isThis: isThis,
                            home: s.group?.home == m.machine || (s.group == nil && isThis), runner: m.roles.contains("runner"), online: online,
                            status: online ? "Online" : Self.offline(m.lastSeen, now: now), sessions: active.count,
-                           waiting: active.filter { $0.state == .waiting }.count, account: account, muted: config.muted.contains(name))
+                           waiting: active.filter { $0.state == .waiting }.count, account: account, muted: config.muted.contains(name),
+                           version: version, behind: false)
+        }
+        let newest = ([s.latest] + machines.map(\.version)).compactMap { $0 }.max { Updater.isNewer($1, than: $0) }
+        if let newest {
+            for i in machines.indices { machines[i].behind = machines[i].version.map { Updater.isNewer(newest, than: $0) } ?? true }
+        }
+        if machines.count > 1, Set(machines.map { $0.version ?? "" }).count > 1 {
+            let list = machines.map { "\($0.name) \($0.version ?? "before 0.2.2")" }.joined(separator: ", ")
+            mismatch = "Your machines run different oversire versions: \(list). Update the older ones, so that all machines speak the same API."
+        } else {
+            mismatch = nil
         }
         let known = Set(members.map(\.machine))
         found = state == .solo
@@ -143,9 +166,19 @@ struct MachinesModel: Equatable {
 
     static func offline(_ seen: Date?, now: Date) -> String {
         guard let seen else { return "Offline" }
-        let s = max(0, now.timeIntervalSince(seen))
-        let ago = s < 3600 ? "\(max(1, Int(s / 60))) min ago" : s < 172_800 ? "\(Int(s / 3600)) h ago" : "\(Int(s / 86400)) d ago"
-        return "Offline · \(ago)"
+        return "Offline · \(ago(seen, now: now))"
+    }
+
+    static func ago(_ d: Date, now: Date) -> String {
+        let s = max(0, now.timeIntervalSince(d))
+        return s < 3600 ? "\(max(1, Int(s / 60))) min ago" : s < 172_800 ? "\(Int(s / 3600)) h ago" : "\(Int(s / 86400)) d ago"
+    }
+
+    /// The note of the Updates row.
+    func updateNote(now: Date = Date()) -> String {
+        guard let u = updateStatus else { return "The daemon checks GitHub each 6 hours. No check yet." }
+        if let e = u.error { return "The last update failed \(Self.ago(u.checkedAt, now: now)): \(e)" }
+        return "The daemon checks GitHub each 6 hours. Last check \(Self.ago(u.checkedAt, now: now)): latest \(u.latest ?? "not known")."
     }
 
     static func hook(_ h: HarnessHooks) -> Hook {
@@ -191,6 +224,16 @@ final class MachinesController {
     private(set) var loading = false
     /// The last error of an action. The page shows it once.
     var notice: String?
+    /// The machines that run POST /v1/update now.
+    private(set) var updating: Set<String> = []
+    /// The daemon of a machine: loopback for this Mac, else the link of the hub. nil: no link.
+    lazy var daemon: (String) -> DaemonClient? = { [unowned self] name in
+        if name == self.snapshot.info?.machine.rawValue { return self.local }
+        guard let hub = self.hub, let l = hub.links.first(where: { $0.machine == name && !$0.local }) else { return nil }
+        return l.client(http: hub.http)
+    }
+    /// The wait for the restart of a daemon after an install.
+    var restartWait: UInt64 = 3_000_000_000
     /// `--uishots` and tests: a fixed snapshot. load() does nothing.
     var frozen = false
     private var setupObserver: Any?
@@ -276,6 +319,47 @@ final class MachinesController {
                 self.changed()
             }
         }
+    }
+
+    /// The daemon of machine checks GitHub and installs a newer CLI now. A CLI before 0.2.2 has no route:
+    /// on this Mac the app installs the CLI, on another machine the page tells what to do.
+    func update(_ machine: String) {
+        guard !updating.contains(machine) else { return }
+        let isThis = machine == snapshot.info?.machine.rawValue
+        guard let client = daemon(machine) else {
+            notice = "Update \(machine): OverSire has no link to \(machine). Check that it is online."
+            changed()
+            return
+        }
+        updating.insert(machine)
+        changed()
+        Task { @MainActor in
+            var installed = false
+            do {
+                let s = try await client.update()
+                if let e = s.error { self.notice = "Update \(machine): \(e)" }
+                installed = s.installed != nil
+            } catch ProviderError.notFound {
+                if isThis {
+                    self.updating.remove(machine)
+                    self.install()
+                    return
+                }
+                self.notice = "Update \(machine): it runs a CLI before 0.2.2, which cannot update from here. "
+                    + "Open OverSire on \(machine) and use Update in Settings › Machines."
+            } catch {
+                self.notice = "Update \(machine): \(DaemonClient.reason(error))"
+            }
+            if installed { try? await Task.sleep(nanoseconds: self.restartWait) }
+            self.updating.remove(machine)
+            self.hub?.refresh()
+            await self.load()
+        }
+    }
+
+    /// Updates each machine that runs an older CLI and that the page can reach.
+    func updateAll() {
+        for m in model.machines where m.behind && (m.isThis || m.online) { update(m.name) }
     }
 
     /// Asks for the admin password when root owns /usr/local/bin.
@@ -383,6 +467,11 @@ extension SettingsPage {
         var actions: [NSView] = [joinCodeButton(.link)]
         if canEdit { actions.append(ActionButton("Add machine…") { [weak self] in self?.addMachine() }) }
         let v = NSStackView(v: [SectionTitle(m.title, action: NSStackView(h: actions, spacing: 10))], spacing: 6)
+        if let text = m.mismatch {
+            let all = ActionButton("Update all") { c.updateAll() }
+            all.isEnabled = m.machines.contains { $0.behind && ($0.isThis || $0.online) && !c.updating.contains($0.name) }
+            v.addFull(Banner(.warning, title: "Different oversire versions", body: text, actions: [all]))
+        }
         let card = ListCard()
         for x in m.machines {
             var badges: [NSView] = [NSTextField.text(x.name, size: 13, weight: .medium)]
@@ -391,7 +480,7 @@ extension SettingsPage {
             if x.runner { badges.append(Chiplet("RUNNER")) }
             if x.muted { badges.append(Chiplet("MUTED", symbol: "speaker.slash")) }
             let name = NSStackView(v: [NSStackView(h: badges, spacing: 6),
-                                       NSTextField.text(x.host, size: 11.5, color: Palette.dim, mono: true)], spacing: 3)
+                                       NSTextField.text(x.hostText, size: 11.5, color: Palette.dim, mono: true)], spacing: 3)
             name.setContentHuggingPriority(.init(1), for: .horizontal)
             let status = Pill(Tone(symbol: x.online ? "circle.fill" : "circle", color: x.online ? Palette.ok : Palette.dim, word: x.status))
             let sessions = Pill(x.waiting > 0 ? Tone(symbol: "exclamationmark.circle.fill", color: Palette.warn, word: x.sessionsText)
@@ -415,9 +504,18 @@ extension SettingsPage {
             more.menu = menu
             more.target = MenuOpener.shared
             more.action = #selector(MenuOpener.open(_:))
-            card.add(Row([Glyph(x.runner && !x.isThis ? "server.rack" : "laptopcomputer", color: Palette.mut, size: 16), name, Spacer(),
-                          status, sessions, pop, more], height: 54,
-                         label: "\(x.name), \(x.status), \(x.sessionsText)\(x.home ? ", home" : "")"))
+            var cells: [NSView] = [Glyph(x.runner && !x.isThis ? "server.rack" : "laptopcomputer", color: Palette.mut, size: 16), name, Spacer(),
+                                   status, sessions]
+            // This Mac updates from the Daemon section.
+            if x.behind && !x.isThis && x.online {
+                let busy = c.updating.contains(x.name)
+                let up = ActionButton(busy ? "Updating…" : "Update") { c.update(x.name) }
+                up.isEnabled = !busy
+                up.setAccessibilityLabel("Update oversire on \(x.name)")
+                cells.append(up)
+            }
+            card.add(Row(cells + [pop, more], height: 54,
+                         label: "\(x.name), \(x.status), \(x.sessionsText), oversire \(x.version ?? "before 0.2.2")\(x.behind ? ", older version" : "")\(x.home ? ", home" : "")"))
         }
         v.addFull(card)
         v.addFull(NSTextField.text("Home keeps the shared OverSire state. Use the row menu to make another machine home.",
@@ -458,17 +556,25 @@ extension SettingsPage {
         let where_ = ["loopback \(d.listen.loopback)", d.listen.tailscale.map { "tailnet \($0)" }].compactMap { $0 }.joined(separator: " · ")
         let runner = d.roles.contains("runner")
         var top: [NSView] = [TwoLine("oversire \(d.version)", where_), Spacer(), Pill(Tone(symbol: "circle.fill", color: Palette.ok, word: "Running"))]
+        let c = MachinesController.shared
+        let busy = c.busy || c.updating.contains(d.machine.rawValue)
         if let u = m.update {
-            let busy = MachinesController.shared.busy
-            let up = ActionButton(busy ? "Updating…" : "Update to \(u)", style: .plain) { MachinesController.shared.install() }
+            let up = ActionButton(busy ? "Updating…" : "Update to \(u)", style: .plain) { c.update(d.machine.rawValue) }
             up.isEnabled = !busy
             top.append(up)
         }
+        let failed = m.updateStatus?.error != nil
+        let check = ActionButton(busy ? "Checking…" : failed ? "Try again" : "Check now", style: .plain) { c.update(d.machine.rawValue) }
+        check.isEnabled = !busy
+        var cells: [NSView] = [TwoLine("Updates", subView: NSTextField.text(m.updateNote(), size: 11.5, color: Palette.dim, lines: 3)), Spacer()]
+        if failed { cells.append(Pill(Tone(symbol: "exclamationmark.triangle.fill", color: Palette.warn, word: "Failed"))) }
+        let updates = Row(cells + [check], height: failed ? 80 : 66, label: "Updates, \(m.updateNote())")
         b.addFull(section(.daemon, [
             Row(top, height: 52, label: "oversire \(d.version), running\(m.update.map { ", update to \($0)" } ?? "")"),
             Row([TwoLine("Runner", "Do work orders from the cloud hub and from your other Macs."), Spacer(),
                  Pill(runner ? Tone(symbol: "checkmark.circle.fill", color: Palette.acc, word: "On") : Tone(symbol: "circle", color: Palette.dim, word: "Off"))],
                 height: 52, label: "Runner, \(runner ? "on" : "off")"),
+            updates,
             pathRow(m),
         ]))
     }

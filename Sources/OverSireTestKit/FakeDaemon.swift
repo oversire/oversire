@@ -26,6 +26,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _decisions: [(id: String, approve: Bool)] = []
     private var _asked: JoinPending?
     private var _joined: JoinResult?
+    private var _update: DaemonUpdate?
     private var sockets: [FakeDaemonSocket] = []
 
     /// The credential that a call must carry. nil: no check (loopback).
@@ -66,6 +67,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     public var asked: JoinPending? { get { with { _asked } } set { with { _asked = newValue } } }
     /// The answer of POST /v1/group/join for a valid code. Default: the group with a credential for the app.
     public var joined: JoinResult? { get { with { _joined } } set { with { _joined = newValue } } }
+    /// The answer of POST /v1/update. nil: 404, as from a CLI before 0.2.2.
+    public var update: DaemonUpdate? { get { with { _update } } set { with { _update = newValue } } }
     /// POST /v1/group/requests/{id}/approve and deny calls.
     public var decisions: [(id: String, approve: Bool)] { with { _decisions } }
     /// The body of each call, as a JSON object.
@@ -154,6 +157,9 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         switch (method, parts) {
         case ("GET", ["v1", "whoami"]): return try ok(_info)
         case ("GET", ["v1", "health"]): return (200, Data(#"{"ok":true}"#.utf8))
+        case ("POST", ["v1", "update"]):
+            guard let u = _update else { return missing }
+            return try ok(u)
         case ("GET", ["v1", "sessions"]):
             if let e = _sessionsError { throw e }
             return try ok(DaemonSessionsPage(sessions: _sessions))

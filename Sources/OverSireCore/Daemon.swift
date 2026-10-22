@@ -133,10 +133,12 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var group: String?               // nil before the machine has a group
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
+    public var update: DaemonUpdate?
     public var listen: Listen
 
     public init(machine: MachineName, version: String, contract: Int, roles: [String], runtimes: [ProviderID],
-                harnesses: [HarnessHooks], group: String? = nil, home: MachineName? = nil, device: String? = nil, listen: Listen) {
+                harnesses: [HarnessHooks], group: String? = nil, home: MachineName? = nil, device: String? = nil,
+                update: DaemonUpdate? = nil, listen: Listen) {
         self.machine = machine
         self.version = version
         self.contract = contract
@@ -146,7 +148,24 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
         self.group = group
         self.home = home
         self.device = device
+        self.update = update
         self.listen = listen
+    }
+}
+
+/// UpdateStatus of daemon.json: the last self-update check of a daemon. POST /v1/update answers it too.
+public struct DaemonUpdate: Codable, Hashable, Sendable {
+    public var checkedAt: Date
+    public var latest: String?
+    /// The version that the check installed. The daemon restarts with it.
+    public var installed: String?
+    public var error: String?
+
+    public init(checkedAt: Date, latest: String? = nil, installed: String? = nil, error: String? = nil) {
+        self.checkedAt = checkedAt
+        self.latest = latest
+        self.installed = installed
+        self.error = error
     }
 }
 
@@ -162,8 +181,11 @@ public struct GroupMember: Codable, Hashable, Sendable {
     public var roles: [String]
     public var joinedAt: Date
     public var lastSeen: Date?
+    /// The CLI version. nil: a CLI before 0.2.2.
+    public var version: String?
 
-    public init(machine: MachineName, host: String, addrs: [String], port: Int, roles: [String], joinedAt: Date, lastSeen: Date? = nil) {
+    public init(machine: MachineName, host: String, addrs: [String], port: Int, roles: [String], joinedAt: Date, lastSeen: Date? = nil,
+                version: String? = nil) {
         self.machine = machine
         self.host = host
         self.addrs = addrs
@@ -171,6 +193,7 @@ public struct GroupMember: Codable, Hashable, Sendable {
         self.roles = roles
         self.joinedAt = joinedAt
         self.lastSeen = lastSeen
+        self.version = version
     }
 }
 

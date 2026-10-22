@@ -7,9 +7,9 @@ import OverSireTestKit
 
 private let now = Date(timeIntervalSince1970: 2_000_000)
 
-private func member(_ m: MachineName, _ ip: String, roles: [String] = ["serve"], seen: TimeInterval? = 0) -> GroupMember {
+private func member(_ m: MachineName, _ ip: String, roles: [String] = ["serve"], seen: TimeInterval? = 0, version: String? = nil) -> GroupMember {
     GroupMember(machine: m, host: m.rawValue, addrs: [ip], port: 7690, roles: roles, joinedAt: now.addingTimeInterval(-86400),
-                lastSeen: seen.map { now.addingTimeInterval(-$0) })
+                lastSeen: seen.map { now.addingTimeInterval(-$0) }, version: version)
 }
 
 private func group(_ members: [GroupMember], home: MachineName = "mbp") -> Group {
@@ -296,11 +296,97 @@ final class MachinesModelTests: XCTestCase {
         XCTAssertEqual(m.missingHooks, ["opencode"])
     }
 
+    func testVersionMismatchAndBehind() {
+        var s = snapshot()
+        s.group = group([member("mbp", "100.97.81.23", version: "0.3.0"), member("mba", "100.71.4.12", version: "0.3.2"),
+                         member("devbox", "100.88.20.3", version: nil)])
+        var m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        XCTAssertEqual(m.machines.map(\.version), ["0.4.0", "0.3.2", nil], "this Mac: the version of its daemon")
+        XCTAssertEqual(m.machines.map(\.behind), [false, true, true], "a member without a version runs a CLI before 0.2.2")
+        XCTAssertEqual(m.machines[2].hostText, "100.88.20.3 · oversire before 0.2.2")
+        XCTAssertEqual(m.mismatch, "Your machines run different oversire versions: mbp 0.4.0, mba 0.3.2, devbox before 0.2.2. "
+                       + "Update the older ones, so that all machines speak the same API.")
+
+        s.group = group([member("mbp", "100.97.81.23", version: "0.4.0"), member("mba", "100.71.4.12", version: "0.4.0")])
+        m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        XCTAssertNil(m.mismatch)
+        XCTAssertEqual(m.machines.map(\.behind), [false, false])
+
+        s.latest = "0.5.0"
+        m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        XCTAssertNil(m.mismatch, "one version, but a newer release")
+        XCTAssertEqual(m.machines.map(\.behind), [true, true])
+    }
+
+    func testUpdateNote() {
+        var s = snapshot()
+        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).updateNote(now: now),
+                       "The daemon checks GitHub each 6 hours. No check yet.")
+        s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-600), latest: "0.4.0")
+        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).updateNote(now: now),
+                       "The daemon checks GitHub each 6 hours. Last check 10 min ago: latest 0.4.0.")
+        s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-7200), latest: "0.4.1", error: "update: no write access to /usr/local/bin")
+        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).updateNote(now: now),
+                       "The last update failed 2 h ago: update: no write access to /usr/local/bin")
+    }
+
     func testSampleScenesBuildTheirState() {
         let states = ["machines-empty", "machines-found", "machines-group"].map {
             MachinesModel(MachinesSnapshot.sample($0, now: now), config: MachinesConfig(), environments: ["mbp"], now: now).state
         }
         XCTAssertEqual(states, [.noDaemon, .solo, .group])
+    }
+}
+
+// MARK: Update
+
+@MainActor
+final class MachineUpdateTests: XCTestCase {
+    private func controller(_ remote: FakeDaemon?) -> MachinesController {
+        let c = MachinesController()
+        c.frozen = true
+        c.restartWait = 0
+        c.changed = {}
+        var s = MachinesSnapshot()
+        s.info = info("mba")
+        c.use(s)
+        c.daemon = { name in remote.map { DaemonClient(base: URL(string: "http://\(name):7690")!, token: "t", http: $0) } }
+        return c
+    }
+
+    private func settle(_ c: MachinesController) async {
+        for _ in 0..<200 where !c.updating.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+    }
+
+    func testRemoteUpdate() async {
+        let mbp = FakeDaemon(machine: "mbp")
+        mbp.update = DaemonUpdate(checkedAt: now, latest: "0.2.2", installed: "0.2.2")
+        let c = controller(mbp)
+        c.update("mbp")
+        XCTAssertTrue(c.updating.contains("mbp"))
+        await settle(c)
+        XCTAssertEqual(mbp.calls, ["POST /v1/update"])
+        XCTAssertNil(c.notice)
+    }
+
+    func testRemoteUpdateErrors() async {
+        let mbp = FakeDaemon(machine: "mbp")
+        mbp.update = DaemonUpdate(checkedAt: now, latest: "0.2.2", error: "update: no write access to /usr/local/bin")
+        var c = controller(mbp)
+        c.update("mbp")
+        await settle(c)
+        XCTAssertEqual(c.notice, "Update mbp: update: no write access to /usr/local/bin")
+
+        mbp.update = nil
+        c = controller(mbp)
+        c.update("mbp")
+        await settle(c)
+        XCTAssertEqual(c.notice, "Update mbp: it runs a CLI before 0.2.2, which cannot update from here. "
+                       + "Open OverSire on mbp and use Update in Settings › Machines.")
+
+        c = controller(nil)
+        c.update("mbp")
+        XCTAssertEqual(c.notice, "Update mbp: OverSire has no link to mbp. Check that it is online.")
     }
 }
 
