@@ -95,7 +95,7 @@ enum ActivityFeed {
         }
         for (key, a) in data.agentIndex.agents where a.phase != .working && a.phase != .starting {
             let st = data.agentIndex.state(key)
-            let title = a.phase == .waiting ? "\(key) session asks a question" : a.phase == .done ? "\(key) · \((st ?? .done).label)" : "\(key) session did not start"
+            let title = a.needsInput ? "\(key) session asks a question" : a.phase == .done ? "\(key) · \((st ?? .done).label)" : "\(key) session did not start"
             out.append(FeedEntry(id: "agent|\(key)|\(a.phase)|\(Int(a.since.timeIntervalSince1970))", source: .agent, title: title,
                                      body: a.message ?? "", at: a.since, route: .item(key, .session),
                                      itemKey: key, itemURL: store.item(key: key)?.2.url))

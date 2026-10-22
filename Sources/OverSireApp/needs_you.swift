@@ -403,7 +403,7 @@ struct NeedsYou: Equatable {
         var title: String {
             switch self {
             case .answer: return "Answer"
-            case .answerInOrca: return "Answer in Orca ↗"
+            case .answerInOrca: return "Open in Orca ↗"
             case .reply: return "Reply"
             case .checklist: return "Checklist"
             case .nudge: return "Send nudge"

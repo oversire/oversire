@@ -67,8 +67,12 @@ final class QuestionHub {
 
     // MARK: Reads
 
+    /// An Enhance worker has its own cards, so a turn question of it does not show.
     var entries: [QuestionBoard.Entry] {
-        (seeded ?? board.map { Array($0.entries.values) } ?? []).sorted { $0.question.askedAt < $1.question.askedAt }
+        let intake = lock.withLock { self.intake }
+        return (seeded ?? board.map { Array($0.entries.values) } ?? [])
+            .filter { $0.question.via != .turn || intake[$0.question.session] == nil }
+            .sorted { $0.question.askedAt < $1.question.askedAt }
     }
 
     /// The item key of the question: its origin, else the work item of its Orca session.

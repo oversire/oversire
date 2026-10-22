@@ -67,6 +67,15 @@ final class QuestionHubTests: XCTestCase {
         XCTAssertEqual(NeedsYou.questions(h).first?.route, .intake("OVERSIRE"))
     }
 
+    func testEnhanceWorkerHasNoTurnCard() {
+        let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w1"), id: "term-3")
+        let h = hub()
+        h.seed([QuestionBoard.Entry(question: question(s, "t", origin: .session, via: .turn), state: .open, firstSeen: t0),
+                QuestionBoard.Entry(question: question(s, "f", origin: .session, via: .form), state: .open, firstSeen: t0)],
+               keys: [:], intake: [s: item])
+        XCTAssertEqual(h.open.map(\.question.via), [.form])
+    }
+
     func testPermissionRowsComeUnderTheQuestions() {
         let runner = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "oversire", id: "local"), id: "r1"), id: "s-1")
         let orca = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w1"), id: "term-1")

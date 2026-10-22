@@ -74,8 +74,9 @@ final class PlaneWriteBack {
         if let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode([String: Done].self, from: d) { done = s }
     }
 
-    static func label(_ phase: AgentSession.Phase) -> String? {
-        switch phase {
+    static func label(_ a: AgentSession) -> String? {
+        if a.needsInput { return "session:needs-input" }
+        switch a.phase {
         case .starting, .working: return "session:working"
         case .waiting: return "session:needs-input"
         case .done: return "session:done"
@@ -106,7 +107,7 @@ final class PlaneWriteBack {
                   -(lastWrite[s.key] ?? .distantPast).timeIntervalSinceNow > 120,
                   let client = trackers.tracker(snap.summary.ref.workspace) else { continue }
             var state = done[s.key] ?? Done()
-            let wantLabel = cfg.labels ? s.agent.flatMap { PlaneWriteBack.label($0.phase) } : nil
+            let wantLabel = cfg.labels ? s.agent.flatMap { PlaneWriteBack.label($0) } : nil
             var links: [(String, String)] = []
             if cfg.links {
                 links += s.prs.map { ($0.pr.url, "PR \($0.repo) #\($0.pr.number)") }

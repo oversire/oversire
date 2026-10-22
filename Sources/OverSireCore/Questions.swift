@@ -30,8 +30,9 @@ public struct SessionQuestion: Identifiable, Hashable, Sendable, Codable {
     }
 
     /// How the question reached OverSire. `waiting`: the session waits, and OverSire cannot read the screen.
+    /// `turn`: the last reply of a turn ends with a question.
     public enum Via: String, Hashable, Sendable, Codable {
-        case askReply, form, runnerInput, permission, waiting
+        case askReply, form, runnerInput, permission, waiting, turn
     }
 
     public let id: QuestionID
@@ -55,7 +56,7 @@ public struct SessionQuestion: Identifiable, Hashable, Sendable, Codable {
         self.expiresAt = expiresAt
     }
 
-    /// False when the runner cannot answer it exactly. The card then shows "Answer in Orca".
+    /// False when the runtime cannot answer it exactly. The card then shows "Open in Orca".
     public var answerable: Bool { via != .waiting }
 
     /// Throws when the answer does not fit the items.

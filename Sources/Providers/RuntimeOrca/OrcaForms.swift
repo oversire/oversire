@@ -245,15 +245,23 @@ extension OrcaRuntime {
     /// The transcript bytes that one read looks at.
     static let transcriptTail = 512 * 1024
 
-    /// The native forms, permission prompts and plan approvals of these sessions: Orca shows the agent waiting, and the screen shows the pause.
-    func formQuestions(in sessions: [SessionRef]) async throws -> [SessionQuestion] {
+    /// The pauses of these sessions: a native form, a permission prompt, a plan approval, a turn that ends with a question,
+    /// or a fallback card when OverSire cannot read the screen. `supervised` sessions reply through ask/reply, so they get no turn card.
+    func formQuestions(in sessions: [SessionRef], supervised: Set<String> = []) async throws -> [SessionQuestion] {
         guard !sessions.isEmpty else { return [] }
-        let waiting = try await formWaits()
+        let waiting = try await pauses()
         guard !waiting.isEmpty else { return [] }
         let terminals = try await terminalRows()
         var out: [SessionQuestion] = []
         for s in sessions {
             guard let t = terminals[s.id], let w = waiting[t.paneKey] else { continue }
+            if w.done {
+                guard !supervised.contains(s.id), let text = AgentSession.question(in: w.message) else { continue }
+                out.append(SessionQuestion(id: questionID("turn:\(s.id):\(w.started)"), session: s, origin: .session,
+                                           items: [QuestionItem(id: "q1", text: text, why: w.message == text ? nil : w.message, kind: .free)],
+                                           via: .turn, askedAt: w.since))
+                continue
+            }
             let screen = try await output(s, lines: 40)
             // A wait with no tool name can be either pause.
             if w.tool != "AskUserQuestion", let p = ClaudePrompt.parse(screen) {
@@ -262,12 +270,16 @@ extension OrcaRuntime {
                                            items: [p.item(tool: w.tool, input: w.input)], via: .permission, askedAt: w.since))
                 continue
             }
-            guard w.tool == nil || w.tool == "AskUserQuestion", let form = ClaudeForm.parse(screen) else { continue }
-            let call = localAsk(cwd: w.path ?? t.path).flatMap { $0.open && $0.matches(form) ? $0 : nil }
-            let id = call.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.key))"
-            let items = call?.items ?? (form.items.isEmpty ? [QuestionItem(id: "q1", text: "The session asks a question in Orca.", kind: .free)] : form.items)
-            let via: SessionQuestion.Via = call != nil || !form.items.isEmpty ? .form : .waiting
-            out.append(SessionQuestion(id: questionID(id), session: s, origin: .session, items: items, via: via, askedAt: w.since))
+            let form = w.tool == nil || w.tool == "AskUserQuestion" ? ClaudeForm.parse(screen) : nil
+            let call = form.flatMap { f in localAsk(cwd: w.path ?? t.path).flatMap { $0.open && $0.matches(f) ? $0 : nil } }
+            if let form, call != nil || !form.items.isEmpty {
+                out.append(SessionQuestion(id: questionID(call.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.key))"), session: s,
+                                           origin: .session, items: call?.items ?? form.items, via: .form, askedAt: w.since))
+            } else {
+                out.append(SessionQuestion(id: questionID("wait:\(s.id):\(w.started)"), session: s, origin: .session,
+                                           items: [QuestionItem(id: "q1", text: "The session waits for you. OverSire cannot read the prompt.", kind: .free)],
+                                           via: .waiting, askedAt: w.since))
+            }
         }
         return out
     }
@@ -319,21 +331,43 @@ extension OrcaRuntime {
         return ask.answer(q.id)
     }
 
-    /// The agents that wait, by pane key, with the tool that waits.
-    private func formWaits() async throws -> [String: (path: String?, since: Date, tool: String?, input: String?)] {
-        var out: [String: (path: String?, since: Date, tool: String?, input: String?)] = [:]
+    /// An agent that waits, or that is done. `started` is the stateStartedAt of Orca in ms.
+    struct Pause {
+        let done: Bool
+        let path: String?
+        let started: Int64
+        let tool: String?
+        let input: String?
+        let message: String?
+        var since: Date { Date(timeIntervalSince1970: Double(started) / 1000) }
+    }
+
+    /// The agents that wait or are done, by pane key.
+    func pauses() async throws -> [String: Pause] {
+        var out: [String: Pause] = [:]
         for w in try await run(["worktree", "ps", "--limit", "500"])["worktrees"] as? [[String: Any]] ?? [] {
-            for a in w["agents"] as? [[String: Any]] ?? [] where a["state"] as? String == "waiting" {
-                guard let pane = a["paneKey"] as? String else { continue }
-                out[pane] = (w["path"] as? String, Date(timeIntervalSince1970: ((a["stateStartedAt"] as? Double) ?? 0) / 1000),
-                             a["toolName"] as? String, a["toolInput"] as? String)
+            for a in w["agents"] as? [[String: Any]] ?? [] {
+                guard let pane = a["paneKey"] as? String, let state = a["state"] as? String, state == "waiting" || state == "done" else { continue }
+                out[pane] = Pause(done: state == "done", path: w["path"] as? String, started: Int64((a["stateStartedAt"] as? Double) ?? 0),
+                                  tool: a["toolName"] as? String, input: a["toolInput"] as? String, message: a["lastAssistantMessage"] as? String)
             }
         }
         return out
     }
 
+    /// Sends the text of a turn question as a prompt. The agent must still be done in the same turn.
+    func answerTurn(_ q: SessionQuestion, _ a: QuestionAnswer) async throws -> AnswerResult {
+        guard let msg = messageID(q.id), msg.hasPrefix("turn:"), let started = msg.split(separator: ":").last.flatMap({ Int64($0) }),
+              let text = a.items.first?.other else { return .gone }
+        guard let pane = try await terminalRows()[q.session.id]?.paneKey, let p = try await pauses()[pane], p.done, p.started == started else {
+            return .alreadyAnswered
+        }
+        try await send(q.session, text: text)
+        return .sent
+    }
+
     /// The pane key and the checkout of each terminal, by handle.
-    private func terminalRows() async throws -> [String: (paneKey: String, path: String?)] {
+    func terminalRows() async throws -> [String: (paneKey: String, path: String?)] {
         var out: [String: (paneKey: String, path: String?)] = [:]
         for t in try await run(["terminal", "list"])["terminals"] as? [[String: Any]] ?? [] {
             guard let h = t["handle"] as? String else { continue }

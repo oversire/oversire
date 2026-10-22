@@ -111,7 +111,8 @@ final class OrcaFormsTests: XCTestCase {
         let s = rt.sessionRef(workspace: "b07c::/w", handle: "term_form")
         let bash = rt.sessionRef(workspace: "b07c::/w", handle: "term_bash")
         let qs = try await rt.openQuestions(in: [s, bash])
-        XCTAssertEqual(qs.map(\.id.rawValue), ["orca:local:form:" + Self.tool], "a session that waits in another tool has no form")
+        XCTAssertEqual(qs.map(\.id.rawValue), ["orca:local:form:" + Self.tool, "orca:local:wait:term_bash:1792550175956"],
+                       "a session that waits in another tool has no form, but a fallback card")
         let q = qs[0]
         XCTAssertEqual(q.via, .form)
         XCTAssertTrue(q.answerable)
@@ -141,7 +142,8 @@ final class OrcaFormsTests: XCTestCase {
 
         orca.on("terminal read", Self.read("no-form-answered"))
         let gone = try await rt.openQuestions(in: [s])
-        XCTAssertTrue(gone.isEmpty, "the footer left the screen")
+        XCTAssertEqual(gone.map(\.via), [.waiting], "the form left the screen, and Orca still shows the agent waiting")
+        XCTAssertNotEqual(gone.first?.id, first[0].id)
     }
 
     func testATranscriptOfAnotherSessionIsNotUsed() async throws {

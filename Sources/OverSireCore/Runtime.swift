@@ -27,6 +27,30 @@ public struct AgentSession: Hashable, Sendable {
         self.message = message
     }
 
+    /// The session waits, or its turn ended with a question.
+    public var needsInput: Bool { phase == .waiting || (phase == .done && Self.question(in: message) != nil) }
+
+    /// The last paragraph of a reply whose last sentence is a question. A "?" in a code block does not count.
+    public static func question(in message: String?) -> String? {
+        guard let message else { return nil }
+        var prose: [String] = []
+        var code = false
+        for line in message.components(separatedBy: "\n") {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                code.toggle()
+                prose.append("")
+            } else {
+                prose.append(code ? "" : line)
+            }
+        }
+        if code { return nil }
+        let paragraphs = prose.joined(separator: "\n").components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard let last = paragraphs.last, message.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(last.suffix(1)) else { return nil }
+        let end = last.trimmingCharacters(in: CharacterSet(charactersIn: "*_\"')”’ "))
+        return end.hasSuffix("?") ? last : nil
+    }
+
     // Needs input first, done last.
     public var rank: Int {
         switch phase {

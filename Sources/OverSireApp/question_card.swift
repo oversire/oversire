@@ -162,7 +162,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
                 add(NSTextField.text("OverSire cannot reach \(place.text). The card shows the last read.", size: 12, color: Palette.warn, lines: 2))
             }
             if inRuntime {
-                add(NSTextField.text("The session shows its own form in \(place.runtime). OverSire shows the questions, but cannot answer them.",
+                add(NSTextField.text("Answer in \(place.runtime). OverSire cannot send the answer for this session.",
                                      size: 12, color: Palette.mut, lines: 2))
             }
             for (i, item) in question.items.enumerated() { add(block(item, index: i)) }
@@ -265,6 +265,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         case .runnerInput: return "runner"
         case .permission: return "permission"
         case .waiting: return "waits in \(place.runtime)"
+        case .turn: return "turn end"
         }
     }
 
@@ -292,7 +293,16 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         if let h = item.header, !h.isEmpty { head.append(Chiplet(h)) }
         if !head.isEmpty { col.addArrangedSubview(NSStackView(h: head + [Spacer()], spacing: 6)) }
         col.addFull(NSTextField.text(item.text, size: 13, weight: .medium, lines: 0))
-        if let why = item.why, !why.isEmpty { col.addFull(NSTextField.text(why, size: 12, color: Palette.dim, lines: 0)) }
+        if let why = item.why, !why.isEmpty {
+            if question.via == .turn {
+                // The full reply of the turn.
+                let d = Disclosure("Details", id: "question-details-\(question.id.rawValue)")
+                d.add(NSTextField.text(why, size: 12, color: Palette.dim, lines: 0))
+                col.addFull(d)
+            } else {
+                col.addFull(NSTextField.text(why, size: 12, color: Palette.dim, lines: 0))
+            }
+        }
         if item.kind != .free && item.kind != .approve {
             let row = NSStackView(h: [], spacing: 6)
             optionRows[item.id] = row
@@ -303,14 +313,14 @@ final class QuestionCard: Card, NSTextFieldDelegate {
             let m = max(0, Int((e.timeIntervalSince(now()) / 60).rounded(.up)))
             col.addFull(NSTextField.text(m == 0 ? "The time limit is reached." : "No answer in \(m) min is a deny.", size: 12, color: Palette.dim))
         }
-        if item.kind == .free || item.allowsOther {
+        if item.kind == .free || item.allowsOther, !inRuntime {
             let f = NSTextField(string: draft.others[item.id] ?? "")
             f.placeholderString = item.kind == .free ? "Your answer" : "Other: write your own answer"
             f.font = .systemFont(ofSize: 12.5)
             f.translatesAutoresizingMaskIntoConstraints = false
             f.delegate = self
             f.identifier = NSUserInterfaceItemIdentifier(item.id)
-            f.isEnabled = entry.state == .open && !inRuntime
+            f.isEnabled = entry.state == .open
             f.setAccessibilityLabel(item.kind == .free ? "Answer to \(item.text)" : "Other answer to \(item.text)")
             fields[item.id] = f
             col.addFull(f)
@@ -353,7 +363,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         var views: [NSView] = []
         let sending = entry.state == .sending
         if inRuntime {
-            if let reveal = actions.reveal { views.append(ActionButton("Answer in \(place.runtime) ↗", style: .primary) { reveal() }) }
+            if let reveal = actions.reveal { views.append(ActionButton("Open in \(place.runtime) ↗", style: .primary) { reveal() }) }
             views.append(Spacer())
         } else if question.items.count == 1, let item = question.items.first, item.kind == .approve {
             let allow = ActionButton(QuestionItem.allow, style: .primary) { [weak self] in self?.pick(0, of: item.id) }

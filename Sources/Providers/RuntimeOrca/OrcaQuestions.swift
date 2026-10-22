@@ -108,7 +108,8 @@ extension OrcaRuntime {
             byHandle[m.from].map { question(m, session: $0) }
         }
         let asked = Set(asks.map(\.session))
-        return asks + (try await formQuestions(in: sessions.filter { !asked.contains($0) }))
+        let supervised = Set(mail.filter { $0.to == coord.address || $0.to == coord.terminal }.map(\.from))
+        return asks + (try await formQuestions(in: sessions.filter { !asked.contains($0) }, supervised: supervised))
     }
 
     public func answer(_ q: SessionQuestion, _ a: QuestionAnswer) async throws -> AnswerResult {
@@ -116,6 +117,7 @@ extension OrcaRuntime {
         try q.validate(a)
         if q.via == .form { return try await answerForm(q, a) }
         if q.via == .permission { return try await answerPrompt(q, a) }
+        if q.via == .turn { return try await answerTurn(q, a) }
         guard let msg = messageID(q.id) else { return .gone }
         let mail = try await inbox()
         if mail.contains(where: { $0.replyTo == msg }) { return .alreadyAnswered }
