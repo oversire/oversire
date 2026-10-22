@@ -40,11 +40,18 @@ public struct APIKeyEngine: AIEngine {
     public let config: APIKeyConfig
     let key: String
     let http: any HTTPTransport
+    /// For the chat. Nil: no chat.
+    let streaming: (any HTTPStreaming)?
+    public var timeouts: ChatTimeouts
 
-    public init(config: APIKeyConfig, key: String, http: any HTTPTransport) {
+    /// `streaming` nil takes `http` when it can stream.
+    public init(config: APIKeyConfig, key: String, http: any HTTPTransport, streaming: (any HTTPStreaming)? = nil,
+                timeouts: ChatTimeouts = ChatTimeouts()) {
         self.config = config
         self.key = key
         self.http = http
+        self.streaming = streaming ?? http as? any HTTPStreaming
+        self.timeouts = timeouts
     }
 
     public var dialect: any AIDialect { config.format == .openai ? OpenAIDialect() : AnthropicDialect() }

@@ -45,7 +45,7 @@ let package = Package(
         .testTarget(name: "OverSireAppTests", dependencies: ["OverSireApp", "OverSireSync", "OverSireTestKit"], exclude: ["Fixtures"], swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "OverSireCoreTests", dependencies: ["OverSireCore", "OverSireTestKit"]),
         .testTarget(name: "OverSireSyncTests", dependencies: ["OverSireSync", "OverSireTestKit"]),
-        .testTarget(name: "OverSireAITests", dependencies: ["OverSireAI", "OverSireTestKit"]),
+        .testTarget(name: "OverSireAITests", dependencies: ["OverSireAI", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "OverSireAssistantTests", dependencies: ["OverSireAssistant", "OverSireTestKit"]),
         .testTarget(name: "AIEngineAgentBinderTests", dependencies: ["AIEngineAgentBinder", "OverSireTestKit", .product(name: "AgentBinder", package: "agent-binder")]),
         .testTarget(name: "OverSireTestKitTests", dependencies: ["OverSireTestKit"]),
@@ -55,7 +55,7 @@ let package = Package(
         .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),
         .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "RuntimeTemplate", "OverSireTestKit"]),
         .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI"]),
-        .testTarget(name: "LiveTests", dependencies: ["TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "OverSireTestKit"]),
+        .testTarget(name: "LiveTests", dependencies: ["OverSireAI", "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "OverSireTestKit"]),
     ],
     swiftLanguageModes: [.v6]
 )
