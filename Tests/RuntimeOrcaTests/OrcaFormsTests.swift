@@ -6,7 +6,9 @@ import OverSireTestKit
 /// Screens and a transcript recorded from Claude Code 2.1.305 in Orca 1.4.223 on 2026-10-21.
 /// The files with a version in the name come from that version of Claude Code, in Orca 1.4.223 on 2026-10-22.
 final class OrcaFormsTests: XCTestCase {
-    static let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
+    /// The shared screen fixtures. The Go parsers of the daemon read the same files.
+    static let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Contract/fixtures/claude-screens")
     static func screen(_ name: String) -> [String] {
         try! String(contentsOf: dir.appendingPathComponent(name + ".txt"), encoding: .utf8).components(separatedBy: "\n")
     }
@@ -286,11 +288,12 @@ final class OrcaFormsTests: XCTestCase {
         orca.on("terminal read", list: (0...10).map(Self.flow))
         orca.on("terminal send", #"{"ok":true,"result":{"send":{"accepted":true,"bytesWritten":1}}}"#)
         files.file = Self.path("ask-flow-answered.jsonl")
-        let a = QuestionAnswer(question: q.id, items: [.init(id: "q1", choices: ["JSON"]), .init(id: "q2", choices: ["Unit"], other: "perf")])
+        let keys = try ClaudeScreensTests.keys()
+        let a = QuestionAnswer(question: q.id, items: keys.answer)
         let r = try await rt.answer(q, a)
         XCTAssertEqual(r, .sent)
         let sends = orca.args("terminal send")
-        XCTAssertEqual(sends.map { $0[5] }, ["2", "1", "4", Self.down, Self.down, Self.down, "perf", Self.down, "\r", "1"])
+        XCTAssertEqual(sends.map { $0[5] }, keys.sends)
         XCTAssertTrue(sends.allSatisfy { !$0.contains("--enter") })
         XCTAssertEqual(orca.args("terminal read").count, 1 + 11, "one read before each key, and one after the last")
         XCTAssertEqual(logs.entries, [], "the transcript has the same answer")
@@ -316,16 +319,21 @@ final class OrcaFormsTests: XCTestCase {
             XCTAssertEqual(r, .sent, item.text)
             return (item, orca.args("terminal send").dropFirst(before).map { $0[5] })
         }
-        let (store, k1) = try await page(0...1) { .init(id: $0.id, choices: ["JSON"]) }
-        XCTAssertEqual(store.text, "Which store?")
-        XCTAssertEqual(k1, ["2"])
-        let (tests, k2) = try await page(1...9) { .init(id: $0.id, choices: ["Unit"], other: "perf") }
-        XCTAssertEqual(tests.kind, .multi)
-        XCTAssertEqual(k2, ["1", "4", Self.down, Self.down, Self.down, "perf", Self.down, "\r"], "no review key: the review page is the next card")
-        let (review, k3) = try await page(9...10) { .init(id: $0.id, choices: ["Submit answers"]) }
-        XCTAssertEqual(review.id, ClaudeForm.reviewID)
-        XCTAssertEqual(review.why, "Which store? → JSON\nWhich tests? → Unit, perf")
-        XCTAssertEqual(k3, ["1"])
+        let pages = try ClaudeScreensTests.keys().pages
+        XCTAssertEqual(pages.count, 3)
+        var items: [QuestionItem] = []
+        for p in pages {
+            let (item, sent) = try await page(p.first...p.last) { item in
+                XCTAssertEqual(item.id, p.answer[0].id)
+                return p.answer[0]
+            }
+            XCTAssertEqual(sent, p.sends, item.text)
+            items.append(item)
+        }
+        XCTAssertEqual(items[0].text, "Which store?")
+        XCTAssertEqual(items[1].kind, .multi, "no review key: the review page is the next card")
+        XCTAssertEqual(items[2].id, ClaudeForm.reviewID)
+        XCTAssertEqual(items[2].why, "Which store? → JSON\nWhich tests? → Unit, perf")
     }
 
     func testFormAnsweredInOrcaSendsNoKey() async throws {

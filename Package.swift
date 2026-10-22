@@ -49,7 +49,7 @@ let package = Package(
         .testTarget(name: "TrackerPlaneTests", dependencies: ["TrackerPlane", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"]),
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "OverSireTestKit"]),
-        .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"], exclude: ["Fixtures"]),
+        .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),
         .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "RuntimeTemplate", "OverSireTestKit"]),
         .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI"]),
         .testTarget(name: "LiveTests", dependencies: ["TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "OverSireTestKit"]),

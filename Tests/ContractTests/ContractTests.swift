@@ -91,7 +91,9 @@ final class ContractTests: XCTestCase {
 
     func testFixturesRoundTrip() throws {
         let fm = FileManager.default
-        let folders = try fm.contentsOfDirectory(atPath: Self.root.appendingPathComponent("fixtures").path).filter { !$0.hasPrefix(".") }
+        // claude-screens holds terminal screens for the parsers, not a wire type.
+        let folders = try fm.contentsOfDirectory(atPath: Self.root.appendingPathComponent("fixtures").path)
+            .filter { !$0.hasPrefix(".") && $0 != "claude-screens" }
         XCTAssertFalse(folders.isEmpty)
         var count = 0
         for folder in folders.sorted() {

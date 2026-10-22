@@ -1,8 +1,10 @@
-# Orca screen fixtures
+# Claude screen fixtures
 
 These files are recorded screens and transcripts of Claude Code in an Orca terminal.
-The tests in `OrcaFormsTests`, `OrcaPromptsTests` and `OrcaTurnTests` parse them.
+Two parsers read them: the app (`OrcaFormsTests`, `OrcaPromptsTests`, `OrcaTurnTests` and `ClaudeScreensTests` in `RuntimeOrcaTests`)
+and the daemon (the Go package `questions` in `oversire/cli`). The two parsers must agree.
 The tests also replay the keys that answer each pause.
+This folder is not a wire type. The contract tests skip it.
 
 ## Versions
 
@@ -24,6 +26,8 @@ The 2.1.305 files have no version in their name. Keep them: they show that the p
 - `plan-approval-*.txt` and `plan-feedback-typing-*.txt`: the plan approval, and the plan approval with text in "Tell Claude what to change".
 - `turn-question-*.txt`: a turn that ends with a question.
 - `no-form-answered.txt` and `false-footer.txt`: screens with no pause. The parser must give nil for them.
+- `<name>.expect.json`: the parsed form and the parsed prompt of `<name>.txt` (headers, items, review, cursor, boxes; title, body, question, options, typed, amending), or null.
+- `flow-2.1.308.keys.json`: the answer of the flow and the keys that answer it, for the full form and for each page.
 
 ## Make a new fixture
 
@@ -49,7 +53,14 @@ Do these steps when Claude Code changes its screen, or when a test of a new paus
 4. For a flow, send one key with `orca terminal send --terminal <handle> --text <key>`. Then record the screen again. Do this for each key.
 5. For a transcript, copy the lines of the AskUserQuestion call and its result from `~/.claude/projects/<folder>/<session>.jsonl`. Remove the other lines.
 6. Put the Claude Code version in the file name (`claude --version`). Add a row to the table above.
-7. Add the file to `testRecordedScreensParse` in `OrcaFormsTests`, and add a test for the keys if the keys change.
+7. Write the `.expect.json` files with the Swift parser. Then read each new file and make sure that it is correct:
+
+   ```bash
+   OVERSIRE_RECORD_SCREENS=1 swift test --filter ClaudeScreensTests
+   ```
+
+8. Add the file to `testRecordedScreensParse` in `OrcaFormsTests`, and add a test for the keys if the keys change.
+9. Copy the contract to the CLI and the cloud. Then run the Go tests of the package `questions`.
 
 ## Live test
 
