@@ -34,15 +34,53 @@ struct ProcessRunner: CommandRunner {
 
     func run(_ exe: String, _ args: [String], stdin: Data?, timeout: Duration) async throws -> CommandOutput {
         let secs = Double(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18
-        return try await withCheckedThrowingContinuation { cont in
-            DispatchQueue.global(qos: .utility).async {
-                cont.resume(with: Result { try runSync(exe, args, stdin: stdin, timeout: secs) })
+        let child = Child()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                DispatchQueue.global(qos: .utility).async {
+                    cont.resume(with: Result { try runSync(exe, args, stdin: stdin, timeout: secs, child: child) })
+                }
+            }
+        } onCancel: {
+            child.cancel()
+        }
+    }
+
+    /// The process of one run. A task cancel stops it.
+    final class Child: @unchecked Sendable {
+        private let lock = NSLock()
+        private var proc: Process?
+        private(set) var cancelled = false
+
+        func cancel() {
+            let p: Process? = lock.withLock {
+                cancelled = true
+                return proc
+            }
+            if let p { ProcessRunner.stop(p) }
+        }
+
+        /// False when the task was cancelled before the start.
+        func attach(_ p: Process) -> Bool {
+            lock.withLock {
+                proc = p
+                return !cancelled
             }
         }
     }
 
-    // Blocks the caller. Terminates the process after the timeout, and kills it 1 s later.
-    func runSync(_ exe: String, _ args: [String], stdin: Data? = nil, timeout: TimeInterval? = nil) throws -> CommandOutput {
+    /// Terminates the process, and kills it 1 s later.
+    static func stop(_ proc: Process) {
+        guard proc.isRunning else { return }
+        proc.terminate()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+            if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
+        }
+    }
+
+    // Blocks the caller. Stops the process after the timeout.
+    func runSync(_ exe: String, _ args: [String], stdin: Data? = nil, timeout: TimeInterval? = nil, child: Child? = nil) throws -> CommandOutput {
+        if child?.cancelled == true { throw CancellationError() }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: exe)
         proc.arguments = args
@@ -53,18 +91,13 @@ struct ProcessRunner: CommandRunner {
         let inPipe = stdin.map { _ in Pipe() }
         if let inPipe { proc.standardInput = inPipe } else { proc.standardInput = FileHandle.nullDevice }
         try proc.run()
+        if let child, !child.attach(proc) { ProcessRunner.stop(proc) }
         if let inPipe, let stdin {
             inPipe.fileHandleForWriting.write(stdin)
             try? inPipe.fileHandleForWriting.close()
         }
         if let timeout {
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) {
-                guard proc.isRunning else { return }
-                proc.terminate()
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
-                    if proc.isRunning { kill(proc.processIdentifier, SIGKILL) }
-                }
-            }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout) { ProcessRunner.stop(proc) }
         }
         // Read both pipes before the wait. A child that fills a 64 KB pipe buffer blocks waitUntilExit.
         var errData = Data()
@@ -76,6 +109,7 @@ struct ProcessRunner: CommandRunner {
         let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
         errDone.wait()
         proc.waitUntilExit()
+        if child?.cancelled == true { throw CancellationError() }
         let err = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return CommandOutput(status: proc.terminationStatus, stdout: outData, stderr: err)
     }

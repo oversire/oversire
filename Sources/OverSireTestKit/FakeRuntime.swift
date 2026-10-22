@@ -37,7 +37,26 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
         try base.locked { [RuntimeRepo(id: "r1", name: "app", path: "/fake/app", folder: false)] }
     }
 
-    public func workspaces() async throws -> [Workspace] { try base.locked { cards } }
+    private var workspaceReads = 0
+    private var workspacesGate: (@Sendable () async -> Void)?
+
+    /// The number of `workspaces()` calls so far.
+    public var workspacesCalls: Int { base.lockedValue { workspaceReads } }
+
+    /// Each `workspaces()` call awaits the gate before it reads. nil: no wait.
+    public func gateWorkspaces(_ gate: (@Sendable () async -> Void)?) { base.lockedValue { workspacesGate = gate } }
+
+    /// Replaces all workspaces.
+    public func set(_ ws: [Workspace]) { base.lockedValue { cards = ws } }
+
+    public func workspaces() async throws -> [Workspace] {
+        let gate = base.lockedValue { () -> (@Sendable () async -> Void)? in
+            workspaceReads += 1
+            return workspacesGate
+        }
+        await gate?()
+        return try base.locked { cards }
+    }
 
     public func sessions(_ w: WorkspaceRef) async throws -> [RuntimeSession] {
         try base.locked {

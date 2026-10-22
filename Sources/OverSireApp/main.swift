@@ -265,6 +265,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
         agentIndex.startTimer()
         startQuestions()
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.agentIndex.didWake()
+            self?.questions.didWake()
+        }
         NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
             self?.reloadList(DataChange(.questions, origin: .event))
             self?.updateIcon()

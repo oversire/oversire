@@ -56,6 +56,9 @@ final class QuestionHub {
         timer?.invalidate()
     }
 
+    /// A sleep can break the changes streams. A new start opens them again and reads at once.
+    func didWake() { board?.start() }
+
     /// For `--uishots`: fixed entries and no board.
     func seed(_ entries: [QuestionBoard.Entry], keys: [SessionRef: String], intake: [SessionRef: ItemRef] = [:]) {
         seeded = entries

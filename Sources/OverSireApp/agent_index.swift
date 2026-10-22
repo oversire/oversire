@@ -86,12 +86,21 @@ final class AgentIndex: NSObject {
     private let writes: StoreWrites?
     private var notified: [String: String] = [:]
     private var primed = false
-    private var polling = false
+    private(set) var polling = false
+    private var pollAgain = false
+    private var againDone: [() -> Void] = []
     private var lastPoll = Date.distantPast
-    private var timer: Timer?
+    private var timer: (() -> Void)?
+    private var holdChecks: [String: (tag: String, cancel: () -> Void)] = [:]   // pane key → the check at since + 10 s
 
     var now: () -> Date = Date.init
     var visible: () -> Bool = { false }
+    /// Runs the work on main after the delay. The result cancels it. Tests use a manual scheduler.
+    var schedule: (_ after: TimeInterval, _ work: @escaping () -> Void) -> () -> Void = { after, work in
+        let t = Timer(timeInterval: after, repeats: false) { _ in work() }
+        RunLoop.main.add(t, forMode: .common)
+        return { t.invalidate() }
+    }
     // Called once for each agent that holds a new waiting or done state for 10 seconds.
     var onAlert: ((_ key: String, _ agent: AgentSession) -> Void)?
     // True when the end check of this agent message found steps for the user.
@@ -191,19 +200,39 @@ final class AgentIndex: NSObject {
         return (rt as? any InstallChecking)?.installed ?? true ? self : nil
     }
 
+    /// Polls each 15 s with a window open or while an agent works or waits. Else each 60 s.
     func startTimer() {
-        timer?.invalidate()
-        let t = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            if self.visible() || -self.lastPoll.timeIntervalSinceNow >= 60 { self.poll() }
-        }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-        poll()
+        timer?()
+        tick(first: true)
     }
 
+    private func tick(first: Bool = false) {
+        let busy = agents.values.contains { $0.phase == .working || $0.phase == .waiting || $0.phase == .starting }
+        // 1 s less, so a late tick does not skip a cycle.
+        if first || visible() || now().timeIntervalSince(lastPoll) >= (busy ? 15 : 60) - 1 { poll() }
+        timer = schedule(15) { [weak self] in self?.tick() }
+    }
+
+    /// A hint that the agents of the account changed. Callable from any thread. nil: any account.
+    func hint(account: AccountID? = nil) {
+        let go = { [weak self] in
+            guard let self else { return }
+            if let account, let rt = self.runtime(), rt.account != account { return }
+            self.poll()
+        }
+        if Thread.isMainThread { go() } else { DispatchQueue.main.async(execute: go) }
+    }
+
+    func didWake() { poll() }
+
+    /// A call during a poll runs one more poll after it.
     func poll(done: (() -> Void)? = nil) {
-        guard ready != nil, !polling, !hold, let rt = runtime() else { done?(); return }
+        if polling {
+            pollAgain = true
+            if let done { againDone.append(done) }
+            return
+        }
+        guard ready != nil, !hold, let rt = runtime() else { done?(); return }
         polling = true
         lastPoll = now()
         Task { [weak self] in
@@ -218,6 +247,11 @@ final class AgentIndex: NSObject {
                     self.absorb(cards)
                 }
                 done?()
+                guard self.pollAgain else { return }
+                self.pollAgain = false
+                let after = self.againDone
+                self.againDone = []
+                self.poll { after.forEach { $0() } }
             }
         }
     }
@@ -488,19 +522,44 @@ final class AgentIndex: NSObject {
         agents = AgentIndex.index(cards, launches: launches, links: links, open: open, now: at)
         feed.record(before: before, after: agents)
         readScreens(at: at)
+        var young: [String: (tag: String, due: Date)] = [:]
         for (key, a) in agents where a.phase == .waiting || a.phase == .done {
             let tag = "\(a.phase)|\(a.paneKey ?? "")|\(Int(a.since.timeIntervalSince1970))"
             guard notified[key] != tag else { continue }
             if !primed { notified[key] = tag; continue }
+            // A short state gets no alert. A check at since + 10 s sees if it holds.
+            if at.timeIntervalSince(a.since) < 10 {
+                young[a.paneKey ?? key] = (tag, a.since.addingTimeInterval(10))
+                continue
+            }
             // An old done agent comes back when its item opens again: it is no news.
-            guard at.timeIntervalSince(a.since) >= 10, at.timeIntervalSince(a.since) < 86400 else { continue }
+            guard at.timeIntervalSince(a.since) < 86400 else { continue }
             notified[key] = tag
             onAlert?(key, a)
         }
         primed = true
+        planHoldChecks(young, at: at)
         // Working minutes change without a state change. A publish each minute keeps them current.
         if agents != before || cardsChanged || (agents.values.contains { $0.phase == .working } && at.timeIntervalSince(lastPublish) >= 60) { publish() }
     }
+
+    // One check for each pane. A new state replaces the check, and an old one goes.
+    private func planHoldChecks(_ young: [String: (tag: String, due: Date)], at: Date) {
+        for (pane, c) in holdChecks where young[pane]?.tag != c.tag {
+            c.cancel()
+            holdChecks[pane] = nil
+        }
+        for (pane, y) in young where holdChecks[pane] == nil {
+            let cancel = schedule(max(0, y.due.timeIntervalSince(at))) { [weak self] in
+                guard let self, self.holdChecks[pane]?.tag == y.tag else { return }
+                self.holdChecks[pane] = nil
+                self.poll()
+            }
+            holdChecks[pane] = (y.tag, cancel)
+        }
+    }
+
+    var holdCheckCount: Int { holdChecks.count }
 
     static let browseRE = try! NSRegularExpression(pattern: "/browse/([A-Za-z][A-Za-z0-9]*-[0-9]+)\\b")
     static let keyRE = try! NSRegularExpression(pattern: "^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
