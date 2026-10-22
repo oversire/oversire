@@ -161,6 +161,30 @@ final class TrackerPlaneTests: XCTestCase {
                        ["\(list)i2/", "\(list)i3/"])
     }
 
+    func testItemsKeepAChangedItemBelowTheListDepth() async throws {
+        // Plane sorts the list by creation, not by activity. i1 is the oldest item and has the newest activity.
+        let list = "\(ws)/projects/P1/issues/"
+        func page(_ at: (Int) -> String) -> String {
+            let rows = (1...15).reversed().map { n in
+                #"{"id":"i\#(n)","name":"Item \#(n)","sequence_id":\#(n),"state":"s1","last_activity_at":"\#(at(n))"}"#
+            }
+            return #"{"results":[\#(rows.joined(separator: ","))],"next_page_results":false}"#
+        }
+        http.on("GET", list, page { _ in "2026-10-16T09:00:00Z" })
+        _ = try await plane.items(project, since: nil, limit: 50)
+
+        // Five items changed, so they load from the list. The list stops at row 14, before i1.
+        plane.indexMaxAge = 0
+        http.on("GET", list, page { n in n == 1 ? "2026-10-16T12:00:00Z" : n >= 12 ? "2026-10-16T11:00:00Z" : "2026-10-16T09:00:00Z" })
+        http.on("GET", "\(list)i1/", #"{"id":"i1","name":"Item 1","sequence_id":1,"state":"s1","last_activity_at":"2026-10-16T12:00:00Z"}"#)
+        let items = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(items.count, 15)
+        XCTAssertEqual(items.first { $0.id == "i1" }?.activityAt, ISO8601DateFormatter().date(from: "2026-10-16T12:00:00Z"))
+        XCTAssertTrue(http.requests.contains { $0.url?.path() == "\(list)i1/" }, "i1 loads alone")
+        XCTAssertTrue(http.requests.filter { $0.url?.query()?.contains("expand") == true && $0.url?.path() == list }
+            .allSatisfy { $0.url?.query()?.contains("order_by=-updated_at") == true })
+    }
+
     func testWritesMakePlaneJSON() async throws {
         let ref = ItemRef(project: project, id: "i1", key: "ENG-1", url: URL(string: "https://app.plane.so/acme/browse/ENG-1/")!)
         http.on("PATCH", "\(ws)/projects/P1/issues/i1/", "{}")

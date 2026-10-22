@@ -104,7 +104,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
             loaded = Set(top.map(\.id))
         } else {
             let query = [URLQueryItem(name: "expand", value: "assignees,labels"),
-                         URLQueryItem(name: "order_by", value: "-last_activity_at")]
+                         Self.newestFirst]
             rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: query, max: limit)
             if let since { rows = rows.filter { (parseISO($0["last_activity_at"] as? String) ?? .distantFuture) >= since } }
             loaded = Set(rows.compactMap { PlaneAPI.id($0["id"]) })
@@ -229,22 +229,25 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
         return ((try? await load(p, need, depth: 2000)) ?? [], kept)
     }
 
-    // A few items load one by one. More load from the list in activity order, `depth` rows deep.
+    // Plane ignores order_by=-last_activity_at and sorts by creation. It obeys -updated_at.
+    static let newestFirst = URLQueryItem(name: "order_by", value: "-updated_at")
+
+    // More than a few items load from the list, `depth` rows deep. The others load one by one.
+    // The list order is not the activity order, so an item can be below `depth`. It then loads alone.
     private func load(_ p: ProjectRef, _ need: Set<String>, depth: Int) async throws -> [[String: Any]] {
         if need.isEmpty { return [] }
         let expand = URLQueryItem(name: "expand", value: "assignees,labels")
-        if need.count <= 3 {
-            var rows: [[String: Any]] = []
-            for id in need.sorted() {
-                if let r = try? await api.send("GET", "\(ws)/projects/\(p.id)/issues/\(id)/", query: [expand]) as? [String: Any] {
-                    rows.append(r)
-                }
-            }
-            return rows
+        var rows: [[String: Any]] = []
+        if need.count > 3 {
+            let all = try await api.list("\(ws)/projects/\(p.id)/issues/", query: [expand, Self.newestFirst], max: depth)
+            rows = all.filter { PlaneAPI.id($0["id"]).map(need.contains) ?? false }
         }
-        let all = try await api.list("\(ws)/projects/\(p.id)/issues/",
-                                     query: [expand, URLQueryItem(name: "order_by", value: "-last_activity_at")], max: depth)
-        return all.filter { PlaneAPI.id($0["id"]).map(need.contains) ?? false }
+        for id in need.subtracting(rows.compactMap { PlaneAPI.id($0["id"]) }).sorted() {
+            if let r = try? await api.send("GET", "\(ws)/projects/\(p.id)/issues/\(id)/", query: [expand]) as? [String: Any] {
+                rows.append(r)
+            }
+        }
+        return rows
     }
 
     private func identifier(of p: ProjectRef) async throws -> String {
