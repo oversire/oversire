@@ -48,6 +48,8 @@ public struct AITaskKind: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let question: AITaskKind = "question"
     public static let itemSummary: AITaskKind = "itemSummary"
     public static let status: AITaskKind = "status"
+    /// The system prompt of the assistant chat. Not a job: ChatEngine runs it.
+    public static let assistant: AITaskKind = "assistant"
 }
 
 public struct AIInput: Hashable, Sendable, Codable {
@@ -106,13 +108,15 @@ public struct AIResult: StoreRecord {
     public var engine: EngineID
     public var text: String
     public var at: Date
+    public var usage: AIUsage?
 
-    public init(task: String, engine: EngineID, text: String, at: Date) {
+    public init(task: String, engine: EngineID, text: String, at: Date, usage: AIUsage? = nil) {
         schema = AITask.schemaVersion
         self.task = task
         self.engine = engine
         self.text = text
         self.at = at
+        self.usage = usage
     }
 
     public var id: String { task }

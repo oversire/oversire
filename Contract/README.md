@@ -8,8 +8,8 @@ Each side has its own types. Both sides run the same fixture files in their test
 - `schema/*.json`: JSON Schema, draft 2020-12.
   - `refs.json`: `ProviderID`, `AccountID`, `PersonRef`, the refs, `SubjectRef`.
   - `provider-event.json`: `ProviderEvent`, `EventSummary`.
-  - `actions.json`: `ItemPatch`, `ChangeAction`, `RunAction`, `LaunchRequest`.
-  - `ai-task.json`: `AITask`, `AIInput`, `AIResult`.
+  - `actions.json`: `ActionKind`, `ItemPatch`, `ChangeAction`, `RunAction`, `LaunchRequest`.
+  - `ai-task.json`: `AITask`, `AIInput`, `AIResult`, `AIUsage`.
   - `account.json`: `AccountConfig`.
   - `store.json`: the store records, `QueueLaneState` and `StoreOp`. Version 2.
   - `jobs.json`: `Job`, `JobTrigger`, `EventFilter`, `JobRun`. Swift names them `AIJob` and `AIJobRun`.
@@ -18,6 +18,7 @@ Each side has its own types. Both sides run the same fixture files in their test
   - `memory.json`: `MemoryEntry`, `MemoryDraft`.
   - `billing.json`: `UsageRow`, `LedgerEntry`, `BillingState`. Money is an integer in micro-USD.
   - `ai-endpoint.json`: `AIEndpoint`, `AIRoute`.
+  - `assistant.json`: `AssistantThread`, `AssistantMessage`, `AssistantPart`, `ChatEvent`, `ToolSpec`, `ToolCall`, `ToolResult`, `Approval`.
 - `fixtures/<type>/<case>.json`: sample values. The folder name is the type.
 - `prompts/<taskKind>.md`: the prompt of each AI task kind. `prompts/README.md` has the format.
 

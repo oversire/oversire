@@ -280,3 +280,58 @@ public enum JSONValue: Hashable, Sendable, Codable {
         }
     }
 }
+
+extension JSONValue {
+    /// A JSONSerialization value. NSNumber booleans stay booleans.
+    public init(any v: Any) {
+        switch v {
+        case is NSNull: self = .null
+        case let n as NSNumber where CFGetTypeID(n) == CFBooleanGetTypeID(): self = .bool(n.boolValue)
+        case let n as NSNumber: self = CFNumberIsFloatType(n) ? .double(n.doubleValue) : .int(n.intValue)
+        case let s as String: self = .string(s)
+        case let a as [Any]: self = .array(a.map(JSONValue.init(any:)))
+        case let o as [String: Any]: self = .object(o.mapValues(JSONValue.init(any:)))
+        default: self = .string(String(describing: v))
+        }
+    }
+
+    /// The JSONSerialization form.
+    public var any: Any {
+        switch self {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .int(let i): return i
+        case .double(let d): return d
+        case .string(let s): return s
+        case .array(let a): return a.map(\.any)
+        case .object(let o): return o.mapValues(\.any)
+        }
+    }
+
+    public subscript(_ key: String) -> JSONValue? {
+        if case .object(let o) = self { return o[key] }
+        return nil
+    }
+
+    public var string: String? { if case .string(let s) = self { return s }; return nil }
+    public var int: Int? {
+        switch self {
+        case .int(let i): return i
+        case .double(let d): return Int(exactly: d)
+        default: return nil
+        }
+    }
+    public var bool: Bool? { if case .bool(let b) = self { return b }; return nil }
+    public var array: [JSONValue]? { if case .array(let a) = self { return a }; return nil }
+    public var object: [String: JSONValue]? { if case .object(let o) = self { return o }; return nil }
+
+    /// Compact JSON text with sorted keys.
+    public var text: String {
+        let data = (try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes])) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    public init(parsing text: String) throws {
+        self.init(any: try JSONSerialization.jsonObject(with: Data(text.utf8), options: .fragmentsAllowed))
+    }
+}
