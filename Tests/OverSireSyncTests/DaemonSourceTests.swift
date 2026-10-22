@@ -159,13 +159,22 @@ final class DaemonSourceTests: XCTestCase {
         await m.refresh()
         let links = await m.links()
         XCTAssertEqual(links, [
-            MachineLink(machine: "mbp", base: URL(string: "http://mbp:7690")!, token: "osd1.APP1.secret", local: false),
+            MachineLink(machine: "mbp", base: URL(string: "http://100.97.81.23:7690")!, token: "osd1.APP1.secret", local: false),
             MachineLink(machine: "mba", base: loopback, token: nil, local: true),
         ])
         XCTAssertEqual(keychain.get("daemon.group.9f3c1a2b7d4e5f60"), "osd1.APP1.secret")
         // The credential is issued once.
         await m.refresh()
         XCTAssertEqual(daemon.issued, 1)
+    }
+
+    func testDialURLPrefersTheTailnetAddress() {
+        func m(_ addrs: [String]) -> GroupMember {
+            GroupMember(machine: "mbp.local", host: "mbp.local", addrs: addrs, port: 7690, roles: ["serve"], joinedAt: Date())
+        }
+        XCTAssertEqual(m(["fd7a:115c:a1e0::1", "100.97.81.23"]).dialURL, URL(string: "http://100.97.81.23:7690"))
+        XCTAssertEqual(m(["fd7a:115c:a1e0::1"]).dialURL, URL(string: "http://[fd7a:115c:a1e0::1]:7690"))
+        XCTAssertEqual(m([]).dialURL, URL(string: "http://mbp.local:7690"), "no address: the host name")
     }
 
     func testARosterChangeGivesNewLinks() async throws {

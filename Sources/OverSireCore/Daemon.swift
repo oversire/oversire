@@ -195,6 +195,13 @@ public struct GroupMember: Codable, Hashable, Sendable {
         self.lastSeen = lastSeen
         self.version = version
     }
+
+    /// The URL that the other members dial. The daemon listens only on loopback and the tailnet,
+    /// so a tailnet address (IPv4 first) wins over the host name, which can resolve to a LAN address.
+    public var dialURL: URL? {
+        let addr = addrs.first { !$0.contains(":") } ?? addrs.first.map { "[\($0)]" } ?? host
+        return URL(string: "http://\(addr):\(port)")
+    }
 }
 
 /// One credential holder: a daemon or an app.

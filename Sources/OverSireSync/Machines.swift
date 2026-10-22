@@ -179,7 +179,7 @@ public actor Machines {
     }
 
     private func remoteLink(_ m: GroupMember, token: String?) -> MachineLink? {
-        guard let token, let url = URL(string: "http://\(m.host):\(m.port)") else { return nil }
+        guard let token, let url = m.dialURL else { return nil }
         return MachineLink(machine: m.machine.rawValue, base: url, token: token, local: false)
     }
 
