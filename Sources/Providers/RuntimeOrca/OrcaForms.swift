@@ -287,13 +287,25 @@ extension OrcaRuntime {
             let screen = try await output(s, lines: 40)
             // A wait with no tool name can be either pause.
             if w.tool != "AskUserQuestion", let p = ClaudePrompt.parse(screen) {
-                let tool = w.tool.flatMap { name in localTranscript(cwd: w.path ?? t.path).flatMap { ClaudePrompt.openTool(name, in: $0) } }
+                var tool: String?
+                if let name = w.tool {
+                    _ = await transcript(pane: t.paneKey, cwd: w.path ?? t.path, words: w.input ?? p.key) {
+                        tool = ClaudePrompt.openTool(name, input: w.input, in: $0)
+                        return tool != nil
+                    }
+                }
                 out.append(SessionQuestion(id: questionID("form:" + (tool ?? "\(s.id):\(Self.fnv(p.key))")), session: s, origin: .session,
                                            items: [p.item(tool: w.tool, input: w.input)], via: .permission, askedAt: w.since))
                 continue
             }
             let form = w.tool == nil || w.tool == "AskUserQuestion" ? ClaudeForm.parse(screen) : nil
-            let call = form.flatMap { f in localAsk(cwd: w.path ?? t.path).flatMap { $0.open && $0.matches(f) ? $0 : nil } }
+            var call: ClaudeAsk?
+            if let form {
+                _ = await transcript(pane: t.paneKey, cwd: w.path ?? t.path, words: form.items.first?.text ?? form.key) {
+                    call = ClaudeAsk.last(in: $0).flatMap { $0.open && $0.matches(form) ? $0 : nil }
+                    return call != nil
+                }
+            }
             if let form, call != nil || !form.items.isEmpty {
                 let items = call?.items ?? (form.review ? [form.reviewItem] : form.items)
                 out.append(SessionQuestion(id: questionID(call.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.page))"), session: s,
@@ -355,8 +367,13 @@ extension OrcaRuntime {
     func formAnswer(_ q: SessionQuestion) async throws -> QuestionAnswer? {
         guard environment == nil, let msg = messageID(q.id), msg.hasPrefix("form:") else { return nil }
         let tool = String(msg.dropFirst("form:".count))
-        guard !tool.contains(":"), let path = try await terminalRows()[q.session.id]?.path, let ask = localAsk(cwd: path), ask.id == tool else { return nil }
-        return ask.answer(q.id)
+        guard !tool.contains(":"), let t = try await terminalRows()[q.session.id] else { return nil }
+        var ask: ClaudeAsk?
+        _ = await transcript(pane: t.paneKey, cwd: t.path, words: q.items.first?.text ?? "") {
+            ask = ClaudeAsk.last(in: $0).flatMap { $0.id == tool ? $0 : nil }
+            return ask != nil
+        }
+        return ask?.answer(q.id)
     }
 
     /// An agent that waits, or that is done. `started` is the stateStartedAt of Orca in ms.
@@ -404,13 +421,27 @@ extension OrcaRuntime {
         return out
     }
 
-    /// The last AskUserQuestion of the newest Claude transcript in `cwd`. Only on this Mac.
-    private func localAsk(cwd: String?) -> ClaudeAsk? { localTranscript(cwd: cwd).flatMap(ClaudeAsk.last) }
-
-    /// The tail of the newest Claude transcript in `cwd`. Only on this Mac.
-    private func localTranscript(cwd: String?) -> Data? {
-        guard environment == nil, let cwd, let transcripts, let file = transcripts.newest(agent: .claude, cwd: cwd) else { return nil }
-        return transcripts.tail(file: file, bytes: Self.transcriptTail)
+    /// The tail of the Claude transcript of the session in `pane`, when `fits` accepts it. Only on this Mac.
+    /// Many sessions can run in one folder, so the newest file there can be of another session.
+    /// The order: the file of the last fit, the newest file in `cwd`, then the files where `orca search` finds `words`.
+    func transcript(pane: String, cwd: String?, words: String, fits: (Data) -> Bool) async -> Data? {
+        guard environment == nil, let cwd, let transcripts else { return nil }
+        var tried: Set<String> = []
+        func fit(_ file: String) -> Data? {
+            guard tried.insert(file).inserted, let d = transcripts.tail(file: file, bytes: Self.transcriptTail), fits(d) else { return nil }
+            paneFiles[pane] = file
+            return d
+        }
+        for f in [transcripts.newest(agent: .claude, cwd: cwd), paneFiles[pane]].compactMap({ $0 }) {
+            if let d = fit(f) { return d }
+        }
+        let query = words.split { !$0.isLetter && !$0.isNumber }.prefix(10).joined(separator: " ")
+        guard !query.isEmpty, let r = try? await run(["search", "--query", query, "--agent", "claude", "--path", cwd, "--scope", "conversation",
+                                                     "--sort", "newest", "--limit", "5"]) else { return nil }
+        for h in r["hits"] as? [[String: Any]] ?? [] {
+            if let f = (h["source"] as? [String: Any])?["filePath"] as? String, let d = fit(f) { return d }
+        }
+        return nil
     }
 
     /// A short stable hash (FNV-1a, 64 bit) for an id.
@@ -418,5 +449,16 @@ extension OrcaRuntime {
         var h: UInt64 = 0xcbf2_9ce4_8422_2325
         for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100_0000_01b3 }
         return String(h, radix: 16)
+    }
+}
+
+/// The transcript file of each pane.
+final class PaneFiles: @unchecked Sendable {
+    private let lock = NSLock()
+    private var files: [String: String] = [:]
+
+    subscript(pane: String) -> String? {
+        get { lock.withLock { files[pane] } }
+        set { lock.withLock { files[pane] = newValue } }
     }
 }

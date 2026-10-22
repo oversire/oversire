@@ -90,13 +90,18 @@ struct ClaudePrompt {
     }
 
     /// The id of the last call of `tool` in a Claude transcript that has no result yet.
-    static func openTool(_ tool: String, in jsonl: Data) -> String? {
+    /// `input` is the start of the input that Orca shows, for example the command. A string of the call must start with it.
+    static func openTool(_ tool: String, input: String? = nil, in jsonl: Data) -> String? {
+        let start = input.map { String($0.prefix(40)) }.flatMap { $0.isEmpty ? nil : $0 }
         var open: String?
         for line in jsonl.split(separator: UInt8(ascii: "\n")) {
             guard let e = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   let blocks = (e["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
             for b in blocks {
-                if b["type"] as? String == "tool_use", b["name"] as? String == tool { open = b["id"] as? String }
+                if b["type"] as? String == "tool_use", b["name"] as? String == tool {
+                    let values = (b["input"] as? [String: Any])?.values.compactMap { $0 as? String } ?? []
+                    open = start.map { s in values.contains { $0.hasPrefix(s) } } ?? true ? b["id"] as? String : nil
+                }
                 if b["type"] as? String == "tool_result", let id = open, b["tool_use_id"] as? String == id { open = nil }
             }
         }

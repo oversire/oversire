@@ -146,6 +146,23 @@ final class OrcaFormsTests: XCTestCase {
         XCTAssertNotEqual(gone.first?.id, first[0].id)
     }
 
+    /// Many sessions run in one folder. The newest file there is of another session, so `orca search` finds the file of the form.
+    /// The next read uses that file again, with no search.
+    func testTheFormFileIsFoundBySearchAndKept() async throws {
+        files.file = Self.path("ask-answered.jsonl")
+        let hit = ["ok": true, "result": ["hits": [["agent": "claude", "sessionId": "s1", "source": ["filePath": Self.path("ask-open.jsonl")]]]]] as [String: Any]
+        orca.on("search --query", String(decoding: try JSONSerialization.data(withJSONObject: hit), as: UTF8.self))
+        let rt = runtime(nil)
+        let s = rt.sessionRef(workspace: "b07c::/w", handle: "term_form")
+        let first = try await rt.openQuestions(in: [s])
+        XCTAssertEqual(first.map(\.id.rawValue), ["orca:local:form:" + Self.tool])
+        let query = try XCTUnwrap(orca.args("search --query").first)
+        XCTAssertTrue(query.contains("/w"), "the search looks in the folder of the session")
+        let second = try await rt.openQuestions(in: [s])
+        XCTAssertEqual(second.map(\.id), first.map(\.id), "the id does not change when another session writes")
+        XCTAssertEqual(orca.args("search --query").count, 1, "the pane keeps its file")
+    }
+
     func testATranscriptOfAnotherSessionIsNotUsed() async throws {
         files.file = Self.path("ask-answered.jsonl")
         let rt = runtime(nil)

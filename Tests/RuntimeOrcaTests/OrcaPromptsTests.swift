@@ -136,6 +136,7 @@ final class OrcaPromptsTests: XCTestCase {
         XCTAssertEqual(ClaudePrompt.openTool("Bash", in: Data(jsonl.utf8)), "t2")
         XCTAssertNil(ClaudePrompt.openTool("Bash", in: Data(jsonl.utf8).prefix(160)), "the call has a result")
         XCTAssertNil(ClaudePrompt.openTool("Edit", in: Data(jsonl.utf8)))
+        XCTAssertNil(ClaudePrompt.openTool("Bash", input: "rm -rf build", in: Data(jsonl.utf8)), "the open call has another command")
     }
 
     func testPermissionQuestion() async throws {
@@ -149,7 +150,7 @@ final class OrcaPromptsTests: XCTestCase {
         XCTAssertEqual(q.items.first?.header, "Bash")
 
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-\(UUID().uuidString).jsonl")
-        try Data(#"{"message":{"content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{}}]}}"#.utf8).write(to: dir)
+        try Data(#"{"message":{"content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"\#(Self.command)"}}]}}"#.utf8).write(to: dir)
         defer { try? FileManager.default.removeItem(at: dir) }
         files.file = dir.path
         let named = try await open(rt)

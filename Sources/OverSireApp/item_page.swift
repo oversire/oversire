@@ -389,6 +389,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 self.summaryPanel(item, body: body, summary: summary, busy: busy, linked: linked)
             })
         }
+        rows += questionRows()
         rows.append(statusRow(stream: stream))
         if let r = cleanupRow(item) { rows.append(r) }
         if hasCloud, data.suggestions.openPlan(naming: item.key) != nil {
@@ -630,16 +631,21 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     // MARK: Session
 
-    private func session(stream: Workstream?) -> [PageRow] {
+    // The question cards of the item. Overview and Session both show them; one tab builds at a time.
+    private func questionRows() -> [PageRow] {
         let entries = data.questions.entries(key: key)
         questionCards = questionCards.filter { id, _ in entries.contains { $0.question.id == id } }
-        var rows = entries.map { e in
+        return entries.map { e in
             PageRow("q-\(e.question.id)", e) { [unowned self] in
                 let c = self.data.questions.card(e)
                 self.questionCards[e.question.id] = c
                 return c
             }
         }
+    }
+
+    private func session(stream: Workstream?) -> [PageRow] {
+        var rows = questionRows()
         if let a = stream?.agent {
             let s = data.statusJob.item(key)
             rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })

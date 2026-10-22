@@ -21,6 +21,8 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHisto
     /// The marker id of a host file upload.
     var uploadId: @Sendable () -> String = { UUID().uuidString }
     let coordinatorSlot = CoordinatorSlot()
+    /// The transcript file of the session in each pane, from the last read that fit.
+    let paneFiles = PaneFiles()
     /// The wait after a failed `check --wait`.
     var changesRetry: Duration = .seconds(10)
     var now: @Sendable () -> Date = { Date() }
