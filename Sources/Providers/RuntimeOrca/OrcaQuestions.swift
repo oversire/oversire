@@ -148,9 +148,15 @@ extension OrcaRuntime {
                         let coord = try await coordinator()
                         var args = ["orchestration", "check", "--terminal", coord.terminal, "--wait", "--types", "question", "--timeout-ms", "60000"]
                         if let ack { args += ["--ack", ack] }
+                        let start = ContinuousClock.now
                         let r = try await run(args, timeout: .seconds(75))
                         ack = r["deliveryId"] as? String
-                        if !(r["messages"] as? [Any] ?? []).isEmpty { cont.yield() }
+                        if !(r["messages"] as? [Any] ?? []).isEmpty {
+                            cont.yield()
+                        } else if ContinuousClock.now - start < .seconds(1) {
+                            // A wait that ends at once with no message must not spin.
+                            try? await Task.sleep(for: changesRetry)
+                        }
                     } catch {
                         if case ProviderError.vendor(let code, _) = error, ["stable_pane_required", "consumer_fenced"].contains(code) {
                             coordinatorSlot.reset()

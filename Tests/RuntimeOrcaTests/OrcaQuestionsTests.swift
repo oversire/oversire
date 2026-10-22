@@ -243,9 +243,19 @@ final class OrcaQuestionsTests: XCTestCase {
         let none = #"{"ok":true,"result":{"runId":"run_305c4998aa1e","deliveryId":null,"messages":[],"count":0,"acknowledged":"delivery_8b9d97015833","timedOut":true}}"#
         orca.on("orchestration check", delivery, none)
         guard let stream = rt.changes else { return XCTFail("no stream") }
-        var it = stream.makeAsyncIterator()
-        _ = await it.next()
+        let reader = Task {
+            var wakes = 0
+            for await _ in stream { wakes += 1 }
+            return wakes
+        }
         for _ in 0..<200 where orca.args("orchestration check").count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        reader.cancel()
+        let wakes = await reader.value
+        XCTAssertEqual(wakes, 1, "a check with no message does not wake")
+        try await Task.sleep(for: .milliseconds(50))
+        let stopped = orca.args("orchestration check").count
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(orca.args("orchestration check").count, stopped, "the loop stops with the reader")
         let calls = orca.args("orchestration check")
         XCTAssertEqual(calls[0].prefix(9), ["orchestration", "check", "--terminal", F.coord, "--wait", "--types", "question", "--timeout-ms", "60000"])
         XCTAssertFalse(calls[0].contains("--ack"))
