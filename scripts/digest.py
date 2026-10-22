@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Make a SessionDigest (Contract/schema/session-digest.json) from a Claude transcript.
 
-The remote Orca read runs this script when oversire-runner is not on the host.
-The rules are the same as in AgentBinder TranscriptReader and in oversire-runner digest.
+The remote Orca read runs this script when the oversire CLI is not on the host.
+The rules are the same as in AgentBinder TranscriptReader and in oversire digest.
 Contract/fixtures/session-digest holds the cases that all three readers must pass.
 
 Usage: digest.py [--markers] [--source S] [--earlier N] [--full N] [--max-chars N] <file or session id>

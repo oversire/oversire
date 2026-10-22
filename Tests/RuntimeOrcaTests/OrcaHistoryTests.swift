@@ -67,6 +67,15 @@ final class OrcaHistoryTests: XCTestCase {
         XCTAssertEqual(OrcaRuntime.digestScript + "\n", file)
     }
 
+    func testRemoteWithCLI() async throws {
+        orca.on("search --query", Self.hit(file: nil))
+        orca.on("terminal read", OrcaHostFilesTests.read(["$ command -v oversire", "OVERSIRE-CLI-H1"]),
+                OrcaHostFilesTests.read(["$ oversire digest"] + (try marked("long")) + ["$"]))
+        let d = try await remote().history(of: session, in: workspace, budget: .standard)
+        XCTAssertEqual(d.turns, try fixture("long").turns)
+        XCTAssertEqual(sent[1], "oversire digest --harness claude --session 'S1' --markers --source orca-terminal --earlier 12 --full 3 --max-chars 4000")
+    }
+
     func testRemoteWithRunner() async throws {
         orca.on("search --query", Self.hit(file: nil))
         orca.on("terminal read", OrcaHostFilesTests.read(["$ command -v oversire-runner", "OVERSIRE-RUNNER-H1"]),

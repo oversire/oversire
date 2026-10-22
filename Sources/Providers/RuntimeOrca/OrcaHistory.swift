@@ -3,7 +3,8 @@ import OverSireCore
 
 // The history of an Orca session. `orca search` finds the harness session id (and the file on this Mac).
 // A local session goes to the injected TranscriptReading. A remote session gets an ad hoc terminal in its
-// workspace: oversire-runner digest, else python3 with digestScript, prints the digest between markers.
+// workspace: oversire digest (or the old oversire-runner digest), else python3 with digestScript, prints the digest
+// between markers.
 
 extension OrcaRuntime {
     static let historyLines = 600
@@ -49,12 +50,14 @@ extension OrcaRuntime {
                             budget: HistoryBudget) async throws -> SessionDigest {
         let id = uploadId()
         try await Task.sleep(for: shellWait)
-        try await type(h, "command -v oversire-runner >/dev/null && \(Self.mark("RUNNER", id)) || { command -v python3 >/dev/null"
-            + " && \(Self.mark("PY", id)) || \(Self.mark("NO", id)); }")
-        let probe = try await readUntil(h, lines: 40) { $0.contains { l in ["RUNNER", "PY", "NO"].contains { l.contains("OVERSIRE-\($0)-" + id) } } }
+        try await type(h, "command -v oversire >/dev/null && \(Self.mark("CLI", id)) || { command -v oversire-runner >/dev/null"
+            + " && \(Self.mark("RUNNER", id)) || { command -v python3 >/dev/null && \(Self.mark("PY", id)) || \(Self.mark("NO", id)); }; }")
+        let probe = try await readUntil(h, lines: 40) { $0.contains { l in ["CLI", "RUNNER", "PY", "NO"].contains { l.contains("OVERSIRE-\($0)-" + id) } } }
         let session = sessionId.map(Self.quote) ?? "\"$(ls -t ~/.claude/projects/\(Self.slug(path))/*.jsonl 2>/dev/null | head -1)\""
         let flags = "\(session) --markers --source orca-terminal --earlier \(budget.earlier) --full \(budget.full) --max-chars \(budget.maxChars)"
-        if probe.contains(where: { $0.contains("OVERSIRE-RUNNER-" + id) }) {
+        if probe.contains(where: { $0.contains("OVERSIRE-CLI-" + id) }) {
+            try await type(h, "oversire digest --harness \(agent.rawValue) --session " + flags)
+        } else if probe.contains(where: { $0.contains("OVERSIRE-RUNNER-" + id) }) {
             try await type(h, "oversire-runner digest --harness \(agent.rawValue) --session " + flags)
         } else if probe.contains(where: { $0.contains("OVERSIRE-PY-" + id) }) {
             let file = "\"${TMPDIR:-/tmp}/oversire-digest-\(id).py\""
@@ -64,7 +67,7 @@ extension OrcaRuntime {
             _ = try await run(["terminal", "send", "--terminal", h, "--text", "\u{04}"])
             try await type(h, "stty echo; python3 -I \(file) \(flags); rm -f \(file)")
         } else {
-            throw ProviderError.vendor(code: "host_tools", message: "The Orca host needs oversire-runner or python3 to read the session history.")
+            throw ProviderError.vendor(code: "host_tools", message: "The Orca host needs the oversire CLI or python3 to read the session history.")
         }
         let out = try await readUntil(h, lines: Self.historyLines) { $0.contains { $0.hasPrefix("OVERSIRE-DIGEST-END") || $0.hasPrefix("OVERSIRE-DIGEST-ERROR") } }
         return try Self.digest(fromMarked: out)
@@ -114,8 +117,8 @@ extension OrcaRuntime {
     #!/usr/bin/env python3
     """Make a SessionDigest (Contract/schema/session-digest.json) from a Claude transcript.
 
-    The remote Orca read runs this script when oversire-runner is not on the host.
-    The rules are the same as in AgentBinder TranscriptReader and in oversire-runner digest.
+    The remote Orca read runs this script when the oversire CLI is not on the host.
+    The rules are the same as in AgentBinder TranscriptReader and in oversire digest.
     Contract/fixtures/session-digest holds the cases that all three readers must pass.
 
     Usage: digest.py [--markers] [--source S] [--earlier N] [--full N] [--max-chars N] <file or session id>

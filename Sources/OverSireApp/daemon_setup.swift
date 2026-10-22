@@ -1,14 +1,15 @@
 import Cocoa
 import OverSireCore
 
-/// The local runner: its status, and "Use this Mac as the runner". Main thread only.
-final class RunnerSetup {
-    static let shared = RunnerSetup()
-    static let changed = Notification.Name("RunnerSetupChanged")
+/// The local daemon: its status, and "Use this Mac as the runner". Main thread only.
+final class DaemonSetup {
+    static let shared = DaemonSetup()
+    static let changed = Notification.Name("DaemonSetupChanged")
     private static let offeredKey = "runnerOffered"
+    private static let updateOfferedKey = "daemonUpdateOffered"
 
-    let installer = RunnerInstaller(http: URLSessionTransport(), commands: ProcessRunner())
-    private(set) var local: RunnerStatus?
+    let installer = DaemonInstaller(http: URLSessionTransport(), commands: ProcessRunner())
+    private(set) var local: DaemonStatus?
     private(set) var busy = false
     private(set) var error: String?
     private var loaded = false
@@ -37,21 +38,38 @@ final class RunnerSetup {
         DispatchQueue.main.async { self.offer() }
     }
 
+    /// Asks one time to replace an old oversire-runner install with the oversire CLI.
+    func offerUpdateOnce() {
+        guard !UserDefaults.standard.bool(forKey: Self.updateOfferedKey), !installer.isInstalled,
+              FileManager.default.fileExists(atPath: DaemonInstaller.legacyConfig.path) else { return }
+        UserDefaults.standard.set(true, forKey: Self.updateOfferedKey)
+        DispatchQueue.main.async {
+            let a = NSAlert()
+            a.messageText = "Update the OverSire runner?"
+            a.informativeText = "oversire-runner is now the oversire CLI. The update keeps the pairing, the allow list and the orders, and starts the OverSire daemon in place of the runner."
+            a.addButton(withTitle: "Update")
+            a.addButton(withTitle: "Not now")
+            NSApp.activate(ignoringOtherApps: true)
+            guard a.runModal() == .alertFirstButtonReturn else { return }
+            self.install(keepAwake: false, pair: false)
+        }
+    }
+
     func offer() {
         guard !busy else { return }
         let a = NSAlert()
         a.messageText = "Make this Mac the runner?"
-        a.informativeText = "The runner starts the Orca sessions of the suggestions that you accept, also when you accept them on the phone. It takes only typed orders that your allow list permits. Edit the list in ~/.config/oversire-runner/allow.json."
+        a.informativeText = "The runner starts the Orca sessions of the suggestions that you accept, also when you accept them on the phone. It takes only typed orders that your allow list permits. Edit the list in ~/.config/oversire/daemon/allow.json."
         a.addButton(withTitle: "Use this Mac")
         a.addButton(withTitle: "Not now")
         a.showsSuppressionButton = true
         a.suppressionButton?.title = "Keep this Mac awake on power while orders wait"
         NSApp.activate(ignoringOtherApps: true)
         guard a.runModal() == .alertFirstButtonReturn else { return }
-        install(keepAwake: a.suppressionButton?.state == .on)
+        install(keepAwake: a.suppressionButton?.state == .on, pair: true)
     }
 
-    private func install(keepAwake: Bool) {
+    func install(keepAwake: Bool, pair: Bool) {
         busy = true
         error = nil
         NotificationCenter.default.post(name: Self.changed, object: self)
@@ -59,13 +77,14 @@ final class RunnerSetup {
         let name = Host.current().localizedName ?? "Mac"
         Task { @MainActor in
             do {
-                self.local = try await self.installer.install(hub: RELAY.workerURL, name: name, keepAwake: keepAwake) {
+                let pairing = pair ? DaemonInstaller.Pairing(hub: RELAY.workerURL, name: name) {
                     try await Task.detached { try api.runnerCode().get().code }.value
-                }
-                log.info("Runner: installed and paired")
+                } : nil
+                self.local = try await self.installer.install(keepAwake: keepAwake, pairing: pairing)
+                log.info("Daemon: installed\(pair ? " and paired" : "")")
             } catch {
                 self.error = "Install failed: \(error)"
-                log.error("Runner: \(String(describing: error), privacy: .public)")
+                log.error("Daemon: \(String(describing: error), privacy: .public)")
             }
             self.busy = false
             NotificationCenter.default.post(name: Self.changed, object: self)
@@ -84,22 +103,22 @@ final class RunnerSetupRow: Row {
     init() {
         let glyph = Glyph("desktopcomputer", color: Palette.dim, size: 13)
         glyph.widthAnchor.constraint(equalToConstant: 18).isActive = true
-        super.init([glyph, TwoLine("This Mac", "Run the work orders here, with the runner as a login item."), Spacer(), status, button],
+        super.init([glyph, TwoLine("This Mac", "Run the work orders here, with the OverSire daemon as a login item."), Spacer(), status, button],
                    height: 52)
-        button.onClick = { RunnerSetup.shared.offer() }
-        observer = NotificationCenter.default.addObserver(forName: RunnerSetup.changed, object: nil, queue: .main) { [weak self] _ in
+        button.onClick = { DaemonSetup.shared.offer() }
+        observer = NotificationCenter.default.addObserver(forName: DaemonSetup.changed, object: nil, queue: .main) { [weak self] _ in
             self?.update()
         }
         update()
-        if RunnerSetup.shared.needsLoad { RunnerSetup.shared.refresh() }
+        if DaemonSetup.shared.needsLoad { DaemonSetup.shared.refresh() }
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { observer.map(NotificationCenter.default.removeObserver) }
 
     private func update() {
-        let s = RunnerSetup.shared
+        let s = DaemonSetup.shared
         status.stringValue = s.statusText
-        button.isHidden = s.local?.paired == true
+        button.isHidden = s.local?.paired == true && s.local?.roles?.contains("runner") != false
         button.isEnabled = !s.busy
         setAccessibilityLabel("This Mac. \(s.statusText)")
     }
