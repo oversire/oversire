@@ -1,9 +1,11 @@
 import Foundation
 import OverSireCore
 
-/// The store of a Mac that is paired with an OverSire Cloud account. It wraps LocalStore and works offline.
+/// The store of a Mac that syncs with the cloud hub or with the home daemon of its machine group. It wraps LocalStore and works offline.
 /// A write goes to disk at once, and its op waits in the outbox until the server accepts it.
 /// Remote ops apply when their hlc is newer (last write wins for each record). Other collections stay local.
+/// The replica can change: a home move (409) or a group change. Each replica has its own cursor. The outbox keeps the ops
+/// while there is no replica.
 public actor SyncedStore: Store {
     public static let cursorKey = "store"
     public static let tombstoneDays = 30
@@ -20,7 +22,10 @@ public actor SyncedStore: Store {
     private static let names = pulled.keys.sorted()
 
     public nonisolated let local: LocalStore
-    private let replication: any StoreReplication
+    /// The device id in the hlc of each local write.
+    public nonisolated let device: String
+    private var replica: StoreReplica?
+    private let rehome: @Sendable (StoreNotHome) async -> StoreReplica?
     private let clock: HybridClock
     private let outbox: Outbox
     private let cursors: CursorStore
@@ -37,22 +42,80 @@ public actor SyncedStore: Store {
     public private(set) var lastSync: Date?
     public private(set) var lastError: String?
 
-    /// dir holds the outbox and the record clocks. A nil dir keeps them in memory. autoSync off: only sync() sends.
+    /// The cloud hub as the replica, with the id "cloud".
     public init(local: LocalStore, replication: any StoreReplication, device: String, dir: URL?, cursors: CursorStore,
                 now: @escaping @Sendable () -> Date = Date.init, sleeper: any Clock<Duration> = ContinuousClock(),
                 autoSync: Bool = true) {
+        self.init(local: local, replica: StoreReplica(id: Self.cloudReplica, replication: replication), device: device, dir: dir,
+                  cursors: cursors, now: now, sleeper: sleeper, autoSync: autoSync)
+    }
+
+    /// dir holds the outbox and the record clocks. A nil dir keeps them in memory. autoSync off: only sync() sends.
+    /// A nil replica keeps all ops in the outbox. rehome gives the replica after a 409 (nil: none now).
+    public init(local: LocalStore, replica: StoreReplica?, device: String, dir: URL?, cursors: CursorStore,
+                now: @escaping @Sendable () -> Date = Date.init, sleeper: any Clock<Duration> = ContinuousClock(),
+                autoSync: Bool = true, rehome: @escaping @Sendable (StoreNotHome) async -> StoreReplica? = { _ in nil }) {
         self.local = local
-        self.replication = replication
+        self.replica = replica
+        self.rehome = rehome
         self.cursors = cursors
         self.now = now
         self.sleeper = sleeper
         self.autoSync = autoSync
+        self.device = device
         clock = HybridClock(device: device, now: now)
         outbox = Outbox(url: dir?.appendingPathComponent("outbox.json"))
         stateURL = dir?.appendingPathComponent("clocks.json")
         state = stateURL.flatMap { try? JSONDecoder().decode(SyncState.self, from: Data(contentsOf: $0)) } ?? SyncState()
         // A clock that went back after a restart still makes larger stamps.
         for hlc in state.clocks.values.map(\.hlc) + outbox.pending.map(\.hlc) { clock.observe(hlc) }
+        if let replica, state.home == nil { state.home = replica.id }
+    }
+
+    /// The id of the cloud replica. Its cursor keeps the old key.
+    public static let cloudReplica = "cloud"
+
+    /// The id of the replica now. nil: local only.
+    public var replicaID: String? { replica?.id }
+
+    /// Changes the replica. A new home gets the full local store once, with the hlc of each record: the newest write wins there.
+    /// nil keeps the ops in the outbox until a replica comes back.
+    public func use(_ next: StoreReplica?) {
+        switchTo(next)
+        if next != nil, autoSync { Task { await self.sync() } }
+    }
+
+    private func switchTo(_ next: StoreReplica?) {
+        guard next?.id != replica?.id else { replica = next; return }
+        replica = next
+        guard let next else { return }
+        if let home = state.home, home != next.id { pushAll() }
+        state.home = next.id
+        saveState()
+    }
+
+    /// Queues each record and tombstone with its own hlc.
+    private func pushAll() {
+        let waiting = Set(outbox.pending.map { Self.key($0.collection, $0.id) })
+        for (key, c) in state.clocks where !waiting.contains(key) {
+            guard let slash = key.firstIndex(of: "/") else { continue }
+            let collection = String(key[..<slash]), id = String(key[key.index(after: slash)...])
+            guard let type = Self.byName[collection] else { continue }
+            if c.deleted {
+                outbox.add(StoreOp(collection: collection, id: id, op: .delete, hlc: c.hlc, device: clock.device))
+            } else if let value = Self.stored(type, id: id, in: local) {
+                outbox.add(StoreOp(collection: collection, id: id, op: .put, record: value, hlc: c.hlc, device: clock.device))
+            }
+        }
+    }
+
+    private static func stored<R: StoreRecord>(_ type: R.Type, id: String, in local: LocalStore) -> JSONValue? {
+        local.stored(type).first { $0.id == id }.flatMap { try? JSONValue($0) }
+    }
+
+    private var cursorKey: String {
+        guard let id = replica?.id, id != Self.cloudReplica else { return Self.cursorKey }
+        return "\(Self.cursorKey)@\(id)"
     }
 
     public var pending: Int { outbox.pending.count }
@@ -111,6 +174,7 @@ public actor SyncedStore: Store {
     /// Sends the outbox, then reads the remote ops. Calls during a sync run once more after it.
     /// A failure tries again later with a backoff.
     public func sync() async {
+        guard replica != nil else { return }
         guard !syncing else { syncAgain = true; return }
         syncing = true
         defer { syncing = false }
@@ -127,6 +191,14 @@ public actor SyncedStore: Store {
                 backoff.reset()
                 retry?.cancel()
                 retry = nil
+            } catch let e as StoreNotHome {
+                lastError = e.message
+                let next = await rehome(e)
+                // The store of another replica is not here yet: the next sync reads it.
+                guard next != nil, next?.id != replica?.id else { switchTo(nil); return }
+                switchTo(next)
+                syncAgain = true
+                continue
             } catch {
                 lastError = (error as? ProviderError)?.message ?? error.localizedDescription
                 if error as? ProviderError != .unauthorized { scheduleRetry() }
@@ -156,6 +228,7 @@ public actor SyncedStore: Store {
     }
 
     private func push() async throws {
+        guard let replication = replica?.replication else { throw ProviderError.transport("The store has no home now") }
         while true {
             let batch = Array(outbox.pending.prefix(100))
             if batch.isEmpty { return }
@@ -166,7 +239,9 @@ public actor SyncedStore: Store {
     }
 
     private func pull(all: Bool) async throws {
-        var cursor = all ? nil : cursors[Self.cursorKey]
+        guard let replication = replica?.replication else { return }
+        let key = cursorKey
+        var cursor = all ? nil : cursors[key]
         var reset = false
         var seen = Set<String>()
         while true {
@@ -183,7 +258,7 @@ public actor SyncedStore: Store {
         if reset && state.seeded && !all { try await drop(keeping: seen) }
         pruneTombstones()
         saveState()
-        cursors[Self.cursorKey] = cursor
+        cursors[key] = cursor
     }
 
     private func apply(_ op: StoreOp) async throws {
@@ -266,6 +341,8 @@ struct SyncState: Codable, Sendable {
     var clocks: [String: RecordClock] = [:]
     /// The pulled collections at the last seed. Nil before this field.
     var known: [String]?
+    /// The id of the last replica. Nil before this field.
+    var home: String?
 }
 
 extension JSONValue {

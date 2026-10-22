@@ -10,12 +10,16 @@ public actor FakeStoreHub {
     public var pageSize = 500
     public private(set) var pushes = 0
     public private(set) var pulls = 0
+    /// A daemon that is not home any more answers 409 to each call.
+    public private(set) var notHome: StoreNotHome?
 
     public init() {}
 
     public nonisolated func replication() -> FakeReplication { FakeReplication(hub: self) }
 
     public func setOnline(_ on: Bool) { online = on }
+
+    public func setNotHome(_ e: StoreNotHome?) { notHome = e }
 
     public func setPageSize(_ n: Int) { pageSize = n }
 
@@ -30,6 +34,7 @@ public actor FakeStoreHub {
 
     func push(_ ops: [StoreOp]) throws -> [StoreOp] {
         guard online else { throw ProviderError.transport("offline") }
+        if let notHome { throw notHome }
         pushes += 1
         var accepted: [StoreOp] = []
         for op in ops {
@@ -44,6 +49,7 @@ public actor FakeStoreHub {
 
     func pull(after: Cursor?) throws -> StorePull {
         guard online else { throw ProviderError.transport("offline") }
+        if let notHome { throw notHome }
         pulls += 1
         var from = after.flatMap { Int($0.rawValue) } ?? 0
         let reset = from > 0 && from < prunedThrough

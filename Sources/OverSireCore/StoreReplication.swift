@@ -23,3 +23,28 @@ public struct StorePull: Hashable, Sendable {
         self.reset = reset
     }
 }
+
+/// One copy of the synced collections: the cloud hub, or the home daemon of the machine group.
+/// `id` names the copy, for example "cloud:<device>" or "member:<group>/<machine>". Each copy has its own cursor.
+public struct StoreReplica: Sendable {
+    public var id: String
+    public var replication: any StoreReplication
+
+    public init(id: String, replication: any StoreReplication) {
+        self.id = id
+        self.replication = replication
+    }
+}
+
+/// A daemon does not keep the store (409). `home` is the member that keeps it now. `cloud`: the cloud hub keeps it.
+public struct StoreNotHome: Error, Hashable, Sendable {
+    public var home: String?
+    public var cloud: Bool
+    public var message: String
+
+    public init(home: String? = nil, cloud: Bool = false, message: String) {
+        self.home = home
+        self.cloud = cloud
+        self.message = message
+    }
+}
