@@ -65,8 +65,9 @@ public final class DaemonClient: Sendable {
         let _: Done = try await post("/v1/group/requests/\(Self.escape(request))/\(approve ? "approve" : "deny")", [String: String]())
     }
 
-    public func setHome(_ machine: String) async throws {
-        let _: Done = try await post("/v1/group/home", ["machine": machine])
+    @discardableResult
+    public func setHome(_ machine: String) async throws -> HomeMove {
+        try await post("/v1/group/home", ["machine": machine])
     }
 
     /// Removes a member from the group.

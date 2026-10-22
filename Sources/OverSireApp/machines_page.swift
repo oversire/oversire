@@ -213,9 +213,10 @@ final class MachinesController {
         loadedAt = Date()
     }
 
-    private func run(_ what: String, _ op: @escaping () async throws -> Void) {
+    /// op can give a warning for the page.
+    private func run(_ what: String, _ op: @escaping () async throws -> String?) {
         Task { @MainActor in
-            do { try await op() } catch {
+            do { if let w = try await op() { self.notice = w } } catch {
                 self.notice = "\(what): \(DaemonClient.reason(error))"
                 log.error("Machines: \(self.notice ?? "", privacy: .public)")
             }
@@ -248,10 +249,10 @@ final class MachinesController {
         }
     }
 
-    func setHome(_ machine: String) { let l = local; run("Make home") { try await l.setHome(machine) } }
-    func remove(_ machine: String) { let l = local; run("Remove \(machine)") { try await l.remove(machine) } }
-    func installHooks(_ names: [String]) { let l = local; run("Install hooks") { _ = try await l.hooks(install: names) } }
-    func removeHooks(_ names: [String]) { let l = local; run("Remove hooks") { _ = try await l.removeHooks(names) } }
+    func setHome(_ machine: String) { let l = local; run("Make home") { try await l.setHome(machine).warning } }
+    func remove(_ machine: String) { let l = local; run("Remove \(machine)") { try await l.remove(machine); return nil } }
+    func installHooks(_ names: [String]) { let l = local; run("Install hooks") { _ = try await l.hooks(install: names); return nil } }
+    func removeHooks(_ names: [String]) { let l = local; run("Remove hooks") { _ = try await l.removeHooks(names); return nil } }
 
     func setMuted(_ machine: String, _ on: Bool) {
         if on { MACHINES.muted.insert(machine) } else { MACHINES.muted.remove(machine) }

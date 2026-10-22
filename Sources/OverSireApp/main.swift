@@ -221,6 +221,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             }
         }
         machineHub.start()
+        DaemonSetup.shared.offerUpdateOnce()
         relay.start()
         updatePolling()
         rateLimit.onChange = { [weak self] in

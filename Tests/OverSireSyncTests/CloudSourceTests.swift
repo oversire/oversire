@@ -285,4 +285,19 @@ final class CloudSourceTests: XCTestCase {
         await eventually("hint") { hints.get() == 2 }
         await source.stop()
     }
+
+    func testAFrameGoesByItsType() async throws {
+        let conn = FakeConnection()
+        let hints = Locked(0)
+        let frames = Locked([String]())
+        let source = CloudSource(base: base, token: "t-1", http: FakeCloud(), socket: FakeSocket([.success(conn)]),
+                                 cursors: CursorStore(url: nil), onStore: { hints.with { $0 += 1 } },
+                                 onFrame: { f in frames.with { $0.append(f) } })
+        _ = source.events()
+        await eventually("connect") { hints.get() == 1 }
+        conn.push(#"{"type":"session","session":{"summary":"the \"store\" and the \"group\""}}"#)
+        await eventually("frame") { frames.get().count == 1 }
+        XCTAssertEqual(hints.get(), 1)
+        await source.stop()
+    }
 }

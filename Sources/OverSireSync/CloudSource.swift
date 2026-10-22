@@ -150,14 +150,15 @@ public actor CloudSource: EventSource {
 
     private func handle(_ message: String) {
         if message == "pong" { pongSeen = true; return }
-        if message.contains("\"store\"") { pongSeen = true; onStore(); return }
-        if message.contains("\"group\"") { pongSeen = true; onGroup(); return }
-        guard message.contains("\"poke\"") else {
-            if message.hasPrefix("{") { pongSeen = true; onFrame(message) }
-            return
-        }
+        guard let data = message.data(using: .utf8),
+              let type = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["type"] as? String else { return }
         pongSeen = true
-        Task { await self.sync() }
+        switch type {
+        case "store": onStore()
+        case "group": onGroup()
+        case "poke": Task { await self.sync() }
+        default: onFrame(message)
+        }
     }
 
     // "ping" text gets an auto-response from the Durable Object, so it does not wake it.

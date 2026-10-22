@@ -5,7 +5,6 @@ import OverSireCore
 final class DaemonSetup {
     static let shared = DaemonSetup()
     static let changed = Notification.Name("DaemonSetupChanged")
-    private static let offeredKey = "runnerOffered"
     private static let updateOfferedKey = "daemonUpdateOffered"
 
     let installer = DaemonInstaller(http: URLSessionTransport(), commands: ProcessRunner())
@@ -27,15 +26,6 @@ final class DaemonSetup {
             self.loaded = true
             NotificationCenter.default.post(name: Self.changed, object: self)
         }
-    }
-
-    /// Asks one time, when Orca runs on this Mac and no runner is paired.
-    func offerOnce(records: CloudAIRecords) {
-        let orca = PROJECTS_CFG.orca
-        guard !UserDefaults.standard.bool(forKey: Self.offeredKey), records.runners.isEmpty, !installer.isInstalled,
-              orca.enabled, orca.environment == nil, FileManager.default.isExecutableFile(atPath: orca.cli) else { return }
-        UserDefaults.standard.set(true, forKey: Self.offeredKey)
-        DispatchQueue.main.async { self.offer() }
     }
 
     /// Asks one time to replace an old oversire-runner install with the oversire CLI.
