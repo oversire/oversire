@@ -33,6 +33,7 @@ protocol AppData: AnyObject {
     var logs: LogStore? { get }
     /// The changes of the data. Pages and windows observe it.
     var bus: ChangeBus { get }
+    var actions: AppActionCatalog { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func refresh(force: Bool, completion: (() -> Void)?)

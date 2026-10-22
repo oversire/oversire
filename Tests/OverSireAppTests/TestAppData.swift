@@ -51,11 +51,13 @@ final class TestAppData: AppData {
     lazy var statusJob = StatusJob(path: tmp + "/session-status.json", agents: agentIndex, queue: queue)
     let relay = LiveSync(secrets: SecretStore(service: "com.oversire.app.tests"), cursors: CursorStore(url: nil))
     var logs: LogStore? { nil }
+    var caps: Set<Capability> = []
+    lazy var actions = AppActionCatalog(data: self)
 
     init() { try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true) }
     deinit { try? FileManager.default.removeItem(atPath: tmp) }
 
-    func has(_ c: Capability) -> Bool { false }
+    func has(_ c: Capability) -> Bool { caps.contains(c) }
     func rerun(repo: String, runs: [Run], failedOnly: Bool) {}
     func setIgnored(_ runs: [Run], ignored: Bool) {}
     func refresh(force: Bool, completion: (() -> Void)?) { completion?() }

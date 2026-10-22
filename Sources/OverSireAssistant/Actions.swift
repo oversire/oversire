@@ -67,11 +67,13 @@ public struct ActionSpec: Sendable {
 
     public static let noArgs: JSONValue = .object(["type": .string("object"), "properties": .object([:])])
 
-    /// A schema object with `properties` as name → (type, help). `required` lists the names that must be set.
+    /// A schema object with `properties` as name → (type, help). An array holds strings. `required` lists the names that must be set.
     public static func args(_ properties: [String: (String, String)], required: [String] = []) -> JSONValue {
         var props: [String: JSONValue] = [:]
         for (name, p) in properties {
-            props[name] = .object(["type": .string(p.0), "description": .string(p.1)])
+            var o: [String: JSONValue] = ["type": .string(p.0), "description": .string(p.1)]
+            if p.0 == "array" { o["items"] = .object(["type": .string("string")]) }
+            props[name] = .object(o)
         }
         var schema: [String: JSONValue] = ["type": .string("object"), "properties": .object(props)]
         if !required.isEmpty { schema["required"] = .array(required.sorted().map(JSONValue.string)) }

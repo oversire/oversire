@@ -27,6 +27,31 @@ enum RowCommand: Equatable {
     case useTrackerIcon(String)
     case hideProject(String)
     case removeWorktree(card: String)
+
+    /// The catalog action of a domain command. nil for a UI command. `key` gives the item key of an item id.
+    func action(key: (String) -> String?) -> (id: String, args: [String: JSONValue])? {
+        func item(_ itemId: String, _ id: String, _ more: [String: JSONValue] = [:]) -> (String, [String: JSONValue])? {
+            key(itemId).map { (id, more.merging(["key": .string($0)]) { a, _ in a }) }
+        }
+        switch self {
+        case .status(let i, let o): return item(i, "item.setStatus", ["status": .string(o)])
+        case .priority(let i, let p): return item(i, "item.setPriority", ["priority": .string(p)])
+        case .assignMe(let i): return item(i, "item.assignMe")
+        case .startSession(let k): return ("session.start", ["key": .string(k)])
+        case .run(let repo, let id, let a):
+            let args: [String: JSONValue] = ["repo": .string(repo), "runId": .string(id)]
+            return a == .cancel ? ("run.cancel", args) : ("run.rerun", args.merging(["failedOnly": .bool(a == .rerunFailed)]) { a, _ in a })
+        case .ignoreFailure(let repo, let id, let on): return ("run.ignore", ["repo": .string(repo), "runId": .string(id), "on": .bool(on)])
+        case .rerunJob(let repo, let runId, let jobId): return ("run.rerunJob", ["repo": .string(repo), "runId": .string(runId), "jobId": .string(jobId)])
+        case .approve(let repo, let n): return ("pr.approve", ["repo": .string(repo), "number": .int(n)])
+        case .merge(let repo, let n): return ("pr.merge", ["repo": .string(repo), "number": .int(n)])
+        case .revealCard(let card): return ("session.reveal", ["card": .string(card)])
+        case .refreshProject(let k): return ("project.refresh", ["project": .string(k)])
+        case .open, .openURL, .copy, .finder, .terminal, .copyJobLog, .explain, .sendInput, .triage, .onlyProject,
+             .useTrackerIcon, .hideProject, .removeWorktree:
+            return nil
+        }
+    }
 }
 
 // One line of a row menu.
@@ -213,6 +238,15 @@ final class RowCommander {
     func run(_ c: RowCommand, anchor: NSView?) {
         if intercept?(c) == true { return }
         let store = data.projectStore
+        if case .startSession(let key) = c {
+            guard let found = store.item(key: key), let anchor else { return }
+            SessionStartMenu(data).start(found.item, snap: found.snap, at: anchor)
+            return
+        }
+        if let (id, args) = c.action(key: { store.item($0)?.item.key }) {
+            data.actions.click(id, args, in: anchor?.window)
+            return
+        }
         switch c {
         case .open(let r): go(r)
         case .openURL(let u): if let url = URL(string: u) { NSWorkspace.shared.open(url) }
@@ -221,41 +255,13 @@ final class RowCommander {
         case .terminal(let p):
             NSWorkspace.shared.open([URL(fileURLWithPath: p)], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
                                     configuration: NSWorkspace.OpenConfiguration())
-        case .status(let id, let opt): store.setStatus(itemId: id, optionId: opt) { _ in }
-        case .priority(let id, let p): store.update(itemId: id, ItemPatch(priority: p), failure: "Could not change the priority") { _ in }
-        case .assignMe(let id): store.assignMe(itemId: id) { _ in }
-        case .startSession(let key):
-            guard let found = store.item(key: key), let anchor else { return }
-            data.agentIndex.start(found.item, snap: found.snap, anchor: anchor)
-        case .run(let repo, let id, let a):
-            Task { [weak self] in
-                _ = await REPO_CLIENT.perform(a, repo: repo, id: id)
-                await MainActor.run { self?.data.refresh(force: true, completion: nil) }
-            }
-        case .ignoreFailure(let repo, let id, let on):
-            guard let r = data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) else { return }
-            data.setIgnored([r], ignored: on)
         case .copyJobLog(let repo, let id):
             Task { if let log = await REPO_CLIENT.rawLog(repo, jobId: id) { await MainActor.run { RowActions.copy(log) } } }
-        case .rerunJob(let repo, let runId, let jobId):
-            Task { [weak self, weak anchor] in
-                let err = await REPO_CLIENT.rerunJob(repo: repo, runId: runId, jobId: jobId)
-                await MainActor.run {
-                    if let err { self?.fail("Could not re-run the job", err, anchor: anchor) }
-                    self?.data.refresh(force: true, completion: nil)
-                }
-            }
-        case .approve(let repo, let n), .merge(let repo, let n):
-            // Pages that list PRs ask first. Elsewhere the PR opens on GitHub.
-            if let u = URL(string: "https://github.com/\(repo)/pull/\(n)") { NSWorkspace.shared.open(u) }
-        case .revealCard(let id): data.agentIndex.reveal(card: id)
         case .sendInput(let key): sendInput(key, anchor: anchor)
         case .explain(let repo, let runId, let jobId): explain(repo: repo, runId: runId, jobId: jobId, anchor: anchor)
-        case .refreshProject(let k): store.refresh([k], force: true) { _ in }
         case .useTrackerIcon(let k): editLocal(k) { $0.icon = .tracker }
         case .hideProject(let k): editLocal(k) { $0.hidden = true }
-        case .removeWorktree: break   // the Worktrees page handles it
-        case .triage, .onlyProject: break
+        default: break   // .removeWorktree: the Worktrees page; .triage, .onlyProject: their pages
         }
     }
 
@@ -276,13 +282,9 @@ final class RowCommander {
         ChangeBus.shared.post(.config())
     }
 
-    private func fail(_ title: String, _ detail: String, anchor: NSView?) {
-        AlertConfirm.tell(title, info: detail, in: anchor?.window)
-    }
-
     private func sendInput(_ key: String, anchor: NSView?) {
         AlertConfirm.input("Send input to the \(key) session", placeholder: "Text for the terminal", button: "Send", in: anchor?.window) { [weak self] text in
-            self?.data.agentIndex.send(key, text: text) { _ in }
+            self?.data.actions.click("session.send", ["key": .string(key), "text": .string(text)], in: anchor?.window, asked: true)
         }
     }
 }

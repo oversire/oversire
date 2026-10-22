@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAI
 
 // ⌘K: type to find a page, a project, an item, a run or an action. Return opens it.
 final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate {
@@ -136,6 +137,12 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         let data = owner.data
         func go(_ r: Route) -> () -> Void { { [weak owner] in owner?.show(r) } }
         var out: [Entry] = []
+        // The catalog actions of this page come first.
+        for (spec, args) in data.actions.palette(owner.router.current, data: data) {
+            let on = args.values.compactMap(\.string).joined(separator: " · ")
+            out.append(Entry(title: spec.title, detail: on.isEmpty ? spec.help : on, symbol: spec.kind == .outward ? "arrow.up.forward.circle" : "bolt",
+                             kind: "Action") { [weak owner] in data.actions.click(spec.id, args, in: owner?.window) })
+        }
         let pages: [(Route, String, String)] = [
             (.home, "Home", "house"), (.work(.items), "Work › Items", "person.crop.circle"),
             (.work(.worktrees), "Work › Worktrees", "cpu"), (.work(.lanes), "Work › Lane board", "list.number"),

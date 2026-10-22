@@ -101,6 +101,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let workstreams = WorkstreamIndex()
     let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
+    lazy var actions = AppActionCatalog(data: self)
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)

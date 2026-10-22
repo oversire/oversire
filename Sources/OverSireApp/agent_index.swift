@@ -315,130 +315,16 @@ final class AgentIndex: NSObject {
         }
     }
 
-    // Starts the item in the project's Orca workspace. Without a saved workspace, a menu
-    // at `anchor` asks for one and saves the choice.
-    func start(_ item: Item, snap: ProjectSnapshot, anchor: NSView, agent: String? = nil) {
-        let pk = snap.summary.ref.storeKey
-        if let root = cfg.roots[pk], !root.isEmpty { start(item, root: root, agent: agent) { _ in }; return }
-        guard let rt = runtime() else { return }
-        Task { [weak self] in
+    /// The Orca workspaces, for the start menu.
+    func workspaces(done: @escaping (Result<[RuntimeRepo], ProviderError>) -> Void) {
+        guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
+        Task {
             let r = await Result(awaiting: { try await rt.repos(in: nil) })
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch r {
-                case .failure(let e): self.fail(item.key, e.message)
-                case .success(let repos):
-                    let menu = NSMenu()
-                    menu.addItem(withTitle: "Run \(snap.summary.identifier) items in…", action: nil, keyEquivalent: "").isEnabled = false
-                    let guess = OrcaConfig.guess(snap.summary, repos)
-                    let sorted = repos.sorted { a, b in
-                        if (a.path == guess) != (b.path == guess) { return a.path == guess }
-                        if a.folder != b.folder { return a.folder }
-                        return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-                    }
-                    for repo in sorted {
-                        let mi = NSMenuItem(title: repo.name, action: #selector(self.pick(_:)), keyEquivalent: "")
-                        mi.target = self
-                        mi.toolTip = repo.path
-                        mi.image = NSImage(systemSymbolName: repo.folder ? "folder" : "arrow.triangle.branch", accessibilityDescription: nil)
-                        mi.representedObject = PickContext(item: item, projectKey: pk, root: repo.path, agent: agent)
-                        menu.addItem(mi)
-                    }
-                    if repos.isEmpty { menu.addItem(withTitle: "Orca has no workspaces", action: nil, keyEquivalent: "").isEnabled = false }
-                    // A rebuild can remove the anchor while Orca replies.
-                    if anchor.window != nil {
-                        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 2), in: anchor)
-                    } else {
-                        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-                    }
-                }
-            }
+            DispatchQueue.main.async { done(r) }
         }
     }
 
-    // A failed start offers a retry. Other states open the terminal.
-    func pillClicked(_ item: Item, snap: ProjectSnapshot, anchor: NSView) {
-        guard let a = agent(item.key), a.phase == .failed else { reveal(item.key); return }
-        let menu = NSMenu()
-        let head = NSMenuItem(title: a.message ?? "The session did not start", action: nil, keyEquivalent: "")
-        head.isEnabled = false
-        menu.addItem(head)
-        menu.addItem(.separator())
-        let retry = NSMenuItem(title: "Try again", action: #selector(retry(_:)), keyEquivalent: "")
-        retry.target = self
-        retry.representedObject = RechooseContext(item: item, snap: snap, anchor: anchor)
-        menu.addItem(retry)
-        if cfg.roots[snap.summary.ref.storeKey]?.isEmpty == false {
-            let other = NSMenuItem(title: "Choose another workspace…", action: #selector(rechoose(_:)), keyEquivalent: "")
-            other.target = self
-            other.representedObject = RechooseContext(item: item, snap: snap, anchor: anchor)
-            menu.addItem(other)
-        }
-        let dismiss = NSMenuItem(title: "Dismiss", action: #selector(dismiss(_:)), keyEquivalent: "")
-        dismiss.target = self
-        dismiss.representedObject = item.key
-        menu.addItem(dismiss)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 2), in: anchor)
-    }
-
-    private final class RechooseContext: NSObject {
-        let item: Item, snap: ProjectSnapshot, anchor: NSView
-        init(item: Item, snap: ProjectSnapshot, anchor: NSView) { (self.item, self.snap, self.anchor) = (item, snap, anchor) }
-    }
-
-    @objc private func retry(_ sender: NSMenuItem) {
-        guard let c = sender.representedObject as? RechooseContext else { return }
-        clearFailure(c.item.key)
-        start(c.item, snap: c.snap, anchor: c.anchor)
-    }
-
-    @objc private func rechoose(_ sender: NSMenuItem) {
-        guard let c = sender.representedObject as? RechooseContext else { return }
-        clearFailure(c.item.key)
-        PROJECTS_CFG.orca.roots[c.snap.summary.ref.storeKey] = nil
-        saveConfig()
-        start(c.item, snap: c.snap, anchor: c.anchor)
-    }
-
-    @objc private func dismiss(_ sender: NSMenuItem) {
-        if let key = sender.representedObject as? String { clearFailure(key) }
-    }
-
-    private final class PickContext: NSObject {
-        let item: Item, projectKey: String, root: String, agent: String?
-        init(item: Item, projectKey: String, root: String, agent: String?) { (self.item, self.projectKey, self.root, self.agent) = (item, projectKey, root, agent) }
-    }
-
-    @objc private func pick(_ sender: NSMenuItem) {
-        guard let c = sender.representedObject as? PickContext else { return }
-        PROJECTS_CFG.orca.roots[c.projectKey] = c.root
-        saveConfig()
-        start(c.item, root: c.root, agent: c.agent) { _ in }
-    }
-
-    /// "Start in Orca with": one start with another agent. The default does not change.
-    /// `header`: false for a submenu, which has the title already.
-    func startMenu(_ item: Item, snap: ProjectSnapshot, anchor: NSView, header: Bool = true) -> NSMenu {
-        let menu = NSMenu()
-        if header { menu.addItem(withTitle: "Start in Orca with", action: nil, keyEquivalent: "").isEnabled = false }
-        let d = PROJECTS_CFG.launch(for: item).agent
-        for a in PROJECTS_CFG.runtime.startAgents {
-            let mi = MenuAction(a) { [weak self, weak anchor] in
-                guard let self, let anchor else { return }
-                self.start(item, snap: snap, anchor: anchor, agent: a == d ? nil : a)
-            }.item
-            if a == d {
-                mi.state = .on
-                mi.attributedTitle = NSAttributedString(string: a + "  default")
-            }
-            menu.addItem(mi)
-        }
-        menu.addItem(.separator())
-        menu.addItem(MenuAction("Change the default…") { (NSApp.delegate as? GHActionsBar)?.open(.settings(.agents)) }.item)
-        return menu
-    }
-
-    private func fail(_ key: String, _ message: String) {
+    func fail(_ key: String, _ message: String) {
         let k = key.uppercased()
         launches[k] = PendingLaunch(at: now(), error: message)
         let before = agents

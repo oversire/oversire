@@ -242,16 +242,21 @@ final class WorkPage: Page {
     }
 
     private func actions(_ key: String, lane: QueueLane, at n: Int) -> [NSView] {
-        let q = data.queue
-        let up = ActionButton("", symbol: "chevron.up") { q.move(key, by: -1) }
+        let k: JSONValue = .string(key)
+        let up = ActionButton("", symbol: "chevron.up", action: "queue.move", ["key": k, "by": .int(-1)])
         up.isEnabled = n > 0
         up.setAccessibilityLabel("Move \(key) up")
-        let down = ActionButton("", symbol: "chevron.down") { q.move(key, by: 1) }
+        let down = ActionButton("", symbol: "chevron.down", action: "queue.move", ["key": k, "by": .int(1)])
         down.isEnabled = n < lane.entries.count - 1
         down.setAccessibilityLabel("Move \(key) down")
         let start = ActionButton("Start now")
-        start.onClick = { [weak start] in q.start(key, project: lane.project, anchor: start) }
-        let remove = ActionButton("", symbol: "xmark") { q.remove(key) }
+        start.onClick = { [weak self, weak start] in
+            guard let self, let start, let snap = self.data.projectStore.snapshot(lane.project) else { return }
+            SessionStartMenu(self.data).pickRoot(snap, at: start, key: key) { root in
+                self.data.actions.click("queue.start", root.map { ["key": k, "root": .string($0)] } ?? ["key": k], in: start.window, confirm: "Start \(key) now?")
+            }
+        }
+        let remove = ActionButton("", symbol: "xmark", action: "queue.remove", ["key": k])
         remove.setAccessibilityLabel("Remove \(key) from the queue")
         return [up, down, start, remove]
     }

@@ -501,8 +501,8 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
                                      canStart: agents != nil && agent == nil && snap.option(kid.statusOptionId)?.category ?? .todo == .todo)
             row.onToggle = { [weak self] in self?.open(kid.id, push: true) }
             if let agents {
-                row.onStart = { [weak agents] anchor in agents?.start(kid, snap: snap, anchor: anchor) }
-                row.onPill = { [weak agents] anchor in agents?.pillClicked(kid, snap: snap, anchor: anchor) }
+                row.onStart = { [weak self] anchor in self?.starter?.start(kid, snap: snap, at: anchor) }
+                row.onPill = { [weak self] anchor in self?.starter?.pill(kid, snap: snap, at: anchor) }
             }
             row.frame.origin = NSPoint(x: 0, y: y)
             doc.addSubview(row)
@@ -781,18 +781,20 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
 
     @objc private func startOrca(_ sender: NSButton) {
         guard let id = itemId, let found = store.item(id) else { return }
-        agents?.start(found.item, snap: found.snap, anchor: sender)
+        starter?.start(found.item, snap: found.snap, at: sender)
     }
 
     @objc private func startOrcaWith(_ sender: NSButton) {
-        guard let id = itemId, let found = store.item(id), let agents else { return }
-        agents.startMenu(found.item, snap: found.snap, anchor: sender).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+        guard let id = itemId, let found = store.item(id), let starter else { return }
+        starter.agents(found.item, snap: found.snap, at: sender).popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
     }
 
     @objc private func agentChip(_ sender: NSButton) {
         guard let id = itemId, let found = store.item(id) else { return }
-        agents?.pillClicked(found.item, snap: found.snap, anchor: sender)
+        starter?.pill(found.item, snap: found.snap, at: sender)
     }
+
+    private var starter: SessionStartMenu? { (NSApp.delegate as? AppData).map(SessionStartMenu.init) }
 
     @objc private func revealAgent() {
         if let id = itemId, let key = store.item(id)?.item.key { agents?.reveal(key) }

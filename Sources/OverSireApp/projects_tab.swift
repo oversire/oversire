@@ -849,9 +849,10 @@ extension TabVC {
                                             && snap.option(item.statusOptionId)?.category ?? .todo == .todo)
                 row.onToggle = { ItemWindow.show(item.id) }
                 if let agents {
-                    row.onStart = { [weak agents] anchor in agents?.start(item, snap: snap, anchor: anchor) }
-                    row.onStartMenu = { anchor, header in agents.startMenu(item, snap: snap, anchor: anchor, header: header) }
-                    row.onPill = { [weak agents] anchor in agents?.pillClicked(item, snap: snap, anchor: anchor) }
+                    let starter = (NSApp.delegate as? AppData).map(SessionStartMenu.init)
+                    row.onStart = { anchor in starter?.start(item, snap: snap, at: anchor) }
+                    row.onStartMenu = { anchor, header in starter?.agents(item, snap: snap, at: anchor, header: header) ?? NSMenu() }
+                    row.onPill = { anchor in starter?.pill(item, snap: snap, at: anchor) }
                 }
                 row.identifier = NSUserInterfaceItemIdentifier("item:" + item.id)
                 rows.append(row)

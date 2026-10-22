@@ -150,8 +150,9 @@ struct RepoClient {
         }
     }
 
-    /// The PR tab shows lastFetchError in its error banner.
-    func perform(_ action: ChangeAction, repo: String, number: Int) async {
+    /// nil on success, else the error text. The PR tab shows lastFetchError in its error banner.
+    @discardableResult
+    func perform(_ action: ChangeAction, repo: String, number: Int) async -> String? {
         let r = await Result(awaiting: {
             let h = try host(repo)
             let url = Self.repoRef(h, repo).url.appendingPathComponent("pull/\(number)")
@@ -160,7 +161,9 @@ struct RepoClient {
         if case .failure(let e) = r {
             lastFetchError = GitHubClient.hint(e)
             log.warning("PR action \(action) for \(repo)#\(number) failed: \(e.message, privacy: .public)")
+            return GitHubClient.hint(e)
         }
+        return nil
     }
 
     /// The login of the token owner.

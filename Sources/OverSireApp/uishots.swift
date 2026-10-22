@@ -20,6 +20,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     let workstreams = WorkstreamIndex()
     let cleaner = Cleaner(defaults: UserDefaults(suiteName: "oversire-uishots")!)
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
+    lazy var actions = AppActionCatalog(data: self)
     lazy var memory = ProjectMemory(writes: writes)
     lazy var updater = Updater()
     lazy var cloudSetup = UIShots.sampleSetup()
@@ -726,7 +727,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("startmenu:"), let found = self.projectStore.item(key: String(p.dropFirst(10))),
                               let more = w.window?.contentView.flatMap({ UIShots.find($0) { $0.accessibilityLabel() == "Start in Orca with" } }) {
                         // startmenu:<KEY>: the agent list of the item page split button.
-                        self.shootMenu(self.agentIndex.startMenu(found.item, snap: found.snap, anchor: more), under: more, name: "\(theme.rawValue)-startmenu")
+                        self.shootMenu(SessionStartMenu(self).agents(found.item, snap: found.snap, at: more), under: more, name: "\(theme.rawValue)-startmenu")
                     } else if p == "pill" {
                         // pill: an update waits while the person scrolls.
                         w.gate.begin(.scroll)

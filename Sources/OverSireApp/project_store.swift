@@ -32,6 +32,8 @@ final class ProjectStore {
     private(set) var snapshots: [String: ProjectSnapshot] = [:]
     private(set) var refreshing: Set<String> = []
     private(set) var lastError: String?
+    /// The id of the item that `create` made last.
+    private(set) var lastCreated: String?
     /// The last fetch error of each project, by store key. A good fetch clears it.
     private(set) var errors: [String: String] = [:]
     private(set) var tracked: [ProjectSummary] = []
@@ -289,6 +291,13 @@ final class ProjectStore {
         }
     }
 
+    func relate(itemId: String, _ patch: RelationPatch, done: @escaping (Bool) -> Void) {
+        write(itemId, failure: "Could not change the relations", done: done) { c, ref in
+            guard let r = c as? any RelationManaging else { throw ProviderError.unsupported(.relations) }
+            try await r.apply(patch, to: ref)
+        }
+    }
+
     func assignMe(itemId: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: "Could not assign the item", done: done) { c, ref in try await ProjectStore.assignMe(c, ref) }
     }
@@ -363,6 +372,7 @@ final class ProjectStore {
                     self.lastError = e.message
                     done(false, e.message)
                 case .success(let itemId):
+                    self.lastCreated = itemId
                     self.suppressNotify.insert(itemId)
                     self.refresh([new.projectKey], force: true) { _ in done(true, nil) }
                 }

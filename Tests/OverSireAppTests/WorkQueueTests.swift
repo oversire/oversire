@@ -122,7 +122,7 @@ final class WorkQueueTests: XCTestCase {
             let saved = PROJECTS_CFG.orca.roots[ref.storeKey]
             PROJECTS_CFG.orca.roots[ref.storeKey] = nil
             defer { PROJECTS_CFG.orca.roots[ref.storeKey] = saved }
-            q.start("OVERSIRE-2", project: ref.storeKey, anchor: nil)
+            XCTAssertNotNil(q.start("OVERSIRE-2", project: ref.storeKey))
             XCTAssertTrue(q.contains("OVERSIRE-2"), "no workspace: the entry stays")
             XCTAssertEqual(q.state(ref.storeKey)?.error, "Choose an Orca workspace for OVERSIRE: use Start now once.")
         }

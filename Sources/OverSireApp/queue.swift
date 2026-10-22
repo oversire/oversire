@@ -290,26 +290,27 @@ final class WorkQueue {
         guard AGENTS.autoStart, agents.ready != nil else { return }
         let world = world(workstreams: workstreams)
         for lane in lanes {
-            if let e = lane.pick(state: states[lane.project], world: world).entry { start(e.key, project: lane.project, anchor: nil) }
+            if let e = lane.pick(state: states[lane.project], world: world).entry { start(e.key, project: lane.project) }
         }
     }
 
-    // Starts the entry now. Without a saved Orca workspace and without an anchor, the lane shows an error.
-    func start(_ key: String, project: String, anchor: NSView?) {
+    // Starts the entry now. `root` saves the Orca workspace of a project that has none. Without one, the lane shows an error.
+    @discardableResult
+    func start(_ key: String, project: String, root new: String? = nil) -> String? {
         guard let li = lanes.firstIndex(where: { $0.project == project }),
-              let snap = store.snapshots[project], let item = snap.items.first(where: { $0.key.uppercased() == key }) else { return }
+              let snap = store.snapshots[project], let item = snap.items.first(where: { $0.key.uppercased() == key }) else { return "\(key) is not in the queue of \(project)." }
+        if let new, !new.isEmpty, PROJECTS_CFG.orca.roots[project]?.isEmpty ?? true {
+            PROJECTS_CFG.orca.roots[project] = new
+            saveConfig()
+        }
         let root = PROJECTS_CFG.orca.roots[project] ?? ""
         if root.isEmpty {
-            if let anchor {
-                agents.start(item, snap: snap, anchor: anchor)
-            } else {
-                setState(project) { $0.error = "Choose an Orca workspace for \(snap.summary.identifier): use Start now once." }
-                save()
-                return
-            }
-        } else {
-            agents.start(item, root: root) { _ in }
+            let e = "Choose an Orca workspace for \(snap.summary.identifier): use Start now once."
+            setState(project) { $0.error = e }
+            save()
+            return e
         }
+        agents.start(item, root: root) { _ in }
         lanes[li].entries.removeAll { $0.key == key }
         setState(project) {
             $0.lastStarted = key
@@ -317,6 +318,7 @@ final class WorkQueue {
         }
         released.remove(key)
         save()
+        return nil
     }
 
     private func setState(_ project: String, _ edit: (inout QueueLaneState) -> Void) {

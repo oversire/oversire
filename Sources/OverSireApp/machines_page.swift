@@ -287,14 +287,21 @@ final class MachinesController {
 
     /// op can give a warning for the page.
     private func run(_ what: String, _ op: @escaping () async throws -> String?) {
-        Task { @MainActor in
-            do { if let w = try await op() { self.notice = w } } catch {
-                self.notice = "\(what): \(DaemonClient.reason(error))"
-                log.error("Machines: \(self.notice ?? "", privacy: .public)")
-            }
-            self.hub?.refresh()
-            await self.load()
+        Task { @MainActor in await self.call(what) { _ in try await op() } }
+    }
+
+    /// Runs one daemon call, shows its warning or error on the page and reloads. Gives the error text.
+    @MainActor @discardableResult
+    func call(_ what: String, _ op: @escaping (DaemonClient) async throws -> String?) async -> String? {
+        var failed: String?
+        do { if let w = try await op(local) { notice = w } } catch {
+            failed = "\(what): \(DaemonClient.reason(error))"
+            notice = failed
+            log.error("Machines: \(failed ?? "", privacy: .public)")
         }
+        hub?.refresh()
+        await load()
+        return failed
     }
 
     // MARK: Actions

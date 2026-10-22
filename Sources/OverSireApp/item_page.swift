@@ -210,7 +210,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let inQueue = data.queue.contains(key)
         var actions: [NSView] = [ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
             guard let self else { return }
-            if inQueue { self.go(.work(.items)) } else { self.data.queue.add(item, snap: snap) }
+            if inQueue { self.go(.work(.items)) } else { self.data.actions.run("queue.add", ["key": .string(key)]) { _ in self.reload() } }
         }]
         if let s = data.statusJob.item(key) {
             actions.append(StatusPill(s))
@@ -219,14 +219,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
             let b = ActionButton("Start in Orca", symbol: "play.fill", style: .primary)
             b.onClick = { [weak self, weak b] in
                 guard let self, let b else { return }
-                self.data.agentIndex.start(item, snap: snap, anchor: b)
+                SessionStartMenu(self.data).start(item, snap: snap, at: b)
             }
             let more = ActionButton("", symbol: "chevron.down", style: .primary)
             more.setAccessibilityLabel("Start in Orca with")
             more.toolTip = "Start in Orca with another agent"
             more.onClick = { [weak self, weak b, weak more] in
                 guard let self, let b, let more else { return }
-                self.data.agentIndex.startMenu(item, snap: snap, anchor: b).popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
+                SessionStartMenu(self.data).agents(item, snap: snap, at: b).popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
             }
             actions.append(NSStackView(h: [b, more], spacing: 1))
         }
