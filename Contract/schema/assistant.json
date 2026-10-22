@@ -7,10 +7,10 @@
   "$defs": {
     "Date": { "type": "string", "format": "date-time" },
     "ToolSpec": {
-      "description": "A tool that the model can call. The name is an action id, for example item.setStatus.",
+      "description": "A tool that the model can call. The name is the action id with _ in place of ., for example item_setStatus: the model APIs allow only [A-Za-z0-9_-] in a tool name.",
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
         "title": { "type": "string" },
         "description": { "description": "For the model and for the command palette.", "type": "string" },
         "kind": { "$ref": "actions.json#/$defs/ActionKind" },
