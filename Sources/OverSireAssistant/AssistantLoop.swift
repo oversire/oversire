@@ -86,6 +86,9 @@ public actor AssistantLoop {
 
     public func isRunning(_ thread: String) -> Bool { runs[thread] != nil }
 
+    /// The tools that apply now, for the MCP server.
+    public func tools() async -> [ToolSpec] { ToolRegistry(await catalog.specs(for: await page())).tools }
+
     /// Sends a user message. A run of the same thread stops first.
     public func send(_ parts: [AssistantPart], in thread: AssistantThread) async -> AsyncStream<ChatEvent> {
         if let old = runs[thread.id] { await finish(old, .cancelled) }
