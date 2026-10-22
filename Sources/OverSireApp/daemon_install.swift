@@ -3,7 +3,8 @@ import Foundation
 import OverSireCore
 
 // Installs the oversire CLI from its GitHub release: checks the SHA-256 and the Developer ID signature,
-// puts it in /usr/local/bin, pairs it with the hub when asked, and starts the daemon service.
+// puts it in ~/.local/bin (no password), pairs it with the hub when asked, and starts the daemon service.
+// The service and the hooks run the binary by its full path, so it does not need to be on PATH.
 
 /// The answer of `oversire daemon status --json`.
 struct DaemonStatus: Decodable, Equatable {
@@ -38,7 +39,16 @@ struct InstallError: Error, CustomStringConvertible {
 struct DaemonInstaller {
     static let repo = "oversire/cli"
     static let teamID = "Q56WK6TB88"
-    static let binDir = URL(fileURLWithPath: "/usr/local/bin")
+    /// The folder on the default PATH. Root owns it on many Macs, so a write there needs a password.
+    static let pathDir = URL(fileURLWithPath: "/usr/local/bin")
+    static let userDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin")
+
+    /// The folder of the current install: an old install in /usr/local/bin stays there. Else the user folder.
+    static var binDir: URL {
+        let onPath = pathDir.appendingPathComponent("oversire")
+        guard FileManager.default.isExecutableFile(atPath: onPath.path) else { return userDir }
+        return onPath.resolvingSymlinksInPath().deletingLastPathComponent()
+    }
     /// The folder of the old oversire-runner config. Its presence means an old install to update.
     static let legacyConfig = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/oversire-runner")
 
@@ -52,13 +62,17 @@ struct DaemonInstaller {
     let http: any HTTPTransport
     let commands: any CommandRunner
     let dir: URL
+    /// Add to PATH puts a link here.
+    let linkDir: URL
     /// The goreleaser arch name: arm64 or amd64.
     let arch: String
 
-    init(http: any HTTPTransport, commands: any CommandRunner, dir: URL = DaemonInstaller.binDir, arch: String = DaemonInstaller.hostArch) {
+    init(http: any HTTPTransport, commands: any CommandRunner, dir: URL = DaemonInstaller.binDir, linkDir: URL = DaemonInstaller.pathDir,
+         arch: String = DaemonInstaller.hostArch) {
         self.http = http
         self.commands = commands
         self.dir = dir
+        self.linkDir = linkDir
         self.arch = arch
     }
 
@@ -115,9 +129,37 @@ struct DaemonInstaller {
             _ = try fm.replaceItemAt(exe, withItemAt: next)
             return
         }
-        let sh = "/bin/mkdir -p \(Self.shellQuote(dir.path)) && /usr/bin/install -m 755 \(Self.shellQuote(staged.path)) \(Self.shellQuote(exe.path))"
+        try await admin("/bin/mkdir -p \(Self.shellQuote(dir.path)) && /usr/bin/install -m 755 \(Self.shellQuote(staged.path)) \(Self.shellQuote(exe.path))",
+                        what: "copy")
+    }
+
+    /// The `oversire` command in linkDir runs this install.
+    var onPath: Bool {
+        let link = linkDir.appendingPathComponent("oversire")
+        return FileManager.default.isExecutableFile(atPath: link.path) && link.resolvingSymlinksInPath().path == exe.resolvingSymlinksInPath().path
+    }
+
+    /// The login shell of the user finds an `oversire` command.
+    func shellFinds() async -> Bool {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let out = try? await commands.run(shell, ["-ilc", "command -v oversire"], stdin: nil, timeout: .seconds(5))
+        return out?.status == 0
+    }
+
+    /// Links linkDir/oversire to the install, so that a terminal finds it. Root owns /usr/local/bin on many Macs: then it asks for a password.
+    func linkOnPath() async throws {
+        let link = linkDir.appendingPathComponent("oversire")
+        let sh = "/bin/mkdir -p \(Self.shellQuote(linkDir.path)) && /bin/ln -sf \(Self.shellQuote(exe.path)) \(Self.shellQuote(link.path))"
+        if FileManager.default.isWritableFile(atPath: linkDir.path) {
+            try await must("/bin/sh", ["-c", sh], what: "link")
+        } else {
+            try await admin(sh, what: "link")
+        }
+    }
+
+    private func admin(_ sh: String, what: String) async throws {
         let script = "do shell script \"\(sh.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\" with administrator privileges"
-        try await must("/usr/bin/osascript", ["-e", script], what: "copy")
+        try await must("/usr/bin/osascript", ["-e", script], what: what)
     }
 
     static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }

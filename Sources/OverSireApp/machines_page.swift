@@ -7,8 +7,11 @@ import OverSireSync
 
 /// What the page reads from the daemons.
 struct MachinesSnapshot: Equatable {
-    /// The oversire CLI is in /usr/local/bin.
+    /// The oversire CLI is at `path`.
     var installed = false
+    var path = "~/.local/bin/oversire"
+    /// The login shell finds an `oversire` command.
+    var onPath = true
     /// The local daemon. nil: no daemon answers on loopback.
     var info: DaemonInfo?
     var group: Group?
@@ -76,6 +79,8 @@ struct MachinesModel: Equatable {
     var hooks: [Hook]
     var daemon: DaemonInfo?
     var installed: Bool
+    var path: String
+    var onPath: Bool
     /// The Orca account choices: ids, then nil for none.
     var accounts: [String?]
 
@@ -92,6 +97,8 @@ struct MachinesModel: Equatable {
     init(_ s: MachinesSnapshot, config: MachinesConfig, environments: [String], now: Date = Date()) {
         daemon = s.info
         installed = s.installed
+        path = s.path
+        onPath = s.onPath
         let me = s.info?.machine.rawValue
         let members = s.group?.members ?? []
         if s.info == nil { state = .noDaemon } else { state = members.count > 1 ? .group : .solo }
@@ -160,6 +167,12 @@ final class MachinesController {
     weak var hub: MachineHub?
     var local = DaemonClient(base: DaemonClient.loopback, token: nil, http: URLSessionTransport())
     var installed: () -> Bool = { DaemonSetup.shared.installer.isInstalled }
+    var path: () -> String = { (DaemonSetup.shared.installer.exe.path as NSString).abbreviatingWithTildeInPath }
+    var onPath: () async -> Bool = {
+        let i = DaemonSetup.shared.installer
+        if i.onPath { return true }
+        return await i.shellFinds()
+    }
     var config: () -> MachinesConfig = { MACHINES }
     var environments: () -> [String] = { MachinesController.shared.hub?.environments() ?? [] }
     var changed: () -> Void = { ChangeBus.shared.post(DataChange(.connection, origin: .user)) }
@@ -188,6 +201,8 @@ final class MachinesController {
         defer { loading = false }
         var s = MachinesSnapshot()
         s.installed = installed()
+        s.path = path()
+        if s.installed { s.onPath = await onPath() }
         s.info = try? await local.whoami()
         if s.info != nil { s.group = try? await local.group() } else if let hub { s.group = await hub.machines.group }
         if let me = s.info {
@@ -248,6 +263,9 @@ final class MachinesController {
             }
         }
     }
+
+    /// Asks for the admin password when root owns /usr/local/bin.
+    func linkOnPath() { run("Add to PATH") { try await DaemonSetup.shared.installer.linkOnPath(); return nil } }
 
     func setHome(_ machine: String) { let l = local; run("Make home") { try await l.setHome(machine).warning } }
     func remove(_ machine: String) { let l = local; run("Remove \(machine)") { try await l.remove(machine); return nil } }
@@ -314,11 +332,11 @@ extension SettingsPage {
         }
         install.isEnabled = !busy
         let note = m.installed
-            ? "The oversire CLI is in /usr/local/bin, but the daemon does not answer on loopback :7690."
+            ? "The oversire CLI is at \(m.path), but the daemon does not answer on loopback :7690."
             : "The daemon sends session state the moment an agent stops or asks a question. Without it, OverSire polls Orca each 15 to 60 s."
         let text = NSStackView(v: [NSTextField.text("Run the OverSire daemon on this Mac", size: 13.5, weight: .semibold),
                                    NSTextField.text(note, size: 12, color: Palette.dim, lines: 3),
-                                   NSTextField.text("Installs /usr/local/bin/oversire from the GitHub release, checks the signature, then runs oversire daemon install.",
+                                   NSTextField.text("Installs \(m.path) from the GitHub release, checks the signature, then runs oversire daemon install. No password.",
                                                     size: 11.5, color: Palette.dim, lines: 3, mono: true)], spacing: 5)
         text.setContentHuggingPriority(.init(1), for: .horizontal)
         let row = NSStackView(h: [Glyph("desktopcomputer", color: Palette.mut, size: 18), text, install], spacing: 14, align: .top)
@@ -431,7 +449,19 @@ extension SettingsPage {
             Row([TwoLine("Runner", "Do work orders from the cloud hub and from your other Macs."), Spacer(),
                  Pill(runner ? Tone(symbol: "checkmark.circle.fill", color: Palette.acc, word: "On") : Tone(symbol: "circle", color: Palette.dim, word: "Off"))],
                 height: 52, label: "Runner, \(runner ? "on" : "off")"),
+            pathRow(m),
         ]))
+    }
+
+    /// The daemon runs the CLI by its full path. PATH is only for a terminal.
+    private func pathRow(_ m: MachinesModel) -> NSView {
+        if m.onPath || !m.installed {
+            return Row([TwoLine("Terminal command", m.path), Spacer(), Pill(Tone(symbol: "checkmark.circle.fill", color: Palette.acc, word: "In PATH"))],
+                       height: 52, label: "Terminal command, in PATH")
+        }
+        let add = ActionButton("Add to PATH", style: .plain) { MachinesController.shared.linkOnPath() }
+        return Row([TwoLine("Terminal command", "\(m.path) is not in PATH. The link in /usr/local/bin can ask for your password.", lines: 2),
+                    Spacer(), add], height: 66, label: "Terminal command, not in PATH")
     }
 
     private func joinCodeButton(_ style: ActionButton.Style) -> ActionButton {

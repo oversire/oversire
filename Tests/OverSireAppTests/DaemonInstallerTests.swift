@@ -150,6 +150,32 @@ final class DaemonInstallerTests: XCTestCase {
         XCTAssertTrue(script.hasSuffix("/oversire' '\(dir.path)/oversire'\" with administrator privileges"), script)
     }
 
+    func testLinkInWritableFolder() async throws {
+        let links = dir.appendingPathComponent("links")
+        try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+        let i = DaemonInstaller(http: http, commands: commands, dir: dir, linkDir: links, arch: "arm64")
+        _ = try await install(pair: false)
+        XCTAssertFalse(i.onPath)
+        try await i.linkOnPath()
+        XCTAssertTrue(commands.adminScripts.isEmpty, "a writable folder needs no password")
+        let sh = try XCTUnwrap(commands.calls.last)
+        XCTAssertEqual(sh.exe, "/bin/sh")
+        XCTAssertEqual(sh.args, ["-c", "/bin/mkdir -p '\(links.path)' && /bin/ln -sf '\(dir.path)/oversire' '\(links.path)/oversire'"])
+        try FileManager.default.createSymbolicLink(at: links.appendingPathComponent("oversire"), withDestinationURL: i.exe)
+        XCTAssertTrue(i.onPath)
+    }
+
+    func testLinkInRootFolderAsksForAdmin() async throws {
+        let links = dir.appendingPathComponent("links")
+        try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: links.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: links.path) }
+        try await DaemonInstaller(http: http, commands: commands, dir: dir, linkDir: links, arch: "arm64").linkOnPath()
+        let script = try XCTUnwrap(commands.adminScripts.first)
+        XCTAssertTrue(script.contains("/bin/ln -sf '\(dir.path)/oversire' '\(links.path)/oversire'"), script)
+        XCTAssertTrue(script.hasSuffix("with administrator privileges"), script)
+    }
+
     func testShellQuote() {
         XCTAssertEqual(DaemonInstaller.shellQuote("/a b/it's"), #"'/a b/it'\''s'"#)
     }
