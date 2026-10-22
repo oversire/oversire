@@ -105,7 +105,7 @@ final class AssistantController {
     var waiting: Queued? { thread.flatMap { queued[$0.id] } }
     var page: PageContext? { pageContext() }
     /// Nil on a chat: the default is on.
-    var follows: Bool { thread?.follow ?? true }
+    var follows: Bool { thread?.follow ?? AI_CFG.assistant.follow }
     var currentEngine: EngineID { thread?.engine ?? engine }
 
     func label(_ id: EngineID?) -> String {

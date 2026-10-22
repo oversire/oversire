@@ -792,9 +792,9 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         window?.makeFirstResponder(page?.view)
     }
 
-    /// What the assistant sees: the route and the title of the page.
+    /// What the assistant sees: the route, the title and the rows in view.
     var pageContext: PageContext {
-        PageContext(route: router.current.path, title: router.current.title)
+        page?.context ?? PageContext(route: router.current.path, title: router.current.title)
     }
     @objc func openNewSession(_ sender: NSButton) {
         guard let s = (NSApp.delegate as? GHActionsBar)?.newSession else { return }

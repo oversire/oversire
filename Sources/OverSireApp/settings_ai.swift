@@ -67,6 +67,7 @@ extension SettingsPage {
         apiKey(b)
         useAIFor(b)
         assistant(b)
+        app?.assistantRoot.configChanged()
         let cloud = CloudAICard(cloudAIRecords)
         cloud.identifier = SettingsAnchor.cloudAI.id
         b.addFull(cloud)

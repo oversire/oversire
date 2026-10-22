@@ -104,8 +104,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var actions = AppActionCatalog(data: self)
     var pages: AppWindow? { appWindow }
-    /// The composition root sets up the loop here. Nil: the panel links to Settings › AI.
-    var assistant: AssistantController? { nil }
+    lazy var assistantRoot = AssistantRoot(app: self)
+    /// Nil: the panel links to Settings › AI.
+    var assistant: AssistantController? { assistantRoot.controller }
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
@@ -454,12 +455,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         assistantHotKey = nil
         let k = AI_CFG.assistant.hotkey
         guard k.hasShortcut else { return true }
-        assistantHotKey = GlobalHotKey(keyCode: k.keyCode, modifiers: k.modifiers) { [weak self] in self?.showAssistant() }
+        assistantHotKey = GlobalHotKey(keyCode: k.keyCode, modifiers: k.modifiers) { [weak self] in self?.askAssistant() }
         if assistantHotKey == nil { log.warning("Assistant shortcut \(k.shortcutLabel) is not available") }
         return assistantHotKey != nil
     }
-
-    func showAssistant() { showWindow() }
 
     func toggleWindow() {
         if appWindow.isVisible && NSApp.isActive && appWindow.window?.isKeyWindow == true { appWindow.window?.orderOut(nil) }
