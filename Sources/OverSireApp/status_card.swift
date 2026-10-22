@@ -49,6 +49,8 @@ struct StatusCard {
             c.add(NSStackView(h: [Glyph("moon.zzz", color: Palette.dim, size: 13),
                                   NSTextField.text("No session yet. Start it in Orca or add it to the queue.", size: 12.5, color: Palette.dim, lines: 2),
                                   Spacer()], spacing: 6))
+        } else if let q = data.questions.open(key: k).first, s.map({ $0.at < q.question.askedAt }) ?? true {
+            asks(c, q)
         } else if let s {
             body(c, s, reading: reading)
         } else if reading {
@@ -140,6 +142,17 @@ struct StatusCard {
             b = [NSTextField.text(s.handled == .approved ? "Approved." : "On hold.", size: 12, color: Palette.dim)]
         }
         return NSStackView(h: b + [Spacer()], spacing: 6)
+    }
+
+    // The session waits on a question. The card above shows it; an older status or recap would be wrong here.
+    private func asks(_ c: Card, _ e: QuestionBoard.Entry) {
+        let n = data.questions.count(key: key.uppercased())
+        let what = e.question.via == .permission ? "a permission" : n == 1 ? "a question" : "\(n) questions"
+        let place = data.questions.place(e.question).runtime
+        let text = e.question.answerable ? "The session waits for your answer to \(what). Answer in the card above, or in \(place)."
+                                         : "The session waits for your answer to \(what). Answer in \(place)."
+        c.add(NSStackView(h: [Glyph("questionmark.bubble", color: Palette.warn, size: 13),
+                              NSTextField.text(text, size: 12.5, color: Palette.fg, lines: 2), Spacer()], spacing: 6))
     }
 
     // A session without a status: the recap from the screen, or a hint to set up AI.
