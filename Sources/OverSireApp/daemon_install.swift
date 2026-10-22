@@ -91,12 +91,8 @@ struct DaemonInstaller {
     func install(keepAwake: Bool = false, pairing: Pairing? = nil) async throws -> DaemonStatus {
         let rel = try await latest()
         let archive = "oversire_\(rel.version)_darwin_\(arch).tar.gz"
-        guard let asset = rel.assets.first(where: { $0.name == archive }),
-              let sums = rel.assets.first(where: { $0.name == "checksums.txt" }) else {
-            throw InstallError("The release v\(rel.version) has no \(archive)")
-        }
-        let data = try await get(asset.browserDownloadURL)
-        let want = try Self.checksum(of: archive, in: String(decoding: try await get(sums.browserDownloadURL), as: UTF8.self))
+        let data = try await get(rel.asset(archive), missing: "The release v\(rel.version) has no \(archive)")
+        let want = try Self.checksum(of: archive, in: String(decoding: try await get(rel.asset("checksums.txt")), as: UTF8.self))
         let got = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard got == want else { throw InstallError("The SHA-256 of \(archive) does not match checksums.txt") }
 
@@ -195,29 +191,27 @@ struct DaemonInstaller {
         throw InstallError("checksums.txt has no line for \(name)")
     }
 
-    struct Release: Decodable {
-        struct Asset: Decodable {
-            let name: String
-            let browserDownloadURL: URL
-            enum CodingKeys: String, CodingKey { case name, browserDownloadURL = "browser_download_url" }
-        }
-        let tagName: String
-        let assets: [Asset]
-        var version: String { tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName }
-        enum CodingKeys: String, CodingKey { case tagName = "tag_name", assets }
+    struct Release {
+        let tag: String
+        var version: String { tag.hasPrefix("v") ? String(tag.dropFirst()) : tag }
+        func asset(_ name: String) -> URL { URL(string: "https://github.com/\(DaemonInstaller.repo)/releases/download/\(tag)/\(name)")! }
     }
 
+    /// GitHub sends releases/latest to releases/tag/<tag>. This is not an API call, so the limit of 60 calls in one hour does not apply.
     func latest() async throws -> Release {
-        var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")!)
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        return try JSONDecoder().decode(Release.self, from: try await get(req))
+        var req = URLRequest(url: URL(string: "https://github.com/\(Self.repo)/releases/latest")!)
+        req.httpMethod = "HEAD"
+        let (_, res) = try await http.send(req)
+        guard (200..<300).contains(res.statusCode), let url = res.url, url.deletingLastPathComponent().lastPathComponent == "tag" else {
+            throw InstallError("GitHub has no release of \(Self.repo) (\(res.statusCode))")
+        }
+        return Release(tag: url.lastPathComponent)
     }
 
-    private func get(_ url: URL) async throws -> Data { try await get(URLRequest(url: url)) }
-
-    private func get(_ req: URLRequest) async throws -> Data {
-        let (data, res) = try await http.send(req)
-        guard (200..<300).contains(res.statusCode) else { throw InstallError("\(req.url?.host ?? "GitHub") returned \(res.statusCode)") }
+    private func get(_ url: URL, missing: String? = nil) async throws -> Data {
+        let (data, res) = try await http.send(URLRequest(url: url))
+        if res.statusCode == 404, let missing { throw InstallError(missing) }
+        guard (200..<300).contains(res.statusCode) else { throw InstallError("\(url.host ?? "GitHub") returned \(res.statusCode)") }
         return data
     }
 

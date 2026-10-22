@@ -5,13 +5,16 @@ import XCTest
 
 private final class FakeHTTP: HTTPTransport, @unchecked Sendable {
     var routes: [String: (Int, Data)] = [:]
+    /// url -> the final url after the redirects.
+    var redirects: [String: String] = [:]
     private(set) var asked: [String] = []
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = request.url!.absoluteString
         asked.append(url)
         let (code, body) = routes[url] ?? (404, Data())
-        return (body, HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: nil)!)
+        let final = redirects[url].map { URL(string: $0)! } ?? request.url!
+        return (body, HTTPURLResponse(url: final, statusCode: code, httpVersion: nil, headerFields: nil)!)
     }
 }
 
@@ -56,17 +59,13 @@ final class DaemonInstallerTests: XCTestCase {
         commands = FakeCommands()
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("bin-\(UUID().uuidString)")
         let base = "https://github.com/oversire/cli/releases/download/v0.2.0/"
-        let release = """
-        {"tag_name":"v0.2.0","assets":[
-          {"name":"oversire_0.2.0_darwin_arm64.tar.gz","browser_download_url":"\(base)oversire_0.2.0_darwin_arm64.tar.gz"},
-          {"name":"checksums.txt","browser_download_url":"\(base)checksums.txt"}]}
-        """
         let sum = SHA256.hash(data: archive).map { String(format: "%02x", $0) }.joined()
         http.routes = [
-            "https://api.github.com/repos/oversire/cli/releases/latest": (200, Data(release.utf8)),
+            "https://github.com/oversire/cli/releases/latest": (200, Data()),
             "\(base)oversire_0.2.0_darwin_arm64.tar.gz": (200, archive),
             "\(base)checksums.txt": (200, Data("\(String(repeating: "0", count: 64))  oversire_0.2.0_linux_amd64.tar.gz\n\(sum)  oversire_0.2.0_darwin_arm64.tar.gz\n".utf8)),
         ]
+        http.redirects["https://github.com/oversire/cli/releases/latest"] = "https://github.com/oversire/cli/releases/tag/v0.2.0"
     }
 
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }
@@ -101,6 +100,7 @@ final class DaemonInstallerTests: XCTestCase {
         XCTAssertEqual(pair.stdin, Data("ABCD-2345\n".utf8))
         XCTAssertFalse(commands.calls.contains { $0.args.contains("ABCD-2345") }, "the code never goes in argv")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["oversire"], "only the binary is in the folder")
+        XCTAssertFalse(http.asked.contains { $0.contains("api.github.com") }, "no API call, so no rate limit")
     }
 
     func testBadChecksumInstallsNothing() async throws {
@@ -125,10 +125,11 @@ final class DaemonInstallerTests: XCTestCase {
     }
 
     func testMissingAssetAndFailedPair() async throws {
-        let saved = http.routes
-        http.routes["https://api.github.com/repos/oversire/cli/releases/latest"] = (200, Data(#"{"tag_name":"v0.3.0","assets":[]}"#.utf8))
-        await XCTAssertThrowsErrorAsync(try await install(), "has no oversire_0.3.0_darwin_arm64.tar.gz")
-        http.routes = saved
+        http.redirects["https://github.com/oversire/cli/releases/latest"] = "https://github.com/oversire/cli/releases/tag/v0.3.0"
+        await XCTAssertThrowsErrorAsync(try await install(), "The release v0.3.0 has no oversire_0.3.0_darwin_arm64.tar.gz")
+        http.redirects["https://github.com/oversire/cli/releases/latest"] = "https://github.com/oversire/cli/releases"
+        await XCTAssertThrowsErrorAsync(try await install(), "GitHub has no release of oversire/cli")
+        http.redirects["https://github.com/oversire/cli/releases/latest"] = "https://github.com/oversire/cli/releases/tag/v0.2.0"
         commands.failing = ["pair"]
         await XCTAssertThrowsErrorAsync(try await install(), "Cannot pair oversire: pair broke")
     }
