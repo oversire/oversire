@@ -102,6 +102,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var actions = AppActionCatalog(data: self)
+    var pages: AppWindow? { appWindow }
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
@@ -463,9 +464,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
     }
 
-    func open(_ route: Route) {
+    func open(_ route: Route, focus: String? = nil) {
         if popover?.isShown == true { popover.close() }
-        appWindow.show(route)
+        appWindow.show(route, focus: focus)
     }
 
     @objc func openPath(_ sender: NSMenuItem) {
@@ -480,7 +481,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            if let r = Route(url: url) { open(r) } else { log.warning("Unknown link: \(url.absoluteString, privacy: .public)") }
+            if let t = Target(url: url) { open(t.route, focus: t.focus) } else { log.warning("Unknown link: \(url.absoluteString, privacy: .public)") }
         }
     }
 

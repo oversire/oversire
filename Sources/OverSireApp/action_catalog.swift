@@ -14,7 +14,8 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         let link = ActionLink(data)
         self.link = link
         all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs
-            + RepoActions(link: link).specs + IntakeActions(link: link).specs + MachineActions(link: link).specs + extra
+            + RepoActions(link: link).specs + IntakeActions(link: link).specs + MachineActions(link: link).specs
+            + PageActions(link: link).specs + extra
         byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
@@ -106,6 +107,8 @@ extension Route {
 /// The way from an action to the app. It holds the app weakly.
 final class ActionLink: @unchecked Sendable {
     weak var data: AppData?
+    /// True when the chat moves the window: Follow along. The assistant sets it.
+    var follows: @Sendable (String) async -> Bool = { _ in true }
 
     init(_ data: AppData) { self.data = data }
 

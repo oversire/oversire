@@ -872,7 +872,7 @@ final class PageScroll: NSScrollView {
         }
     }
 
-    private var reconciler: RowReconciler?
+    fileprivate(set) var reconciler: RowReconciler?
     private var base: (distribution: NSStackView.Distribution, hugging: NSLayoutConstraint.Priority) = (.gravityAreas, .defaultLow)
 
     /// Keeps the views with the same id, updates the rows whose hash changed, inserts and removes the others. No column swap.
@@ -2067,5 +2067,94 @@ final class IconButton: NSButton {
             guard let self else { return }
             self.show(self.symbol, Palette.mut)
         }
+    }
+}
+
+// ─── Reveal ──────────────────────────────────────────────────────────────────
+// A link, a search or the assistant scrolls a row into view and flashes it.
+
+extension NSView {
+    func descendant(_ match: (NSView) -> Bool) -> NSView? {
+        if match(self) { return self }
+        for s in subviews { if let v = s.descendant(match) { return v } }
+        return nil
+    }
+
+    // An accent fill that fades in one second. With Reduce motion it shows one second and goes, with no fade.
+    func flash() {
+        let o = Box(fill: Palette.acc.withAlphaComponent(0.28), border: nil, radius: 6)
+        o.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(o, positioned: .below, relativeTo: subviews.first)
+        NSLayoutConstraint.activate([o.leadingAnchor.constraint(equalTo: leadingAnchor), o.trailingAnchor.constraint(equalTo: trailingAnchor),
+                                     o.topAnchor.constraint(equalTo: topAnchor), o.bottomAnchor.constraint(equalTo: bottomAnchor)])
+        if RowReconciler.reduceMotion {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { o.removeFromSuperview() }
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ c in
+            c.duration = 1
+            o.animator().alphaValue = 0
+        }, completionHandler: { o.removeFromSuperview() })
+    }
+}
+
+extension NSView {
+    /// The text of a row on one line: its accessibility label, else its labels.
+    var oneLine: String {
+        if let l = accessibilityLabel(), !l.isEmpty { return l }
+        var parts: [String] = []
+        func walk(_ v: NSView) {
+            guard parts.count < 6, !v.isHidden else { return }
+            if let t = v as? NSTextField, !t.stringValue.isEmpty { parts.append(t.stringValue) }
+            v.subviews.forEach(walk)
+        }
+        walk(self)
+        let s = parts.joined(separator: " · ").replacingOccurrences(of: "\n", with: " ")
+        return s.count > 160 ? String(s.prefix(159)) + "…" : s
+    }
+}
+
+extension NSScrollView {
+    /// Scrolls so that `target` shows. `top` (its section) goes near the top when the target still fits below it.
+    func reveal(_ target: NSView, top: NSView? = nil) {
+        guard let doc = documentView else { return }
+        doc.layoutSubtreeIfNeeded()
+        let r = target.convert(target.bounds, to: doc)
+        var y = (top.map { $0.convert($0.bounds, to: doc).minY } ?? r.minY) - 8
+        if r.maxY > y + contentView.bounds.height { y = r.minY - 80 }
+        contentView.scroll(to: NSPoint(x: 0, y: max(0, min(y, doc.frame.height - contentView.bounds.height))))
+        reflectScrolledClipView(contentView)
+    }
+}
+
+extension RowReconciler {
+    /// The view of a row: its full id, or the row id after its section ("<section>/<id>").
+    func view(matching id: String) -> NSView? {
+        view(id) ?? ids.first { $0.hasSuffix("/" + id) }.flatMap { view($0) }
+    }
+}
+
+extension PageScroll {
+    /// The rows of the page in order. A row that holds a row list gives the rows of the list.
+    var rows: [(id: String, view: NSView)] {
+        guard let r = reconciler else { return [] }
+        return r.ids.flatMap { id -> [(id: String, view: NSView)] in
+            guard let v = r.view(id) else { return [] }
+            var list: RowList?
+            _ = v.descendant { list = $0 as? RowList; return list != nil }
+            guard let list else { return [(id, v)] }
+            return list.reconciler.ids.compactMap { i in list.reconciler.view(i).map { (i, $0) } }
+        }
+    }
+
+    /// The view of a row of the page or of a row list in it.
+    func row(_ id: String) -> NSView? {
+        if let v = reconciler?.view(matching: id) { return v }
+        var found: NSView?
+        _ = column.descendant { v in
+            found = (v as? RowList)?.reconciler.view(matching: id)
+            return found != nil
+        }
+        return found
     }
 }

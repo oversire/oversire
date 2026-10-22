@@ -154,20 +154,17 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     }
 
     // Scrolls to the section, and flashes the row with the title.
-    private func reveal(_ anchor: String, flash: String?) {
-        guard let scroll = pane, let doc = scroll.documentView, let section = doc.find(NSUserInterfaceItemIdentifier("anchor-" + anchor)) else { return }
-        doc.layoutSubtreeIfNeeded()
+    @discardableResult
+    private func reveal(_ anchor: String, flash: String?) -> Bool {
+        guard let scroll = pane, let doc = scroll.documentView, let section = doc.find(NSUserInterfaceItemIdentifier("anchor-" + anchor)) else { return false }
         let target = flash.flatMap { t in section.findBox { $0.accessibilityLabel() == t } }
-        let top = section.convert(section.bounds, to: doc).minY
-        var y = top - 8
-        if let target {
-            let r = target.convert(target.bounds, to: doc)
-            if r.maxY > y + scroll.contentView.bounds.height { y = r.minY - 80 }
-        }
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, min(y, doc.frame.height - scroll.contentView.bounds.height))))
-        scroll.reflectScrolledClipView(scroll.contentView)
+        scroll.reveal(target ?? section, top: section)
         (target ?? (flash != nil ? section.findBox { $0 is ListCard } : nil))?.flash()
+        return true
     }
+
+    /// A settings row id is a section anchor.
+    override func reveal(_ id: String) -> Bool { reveal(id, flash: nil) }
 
     // A titled card. A route anchor and the search scroll to it.
     func section(_ anchor: SettingsAnchor, _ rows: [NSView]) -> NSView {

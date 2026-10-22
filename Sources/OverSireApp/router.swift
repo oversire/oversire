@@ -109,6 +109,14 @@ enum Route: Equatable {
 
     init?(path: String) { self.init(parts: path.split(separator: "/").map(String.init)) }
 
+    /// The route without the URL fragment.
+    fileprivate init?(urlPath url: URL) {
+        var c = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        c?.fragment = nil
+        guard let u = c?.url else { return nil }
+        self.init(url: u)
+    }
+
     private init?(parts: [String]) {
         guard let head = parts.first?.lowercased() else { return nil }
         let rest = Array(parts.dropFirst())
@@ -254,5 +262,34 @@ final class Router {
         backStack.append(current)
         current = r
         onChange?(r)
+    }
+}
+
+/// A route plus a row to show: oversire://work/lanes#OVERSIRE-12.
+/// On a settings page the fragment is the section anchor, as before.
+struct Target: Equatable {
+    var route: Route
+    var focus: String?
+
+    init(_ route: Route, focus: String? = nil) {
+        self.route = route
+        self.focus = focus.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    var path: String { focus.map { route.path + "#" + $0 } ?? route.path }
+
+    var url: URL { URL(string: "oversire://" + route.path + (focus.map { "#" + ($0.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? $0) } ?? ""))! }
+
+    init?(path: String) {
+        let p = path.split(separator: "#", maxSplits: 1).map(String.init)
+        guard let r = p.first.flatMap(Route.init(path:)) else { return nil }
+        if case .settings = r, p.count == 2 { guard let s = Route(path: p[0] + "/" + p[1]) else { return nil }; self.init(s); return }
+        self.init(r, focus: p.count == 2 ? p[1] : nil)
+    }
+
+    init?(url: URL) {
+        guard let r = Route(urlPath: url) else { return nil }
+        if case .settings = r { guard let s = Route(url: url) else { return nil }; self.init(s); return }
+        self.init(r, focus: url.fragment?.removingPercentEncoding)
     }
 }

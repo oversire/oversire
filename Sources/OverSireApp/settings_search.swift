@@ -273,17 +273,3 @@ final class SettingsSearchField: NSSearchField, NSSearchFieldDelegate {
     }
 }
 
-extension Box {
-    // An accent fill that fades in one second. It shows the row that a search opened.
-    func flash() {
-        let o = Box(fill: Palette.acc.withAlphaComponent(0.28), border: nil, radius: 6)
-        o.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(o, positioned: .below, relativeTo: subviews.first)
-        NSLayoutConstraint.activate([o.leadingAnchor.constraint(equalTo: leadingAnchor), o.trailingAnchor.constraint(equalTo: trailingAnchor),
-                                     o.topAnchor.constraint(equalTo: topAnchor), o.bottomAnchor.constraint(equalTo: bottomAnchor)])
-        NSAnimationContext.runAnimationGroup({ c in
-            c.duration = 1
-            o.animator().alphaValue = 0
-        }, completionHandler: { o.removeFromSuperview() })
-    }
-}

@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireAssistant
 
 // What the window pages read and do. The app delegate implements it.
 protocol AppData: AnyObject {
@@ -34,6 +35,8 @@ protocol AppData: AnyObject {
     /// The changes of the data. Pages and windows observe it.
     var bus: ChangeBus { get }
     var actions: AppActionCatalog { get }
+    /// The main window. Nil in tests.
+    var pages: AppWindow? { get }
     func rerun(repo: String, runs: [Run], failedOnly: Bool)
     func setIgnored(_ runs: [Run], ignored: Bool)
     func refresh(force: Bool, completion: (() -> Void)?)
@@ -42,6 +45,8 @@ protocol AppData: AnyObject {
 }
 
 extension AppData {
+    var pages: AppWindow? { nil }
+
     /// The problems for the marks. Empty when the Logs settings turn the mark off.
     var openProblems: [Problem] { LOGS_CFG.menuMark ? logs?.problems.open ?? [] : [] }
 }
@@ -154,6 +159,7 @@ class Page: NSViewController {
     func show(_ r: Route) {
         let tabChanged = r != route
         route = r
+        if tabChanged { pendingFocus = nil }
         if tabChanged { scroll.toTop() }
         reload(reason: "route")
         if tabChanged { scroll.toTop() }
@@ -183,6 +189,43 @@ class Page: NSViewController {
             scroll.rebuild(fills: fillsHeight) { build($0) }
         }
         logBuild(reason, ms: Int(Date().timeIntervalSince(start) * 1000))
+        if let f = pendingFocus, reveal(f) { pendingFocus = nil }
+    }
+
+    // MARK: Focus
+
+    // A row id that the next build shows, when the row is not there yet.
+    private var pendingFocus: String?
+
+    /// Scrolls the row into view and flashes it. A row that is not built yet shows after the next build.
+    func focus(_ id: String) {
+        pendingFocus = reveal(id) ? nil : id
+    }
+
+    /// What the page shows: the assistant sends it with each message.
+    var context: PageContext {
+        var rows: [PageContext.Row] = []
+        func inView(_ v: NSView) -> Bool {
+            guard let s = v.enclosingScrollView, let doc = s.documentView else { return true }
+            return v.convert(v.bounds, to: doc).intersects(s.documentVisibleRect)
+        }
+        for (id, v) in scroll.rows where rows.count < 40 && !v.isHiddenOrHasHiddenAncestor && inView(v) {
+            let line = v.oneLine
+            if !line.isEmpty { rows.append(PageContext.Row(id: id, text: line)) }
+        }
+        return PageContext(route: route.path, title: route.title, rows: rows, selection: selection)
+    }
+
+    /// The row ids that the user picked. Most pages have no selection.
+    var selection: [String] { [] }
+
+    /// Shows the row with this id, or a row id after its section. False when the page has no such row.
+    @discardableResult
+    func reveal(_ id: String) -> Bool {
+        guard let v = scroll.row(id) else { return false }
+        (v.enclosingScrollView ?? scroll).reveal(v)
+        v.flash()
+        return true
     }
 
     private func logBuild(_ reason: String, ms: Int) {
@@ -356,8 +399,16 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         return NSApp.isActive && w.isKeyWindow ? .front : .background
     }
 
-    func show(_ route: Route? = nil) {
+    /// Moves to the route without a focus change of the app. A hidden window shows.
+    func go(_ route: Route, focus: String? = nil) {
+        guard window?.isVisible == true else { show(route, focus: focus); return }
+        router.go(route)
+        if let focus { page?.focus(focus) }
+    }
+
+    func show(_ route: Route? = nil, focus: String? = nil) {
         if let route { router.go(route) }
+        if let focus { page?.focus(focus) }
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
