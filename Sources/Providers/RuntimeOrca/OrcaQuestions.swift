@@ -115,6 +115,7 @@ extension OrcaRuntime {
         guard q.answerable else { throw QuestionError.notAnswerable }
         try q.validate(a)
         if q.via == .form { return try await answerForm(q, a) }
+        if q.via == .permission { return try await answerPrompt(q, a) }
         guard let msg = messageID(q.id) else { return .gone }
         let mail = try await inbox()
         if mail.contains(where: { $0.replyTo == msg }) { return .alreadyAnswered }

@@ -18,9 +18,7 @@ struct ClaudeForm: Hashable {
 
     /// nil when no form is open at the bottom of the screen.
     static func parse(_ screen: [String]) -> ClaudeForm? {
-        var rows = screen.map { $0.replacingOccurrences(of: "\u{a0}", with: " ") }
-        // Orca draws a rule with the worktree name below the terminal.
-        while let r = rows.last.map(trim), r.isEmpty || (r.hasPrefix("─") && !separator(r)) { rows.removeLast() }
+        let rows = lines(screen)
         let filled = rows.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard let last = filled.last else { return nil }
         let review = filled.suffix(4).contains { $0.contains("Ready to submit your answers?") }
@@ -90,8 +88,15 @@ struct ClaudeForm: Hashable {
         return texts.enumerated().map { QuestionItem(id: "q\($0.offset + 1)", text: $0.element, kind: .free) }
     }
 
+    /// The screen with no empty rows at the bottom. Orca draws a rule with the worktree name below the terminal.
+    static func lines(_ screen: [String]) -> [String] {
+        var rows = screen.map { $0.replacingOccurrences(of: "\u{a0}", with: " ") }
+        while let r = rows.last.map(trim), r.isEmpty || (r.hasPrefix("─") && !separator(r)) { rows.removeLast() }
+        return rows
+    }
+
     /// The number and text of a numbered option row: "❯ 1. SQLite" gives 1 and "SQLite".
-    private static func option(_ row: String) -> (Int, String)? {
+    static func option(_ row: String) -> (Int, String)? {
         var t = trim(row)
         if t.hasPrefix("❯") { t = trim(String(t.dropFirst())) }
         guard let dot = t.firstIndex(of: "."), let n = Int(t[..<dot]), t[..<dot].allSatisfy(\.isNumber),
@@ -102,8 +107,8 @@ struct ClaudeForm: Hashable {
     /// A tab of the bar: "☐ Store", "☒ Tests", "✔ Submit".
     private static func boxed(_ t: String) -> Bool { t.hasPrefix("☐ ") || t.hasPrefix("☒ ") || t.hasPrefix("✔ ") }
 
-    private static func separator(_ row: String) -> Bool { let t = trim(row); return !t.isEmpty && t.allSatisfy { $0 == "─" } }
-    private static func trim(_ s: String) -> String { s.trimmingCharacters(in: .whitespaces) }
+    static func separator(_ row: String) -> Bool { let t = trim(row); return !t.isEmpty && t.allSatisfy { $0 == "─" } }
+    static func trim(_ s: String) -> String { s.trimmingCharacters(in: .whitespaces) }
 }
 
 /// The last AskUserQuestion call in a Claude transcript, and its answers when it has a result.
@@ -240,7 +245,7 @@ extension OrcaRuntime {
     /// The transcript bytes that one read looks at.
     static let transcriptTail = 512 * 1024
 
-    /// The native forms of these sessions: Orca shows the agent waiting in AskUserQuestion, and the screen shows the form.
+    /// The native forms, permission prompts and plan approvals of these sessions: Orca shows the agent waiting, and the screen shows the pause.
     func formQuestions(in sessions: [SessionRef]) async throws -> [SessionQuestion] {
         guard !sessions.isEmpty else { return [] }
         let waiting = try await formWaits()
@@ -250,11 +255,18 @@ extension OrcaRuntime {
         for s in sessions {
             guard let t = terminals[s.id], let w = waiting[t.paneKey] else { continue }
             let screen = try await output(s, lines: 40)
-            guard let form = ClaudeForm.parse(screen) else { continue }
-            let ask = localAsk(cwd: w.path ?? t.path).flatMap { $0.open && $0.matches(form) ? $0 : nil }
-            let id = ask.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.key))"
-            let items = ask?.items ?? (form.items.isEmpty ? [QuestionItem(id: "q1", text: "The session asks a question in Orca.", kind: .free)] : form.items)
-            let via: SessionQuestion.Via = ask != nil || !form.items.isEmpty ? .form : .waiting
+            // A wait with no tool name can be either pause.
+            if w.tool != "AskUserQuestion", let p = ClaudePrompt.parse(screen) {
+                let tool = w.tool.flatMap { name in localTranscript(cwd: w.path ?? t.path).flatMap { ClaudePrompt.openTool(name, in: $0) } }
+                out.append(SessionQuestion(id: questionID("form:" + (tool ?? "\(s.id):\(Self.fnv(p.key))")), session: s, origin: .session,
+                                           items: [p.item(tool: w.tool, input: w.input)], via: .permission, askedAt: w.since))
+                continue
+            }
+            guard w.tool == nil || w.tool == "AskUserQuestion", let form = ClaudeForm.parse(screen) else { continue }
+            let call = localAsk(cwd: w.path ?? t.path).flatMap { $0.open && $0.matches(form) ? $0 : nil }
+            let id = call.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.key))"
+            let items = call?.items ?? (form.items.isEmpty ? [QuestionItem(id: "q1", text: "The session asks a question in Orca.", kind: .free)] : form.items)
+            let via: SessionQuestion.Via = call != nil || !form.items.isEmpty ? .form : .waiting
             out.append(SessionQuestion(id: questionID(id), session: s, origin: .session, items: items, via: via, askedAt: w.since))
         }
         return out
@@ -263,27 +275,34 @@ extension OrcaRuntime {
     /// Types the answer into the form. Before each key it reads the screen and stops when the form is not at the step.
     /// .alreadyAnswered: the form is gone, so the user answered in Orca. form_changed: another form or step shows.
     func answerForm(_ q: SessionQuestion, _ a: QuestionAnswer) async throws -> AnswerResult {
-        for step in FormKeys(q, a).steps {
-            var form: ClaudeForm?
-            for i in 0..<formTries {
-                form = ClaudeForm.parse(try await output(q.session, lines: 40))
-                if form.map(step.holds) ?? false { break }
-                if form == nil { return .alreadyAnswered }
-                if i == formTries - 1 { throw ProviderError.vendor(code: "form_changed", message: "The form in Orca changed. Answer it in Orca.") }
-                try await Task.sleep(for: formWait)
-            }
-            _ = try await run(["terminal", "send", "--terminal", q.session.id, "--text", step.keys])
-        }
-        for i in 0..<formTries * 5 {
-            if ClaudeForm.parse(try await output(q.session, lines: 40)) == nil { break }
-            if i == formTries * 5 - 1 { throw ProviderError.vendor(code: "form_open", message: "The form is still open in Orca.") }
-            try await Task.sleep(for: formWait)
-        }
+        let steps = FormKeys(q, a).steps.map { step in (keys: step.keys, check: { ClaudeForm.parse($0).map(step.holds) }) }
+        if let r = try await press(steps, in: q.session) { return r }
         if let given = try? await formAnswer(q), Self.flat(given) != Self.flat(a) {
             log.write(LogEntry(level: .warn, area: .sessions, job: "Form answer", subject: q.session.id,
                                message: "The session got another answer than OverSire typed: \(Self.flat(given)), not \(Self.flat(a))."))
         }
         return .sent
+    }
+
+    /// Sends each key when its check gives true. The check gives false for another step, and nil when the pause is gone.
+    /// nil: each key went, and the pause is gone after the last key.
+    func press(_ steps: [(keys: String, check: ([String]) -> Bool?)], in s: SessionRef) async throws -> AnswerResult? {
+        guard let first = steps.first else { return .gone }
+        for step in steps {
+            for i in 0..<formTries {
+                guard let ok = step.check(try await output(s, lines: 40)) else { return .alreadyAnswered }
+                if ok { break }
+                if i == formTries - 1 { throw ProviderError.vendor(code: "form_changed", message: "The question in Orca changed. Answer it in Orca.") }
+                try await Task.sleep(for: formWait)
+            }
+            _ = try await run(["terminal", "send", "--terminal", s.id, "--text", step.keys])
+        }
+        for i in 0..<formTries * 5 {
+            if first.check(try await output(s, lines: 40)) == nil { return nil }
+            if i == formTries * 5 - 1 { throw ProviderError.vendor(code: "form_open", message: "The question is still open in Orca.") }
+            try await Task.sleep(for: formWait)
+        }
+        return nil
     }
 
     /// Each item as Claude shows it: the labels and the text, in any order.
@@ -300,13 +319,14 @@ extension OrcaRuntime {
         return ask.answer(q.id)
     }
 
-    /// The agents that wait in AskUserQuestion, by pane key.
-    private func formWaits() async throws -> [String: (path: String?, since: Date)] {
-        var out: [String: (path: String?, since: Date)] = [:]
+    /// The agents that wait, by pane key, with the tool that waits.
+    private func formWaits() async throws -> [String: (path: String?, since: Date, tool: String?, input: String?)] {
+        var out: [String: (path: String?, since: Date, tool: String?, input: String?)] = [:]
         for w in try await run(["worktree", "ps", "--limit", "500"])["worktrees"] as? [[String: Any]] ?? [] {
-            for a in w["agents"] as? [[String: Any]] ?? [] where a["state"] as? String == "waiting" && a["toolName"] as? String == "AskUserQuestion" {
+            for a in w["agents"] as? [[String: Any]] ?? [] where a["state"] as? String == "waiting" {
                 guard let pane = a["paneKey"] as? String else { continue }
-                out[pane] = (w["path"] as? String, Date(timeIntervalSince1970: ((a["stateStartedAt"] as? Double) ?? 0) / 1000))
+                out[pane] = (w["path"] as? String, Date(timeIntervalSince1970: ((a["stateStartedAt"] as? Double) ?? 0) / 1000),
+                             a["toolName"] as? String, a["toolInput"] as? String)
             }
         }
         return out
@@ -323,10 +343,12 @@ extension OrcaRuntime {
     }
 
     /// The last AskUserQuestion of the newest Claude transcript in `cwd`. Only on this Mac.
-    private func localAsk(cwd: String?) -> ClaudeAsk? {
-        guard environment == nil, let cwd, let transcripts, let file = transcripts.newest(agent: .claude, cwd: cwd),
-              let data = transcripts.tail(file: file, bytes: Self.transcriptTail) else { return nil }
-        return ClaudeAsk.last(in: data)
+    private func localAsk(cwd: String?) -> ClaudeAsk? { localTranscript(cwd: cwd).flatMap(ClaudeAsk.last) }
+
+    /// The tail of the newest Claude transcript in `cwd`. Only on this Mac.
+    private func localTranscript(cwd: String?) -> Data? {
+        guard environment == nil, let cwd, let transcripts, let file = transcripts.newest(agent: .claude, cwd: cwd) else { return nil }
+        return transcripts.tail(file: file, bytes: Self.transcriptTail)
     }
 
     /// A short stable hash (FNV-1a, 64 bit) for an id.

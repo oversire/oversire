@@ -117,7 +117,7 @@ final class OrcaFormsTests: XCTestCase {
         XCTAssertTrue(q.answerable)
         XCTAssertEqual(q.items.map(\.header), ["Store", "Tests"])
         XCTAssertEqual(q.askedAt, Date(timeIntervalSince1970: 1792550175.956))
-        XCTAssertEqual(orca.args("terminal read").count, 1, "only the waiting session")
+        XCTAssertEqual(orca.args("terminal read").count, 2, "each waiting session")
 
         let none = try await rt.answerGiven(q)
         XCTAssertNil(none, "still open")

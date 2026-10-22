@@ -1135,6 +1135,16 @@ extension UIShots {
         } else {
             var enhance = acts
             enhance.stop = {}
+            let bash = QuestionItem(id: "q1", header: "Bash", text: "git push origin oversire-237", why: "Do you want to proceed?", kind: .single,
+                                    options: ["Yes", "Yes, and don’t ask again for: git push *", "No"].map { .init(label: $0) }, allowsOther: true)
+            let plan = QuestionItem(id: "q1", header: "Plan", text: "Append \"world\" to notes.md",
+                                    why: "Claude has written up a plan and is ready to execute. Would you like to proceed?", kind: .single,
+                                    options: ["Yes, and use auto mode", "Yes, manually approve edits", "Tell Claude what to change"].map { .init(label: $0) },
+                                    allowsOther: true)
+            let pause = { (id: String, item: QuestionItem, at: Double) in
+                e(SessionQuestion(id: QuestionID(rawValue: "orca:local:form:\(id)"), session: session, origin: work, items: [item], via: .permission,
+                                  askedAt: ago(at)), .open)
+            }
             var failed = e(q("m4", [free], .runnerInput, 3, work), .open)
             failed.error = "the runner is offline"
             cards = [
@@ -1142,6 +1152,8 @@ extension UIShots {
                  (e(q("m2", [free], .askReply, 2, work), .sending), here, acts, { c in c.write("Ask about questions", in: "q1") }),
                  (failed, runner, acts, nil)],
                 [(e(q("f1", [store, tests], .form, 52, work), .open), here, acts, nil),
+                 (pause("t1", bash, 1), here, acts, nil),
+                 (pause("t2", plan, 2), here, acts, { c in c.write("Use one step only", in: "q1") }),
                  (e(SessionQuestion(id: "orca:studio:m5", session: session, origin: .intake(item("TREBI-471")), round: 2, items: [tests], via: .askReply,
                                     askedAt: ago(1)), .open), remote, enhance, nil)],
             ]
