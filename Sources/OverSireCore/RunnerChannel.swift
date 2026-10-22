@@ -229,3 +229,56 @@ public struct RunnerSession: StoreRecord {
         self.updatedAt = updatedAt
     }
 }
+
+// MARK: Transport
+
+/// The path of the work orders to a runner: the hub, or the daemon of a member machine.
+/// The daemon sends the same ack, result and session frames as the hub.
+public protocol RunnerTransport: Sendable {
+    func send(_ order: WorkOrder) async throws
+    func messages() -> AsyncStream<RunnerMessage>
+}
+
+extension WorkOrder {
+    /// The life of a new order: ORDER_MINUTES on the hub.
+    public static let lifetime: TimeInterval = 60 * 60
+
+    /// "wo-" and 8 hex digits, as the hub makes them.
+    public static func newID() -> String {
+        "wo-" + String(format: "%08x", UInt32.random(in: .min ... .max))
+    }
+}
+
+extension WorkOrderDraft {
+    /// The order of an accepted suggestion. The hub makes the same order in accept.ts.
+    public func order(suggestion: String, runner: String, id: String = WorkOrder.newID(), now: Date) -> WorkOrder {
+        WorkOrder(id: id, runner: runner, runtime: runtime, order: order, suggestion: suggestion, createdAt: now,
+                  expiresAt: now.addingTimeInterval(WorkOrder.lifetime), state: .queued)
+    }
+}
+
+extension SessionOrder {
+    /// The runtime account of the order in this app: the environment of a start (nil: "local"), else the account of the session.
+    public var account: String {
+        switch self {
+        case .start(let r): return r.environment.flatMap { $0.isEmpty ? nil : $0 } ?? "local"
+        case .stop(let s), .read(let s, _), .send(let s, _, _, _), .history(let s, _): return s.workspace.account.id
+        }
+    }
+
+    /// The same order for the runtime on the target machine itself: no environment, and the account "local".
+    public var onTarget: SessionOrder {
+        func here(_ s: SessionRef) -> SessionRef {
+            SessionRef(workspace: WorkspaceRef(account: AccountID(provider: s.workspace.account.provider, id: "local"), id: s.workspace.id), id: s.id)
+        }
+        switch self {
+        case .start(var r):
+            r.environment = nil
+            return .start(r)
+        case .stop(let s): return .stop(here(s))
+        case .read(let s, let lines): return .read(here(s), lines: lines)
+        case .send(let s, let text, let permission, let answer): return .send(here(s), text: text, permission: permission, answer: answer)
+        case .history(let s, let budget): return .history(here(s), budget: budget)
+        }
+    }
+}

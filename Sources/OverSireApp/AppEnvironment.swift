@@ -281,13 +281,58 @@ struct CloudLink: Equatable {
     let device: String
 }
 
+/// The copy of the store that this app syncs with. Contract: the replica table of OVERSIRE-253.
+enum StoreHome: Equatable {
+    /// The cloud hub of a paired Mac, as before the machine group.
+    case cloud(CloudLink)
+    /// The home member of a group with no cloud: its daemon, or loopback when this Mac is home.
+    case member(MachineLink)
+    /// No group, or the home is offline. The outbox keeps the ops.
+    case local
+
+    /// The sync identity. One SyncedStore (outbox and clocks) serves all replicas of one identity.
+    var identity: String? {
+        switch self {
+        case .cloud(let c): return c.device
+        case .member: return AppEnvironment.appDevice
+        case .local: return nil
+        }
+    }
+
+    func replica(http: any HTTPTransport, group: String?) -> StoreReplica? {
+        switch self {
+        case .cloud(let c): return StoreReplica(id: SyncedStore.cloudReplica, replication: CloudReplication(base: c.base, token: c.token, http: http))
+        case .member(let l):
+            return StoreReplica(id: "member:\(group ?? "")/\(l.machine)", replication: CloudReplication(base: l.base, token: l.token, http: http))
+        case .local: return nil
+        }
+    }
+}
+
+/// The paired cloud wins. Else the home member of the group, when it is live (`links` holds only the live links). Else local only.
+func storeHome(group: Group?, cloud: CloudLink?, links: [MachineLink]) -> StoreHome {
+    if let cloud { return .cloud(cloud) }
+    guard let group, group.cloud == nil, let home = links.first(where: { $0.machine == group.home.rawValue }) else { return .local }
+    return .member(home)
+}
+
 extension AppEnvironment {
-    /// Free mode: the LocalStore only, with no cloud calls. A paired Mac: a SyncedStore over the same files.
-    /// The sync state of each device has its own folder, so a new pairing starts clean.
-    func store(local: LocalStore, link: CloudLink?) -> any Store {
-        guard let link else { return local }
-        let dir = URL(fileURLWithPath: CONFIG_DIR).appendingPathComponent("sync").appendingPathComponent(link.device)
-        return SyncedStore(local: local, replication: CloudReplication(base: link.base, token: link.token, http: URLSessionTransport()),
-                           device: link.device, dir: dir, cursors: CursorStore(url: dir.appendingPathComponent("cursor.json")))
+    /// The device id of this app in the hlc of a group with no cloud. It stays the same after a restart.
+    static let appDevice: String = {
+        let url = URL(fileURLWithPath: CONFIG_DIR).appendingPathComponent("sync/app/device")
+        if let id = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty { return id }
+        let id = "app-" + String(format: "%08x", UInt32.random(in: .min ... .max))
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? id.write(to: url, atomically: true, encoding: .utf8)
+        return id
+    }()
+
+    /// A SyncedStore over the same files. The sync state of each identity has its own folder, so a new pairing starts clean.
+    func store(local: LocalStore, identity: String, replica: StoreReplica?,
+               rehome: @escaping @Sendable (StoreNotHome) async -> StoreReplica?) -> SyncedStore {
+        let folder = identity == Self.appDevice ? "app" : identity
+        let dir = URL(fileURLWithPath: CONFIG_DIR).appendingPathComponent("sync").appendingPathComponent(folder)
+        return SyncedStore(local: local, replica: replica, device: identity, dir: dir,
+                           cursors: CursorStore(url: dir.appendingPathComponent("cursor.json")), rehome: rehome)
     }
 }

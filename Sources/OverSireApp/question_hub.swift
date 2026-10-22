@@ -24,6 +24,8 @@ final class QuestionHub {
     /// Posts one notification for a question that waits this long. nil: never.
     var tellAfter: () -> TimeInterval? = { AGENTS.questionNotice.delay }
     var notify: (_ key: String?, _ title: String, _ body: String) -> Void = { _, _, _ in }
+    /// The answers of the runner sessions: the daemon of the session, else the hub.
+    var sender: any RunnerAnswerSending = RUNNER_DESK
 
     init(agents: AgentIndex, writes: StoreWrites) {
         self.agents = agents
@@ -33,7 +35,7 @@ final class QuestionHub {
     /// Makes the board with the runtimes that have questions, and the runner channel.
     func start(channels: [any QuestionChannel]) {
         board?.stop()
-        let runner = RunnerQuestions(store: writes.store, sender: RelayAnswers { RelayAPI(base: RELAY.workerURL, token: SecretStore().get(SecretStore.deviceToken)) })
+        let runner = RunnerQuestions(store: writes.store, sender: sender)
         let b = QuestionBoard(channels: channels + [runner], sessions: { [weak self] in self?.sessions() ?? [] }, store: writes.store)
         attach(b)
         resolve()

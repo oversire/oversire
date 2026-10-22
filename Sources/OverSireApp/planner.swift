@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireSync
 
 // ─── Planner (cloud) ─────────────────────────────────────────────────────────
 // Code areas of the items, the plan changes of the hub, the Planner settings and the hold of work orders.
@@ -60,9 +61,13 @@ final class SuggestionBook {
     private let writes: StoreWrites
     private(set) var all: [Suggestion] = []
     private var observer: NSObjectProtocol?
+    /// The runner path of a workOrder proposal. nil: the hub makes each order.
+    var desk: RunnerDesk?
 
-    init(writes: StoreWrites) {
+    /// The book of the app store uses the runner desk of the app.
+    init(writes: StoreWrites, desk: RunnerDesk? = nil) {
         self.writes = writes
+        self.desk = desk ?? (writes === STORE_WRITES ? RUNNER_DESK : nil)
         all = writes.load(Suggestion.self)
         observer = NotificationCenter.default.addObserver(forName: StoreWrites.remoteChanged, object: writes, queue: .main) { [weak self] n in
             guard let self, n.userInfo?["collection"] as? String == Suggestion.collection else { return }
@@ -94,11 +99,20 @@ final class SuggestionBook {
 
     /// `drop`: the indexes of PlanDraft.lines that the user cleared. The hub applies the rest.
     func accept(_ id: String, drop: Set<Int>, by device: String?, now: Date = Date()) {
+        if let desk, let s = all.first(where: { $0.id == id }), s.state == .open, case .workOrder(let draft)? = s.proposal,
+           acceptOrder(s, draft: draft, by: device, now: now, desk: desk) { return }
         decide(id, .accepted, by: device, now: now) { $0.edit = drop.isEmpty ? nil : SuggestionEdit(drop: drop.sorted()) }
     }
 
     func dismiss(_ id: String, by device: String?, now: Date = Date()) {
         decide(id, .dismissed, by: device, now: now) { _ in }
+    }
+
+    /// Keeps the suggestion in memory, and writes it when `write` is true.
+    func replace(_ s: Suggestion, write: Bool) {
+        if let i = all.firstIndex(where: { $0.id == s.id }) { all[i] = s } else { all.append(s) }
+        if write { writes.put(s) }
+        NotificationCenter.default.post(name: Self.changed, object: self)
     }
 
     /// For `--uishots`: a suggestion without a write.

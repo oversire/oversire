@@ -26,34 +26,54 @@ final class StoreWrites: @unchecked Sendable {
     private let lock = NSLock()
     private var current: any Store
     private let local: LocalStore?
-    private var link: CloudLink?            // main thread only
+    private var home: StoreHome?           // main thread only
     private var watch: Task<Void, Never>?   // main thread only
     private var last: Task<Void, Never>?   // main thread only
+    /// The replica after a 409 of the old home. nil: none now. GroupSync sets it.
+    var rehome: @Sendable (StoreNotHome) async -> StoreReplica? = { _ in nil }
+    /// The id of the group, for the replica id of its home.
+    var group: () -> String? = { nil }
 
     var store: any Store { lock.withLock { current } }
+
+    /// The files on disk under each store. Records of the hub-only collections go here.
+    var files: (any Store)? { local }
 
     init(store: any Store) {
         current = store
         local = store as? LocalStore
     }
 
-    /// Free mode (nil) keeps the LocalStore. A paired Mac syncs the same files with the cloud. Main thread only.
-    func use(_ link: CloudLink?) {
-        guard let local, link != self.link else { return }
-        self.link = link
+    /// Free mode (`.local` with no SyncedStore yet) keeps the LocalStore. A replica of the same identity changes in place,
+    /// and the SyncedStore keeps its outbox. A new identity (another cloud device) gets a new SyncedStore. Main thread only.
+    func use(_ next: StoreHome) {
+        guard let local, next != home else { return }
+        home = next
+        let replica = next.replica(http: URLSessionTransport(), group: group())
+        let synced = store as? SyncedStore
+        if let synced, next.identity == nil || next.identity == synced.device {
+            Task { await synced.use(replica) }
+            return
+        }
+        guard let identity = next.identity else { return }
         watch?.cancel()
-        if let old = store as? SyncedStore { Task { await old.stop() } }
-        let next = ENV.store(local: local, link: link)
-        lock.withLock { current = next }
-        guard let synced = next as? SyncedStore else { return }
+        if let synced { Task { await synced.stop() } }
+        let rehome = self.rehome
+        let made = ENV.store(local: local, identity: identity, replica: replica, rehome: { await rehome($0) })
+        lock.withLock { current = made }
         watch = Task {
-            for await c in await synced.remoteChanges() {
+            for await c in await made.remoteChanges() {
                 await MainActor.run {
                     NotificationCenter.default.post(name: Self.remoteChanged, object: self, userInfo: ["collection": c.collection])
                 }
             }
         }
         syncNow()
+    }
+
+    /// Tells the pages that a record of the collection changed outside the UI, for example by a runner frame.
+    func changed(_ collection: String) {
+        NotificationCenter.default.post(name: Self.remoteChanged, object: self, userInfo: ["collection": collection])
     }
 
     /// Sends the outbox and reads the cloud ops now. Free mode does nothing.

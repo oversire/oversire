@@ -77,7 +77,11 @@ final class LiveSync {
 
     weak var sink: RelaySink?
     /// The daemons. Each active link gets a source.
-    var machines: MachineHub?
+    var machines: MachineHub? {
+        didSet { group = machines.map { GroupSync(hub: $0) } }
+    }
+    /// The runner path and the store home of the group.
+    private(set) var group: GroupSync?
     let secrets: SecretStore
     let cursors: CursorStore
 
@@ -230,7 +234,9 @@ final class LiveSync {
                 DispatchQueue.main.async { [weak self] in
                     if self?.generation == gen { hub.logGap(machine) }
                 }
-            }, onGroup: { DispatchQueue.main.async { hub.refresh() } }, onFrame: { text in
+            }, onStore: { DispatchQueue.main.async { STORE_WRITES.syncNow() } },
+            onGroup: { DispatchQueue.main.async { [weak self] in self?.group?.reread() ?? hub.refresh() } }, onFrame: { text in
+                DispatchQueue.main.async { [weak self] in self?.group?.frame(text, from: machine) }
                 guard l.local else { return }
                 DispatchQueue.main.async { hub.frame(text) }
             })
@@ -244,18 +250,22 @@ final class LiveSync {
     }
 
     private func makeCloud(generation gen: Int) -> CloudSource? {
-        guard canRun, let base = URL(string: RELAY.workerURL) else { STORE_WRITES.use(nil); return nil }
+        guard canRun, let base = URL(string: RELAY.workerURL) else { useCloud(nil); return nil }
         guard let token = secrets.get(SecretStore.deviceToken) else {
-            STORE_WRITES.use(nil)
+            useCloud(nil)
             state = .error("This Mac has not joined the cloud")
             return nil
         }
         // The old single-tenant relay has no store.
-        STORE_WRITES.use(RELAY.hookRoute == nil ? nil : CloudLink(base: base, token: token, device: RELAY.deviceID))
+        useCloud(RELAY.hookRoute == nil ? nil : CloudLink(base: base, token: token, device: RELAY.deviceID))
         return CloudSource(base: base, token: token, http: URLSessionTransport(), socket: URLSessionWebSockets(), cursors: cursors,
                            onResync: { a in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.resync(a) } }
         }, onStore: { DispatchQueue.main.async { STORE_WRITES.syncNow() } })
+    }
+
+    private func useCloud(_ link: CloudLink?) {
+        if let group { group.cloud = link } else { STORE_WRITES.use(link.map { .cloud($0) } ?? .local) }
     }
 
     private func watchNetwork() {
