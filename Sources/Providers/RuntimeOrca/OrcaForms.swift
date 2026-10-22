@@ -15,6 +15,18 @@ struct ClaudeForm: Hashable {
 
     /// The text that names the form when the transcript does not give its id.
     var key: String { headers.isEmpty ? items.first?.text ?? "" : headers.joined(separator: "|") }
+    /// The key of this page of the form. OverSire answers a form from the screen one page at a time.
+    var page: String { key + "\n" + (review ? Self.reviewID : items.first?.text ?? "") }
+
+    /// The id of the item that submits or cancels the review page.
+    static let reviewID = "review"
+
+    /// The review page as one choice, for a form that OverSire reads from the screen only.
+    var reviewItem: QuestionItem {
+        QuestionItem(id: Self.reviewID, header: "Review", text: "Ready to submit your answers?",
+                     why: items.map { "\($0.text) → \($0.why ?? "")" }.joined(separator: "\n"), kind: .single,
+                     options: [.init(label: "Submit answers"), .init(label: "Cancel")])
+    }
 
     /// nil when no form is open at the bottom of the screen.
     static func parse(_ screen: [String]) -> ClaudeForm? {
@@ -69,23 +81,26 @@ struct ClaudeForm: Hashable {
         return ClaudeForm(headers: headers, items: [item], cursor: cursor, boxes: boxes)
     }
 
-    /// "● question" starts an item, "→ answer" ends it.
+    /// "● question" starts an item, "→ answer" ends it. The why of each item is its answer.
     private static func reviewItems(_ rows: [String]) -> [QuestionItem] {
-        var texts: [String] = []
+        var texts: [(text: String, answer: String?)] = []
         var open = false
         for row in rows {
             var t = trim(row)
             if t.hasPrefix("│") { t = trim(String(t.dropFirst())) }
             if t.hasPrefix("● ") {
-                texts.append(String(t.dropFirst(2)))
+                texts.append((String(t.dropFirst(2)), nil))
                 open = true
-            } else if t.hasPrefix("→") || t.hasPrefix("Ready to submit") {
+            } else if t.hasPrefix("→"), !texts.isEmpty {
+                texts[texts.count - 1].answer = trim(String(t.dropFirst()))
+                open = false
+            } else if t.hasPrefix("Ready to submit") {
                 open = false
             } else if open, !t.isEmpty {
-                texts[texts.count - 1] += " " + t
+                texts[texts.count - 1].text += " " + t
             }
         }
-        return texts.enumerated().map { QuestionItem(id: "q\($0.offset + 1)", text: $0.element, kind: .free) }
+        return texts.enumerated().map { QuestionItem(id: "q\($0.offset + 1)", text: $0.element.text, why: $0.element.answer, kind: .free) }
     }
 
     /// The screen with no empty rows at the bottom. Orca draws a rule with the worktree name below the terminal.
@@ -185,7 +200,7 @@ struct FormKeys: Hashable {
     struct Step: Hashable {
         /// The question of the tab. nil: the review page.
         var question: String?
-        /// The start of the cursor row, for example "4." or "Next".
+        /// The start of the cursor row, for example "4." or "Next". Rows split by "|" are each a match.
         var cursor: String?
         /// The boxes of a multi question before the key.
         var boxes: [Int: Bool] = [:]
@@ -196,15 +211,21 @@ struct FormKeys: Hashable {
             if let question {
                 guard !f.review, f.items.count == 1, flat(f.items[0].text) == flat(question) else { return false }
             } else if !f.review { return false }
-            if let cursor, !(f.cursor ?? "").hasPrefix(cursor) { return false }
+            if let cursor, !cursor.split(separator: "|").contains(where: { (f.cursor ?? "").hasPrefix($0) }) { return false }
             return boxes.allSatisfy { f.boxes[$0.key] == $0.value }
         }
     }
 
     let steps: [Step]
 
-    init(_ q: SessionQuestion, _ a: QuestionAnswer) {
+    /// `page`: the question is one page of a form with tabs, read from the screen. Its review page is another question.
+    init(_ q: SessionQuestion, _ a: QuestionAnswer, page: Bool = false) {
         var steps: [Step] = []
+        if let item = q.items.first, item.id == ClaudeForm.reviewID {
+            let n = a.items.first?.choices.first.flatMap { c in item.options.firstIndex { $0.label == c } }.map { $0 + 1 }
+            self.steps = n.map { [Step(question: nil, keys: "\($0)")] } ?? []
+            return
+        }
         for (i, item) in q.items.enumerated() {
             let given = a.items.first { $0.id == item.id } ?? .init(id: item.id)
             let other = (given.other ?? "").split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
@@ -231,10 +252,11 @@ struct FormKeys: Hashable {
                     steps += [Step(question: text, cursor: "\(typed).", keys: other), Step(question: text, cursor: "\(typed).", keys: Self.down)]
                 }
                 let boxes = Dictionary(uniqueKeysWithValues: (1...rows).map { ($0, on.contains($0)) })
-                steps.append(Step(question: text, cursor: i == q.items.count - 1 ? "Submit" : "Next", boxes: boxes, keys: Self.enter))
+                let last = page ? "Next|Submit" : i == q.items.count - 1 ? "Submit" : "Next"
+                steps.append(Step(question: text, cursor: last, boxes: boxes, keys: Self.enter))
             }
         }
-        if q.items.count > 1 || q.items.contains(where: { $0.kind == .multi }) {
+        if !page, q.items.count > 1 || q.items.contains(where: { $0.kind == .multi }) {
             steps.append(Step(question: nil, cursor: "1. Submit answers", keys: "1"))
         }
         self.steps = steps
@@ -273,8 +295,9 @@ extension OrcaRuntime {
             let form = w.tool == nil || w.tool == "AskUserQuestion" ? ClaudeForm.parse(screen) : nil
             let call = form.flatMap { f in localAsk(cwd: w.path ?? t.path).flatMap { $0.open && $0.matches(f) ? $0 : nil } }
             if let form, call != nil || !form.items.isEmpty {
-                out.append(SessionQuestion(id: questionID(call.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.key))"), session: s,
-                                           origin: .session, items: call?.items ?? form.items, via: .form, askedAt: w.since))
+                let items = call?.items ?? (form.review ? [form.reviewItem] : form.items)
+                out.append(SessionQuestion(id: questionID(call.map { "form:" + $0.id } ?? "form:\(s.id):\(Self.fnv(form.page))"), session: s,
+                                           origin: .session, items: items, via: .form, askedAt: w.since))
             } else {
                 out.append(SessionQuestion(id: questionID("wait:\(s.id):\(w.started)"), session: s, origin: .session,
                                            items: [QuestionItem(id: "q1", text: "The session waits for you. OverSire cannot read the prompt.", kind: .free)],
@@ -287,7 +310,12 @@ extension OrcaRuntime {
     /// Types the answer into the form. Before each key it reads the screen and stops when the form is not at the step.
     /// .alreadyAnswered: the form is gone, so the user answered in Orca. form_changed: another form or step shows.
     func answerForm(_ q: SessionQuestion, _ a: QuestionAnswer) async throws -> AnswerResult {
-        let steps = FormKeys(q, a).steps.map { step in (keys: step.keys, check: { ClaudeForm.parse($0).map(step.holds) }) }
+        // A form from the screen has the hash of its page at the end of the id. Another page is an answered page.
+        let tail = messageID(q.id)?.dropFirst("form:".count).split(separator: ":")
+        let page = tail.flatMap { $0.count == 2 ? String($0[1]) : nil }
+        let steps = FormKeys(q, a, page: page != nil).steps.map { step in
+            (keys: step.keys, check: { ClaudeForm.parse($0).flatMap { f in page.map { Self.fnv(f.page) == $0 } ?? true ? step.holds(f) : nil } })
+        }
         if let r = try await press(steps, in: q.session) { return r }
         if let given = try? await formAnswer(q), Self.flat(given) != Self.flat(a) {
             log.write(LogEntry(level: .warn, area: .sessions, job: "Form answer", subject: q.session.id,

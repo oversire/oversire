@@ -59,4 +59,90 @@ final class OrcaLiveTests: XCTestCase {
         let after = try await rt.openQuestions(in: [session])
         XCTAssertFalse(after.contains { $0.id == open.id })
     }
+
+    /// Native questions of a real Claude Code session in Orca, in default permission mode.
+    /// ORCA_CLAUDE_TERMINAL is its handle. ORCA_CLAUDE_DIR is its folder. The test sends prompts to it.
+    func testNativeQuestions() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OVERSIRE_LIVE"] == "1" else { throw XCTSkip("set OVERSIRE_LIVE=1") }
+        guard let handle = env["ORCA_CLAUDE_TERMINAL"], let dir = env["ORCA_CLAUDE_DIR"] else {
+            throw XCTSkip("set ORCA_CLAUDE_TERMINAL and ORCA_CLAUDE_DIR to a Claude Code terminal in Orca")
+        }
+        let rt = OrcaRuntime(environment: nil, commands: LiveCommands())
+        guard rt.installed else { throw XCTSkip("Orca is not installed") }
+        let s = rt.sessionRef(workspace: "live", handle: handle)
+        func wait(_ via: SessionQuestion.Via, not old: QuestionID? = nil) async throws -> SessionQuestion {
+            for _ in 0..<60 {
+                if let q = try await rt.openQuestions(in: [s]).first(where: { $0.via == via && $0.id != old }) { return q }
+                try await Task.sleep(for: .seconds(2))
+            }
+            throw XCTSkip("no \(via) question after 120 s")
+        }
+        func gone(_ id: QuestionID) async throws -> Bool {
+            for _ in 0..<15 {
+                if try await !rt.openQuestions(in: [s]).contains(where: { $0.id == id }) { return true }
+                try await Task.sleep(for: .seconds(2))
+            }
+            return false
+        }
+        func keys(_ k: String) async throws { _ = try await LiveCommands().run(rt.exe, ["terminal", "send", "--terminal", handle, "--text", k], stdin: nil, timeout: .seconds(20)) }
+
+        // A form with two tabs, answered in OverSire.
+        try await rt.send(s, text: #"Use AskUserQuestion once with two questions. Q1 header "Store" single: "Which store?" options SQLite, JSON. "#
+            + #"Q2 header "Tests" multiSelect: "Which tests?" options Unit, uishots, Live. Then reply with the answers only."#)
+        // Without the transcript of this folder, OverSire reads the screen and answers one page at a time.
+        let picks: [String: QuestionAnswer.Item] = ["Which store?": .init(id: "", choices: ["JSON"]),
+                                                    "Which tests?": .init(id: "", choices: ["Unit"], other: "perf"),
+                                                    "Ready to submit your answers?": .init(id: "", choices: ["Submit answers"])]
+        var form = try await wait(.form)
+        var pages: [String] = []
+        while true {
+            let item = try XCTUnwrap(form.items.first)
+            pages.append(item.text)
+            let pick = try XCTUnwrap(picks[item.text], item.text)
+            let sent = try await rt.answer(form, QuestionAnswer(question: form.id, items: [.init(id: item.id, choices: pick.choices, other: pick.other)]))
+            XCTAssertEqual(sent, .sent)
+            guard let next = try await rt.openQuestions(in: [s]).first(where: { $0.via == .form && $0.id != form.id }) else { break }
+            form = next
+        }
+        XCTAssertEqual(pages, ["Which store?", "Which tests?", "Ready to submit your answers?"])
+        let formGone = try await gone(form.id)
+        XCTAssertTrue(formGone)
+
+        // A form answered in Orca: the card goes, and OverSire sends no key.
+        try await rt.send(s, text: #"Use AskUserQuestion once with one question. Header "Color" single: "Which color?" options Red, Blue. Then reply with the answer only."#)
+        let orcaForm = try await wait(.form, not: form.id)
+        XCTAssertEqual(orcaForm.items.first?.text, "Which color?")
+        try await keys("2")
+        if try await !gone(orcaForm.id) { try await keys("1") }
+        let orcaGone = try await gone(orcaForm.id)
+        XCTAssertTrue(orcaGone)
+        let late = try await rt.answer(orcaForm, QuestionAnswer(question: orcaForm.id, items: [.init(id: orcaForm.items[0].id, choices: ["Red"])]))
+        XCTAssertEqual(late, .alreadyAnswered)
+
+        // A permission prompt, answered Yes in OverSire. The command runs.
+        let stamp = (dir as NSString).appendingPathComponent("stamp-\(Int(Date().timeIntervalSince1970)).txt")
+        try await rt.send(s, text: "Run this exact Bash command and nothing else: date > \(stamp)")
+        let perm = try await wait(.permission)
+        XCTAssertEqual(perm.items.first?.header, "Bash")
+        let yes = try await rt.answer(perm, QuestionAnswer(question: perm.id, items: [.init(id: "q1", choices: ["Yes"])]))
+        XCTAssertEqual(yes, .sent)
+        var ran = false
+        for _ in 0..<30 where !ran {
+            ran = FileManager.default.fileExists(atPath: stamp)
+            if !ran { try await Task.sleep(for: .seconds(1)) }
+        }
+        XCTAssertTrue(ran, "the command did not run")
+
+        // A turn that ends with a question. The answer is the next prompt.
+        try await rt.send(s, text: "Reply with only this text: Do you want me to add a third line?")
+        let turn = try await wait(.turn)
+        XCTAssertEqual(turn.items.first?.text, "Do you want me to add a third line?")
+        let reply = try await rt.answer(turn, QuestionAnswer(question: turn.id, items: [.init(id: "q1", other: "No. Reply with the word OK.")]))
+        XCTAssertEqual(reply, .sent)
+        let screen = try await rt.output(s, lines: 40).joined(separator: "\n")
+        XCTAssertTrue(screen.contains("No. Reply with the word OK."), screen)
+        let again = try await rt.answer(turn, QuestionAnswer(question: turn.id, items: [.init(id: "q1", other: "No")]))
+        XCTAssertEqual(again, .alreadyAnswered)
+    }
 }

@@ -134,7 +134,7 @@ final class OrcaFormsTests: XCTestCase {
         let first = try await rt.openQuestions(in: [s])
         orca.on("terminal read", Self.read("form-multi"))
         let second = try await rt.openQuestions(in: [s])
-        XCTAssertEqual(first.map(\.id), second.map(\.id), "the id stays on another page")
+        XCTAssertNotEqual(first.map(\.id), second.map(\.id), "each page has its own id, so the board shows the next page")
         XCTAssertTrue(first[0].id.rawValue.hasPrefix("orca:mbp:form:term_form:"))
         XCTAssertEqual(first[0].items.first?.text, Self.storeText)
         let given = try await rt.answerGiven(first[0])
@@ -279,6 +279,36 @@ final class OrcaFormsTests: XCTestCase {
         XCTAssertEqual(logs.entries, [], "the transcript has the same answer")
         let given = try await rt.answerGiven(q)
         XCTAssertEqual(given.map(OrcaRuntime.flat), OrcaRuntime.flat(a))
+    }
+
+    /// With no transcript, OverSire answers one page at a time: Store, then Tests, then the review page.
+    func testRemoteFormIsAnsweredPageByPage() async throws {
+        let rt = runtime("mbp")
+        rt.formWait = .zero
+        orca.on("terminal send", #"{"ok":true,"result":{"send":{"accepted":true,"bytesWritten":1}}}"#)
+        let s = rt.sessionRef(workspace: "b07c::/w", handle: "term_form")
+        func page(_ frames: ClosedRange<Int>, _ answer: (QuestionItem) -> QuestionAnswer.Item) async throws -> (QuestionItem, [String]) {
+            orca.on("terminal read", Self.flow(frames.lowerBound))
+            let open = try await rt.openQuestions(in: [s])
+            let q = try XCTUnwrap(open.first)
+            let item = try XCTUnwrap(q.items.first)
+            XCTAssertEqual(q.items.count, 1)
+            let before = orca.args("terminal send").count
+            orca.on("terminal read", list: frames.map(Self.flow))
+            let r = try await rt.answer(q, QuestionAnswer(question: q.id, items: [answer(item)]))
+            XCTAssertEqual(r, .sent, item.text)
+            return (item, orca.args("terminal send").dropFirst(before).map { $0[5] })
+        }
+        let (store, k1) = try await page(0...1) { .init(id: $0.id, choices: ["JSON"]) }
+        XCTAssertEqual(store.text, "Which store?")
+        XCTAssertEqual(k1, ["2"])
+        let (tests, k2) = try await page(1...9) { .init(id: $0.id, choices: ["Unit"], other: "perf") }
+        XCTAssertEqual(tests.kind, .multi)
+        XCTAssertEqual(k2, ["1", "4", Self.down, Self.down, Self.down, "perf", Self.down, "\r"], "no review key: the review page is the next card")
+        let (review, k3) = try await page(9...10) { .init(id: $0.id, choices: ["Submit answers"]) }
+        XCTAssertEqual(review.id, ClaudeForm.reviewID)
+        XCTAssertEqual(review.why, "Which store? → JSON\nWhich tests? → Unit, perf")
+        XCTAssertEqual(k3, ["1"])
     }
 
     func testFormAnsweredInOrcaSendsNoKey() async throws {

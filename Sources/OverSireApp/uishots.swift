@@ -1130,6 +1130,9 @@ extension UIShots {
         let turn = QuestionItem(id: "q1", text: "Do you want me to add a third line?",
                                 why: "The file notes.md has two lines: hello and world.\n\nDo you want me to add a third line?", kind: .free)
         let wait = QuestionItem(id: "q1", text: "The session waits for you. OverSire cannot read the prompt.", kind: .free)
+        let review = QuestionItem(id: "review", header: "Review", text: "Ready to submit your answers?",
+                                  why: "Which store? → JSON\nWhich tests? → Unit, perf", kind: .single,
+                                  options: [.init(label: "Submit answers"), .init(label: "Cancel")])
         let pause = { (id: String, item: QuestionItem, at: Double) in
             e(SessionQuestion(id: QuestionID(rawValue: "orca:local:form:\(id)"), session: session, origin: work, items: [item], via: .permission,
                               askedAt: ago(at)), .open)
@@ -1140,6 +1143,8 @@ extension UIShots {
                 [(e(SessionQuestion(id: "orca:local:turn:term_1:1", session: session, origin: work, items: [turn], via: .turn, askedAt: ago(3)), .open),
                   here, acts, nil),
                  (e(SessionQuestion(id: "orca:local:wait:term_1:1", session: session, origin: work, items: [wait], via: .waiting, askedAt: ago(5)), .open),
+                  here, acts, nil),
+                 (e(SessionQuestion(id: "orca:mbp:form:term_1:1", session: session, origin: work, items: [review], via: .form, askedAt: ago(6)), .open),
                   here, acts, nil)],
             ]
         } else if set == "closed" {
