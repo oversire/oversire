@@ -7,8 +7,8 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         let title: String
         let detail: String
         let symbol: String
-        let kind: String         // "Page", "Item", "Run", "Action"
-        var key = ""             // the item key, for kind "Item"
+        let kind: String         // "Page", "Item", "Intake", "Run", "Action"
+        var key = ""             // the item key, for kind "Item" and "Intake"
         let run: () -> Void
     }
 
@@ -97,6 +97,19 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         panel.contentView = root
         all = entries()
         filter("")
+        if !picking { loadIntakeKeys() }
+    }
+
+    // Intake keys load late. The entries then get the keys.
+    private func loadIntakeKeys() {
+        guard let store = owner?.data.projectStore else { return }
+        for (pk, s) in store.snapshots where s.intake?.isEmpty == false {
+            store.loadIntakeKeys(projectKey: pk) { [weak self] in
+                guard let self, CommandPalette.current === self else { return }
+                self.all = self.entries()
+                self.filter(self.field.stringValue)
+            }
+        }
     }
 
     private func open() {
@@ -146,6 +159,9 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
                 out.append(Entry(title: "\(i.key)  \(i.title)", detail: st, symbol: "circle.dashed", kind: "Item", key: i.key, run: go(.item(i.key, .overview))))
             }
         }
+        out += Self.intakeEntries(data.projectStore.snapshots, keys: data.projectStore.intakeKeys) { pk, id in
+            IntakeWindow.show(projectKey: pk, workItemId: id)
+        }
         for (repo, runs) in data.grouped {
             for r in runs.prefix(8) {
                 out.append(Entry(title: "\(r.workflowName ?? r.name) · \(r.headBranch)", detail: "\(repo) · \(Tone(r).word)",
@@ -168,9 +184,24 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         return out
     }
 
+    /// One entry for each pending intake item. The item page does not know intake items, so `open` gets the project key and the work item id.
+    static func intakeEntries(_ snapshots: [String: ProjectSnapshot], keys: [String: Int], open: @escaping (String, String) -> Void) -> [Entry] {
+        var out: [Entry] = []
+        for (pk, s) in snapshots {
+            for i in s.intake ?? [] {
+                let key = keys[i.workItemId].map { "\(s.summary.identifier)-\($0)" } ?? ""
+                let detail = ["Intake", i.priority].compactMap { $0 }.joined(separator: " · ")
+                out.append(Entry(title: key.isEmpty ? i.name : "\(key)  \(i.name)", detail: detail, symbol: "tray.and.arrow.down",
+                                 kind: "Intake", key: key) { open(pk, i.workItemId) })
+            }
+        }
+        return out
+    }
+
     // Every word must appear in the title or the detail. Items whose key starts with the query come first.
-    private func filter(_ q: String) {
+    static func match(_ all: [Entry], query q: String, picking: Bool) -> [Entry] {
         let words = q.lowercased().split(separator: " ").map(String.init)
+        var shown: [Entry]
         if words.isEmpty && picking {
             shown = all
         } else if words.isEmpty {
@@ -185,7 +216,11 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
                 return pa && !pb
             }
         }
-        shown = Array(shown.prefix(60))
+        return Array(shown.prefix(60))
+    }
+
+    private func filter(_ q: String) {
+        shown = Self.match(all, query: q, picking: picking)
         table.reloadData()
         if !shown.isEmpty { table.selectRowIndexes([0], byExtendingSelection: false) }
     }
