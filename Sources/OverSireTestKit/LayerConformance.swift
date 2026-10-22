@@ -231,7 +231,7 @@ public enum RuntimeConformance {
 
 public enum QuestionChannelConformance {
     /// Reads the open questions of `sessions` twice, answers the first answerable one twice,
-    /// and checks the form questions. The channel must have at least one answerable question.
+    /// and checks the form questions and the questions that are not answerable. The channel must have at least one answerable question.
     public static func run(sessions: [SessionRef], make: @Sendable () async throws -> any QuestionChannel) async -> ConformanceReport {
         var r = ConformanceReport()
         guard let ch = await r.step("make", make) else { return r }
@@ -247,14 +247,16 @@ public enum QuestionChannelConformance {
         }
 
         for q in first where q.via == .form {
-            r.expect(!q.answerable, "form question \(q.id) is answerable")
+            r.expect(q.answerable, "form question \(q.id) is not answerable")
+        }
+        for q in first where !q.answerable {
             do {
                 _ = try await ch.answer(q, answer(for: q))
-                r.expect(false, "answer on form question \(q.id) did not throw")
+                r.expect(false, "answer on question \(q.id) that is not answerable did not throw")
             } catch let e as QuestionError {
-                r.expect(e == .notAnswerable, "answer on form question \(q.id) threw \(e)")
+                r.expect(e == .notAnswerable, "answer on question \(q.id) threw \(e)")
             } catch {
-                r.expect(false, "answer on form question \(q.id) threw \(error), not QuestionError.notAnswerable")
+                r.expect(false, "answer on question \(q.id) threw \(error), not QuestionError.notAnswerable")
             }
         }
 

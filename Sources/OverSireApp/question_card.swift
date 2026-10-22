@@ -145,7 +145,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
 
     // MARK: Drawing
 
-    private var isForm: Bool { !question.answerable }
+    private var inRuntime: Bool { !question.answerable }
     private var askedWord: String { question.origin.isIntake ? "Enhance asks" : "The session asks" }
 
     private func render() {
@@ -161,7 +161,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
             if entry.stale {
                 add(NSTextField.text("OverSire cannot reach \(place.text). The card shows the last read.", size: 12, color: Palette.warn, lines: 2))
             }
-            if isForm {
+            if inRuntime {
                 add(NSTextField.text("The session shows its own form in \(place.runtime). OverSire shows the questions, but cannot answer them.",
                                      size: 12, color: Palette.mut, lines: 2))
             }
@@ -189,7 +189,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
 
     private var stateWord: String {
         switch entry.state {
-        case .open: return isForm ? "answer in \(place.runtime)" : "open"
+        case .open: return inRuntime ? "answer in \(place.runtime)" : "open"
         case .sending: return "sending"
         case .answeredHere: return "answered"
         case .answeredElsewhere: return "answered in \(place.runtime)"
@@ -202,12 +202,12 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         let open = entry.state == .open || entry.state == .sending
         fill = open ? Palette.panel : Palette.panel.withAlphaComponent(0.6)
         switch entry.state {
-        case .open, .sending: border = isForm ? nil : entry.stale ? Palette.warn.withAlphaComponent(0.6) : Palette.acc.withAlphaComponent(0.6)
+        case .open, .sending: border = inRuntime ? nil : entry.stale ? Palette.warn.withAlphaComponent(0.6) : Palette.acc.withAlphaComponent(0.6)
         case .raced: border = Palette.warn.withAlphaComponent(0.6)
         default: border = Palette.line
         }
-        borderWidth = open && !isForm ? 1.5 : 1
-        dash.isHidden = !(open && isForm)
+        borderWidth = open && !inRuntime ? 1.5 : 1
+        dash.isHidden = !(open && inRuntime)
         needsDisplay = true
     }
 
@@ -239,7 +239,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         title.setContentCompressionResistancePriority(.required, for: .horizontal)
         var views: [NSView] = [Glyph("sparkles", color: Palette.acc, size: 13), title,
                                Chiplet(place.text, symbol: place.local ? "desktopcomputer" : "network")]
-        views.append(Chiplet(wayWord, symbol: isForm ? "rectangle.and.pencil.and.ellipsis" : "bubble.left.and.bubble.right"))
+        views.append(Chiplet(wayWord, symbol: inRuntime ? "rectangle.and.pencil.and.ellipsis" : "bubble.left.and.bubble.right"))
         if question.round > 1 { views.append(Chiplet("Round \(question.round)")) }
         views.append(Spacer())
         let waited = now().timeIntervalSince(question.askedAt)
@@ -264,6 +264,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         case .form: return "form in \(place.runtime)"
         case .runnerInput: return "runner"
         case .permission: return "permission"
+        case .waiting: return "waits in \(place.runtime)"
         }
     }
 
@@ -309,7 +310,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
             f.translatesAutoresizingMaskIntoConstraints = false
             f.delegate = self
             f.identifier = NSUserInterfaceItemIdentifier(item.id)
-            f.isEnabled = entry.state == .open && !isForm
+            f.isEnabled = entry.state == .open && !inRuntime
             f.setAccessibilityLabel(item.kind == .free ? "Answer to \(item.text)" : "Other answer to \(item.text)")
             fields[item.id] = f
             col.addFull(f)
@@ -324,14 +325,14 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         b.setAccessibilityElement(true)
         b.setAccessibilityRole(.group)
         b.setAccessibilityLabel("Question \(index + 1) of \(question.items.count): \(item.text)")
-        b.setAccessibilityHelp(isForm ? nil : item.kind == .free ? "Write the answer, then press Return." : "Press 1 to \(min(9, item.options.count)) to pick an option.")
+        b.setAccessibilityHelp(inRuntime ? nil : item.kind == .free ? "Write the answer, then press Return." : "Press 1 to \(min(9, item.options.count)) to pick an option.")
         return b
     }
 
     private func fillOptions(_ item: QuestionItem) {
         guard let row = optionRows[item.id] else { return }
         row.clear()
-        let enabled = entry.state == .open && !isForm
+        let enabled = entry.state == .open && !inRuntime
         let n = item.options.count
         // Long labels go one under the other.
         row.orientation = item.options.map(\.label.count).reduce(0, +) > 70 ? .vertical : .horizontal
@@ -351,7 +352,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     private func footer() -> NSView {
         var views: [NSView] = []
         let sending = entry.state == .sending
-        if isForm {
+        if inRuntime {
             if let reveal = actions.reveal { views.append(ActionButton("Answer in \(place.runtime) ↗", style: .primary) { reveal() }) }
             views.append(Spacer())
         } else if question.items.count == 1, let item = question.items.first, item.kind == .approve {

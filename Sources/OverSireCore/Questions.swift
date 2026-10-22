@@ -29,9 +29,9 @@ public struct SessionQuestion: Identifiable, Hashable, Sendable, Codable {
         }
     }
 
-    /// How the question reached OverSire.
+    /// How the question reached OverSire. `waiting`: the session waits, and OverSire cannot read the screen.
     public enum Via: String, Hashable, Sendable, Codable {
-        case askReply, form, runnerInput, permission
+        case askReply, form, runnerInput, permission, waiting
     }
 
     public let id: QuestionID
@@ -56,7 +56,7 @@ public struct SessionQuestion: Identifiable, Hashable, Sendable, Codable {
     }
 
     /// False when the runner cannot answer it exactly. The card then shows "Answer in Orca".
-    public var answerable: Bool { via != .form }
+    public var answerable: Bool { via != .waiting }
 
     /// Throws when the answer does not fit the items.
     public func validate(_ a: QuestionAnswer) throws {

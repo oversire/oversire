@@ -24,10 +24,15 @@ public final class OrcaRuntime: AgentRuntime, SessionIO, Revealing, SessionHisto
     /// The wait after a failed `check --wait`.
     var changesRetry: Duration = .seconds(10)
     var now: @Sendable () -> Date = { Date() }
+    /// The reads of the screen for one form step, and the wait between two reads.
+    var formTries = 10
+    var formWait: Duration = .milliseconds(200)
+    let log: any LogSink
 
     public init(exe: String = OrcaRuntime.defaultPath, environment: String?, commands: any CommandRunner,
-                transcripts: (any TranscriptReading)? = nil) {
+                transcripts: (any TranscriptReading)? = nil, log: any LogSink = NoLog()) {
         self.exe = exe
+        self.log = log
         self.environment = environment?.isEmpty == true ? nil : environment
         self.commands = commands
         self.transcripts = transcripts

@@ -10,7 +10,8 @@ final class ReplayOrca: CommandRunner, @unchecked Sendable {
     private(set) var calls: [[String]] = []
 
     /// Replies in order. The last one repeats.
-    func on(_ command: String, _ replies: String...) { lock.withLock { answers[command] = replies } }
+    func on(_ command: String, _ replies: String...) { on(command, list: replies) }
+    func on(_ command: String, list replies: [String]) { lock.withLock { answers[command] = replies } }
 
     func run(_ exe: String, _ args: [String], stdin: Data?, timeout: Duration) async throws -> CommandOutput {
         lock.withLock {

@@ -56,9 +56,9 @@ final class QuestionCardTests: XCTestCase {
     }
 
     @MainActor
-    func testFormHasNoSend() {
+    func testWaitingHasNoSend() {
         var got: [QuestionAnswer] = []
-        let c = card([single], via: .form) { got.append($0) }
+        let c = card([single], via: .waiting) { got.append($0) }
         XCTAssertNil(c.sendButton)
         c.pick(0, of: "q1")
         c.send()

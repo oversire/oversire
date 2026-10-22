@@ -129,7 +129,7 @@ final class QuestionBoardTests: XCTestCase {
         let ch = FakeQuestionChannel()
         let box = Box(t0, [ch.session("s1")])
         let b = board(ch, box)
-        let q = question(ch, "1"), form = question(ch, "2", via: .form)
+        let q = question(ch, "1"), form = question(ch, "2", via: .waiting)
         ch.ask(q)
         ch.ask(form)
         await b.refresh()

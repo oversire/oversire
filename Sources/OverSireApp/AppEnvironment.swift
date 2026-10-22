@@ -34,7 +34,7 @@ final class AppEnvironment: @unchecked Sendable {
         let gh = p == .github || p == .githubActions
         return ProviderEnvironment(http: gh ? URLSessionTransport.noRedirects : URLSessionTransport(),
                                    commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil), secrets: other ?? secrets,
-                                   transcripts: BinderTranscripts())
+                                   transcripts: BinderTranscripts(), log: AppLog())
     }
 
     /// Runs after the Providers page removes an account, for example to delete its webhook.

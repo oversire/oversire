@@ -51,11 +51,11 @@ final class QuestionHubTests: XCTestCase {
     func testSessionQuestionGetsTheKeyOfItsTerminal() {
         let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w1"), id: "term-1")
         let h = hub()
-        h.seed([QuestionBoard.Entry(question: question(s, "f", origin: .session, via: .form), state: .open, firstSeen: t0)],
+        h.seed([QuestionBoard.Entry(question: question(s, "f", origin: .session, via: .waiting), state: .open, firstSeen: t0)],
                keys: [s: "OVERSIRE-7"])
         let rows = NeedsYou.questions(h)
         XCTAssertEqual(rows.map(\.key), ["OVERSIRE-7"])
-        XCTAssertEqual(rows.first?.act, .answerInOrca("fake:f"), "a form gets its answer in Orca")
+        XCTAssertEqual(rows.first?.act, .answerInOrca("fake:f"), "a pause that OverSire cannot read gets its answer in Orca")
         XCTAssertEqual(h.line(key: "OVERSIRE-7"), "✦ 1 question · in Orca")
         XCTAssertTrue(rows.first?.reason.hasSuffix("this Mac") == true, rows.first?.reason ?? "")
     }

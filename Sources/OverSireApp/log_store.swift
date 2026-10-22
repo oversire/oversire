@@ -8,6 +8,11 @@ import OverSireCore
 /// The log of the app. Tests and the CLI paths keep NoLog.
 var APP_LOG: any LogSink = NoLog()
 
+/// Writes to APP_LOG at the time of the write. Adapters get it before the log store starts.
+struct AppLog: LogSink {
+    func write(_ e: LogEntry) { APP_LOG.write(e) }
+}
+
 final class LogStore: LogSink, @unchecked Sendable {
     static let changed = Notification.Name("LogStore.changed")
     static let cap = 5000

@@ -14,6 +14,6 @@ extension OrcaRuntime {
         auth: [.localApp], docsURL: URL(string: "https://github.com/stablyai/orca")
     ) { config, env in
         let cli = config.values["cli"].flatMap { $0.isEmpty ? nil : $0 } ?? OrcaRuntime.defaultPath
-        return OrcaRuntime(exe: cli, environment: config.values["environment"], commands: env.commands, transcripts: env.transcripts)
+        return OrcaRuntime(exe: cli, environment: config.values["environment"], commands: env.commands, transcripts: env.transcripts, log: env.log)
     }
 }
