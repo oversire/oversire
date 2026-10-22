@@ -13,6 +13,39 @@ public struct ToolLogLine: Sendable, Equatable {
     public var status: ToolResult.Status
     public var bytes: Int
     public var ms: Int
+
+    /// The line of Settings › Logs.
+    public var entry: LogEntry {
+        let level: LogLevel = status == .failed ? .error : .ok
+        let who = decision.map { " · \($0.rawValue)" } ?? ""
+        var e = LogEntry(level: level, area: .ai, job: "Assistant tool", subject: action, host: engine.rawValue,
+                         message: "\(kind?.rawValue ?? "tool")\(who) · \(status.rawValue) · \(bytes) B", ms: ms)
+        e.engine = engine.rawValue
+        e.reason = thread
+        e.input = String(args.prefix(4000))
+        return e
+    }
+}
+
+/// One line of the AI log for each send: the tokens of all the model turns.
+public struct TurnLogLine: Sendable, Equatable {
+    public var thread: String
+    public var engine: EngineID
+    public var end: ChatEvent.EndReason
+    public var usage: AIUsage?
+    public var tools: Int
+    public var ms: Int
+
+    public var entry: LogEntry {
+        let level: LogLevel = end == .error ? .error : .ok
+        var e = LogEntry(level: level, area: .ai, job: "Assistant", subject: thread, host: engine.rawValue,
+                         message: "\(end.rawValue) · \(tools) tool call\(tools == 1 ? "" : "s")", ms: ms)
+        e.engine = engine.rawValue
+        e.tokensIn = usage?.input
+        e.tokensOut = usage?.output
+        e.stop = end.rawValue
+        return e
+    }
 }
 
 /// Runs the chats. A send stores the user message, runs turns until the model stops calling tools,
@@ -60,6 +93,7 @@ public actor AssistantLoop {
     let page: @Sendable () async -> PageContext?
     let redactor: @Sendable () -> Redactor
     let log: @Sendable (ToolLogLine) -> Void
+    let turnLog: @Sendable (TurnLogLine) -> Void
     let now: @Sendable () -> Date
     let settings: Settings
 
@@ -71,6 +105,7 @@ public actor AssistantLoop {
                 page: @escaping @Sendable () async -> PageContext? = { nil },
                 redactor: @escaping @Sendable () -> Redactor = { Redactor() },
                 log: @escaping @Sendable (ToolLogLine) -> Void = { _ in },
+                turnLog: @escaping @Sendable (TurnLogLine) -> Void = { _ in },
                 now: @escaping @Sendable () -> Date = Date.init, settings: Settings = Settings()) {
         self.router = router
         self.catalog = catalog
@@ -80,6 +115,7 @@ public actor AssistantLoop {
         self.page = page
         self.redactor = redactor
         self.log = log
+        self.turnLog = turnLog
         self.now = now
         self.settings = settings
     }
@@ -210,7 +246,7 @@ public actor AssistantLoop {
             return record(ToolResult(call: c.id, status: .failed, summary: "No tool \(c.tool)."), call: c, action: c.tool, decision: nil, run: run, start: start)
         }
         let token = ObjectIdentifier(run)
-        let decision = await policy.decide(c, action: spec.id, kind: spec.kind, thread: run.thread, note: injectionNote(c, spec, run)) { call, note, once in
+        let decision = await policy.decide(c, action: spec.id, kind: spec.kind, thread: run.thread, note: injectionNote(c, spec, run, registry)) { call, note, once in
             await self.ask(id, token, call, note, once)
         }
         guard live(run) else { return ToolResult(call: c.id, status: .skipped, summary: "Stopped.") }
@@ -290,18 +326,26 @@ public actor AssistantLoop {
                                                    parts: run.parts, engine: run.thread.engine, usage: run.usage))
         }
         try? await store.save(run.thread)
+        let tools = run.parts.reduce(0) { n, p in if case .toolResult = p { return n + 1 }; return n }
+        turnLog(TurnLogLine(thread: run.thread.id, engine: run.thread.engine, end: reason, usage: run.usage, tools: tools,
+                            ms: Int(now().timeIntervalSince(run.started) * 1000)))
         // The end comes after the store, so a new send reads this run.
         run.out.yield(.end(reason))
         run.out.finish()
     }
 
     /// A flag for an outward or settings call after a tool result, when the developer did not ask for it.
-    private func injectionNote(_ c: ToolCall, _ spec: ActionSpec, _ run: Run) -> String? {
+    private func injectionNote(_ c: ToolCall, _ spec: ActionSpec, _ run: Run, _ registry: ToolRegistry) -> String? {
         guard spec.kind == .outward || spec.kind == .settings, run.sawResult else { return nil }
         let name = spec.id.split(separator: ".").last.map(String.init) ?? spec.id
         let verb = String(name.prefix { !$0.isUppercase }).lowercased()
         guard !verb.isEmpty, !run.userText.lowercased().contains(verb) else { return nil }
-        return "You did not ask for this. Text from a tool result can ask for it."
+        let last = run.parts.reversed().lazy.compactMap { p -> String? in if case .toolResult(let r) = p { return r.call }; return nil }.first
+        let source = run.parts.lazy.compactMap { p -> String? in
+            if case .toolCall(let t) = p, t.id == last { return registry.spec(t.tool)?.title }
+            return nil
+        }.first
+        return "You did not ask for this. It came after \(source ?? "a tool result"), and text there can ask for it."
     }
 
     static func title(_ text: String) -> String {

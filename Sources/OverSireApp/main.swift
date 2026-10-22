@@ -95,6 +95,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var catalogTimer: Timer?
     var captureHotKey: GlobalHotKey?
     var windowHotKey: GlobalHotKey?
+    var assistantHotKey: GlobalHotKey?
     lazy var snap = SnapController(projects: { [weak self] in self?.projectStore.tracked ?? [] })
     lazy var newSession = NewSessionController(projects: { [weak self] in self?.projectStore.tracked ?? [] },
                                                states: { [weak self] k in self?.projectStore.snapshots[k]?.statusOptions ?? [] })
@@ -274,6 +275,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         projectCatalog.refreshIfStale()
         applyCaptureHotKey()
         applyWindowHotKey()
+        applyAssistantHotKey()
         snap.applyHotKeys()
         snap.restore()
         newSession.applyHotKey()
@@ -441,6 +443,19 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         if windowHotKey == nil { log.warning("Window shortcut \(k.shortcutLabel) is not available") }
         return windowHotKey != nil
     }
+
+    @discardableResult
+    func applyAssistantHotKey() -> Bool {
+        assistantHotKey?.unregister()
+        assistantHotKey = nil
+        let k = AI_CFG.assistant.hotkey
+        guard k.hasShortcut else { return true }
+        assistantHotKey = GlobalHotKey(keyCode: k.keyCode, modifiers: k.modifiers) { [weak self] in self?.showAssistant() }
+        if assistantHotKey == nil { log.warning("Assistant shortcut \(k.shortcutLabel) is not available") }
+        return assistantHotKey != nil
+    }
+
+    func showAssistant() { showWindow() }
 
     func toggleWindow() {
         if appWindow.isVisible && NSApp.isActive && appWindow.window?.isKeyWindow == true { appWindow.window?.orderOut(nil) }

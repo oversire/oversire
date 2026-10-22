@@ -2,6 +2,7 @@ import Foundation
 import AgentBinder
 import OverSireCore
 import OverSireAI
+import OverSireAssistant
 import OverSireSync
 import AIEngineAgentBinder
 import TrackerPlane
@@ -655,6 +656,7 @@ struct AIConfig: Codable, Equatable {
     var flaky = true                    // mark a run that failed, then passed on the same commit
     var digest = false                  // morning digest on Home
     var digestHour = 8
+    var assistant = AssistantConfig()
 
     init() {}
 
@@ -687,6 +689,7 @@ struct AIConfig: Codable, Equatable {
         flaky = try c.decodeIfPresent(Bool.self, forKey: .flaky) ?? true
         digest = try c.decodeIfPresent(Bool.self, forKey: .digest) ?? false
         digestHour = try c.decodeIfPresent(Int.self, forKey: .digestHour) ?? 8
+        assistant = try c.decodeIfPresent(AssistantConfig.self, forKey: .assistant) ?? AssistantConfig()
     }
 
     var apiKey: APIKeyConfig { APIKeyConfig(format: format, baseURL: baseURL, model: model, effort: effort, maxTokens: maxTokens) }
@@ -715,6 +718,41 @@ struct AIConfig: Codable, Equatable {
     func engineVerified(key: String?) -> Bool { engine == .localCLI ? cliVerifiedNow : keyVerified(key) }
 
     func isOn(key: String?) -> Bool { enabled && engineVerified(key: key) }
+}
+
+// Settings › AI › Assistant. The chat panel uses the same engines as the AI jobs.
+struct AssistantConfig: Codable, Equatable {
+    enum Source: String, Codable, CaseIterable { case jobs, localCLI = "local-cli", apiKey = "api-key" }
+
+    var source = Source.jobs
+    /// outward always asks and settings never runs (decision D).
+    var permissions = AssistantPermissions()
+    /// A new chat moves the window to the pages that it talks about.
+    var follow = true
+    /// Opens the panel from any app. No modifiers: no shortcut.
+    var hotkey = KeyShortcut(keyCode: 38, modifiers: 0)
+    /// Chats with no change for this time go away. Pinned chats stay.
+    var retention = ChatRetention.days30
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decodeIfPresent(Source.self, forKey: .source) ?? .jobs
+        permissions = try c.decodeIfPresent(AssistantPermissions.self, forKey: .permissions) ?? AssistantPermissions()
+        follow = try c.decodeIfPresent(Bool.self, forKey: .follow) ?? true
+        hotkey = try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkey) ?? KeyShortcut(keyCode: 38, modifiers: 0)
+        retention = try c.decodeIfPresent(ChatRetention.self, forKey: .retention) ?? .days30
+    }
+
+    /// The engine that a new chat tries first.
+    func engine(jobs: AIEngineChoice) -> EngineID {
+        switch source {
+        case .jobs: return jobs == .localCLI ? .localCLI : .apiKey
+        case .localCLI: return .localCLI
+        case .apiKey: return .apiKey
+        }
+    }
 }
 
 // Settings › Logs.

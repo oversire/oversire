@@ -7,7 +7,7 @@ enum SettingsAnchor: String, CaseIterable {
     case projects, refresh, repos, linking, writeback
     case sessions, queue, worktrees, planner
     case thisMac = "this-mac", joinOnly = "join-only", found, machines, hooks, daemon
-    case engine, localCLI = "local-cli", apiKey = "api-key", use, cloudAI = "cloud-ai"
+    case engine, localCLI = "local-cli", apiKey = "api-key", use, assistant, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
     case problems, log, logSettings = "log-settings"
 
@@ -40,6 +40,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .localCLI: return "Local CLI"
         case .apiKey: return "API key"
         case .use: return "Use AI for"
+        case .assistant: return "Assistant"
         case .cloudAI: return "Cloud AI"
         case .ci: return "CI runs"
         case .tracker: return "Tracker items"
@@ -59,7 +60,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .worktrees, .planner: return .agents
         case .thisMac, .joinOnly, .found, .machines, .hooks, .daemon: return .machines
-        case .engine, .localCLI, .apiKey, .use, .cloudAI: return .ai
+        case .engine, .localCLI, .apiKey, .use, .assistant, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
         case .problems, .log, .logSettings: return .logs
         }
@@ -189,6 +190,12 @@ struct SettingsIndex {
         Entry("Title and fields", .use, "new item size priority"),
         Entry("Tidy the text", .use, "rewrite description"),
         Entry("Pick the project", .use, "new item"),
+        Entry("Assistant source", .assistant, "chat engine ask"),
+        Entry("Read tools", .assistant, "chat permissions allow"),
+        Entry("Change tools", .assistant, "chat permissions approve"),
+        Entry("Follow along", .assistant, "chat navigate pages"),
+        Entry("Assistant shortcut", .assistant, "chat hotkey ⌘J"),
+        Entry("Keep chats", .assistant, "chat retention history delete"),
         Entry("Credits", .cloudAI, "usage cloud"),
         Entry("Started", .ci, "run alert"),
         Entry("Passed", .ci, "run success alert"),

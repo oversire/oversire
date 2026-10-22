@@ -3,6 +3,7 @@ import OverSireCore
 import OverSireAI
 import AIEngineAgentBinder
 import AgentBinder
+import OverSireAssistant
 
 // An API key field with Show and Hide. It commits on end editing only.
 final class KeyField: NSStackView, NSTextFieldDelegate {
@@ -65,6 +66,7 @@ extension SettingsPage {
         if AI_CFG.engine == .localCLI { localCLI(b) }
         apiKey(b)
         useAIFor(b)
+        assistant(b)
         let cloud = CloudAICard(cloudAIRecords)
         cloud.identifier = SettingsAnchor.cloudAI.id
         b.addFull(cloud)
@@ -164,6 +166,73 @@ extension SettingsPage {
         rows.append(Row([TwoLine("Detection", "AgentBinder finds each CLI on PATH and reads its login. Press after you install or log in.", lines: 2),
                          Spacer(), again], height: 52, label: "Detection"))
         b.addFull(section(.localCLI, rows))
+    }
+
+    // The chat panel: its engine, what its tools may do without a question, Follow along, the shortcut and the history.
+    private func assistant(_ b: NSStackView) {
+        let cfg = AI_CFG.assistant
+        let sources: [AssistantConfig.Source] = [.jobs, .localCLI, .apiKey]
+        let pick = Segmented(["Same as AI jobs", "Local CLI", "API key", "Cloud · Pro"], selected: sources.firstIndex(of: cfg.source) ?? 0,
+                             label: "Assistant source") { [weak self] i in
+            if i < sources.count {
+                AI_CFG.assistant.source = sources[i]
+                saveConfig()
+            }
+            self?.reloadSoon()
+        }
+        pick.setEnabled(false, forSegment: 3)
+        pick.setToolTip("Later. Cloud credits need OverSire Cloud.", forSegment: 3)
+        var rows: [NSView] = [FieldRow("Source", note: "The engine of the chat panel. The other engine is the fallback.", pick)]
+        if cfg.engine(jobs: AI_CFG.engine) == .localCLI, let note = Self.cliChatNote(AI_CFG.cliHarness) {
+            rows.append(Padded(Banner(.warning, title: "This CLI cannot chat.", body: note), vertical: 8))
+        }
+
+        let rules: [PermissionRule] = [.allow, .askOnce, .askEach, .never]
+        let names = ["Run", "Ask once in each chat", "Ask each time", "Never"]
+        let rule: (String, String, PermissionRule, @escaping (PermissionRule) -> Void) -> NSView = { title, note, now, set in
+            FieldRow(title, note: note, PopUp(names, selected: rules.firstIndex(of: now) ?? 0, label: title) { i in
+                set(rules[i])
+                saveConfig()
+            })
+        }
+        rows.append(rule("Read tools", "Look at items, PRs, runs, sessions and pages.", cfg.permissions.read) { AI_CFG.assistant.permissions.read = $0 })
+        rows.append(rule("Change tools", "Change OverSire or the tracker: queue, states, comments.", cfg.permissions.change) {
+            AI_CFG.assistant.permissions.change = $0
+        })
+        rows.append(FieldRow("Outward tools", note: "Merge, re-run, start a session, send to an agent. Fixed for safety.",
+                             NSTextField.text("Ask each time", size: 12, color: Palette.mut)))
+        rows.append(FieldRow("Settings", note: "The assistant tells you where a setting is. Only you change it.",
+                             NSTextField.text("Never", size: 12, color: Palette.mut)))
+        rows.append(SwitchRow("Follow along", note: "New chats move the window to the pages they talk about. Each chat can turn it off.",
+                              on: cfg.follow) { AI_CFG.assistant.follow = $0 })
+
+        let key = ShortcutField(cfg.hotkey)
+        key.setAccessibilityLabel("Assistant shortcut")
+        let set: (KeyShortcut) -> Void = { [weak self, weak key] k in
+            AI_CFG.assistant.hotkey = k
+            saveConfig()
+            key?.set(k)
+            _ = self?.app?.applyAssistantHotKey()
+        }
+        key.onChange = { set(KeyShortcut(keyCode: $0, modifiers: $1)) }
+        let clear = ActionButton("Clear") { set(KeyShortcut(keyCode: cfg.hotkey.keyCode, modifiers: 0)) }
+        rows.append(FieldRow("Open from any app", note: "In the window, ⌘J opens the panel.", NSStackView(h: [key, clear], spacing: 6)))
+
+        let keeps: [ChatRetention] = [.days7, .days30, .always]
+        rows.append(FieldRow("Keep chats", note: "Older chats go away. Pinned chats stay.",
+                             PopUp(["7 days", "30 days", "Always"], selected: keeps.firstIndex(of: cfg.retention) ?? 1, label: "Keep chats") { i in
+            AI_CFG.assistant.retention = keeps[i]
+            saveConfig()
+        }))
+        b.addFull(section(.assistant, rows))
+    }
+
+    /// Why the CLI cannot chat, or nil when it can. A chat needs MCP for the tools.
+    static func cliChatNote(_ harness: String) -> String? {
+        guard !harness.isEmpty else { return "Pick a CLI in Local CLI. The chat uses the API key until then." }
+        guard let d = LocalCLI.shared.detections?.first(where: { $0.harness.rawValue == harness }) else { return nil }
+        guard d.features.mcpInject == .none else { return nil }
+        return "\(d.harness.binaryName) has no MCP, so it cannot call the tools. The chat uses the API key."
     }
 
     // The CLI and the agent library are not in the table.

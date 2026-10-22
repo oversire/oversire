@@ -18,6 +18,13 @@ final class Lines: @unchecked Sendable {
     func add(_ l: ToolLogLine) { lock.withLock { all.append(l) } }
 }
 
+final class Turns: @unchecked Sendable {
+    private let lock = NSLock()
+    private var all: [TurnLogLine] = []
+    var value: [TurnLogLine] { lock.withLock { all } }
+    func add(_ l: TurnLogLine) { lock.withLock { all.append(l) } }
+}
+
 final class AssistantLoopTests: XCTestCase {
     var dir: URL!
 
@@ -28,10 +35,11 @@ final class AssistantLoopTests: XCTestCase {
     override func tearDown() { try? FileManager.default.removeItem(at: dir) }
 
     func makeLoop(_ engines: [any ChatEngine], _ specs: [ActionSpec], permissions: AssistantPermissions = AssistantPermissions(),
-                  settings: AssistantLoop.Settings = AssistantLoop.Settings(), log: Lines? = nil) -> AssistantLoop {
+                  settings: AssistantLoop.Settings = AssistantLoop.Settings(), log: Lines? = nil, turns: Turns? = nil) -> AssistantLoop {
         AssistantLoop(router: ChatRouter(engines: engines), catalog: ActionList(specs), policy: RuleConfirmPolicy { permissions },
                       store: ThreadStore(store: MemoryStore(), blobDir: dir), system: { _, _ in "system" },
-                      redactor: { Redactor(secrets: ["hunter2-secret-value"]) }, log: { log?.add($0) }, settings: settings)
+                      redactor: { Redactor(secrets: ["hunter2-secret-value"]) }, log: { log?.add($0) }, turnLog: { turns?.add($0) },
+                      settings: settings)
     }
 
     func thread(_ engine: EngineID = "fake-chat") -> AssistantThread {
@@ -301,7 +309,7 @@ final class AssistantLoopTests: XCTestCase {
         guard case .approvalNeeded(_, let note)? = ev.first(where: { if case .approvalNeeded = $0 { return true }; return false }) else {
             return XCTFail("no approval card")
         }
-        XCTAssertNotNil(note)
+        XCTAssertEqual(note, "You did not ask for this. It came after item.get, and text there can ask for it.")
         // The developer asked for the merge: no note.
         e.reply(.toolCall(ToolCall(id: "c3", tool: "item_get")))
         e.reply(.toolCall(ToolCall(id: "c4", tool: "pr_merge")))
@@ -313,6 +321,43 @@ final class AssistantLoopTests: XCTestCase {
             return XCTFail("no approval card")
         }
         XCTAssertNil(note2)
+    }
+
+    /// One log line for each call: rule-allowed, approved and denied. One line for the send, with the tokens.
+    func testLogLines() async throws {
+        let e = FakeChatEngine()
+        e.reply(.toolCall(ToolCall(id: "c1", tool: "item_get", args: .object(["key": .string("OVERSIRE-1")]))),
+                .toolCall(ToolCall(id: "c2", tool: "item_setStatus")), .toolCall(ToolCall(id: "c3", tool: "item_comment")))
+        e.reply(.textDelta("ok"))
+        let lines = Lines(), turns = Turns()
+        let loop = makeLoop([e], [spec("item.get", .read, result: .ok(summary: "x", data: .string("12345"))), spec("item.setStatus", .change),
+                                  spec("item.comment", .change)], log: lines, turns: turns)
+        _ = await collect(loop, "Set and comment", in: thread()) { c, _ in c.id == "c2" ? .approve : .deny }
+        let l = lines.value
+        XCTAssertEqual(l.map(\.action), ["item.get", "item.setStatus", "item.comment"])
+        XCTAssertEqual(l.map(\.decision), [.allowedByRule, .approved, .denied])
+        XCTAssertEqual(l.map(\.status), [.ok, .ok, .denied])
+        XCTAssertEqual(l.map(\.kind), [.read, .change, .change])
+        XCTAssertEqual(l[0].bytes, 7)
+        XCTAssertEqual(l[0].thread, "t-1")
+        XCTAssertEqual(l[0].engine, "fake-chat")
+
+        let entry = l[1].entry
+        XCTAssertEqual(entry.area, .ai)
+        XCTAssertEqual(entry.job, "Assistant tool")
+        XCTAssertEqual(entry.subject, "item.setStatus")
+        XCTAssertEqual(entry.message, "change · approved · ok · 0 B")
+        XCTAssertEqual(l[2].entry.level, .ok)
+        XCTAssertEqual(l[0].entry.input, #"{"key":"OVERSIRE-1"}"#)
+
+        let t = try XCTUnwrap(turns.value.first)
+        XCTAssertEqual(turns.value.count, 1)
+        XCTAssertEqual(t.tools, 3)
+        XCTAssertEqual(t.end, .done)
+        XCTAssertEqual(t.usage, AIUsage(input: 20, output: 10))
+        XCTAssertEqual(t.entry.tokensIn, 20)
+        XCTAssertEqual(t.entry.tokensOut, 10)
+        XCTAssertEqual(t.entry.message, "done · 3 tool calls")
     }
 
     func testRunToolForEnginesThatRunTools() async throws {
