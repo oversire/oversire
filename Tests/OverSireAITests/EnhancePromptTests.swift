@@ -4,11 +4,9 @@ import OverSireCore
 
 final class EnhancePromptTests: XCTestCase {
     func testPromptRenders() {
-        let input = EnhancePrompt.input(key: "TREBI-9", title: "Sync fails", url: "https://x/TREBI-9", body: "it breaks", vision: "Small and native.",
-                                        ask: AskSkill.promptLine)
+        let input = EnhancePrompt.input(key: "TREBI-9", title: "Sync fails", url: "https://x/TREBI-9", body: "it breaks", vision: "Small and native.")
         let text = EnhancePrompt.render(EnhancePrompt.template, input)
         XCTAssertTrue(text.hasPrefix("You enhance a new intake item. Do not change files."))
-        XCTAssertTrue(text.contains(AskSkill.promptLine))
         XCTAssertTrue(text.contains("Project vision (the true north of the project):\nSmall and native."))
         XCTAssertTrue(text.hasSuffix("Item TREBI-9: Sync fails\nhttps://x/TREBI-9\n\nit breaks"), text)
         XCTAssertTrue(text.contains(EnhancePrompt.originalHeading))

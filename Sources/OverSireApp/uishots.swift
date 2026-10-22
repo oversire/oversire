@@ -1120,7 +1120,6 @@ extension UIShots {
         let answer = QuestionAnswer(question: "orca:local:m1", items: [.init(id: "q1", choices: ["Local JSON files"]), .init(id: "q2", choices: ["Unit", "uishots"])])
         var acts = QuestionCard.Actions()
         acts.reveal = {}
-        acts.askAgain = {}
         let cards: [[(QuestionBoard.Entry, QuestionPlace, QuestionCard.Actions, ((QuestionCard) -> Void)?)]]
         if set == "closed" {
             let two = q("m1", [store, tests], .askReply, 6, work)

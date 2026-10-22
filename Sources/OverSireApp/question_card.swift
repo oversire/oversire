@@ -57,7 +57,6 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     struct Actions {
         var send: (QuestionAnswer) -> Void = { _ in }
         var reveal: (() -> Void)?
-        var askAgain: (() -> Void)?
         var dismiss: () -> Void = {}
         var stop: (() -> Void)?
         /// Each change of the draft, so a page rebuild keeps it.
@@ -354,7 +353,6 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         let sending = entry.state == .sending
         if isForm {
             if let reveal = actions.reveal { views.append(ActionButton("Answer in \(place.runtime) ↗", style: .primary) { reveal() }) }
-            if let again = actions.askAgain { views.append(ActionButton("Ask the session to use OverSire", style: .link) { again() }) }
             views.append(Spacer())
         } else if question.items.count == 1, let item = question.items.first, item.kind == .approve {
             let allow = ActionButton(QuestionItem.allow, style: .primary) { [weak self] in self?.pick(0, of: item.id) }

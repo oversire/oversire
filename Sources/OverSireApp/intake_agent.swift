@@ -5,7 +5,7 @@ import RuntimeOrca
 
 // ─── Intake agent (Enhance) ──────────────────────────────────────────────────
 // A read-only Orca worker reads the code for a new intake item, asks the user what the code cannot tell
-// (oversire-ask, shown with QuestionCard), and sends a new description in its `worker_done`. The user then
+// (the native AskUserQuestion form, shown with QuestionCard), and sends a new description in its `worker_done`. The user then
 // checks the properties to write, and accepts the item in the same step.
 
 /// The calls of a runtime that runs an Enhance worker.
@@ -84,9 +84,8 @@ final class IntakeAgent {
 
     func state(_ item: IntakeItem) -> State? { states[item.id] ?? sample?(item) }
 
-    func spec(key: String, title: String, url: String, body: String, vision: String?, ask: Bool) -> String {
-        EnhancePrompt.render(AGENTS.intakePrompt, EnhancePrompt.input(key: key, title: title, url: url, body: body, vision: vision,
-                                                                      ask: ask ? AskSkill.promptLine : ""))
+    func spec(key: String, title: String, url: String, body: String, vision: String?) -> String {
+        EnhancePrompt.render(AGENTS.intakePrompt, EnhancePrompt.input(key: key, title: title, url: url, body: body, vision: vision))
     }
 
     /// A short body with no steps. Quick triage starts Enhance for it when the setting is on.
@@ -130,8 +129,7 @@ final class IntakeAgent {
             let path = AGENTS.intakeScratch ? root + "/.wt/enhance-" + key.lowercased() : root
             Task {
                 if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
-                let ask = await ASK_SCRIPTS.ready(host: rt as? any HostFileWriting, workspacePath: root)
-                let spec = self.spec(key: key, title: item.name, url: url, body: body, vision: vision, ask: ask)
+                let spec = self.spec(key: key, title: item.name, url: url, body: body, vision: vision)
                 let r = await Result(awaiting: { try await rt.startWorker(spec: spec, title: "Enhance " + key, path: path, agent: "claude") })
                 DispatchQueue.main.async {
                     switch r {

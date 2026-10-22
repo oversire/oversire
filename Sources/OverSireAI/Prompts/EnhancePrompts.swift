@@ -102,8 +102,8 @@ public enum EnhancePrompt {
     /// The user template of enhance.md. The user can change it in Settings.
     public static var template: String { PromptTemplate.all[.enhance]?.userTemplate ?? "" }
 
-    public static func input(key: String, title: String, url: String, body: String, vision: String? = nil, ask: String = "") -> AIInput {
-        var context = ["key": key, "title": title, "url": url, "ask": ask]
+    public static func input(key: String, title: String, url: String, body: String, vision: String? = nil) -> AIInput {
+        var context = ["key": key, "title": title, "url": url]
         if let vision, !vision.isEmpty { context["vision"] = vision }
         return AIInput(text: body.isEmpty ? "(no description)" : String(body.prefix(6000)), context: context)
     }

@@ -140,7 +140,6 @@ final class QuestionHub {
         a.draft = { [weak self] d in self?.lock.withLock { self?.drafts[id] = d } }
         a.stop = stop
         if channel(e.question) is any Revealing { a.reveal = { [weak self] in self?.reveal(e.question) } }
-        if e.question.via == .form, channel(e.question) is OrcaRuntime { a.askAgain = { [weak self] in self?.askAgain(e.question) } }
         return QuestionCard(e, place: place(e.question), checkedAt: checkedAt(e.question), draft: lock.withLock { drafts[id] } ?? QuestionDraft(), actions: a)
     }
 
@@ -168,16 +167,6 @@ final class QuestionHub {
     func reveal(_ q: SessionQuestion) {
         guard let r = channel(q) as? any Revealing else { return }
         Task { try? await r.reveal(q.session) }
-    }
-
-    /// Waits until the form is gone, then asks the session to use oversire-ask.
-    func askAgain(_ q: SessionQuestion) {
-        guard let orca = channel(q) as? OrcaRuntime else { return }
-        Task {
-            do { try await orca.askAgainWithOverSire(q.session, line: AskSkill.askAgainLine) } catch {
-                log.error("Ask again failed: \(String(describing: error), privacy: .public)")
-            }
-        }
     }
 
     private func channel(_ q: SessionQuestion) -> (any AgentRuntime)? {

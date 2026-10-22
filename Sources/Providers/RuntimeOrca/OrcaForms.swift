@@ -183,17 +183,6 @@ extension OrcaRuntime {
         return ask.answer(q.id)
     }
 
-    /// Waits until the form is gone, then sends `line`, which asks the session to use oversire-ask. It sends no key while the form shows.
-    public func askAgainWithOverSire(_ s: SessionRef, line: String, every: Duration = .seconds(2), tries: Int = 300) async throws {
-        for i in 0..<tries {
-            if ClaudeForm.parse(try await output(s, lines: 40)) == nil { break }
-            if i == tries - 1 { throw ProviderError.vendor(code: "form_open", message: "The form is still open in Orca.") }
-            try await Task.sleep(for: every)
-        }
-        try await waitIdle(s, name: s.id)
-        try await send(s, text: line)
-    }
-
     /// The agents that wait in AskUserQuestion, by pane key.
     private func formWaits() async throws -> [String: (path: String?, since: Date)] {
         var out: [String: (path: String?, since: Date)] = [:]
