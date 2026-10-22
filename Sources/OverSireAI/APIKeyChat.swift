@@ -121,9 +121,9 @@ final class ChunkClock: @unchecked Sendable {
 
 // ─── Shared helpers of the two dialects ──────────────────────────────────────
 
-enum ChatWire {
+public enum ChatWire {
     /// The text of a tool result for the model.
-    static func resultText(_ r: ToolResult) -> String {
+    public static func resultText(_ r: ToolResult) -> String {
         let data = r.data.map { $0.string ?? $0.text }
         switch r.status {
         case .ok: return data.map { r.summary.isEmpty ? $0 : "\(r.summary)\n\($0)" } ?? r.summary
@@ -136,7 +136,7 @@ enum ChatWire {
     static let textMimes = ["application/json", "application/xml", "application/yaml", "application/x-yaml"]
 
     /// A file goes in as text when it is text and small, else as a line with its name.
-    static func fileText(_ name: String, _ mime: String, _ bytes: Int, _ data: Data?) -> String {
+    public static func fileText(_ name: String, _ mime: String, _ bytes: Int, _ data: Data?) -> String {
         if let data, data.count <= 100_000, mime.hasPrefix("text/") || textMimes.contains(mime),
            let s = String(data: data, encoding: .utf8) {
             return "File \(name):\n```\n\(s)\n```"
@@ -145,14 +145,14 @@ enum ChatWire {
     }
 
     /// The label and the JSON form of the ref, so the model can pass the ref to a tool.
-    static func mentionText(_ s: SubjectRef, _ label: String?) -> String {
+    public static func mentionText(_ s: SubjectRef, _ label: String?) -> String {
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let ref = (try? enc.encode(s)).map { String(decoding: $0, as: UTF8.self) } ?? s.kind.rawValue
         return label.map { "[\($0): \(ref)]" } ?? "[\(ref)]"
     }
 
-    static func json(_ s: String) -> JSONValue {
+    public static func json(_ s: String) -> JSONValue {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? .object([:]) : ((try? JSONValue(parsing: t)) ?? .object(["_raw": .string(t)]))
     }
