@@ -27,6 +27,8 @@ jobs:
     # Only the owner can release. Runs for other actors and in forks skip this job.
     if: github.repository == 'oversire/oversire' && github.actor == 'flarco'
     runs-on: macos-15
+    # A good run takes 5 to 24 minutes. A hung test fails here and does not run for hours.
+    timeout-minutes: 25
     # The signing secrets live in this environment. It accepts the main branch only.
     environment: release
     permissions:
