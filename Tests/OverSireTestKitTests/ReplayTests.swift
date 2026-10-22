@@ -69,3 +69,32 @@ final class ReplayTests: XCTestCase {
         }
     }
 }
+
+final class ReplayStreamTests: XCTestCase {
+    func testChunksAreTheSameForTheSameSeed() {
+        let data = Data((0..<2000).map { UInt8($0 % 251) })
+        let a = ReplayTransport.chunks(data, seed: 42)
+        XCTAssertEqual(a, ReplayTransport.chunks(data, seed: 42))
+        XCTAssertNotEqual(a.map(\.count), ReplayTransport.chunks(data, seed: 43).map(\.count))
+        XCTAssertEqual(a.reduce(Data(), +), data)
+        XCTAssertTrue(a.allSatisfy { (1...16).contains($0.count) })
+    }
+
+    func testStreamReplaysTheRecordedBody() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-replay-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let vendor = RecordedHTTP()
+        let body = "data: one\n\ndata: two\n\n"
+        vendor.on("POST", "https://api.x.dev/v1/messages", 200, body)
+        var r = URLRequest(url: URL(string: "https://api.x.dev/v1/messages")!)
+        r.httpMethod = "POST"
+        _ = try await ReplayTransport(dir: dir, upstream: vendor, record: true).send(r)
+        let (resp, stream) = try await ReplayTransport(dir: dir, chunkSeed: 3).stream(r)
+        XCTAssertEqual(resp.statusCode, 200)
+        var all = Data()
+        var parts = 0
+        for try await c in stream { all.append(c); parts += 1 }
+        XCTAssertEqual(String(decoding: all, as: UTF8.self), body)
+        XCTAssertGreaterThan(parts, 1)
+    }
+}

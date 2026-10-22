@@ -27,3 +27,9 @@ public struct CommandOutput: Hashable, Sendable {
 public protocol SecretReader: Sendable {
     func secret(_ key: String) -> String?
 }
+
+/// HTTP with a body that arrives in parts (SSE). Tests replay recorded streams.
+/// A cancel of the task that reads the stream cancels the request.
+public protocol HTTPStreaming: Sendable {
+    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>)
+}

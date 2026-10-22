@@ -67,13 +67,16 @@ public final class ReplayTransport: HTTPTransport, @unchecked Sendable {
     public let dir: URL
     let upstream: (any HTTPTransport)?
     let record: Bool
+    /// The seed of the chunk sizes of a replayed stream.
+    let chunkSeed: UInt64
     private let lock = NSLock()
     private var misses: [String] = []
 
-    public init(dir: URL, upstream: (any HTTPTransport)? = nil, record: Bool = recordMode) {
+    public init(dir: URL, upstream: (any HTTPTransport)? = nil, record: Bool = recordMode, chunkSeed: UInt64 = 1) {
         self.dir = dir
         self.upstream = upstream
         self.record = record && upstream != nil
+        self.chunkSeed = chunkSeed
     }
 
     /// The calls with no fixture.
@@ -103,6 +106,47 @@ public final class ReplayTransport: HTTPTransport, @unchecked Sendable {
             throw ProviderError.transport("no fixture \(miss)")
         }
         return (Data(f.body.utf8), HTTPURLResponse(url: url, statusCode: f.status, httpVersion: "HTTP/1.1", headerFields: f.headers)!)
+    }
+}
+
+/// A replayed stream plays the recorded body in chunks of random size, to find parser bugs at chunk edges.
+/// A record collects the whole body from the upstream.
+extension ReplayTransport: HTTPStreaming {
+    public func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+        let (data, resp) = try await send(request)
+        let parts = Self.chunks(data, seed: chunkSeed)
+        return (resp, AsyncThrowingStream { cont in
+            for p in parts { cont.yield(p) }
+            cont.finish()
+        })
+    }
+
+    /// The same seed gives the same cuts. Chunks are 1 to 16 bytes.
+    public static func chunks(_ data: Data, seed: UInt64, max: Int = 16) -> [Data] {
+        var rng = SplitMix64(seed: seed)
+        var out: [Data] = []
+        var i = data.startIndex
+        while i < data.endIndex {
+            let n = Int(rng.next() % UInt64(max)) + 1
+            let end = data.index(i, offsetBy: n, limitedBy: data.endIndex) ?? data.endIndex
+            out.append(data[i..<end])
+            i = end
+        }
+        return out
+    }
+}
+
+struct SplitMix64: RandomNumberGenerator {
+    var state: UInt64
+
+    init(seed: UInt64) { state = seed }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }
 

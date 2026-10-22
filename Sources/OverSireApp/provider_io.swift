@@ -22,6 +22,37 @@ struct URLSessionTransport: HTTPTransport {
     }
 }
 
+extension URLSessionTransport: HTTPStreaming {
+    /// Yields at each line end, so SSE events arrive without delay. The end of the read cancels the request.
+    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+        let (bytes, resp): (URLSession.AsyncBytes, URLResponse)
+        do { (bytes, resp) = try await session.bytes(for: request) } catch {
+            throw ProviderError.transport(error.localizedDescription)
+        }
+        guard let http = resp as? HTTPURLResponse else { throw ProviderError.transport("No HTTP answer") }
+        let stream = AsyncThrowingStream<Data, Error> { cont in
+            let task = Task {
+                var buf = Data()
+                do {
+                    for try await b in bytes {
+                        buf.append(b)
+                        if b == 0x0A || buf.count >= 16_384 {
+                            cont.yield(buf)
+                            buf.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    if !buf.isEmpty { cont.yield(buf) }
+                    cont.finish()
+                } catch {
+                    cont.finish(throwing: Task.isCancelled ? CancellationError() : ProviderError.transport(error.localizedDescription))
+                }
+            }
+            cont.onTermination = { _ in task.cancel() }
+        }
+        return (http, stream)
+    }
+}
+
 final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? { nil }
