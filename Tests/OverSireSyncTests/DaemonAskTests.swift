@@ -143,11 +143,17 @@ final class DaemonAskTests: XCTestCase {
         XCTAssertEqual(http.requests.map { $0.url?.path }, ["/v1/orders/wo-1", "/v1/orders/wo-2"])
     }
 
-    func testWorkspacesWaitLongerThanTheDefault() async throws {
+    func testRuntimeRoutesWaitLongerThanTheDefault() async throws {
         let http = RecordedHTTP()
         http.on("GET", "http://mbp:7690/v1/workspaces", 200, try fixture("daemon-workspaces-page", "two"))
-        let page = try await client(http).workspaces()
+        http.on("GET", "http://mbp:7690/v1/repos", 200, try fixture("daemon-repos-page", "two"))
+        http.on("GET", "http://mbp:7690/v1/runtimes", 200, try fixture("daemon-runtimes-page", "orca-and-oversire"))
+        let c = client(http)
+        let page = try await c.workspaces()
+        _ = try await c.repos()
+        _ = try await c.runtimes()
         XCTAssertEqual(page.workspaces.count, 2)
-        XCTAssertGreaterThanOrEqual(try XCTUnwrap(http.requests.first).timeoutInterval, 30)
+        XCTAssertEqual(http.requests.map { $0.url?.path }, ["/v1/workspaces", "/v1/repos", "/v1/runtimes"])
+        XCTAssertEqual(http.requests.map(\.timeoutInterval), [30, 30, 30])
     }
 }

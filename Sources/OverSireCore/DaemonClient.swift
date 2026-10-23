@@ -115,13 +115,15 @@ public final class DaemonClient: Sendable {
 
     // MARK: Runtimes (member routes)
 
-    public func runtimes() async throws -> DaemonRuntimesPage { try await get("/v1/runtimes") }
+    public func runtimes() async throws -> DaemonRuntimesPage { try await runtimeGet("/v1/runtimes") }
 
-    public func repos() async throws -> DaemonReposPage { try await get("/v1/repos") }
+    public func repos() async throws -> DaemonReposPage { try await runtimeGet("/v1/repos") }
 
-    /// The daemon asks each runtime. Orca with many workspaces takes more than the default timeout.
-    public func workspaces() async throws -> DaemonWorkspacesPage {
-        var r = request("/v1/workspaces")
+    public func workspaces() async throws -> DaemonWorkspacesPage { try await runtimeGet("/v1/workspaces") }
+
+    /// The daemon asks each runtime. Orca under load, or with many workspaces, takes more than the default timeout.
+    private func runtimeGet<T: Decodable>(_ path: String) async throws -> T {
+        var r = request(path)
         r.timeoutInterval = 30
         return try Self.decode(try await send(r))
     }
