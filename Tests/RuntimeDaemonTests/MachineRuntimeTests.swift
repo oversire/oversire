@@ -130,8 +130,10 @@ final class MachineRuntimeTests: XCTestCase {
         let rt = local(d)
         let none = try await rt.workspaces()
         XCTAssertEqual(none, [])
-        let http = ScriptedHTTP([.init(body: Data(#"{"workspaces":[],"errors":{"orca":"Orca is not running."}}"#.utf8)),
-                                 .init(body: Data(#"{"sessions":[]}"#.utf8))])
+        // The two calls run at the same time. Answer by URL, not by order.
+        let http = RecordedHTTP()
+        http.on("GET", "http://127.0.0.1:7690/v1/workspaces", 200, #"{"workspaces":[],"errors":{"orca":"Orca is not running."}}"#)
+        http.on("GET", "http://127.0.0.1:7690/v1/sessions", 200, #"{"sessions":[]}"#)
         let down = MachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: http))
         do {
             _ = try await down.workspaces()
