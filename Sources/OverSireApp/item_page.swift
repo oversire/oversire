@@ -132,14 +132,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func tabsRow(snap: ProjectSnapshot, item: Item) -> PageRow {
         let prog = snap.progress(of: item.id)
+        let started = snap.started(of: item.id)
         let warn = snap.isDoneWithOpenSubItems(item)
         let asks = data.questions.count(key: key)
         let tab = self.tab
-        return PageRow("tabs", tab, prog.done, prog.total, warn, asks) { [unowned self] in
+        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks) { [unowned self] in
             let tabs = Route.ItemTab.allCases
             var sub = TabStrip.Tab(title: "Sub-items")
             if prog.total > 0 {
-                sub.lead = [ProgressRing(done: prog.done, total: prog.total).sized(14)]
+                sub.lead = [ProgressRing(done: prog.done, started: started, total: prog.total).sized(14)]
                 if warn { sub.trail = [Glyph("exclamationmark.triangle.fill", color: Palette.warn, size: 11)] }
                 sub.label = "Sub-items, \(prog.done) of \(prog.total) done" + (warn ? ", Done with open sub-items" : "")
             }
@@ -148,7 +149,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview"), sessionTab, sub, TabStrip.Tab(title: "Activity")],
                                  selected: tabs.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
-            return strip
+            return NSStackView(h: [strip, Spacer()])
         }
     }
 
@@ -756,11 +757,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func subItems(snap: ProjectSnapshot, item: Item) -> [PageRow] {
         let kids = snap.children(of: item.id)
         let progress = snap.progress(of: item.id)
+        let started = snap.started(of: item.id)
         var rows: [PageRow] = []
         if progress.total > 0 {
-            rows.append(PageRow("progress", progress.done, progress.total) {
-                NSStackView(h: [ProgressRing(done: progress.done, total: progress.total).sized(16),
-                                NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold), Spacer()], spacing: 8)
+            rows.append(PageRow("progress", progress.done, started, progress.total) {
+                var views: [NSView] = [ProgressRing(done: progress.done, started: started, total: progress.total).sized(16),
+                                       NSTextField.text("\(progress.done) of \(progress.total) done", size: 13, weight: .semibold)]
+                if started > 0 { views.append(NSTextField.text("\(started) in progress", size: 13, color: Palette.mut)) }
+                return NSStackView(h: views + [Spacer()], spacing: 8)
             })
         }
         let job = data.statusJob

@@ -27,7 +27,7 @@ final class ItemLine: TableRow {
         ]
         let prog = snap.progress(of: item.id)
         if prog.total > 0 {
-            cells["sub"] = NSStackView(h: [ProgressRing(done: prog.done, total: prog.total).sized(14),
+            cells["sub"] = NSStackView(h: [ProgressRing(done: prog.done, started: snap.started(of: item.id), total: prog.total).sized(14),
                                            NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)], spacing: 4)
         }
         cells["session"] = finish ?? StatusPill.or(status)
@@ -61,7 +61,7 @@ final class ItemLine: TableRow {
     /// The values that an item line shows.
     static func hash(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, status: ItemStatus?, cleanup: [CleanupLine] = []) -> Int {
         let prog = snap.progress(of: item.id)
-        return PageRow.hash([item, snap.option(item.statusOptionId), prog.done, prog.total, status?.label, status?.tone.word, status?.tip,
+        return PageRow.hash([item, snap.option(item.statusOptionId), prog.done, snap.started(of: item.id), prog.total, status?.label, status?.tone.word, status?.tip,
                              stream?.ci?.word, snap.isDoneWithOpenSubItems(item), snap.openSubItems(of: item.id), cleanup.map(\.kind.noun)])
     }
 }

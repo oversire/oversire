@@ -485,7 +485,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
             doc.addSubview(l)
             return y + 40
         }
-        let ring = ProgressRing(done: progress.done, total: progress.total)
+        let ring = ProgressRing(done: progress.done, started: snap.started(of: item.id), total: progress.total)
         ring.frame.origin = NSPoint(x: pad, y: y + 2)
         doc.addSubview(ring)
         let sum = NSTextField(labelWithString: "\(progress.done) of \(progress.total) done · \(progress.total - progress.done) open")

@@ -359,11 +359,18 @@ public struct ProjectSnapshot: Codable, Sendable {
 
     // Direct sub-items. The index counts also the sub-items that are not loaded.
     public func progress(of id: String) -> (done: Int, total: Int) {
-        let states = index.map { $0.filter { $0.parentId == id }.map(\.stateId) }
-            ?? items.filter { $0.parentId == id }.map(\.statusOptionId)
-        let ids = index.map { $0.filter { $0.parentId == id }.map(\.id) } ?? items.filter { $0.parentId == id }.map(\.id)
-        let done = zip(ids, states).filter { isClosed($0.1) && openSubItems(of: $0.0) == 0 }.count
-        return (done, states.count)
+        let kids = subStates(of: id)
+        return (kids.filter { isClosed($0.state) && openSubItems(of: $0.id) == 0 }.count, kids.count)
+    }
+
+    /// Direct sub-items in progress or in review.
+    public func started(of id: String) -> Int {
+        subStates(of: id).filter { [.progress, .review].contains(option($0.state)?.category) }.count
+    }
+
+    private func subStates(of id: String) -> [(id: String, state: String?)] {
+        index.map { $0.filter { $0.parentId == id }.map { ($0.id, $0.stateId) } }
+            ?? items.filter { $0.parentId == id }.map { ($0.id, $0.statusOptionId) }
     }
 
     // Parent first, up to the root.

@@ -153,15 +153,17 @@ enum HoverCard {
     }
 }
 
-// The done part of the sub-items, as an arc that starts at the top.
+// The sub-items as arcs from the top: green for done, then yellow for started.
 final class ProgressRing: NSView {
     let done: Int
+    let started: Int
     let total: Int
-    init(done: Int, total: Int, size: CGFloat = 14) {
+    init(done: Int, started: Int = 0, total: Int, size: CGFloat = 14) {
         self.done = done
+        self.started = started
         self.total = total
         super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
-        toolTip = "\(done) of \(total) sub-items done, \(total - done) open"
+        toolTip = "\(done) of \(total) sub-items done" + (started > 0 ? ", \(started) in progress" : "") + ", \(total - done) open"
         setAccessibilityElement(false)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -171,14 +173,21 @@ final class ProgressRing: NSView {
         let track = NSBezierPath(ovalIn: r)
         track.lineWidth = 2.2
         NSColor.tertiaryLabelColor.withAlphaComponent(0.35).setStroke(); track.stroke()
-        guard total > 0, done > 0 else { return }
+        guard total > 0 else { return }
+        let deg = 360 / CGFloat(total)
+        let mid = 90 - deg * CGFloat(done)
+        // The started arc first, so that the round cap of the done arc covers the join.
+        stroke(from: mid, to: mid - deg * CGFloat(min(started, total - done)), color: Palette.warn)
+        stroke(from: 90, to: mid, color: C_SUCCESS)
+    }
+
+    private func stroke(from start: CGFloat, to end: CGFloat, color: NSColor) {
+        guard start > end else { return }
         let arc = NSBezierPath()
-        let end = 90 - 360 * CGFloat(done) / CGFloat(total)
-        arc.appendArc(withCenter: NSPoint(x: bounds.midX, y: bounds.midY), radius: r.width / 2,
-                      startAngle: 90, endAngle: end, clockwise: true)
+        arc.appendArc(withCenter: NSPoint(x: bounds.midX, y: bounds.midY), radius: bounds.insetBy(dx: 1.5, dy: 1.5).width / 2,
+                      startAngle: start, endAngle: end, clockwise: true)
         arc.lineWidth = 2.2; arc.lineCapStyle = .round
-        // Blue while open, green when all are done.
-        (done >= total ? C_SUCCESS : NSColor.systemBlue).setStroke(); arc.stroke()
+        color.setStroke(); arc.stroke()
     }
 }
 
@@ -539,7 +548,7 @@ final class ProjectItemRow: NSView {
             x += pb.frame.width + 6
         }
         if let progress {
-            let ring = ProgressRing(done: progress.done, total: progress.total)
+            let ring = ProgressRing(done: progress.done, started: snap.started(of: item.id), total: progress.total)
             ring.frame.origin = NSPoint(x: x, y: 7)
             addSubview(ring)
             let n = NSTextField(labelWithString: "\(progress.done)/\(progress.total)")
