@@ -24,6 +24,11 @@ public struct LogArea: RawRepresentable, Hashable, Sendable, Codable, Expressibl
     public static let sync: LogArea = "sync"
     public static let runner: LogArea = "runner"
     public static let ui: LogArea = "ui"
+    public static let net: LogArea = "net"
+    public static let cmd: LogArea = "cmd"
+
+    /// A record area keeps what happened, not the result of a job. Its lines open and clear no problem.
+    public var isRecord: Bool { self == .net || self == .cmd || self == .ui }
 }
 
 public struct LogEntry: Codable, Hashable, Sendable {

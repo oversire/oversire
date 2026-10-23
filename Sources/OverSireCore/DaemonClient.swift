@@ -177,8 +177,12 @@ public final class DaemonClient: Sendable {
         var r = URLRequest(url: URL(string: base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)!,
                            timeoutInterval: timeout)
         if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        r.setValue(String(format: "%08x", UInt32.random(in: 0...UInt32.max)), forHTTPHeaderField: Self.requestID)
         return r
     }
+
+    /// The app log and the daemon log both show it.
+    public static let requestID = "X-Request-Id"
 
     package func get<T: Decodable>(_ path: String) async throws -> T {
         try Self.decode(try await send(request(path)))

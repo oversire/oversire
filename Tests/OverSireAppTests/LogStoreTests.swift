@@ -214,4 +214,5 @@ final class LogListModelTests: XCTestCase {
         XCTAssertTrue(k.label.hasSuffix("· 2 problems"))
         XCTAssertEqual(MenuIconState(runs: [], waitingAgents: 0, unread: 0, unreadDot: false).problems, 0)
     }
+
 }

@@ -6,7 +6,8 @@ import OverSireCore
 /// The rows that the filter and the search let through. Pure, for the tests.
 struct LogListModel {
     enum Filter: String, CaseIterable {
-        case all = "All", ai = "AI", sessions = "Sessions", sync = "Sync", runner = "Runner", problems = "Problems only"
+        case all = "All", ai = "AI", sessions = "Sessions", sync = "Sync", runner = "Runner", net = "Network", cmd = "Commands", ui = "UI"
+        case problems = "Problems only"
     }
 
     var filter: Filter = .all
@@ -21,6 +22,9 @@ struct LogListModel {
             case .sessions: guard e.area == .sessions else { return false }
             case .sync: guard e.area == .sync else { return false }
             case .runner: guard e.area == .runner else { return false }
+            case .net: guard e.area == .net else { return false }
+            case .cmd: guard e.area == .cmd else { return false }
+            case .ui: guard e.area == .ui else { return false }
             case .problems: guard e.level != .ok else { return false }
             }
             guard !q.isEmpty else { return true }
@@ -35,6 +39,8 @@ struct LogListModel {
         case .sync: return "Sync"
         case .runner: return "Runner"
         case .ui: return "UI"
+        case .net: return "Network"
+        case .cmd: return "Command"
         default: return a.rawValue.capitalized
         }
     }

@@ -45,15 +45,18 @@ final class LogStore: LogSink, @unchecked Sendable {
             e.input = nil
             e.output = nil
         }
-        if e.verbose != true || e.level != .ok || c.debug {
+        let keep = e.verbose != true || e.level != .ok || c.debug
+        if keep {
             lock.withLock {
                 lines.append(e)
                 if lines.count > Self.cap { lines.removeFirst(lines.count - Self.cap) }
                 append(e)
             }
         }
+        // A poll that the log does not keep changes nothing on screen.
+        guard keep || !e.area.isRecord else { return }
         let post = { [problems] in
-            problems.record(e)
+            if !e.area.isRecord { problems.record(e) }
             NotificationCenter.default.post(name: Self.changed, object: self)
         }
         if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }

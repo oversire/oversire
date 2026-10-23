@@ -75,7 +75,9 @@ final class Updater {
         var req = URLRequest(url: URL(string: "https://api.github.com/repos/\(Updater.repo)/releases/latest")!)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("OverSire/\(current)", forHTTPHeaderField: "User-Agent")
+        let t0 = Date()
         URLSession.shared.dataTask(with: req) { data, resp, err in
+            IOLog().request(req, status: (resp as? HTTPURLResponse)?.statusCode, ms: IOLog.ms(since: t0), body: data, error: err?.localizedDescription)
             let rel = data.flatMap { try? JSONDecoder().decode(Release.self, from: $0) }
             DispatchQueue.main.async {
                 guard let rel = rel else {
@@ -97,7 +99,9 @@ final class Updater {
         progress = 0
         state = .downloading(version)
         log.info("Updater: downloading v\(version)")
-        let task = URLSession.shared.downloadTask(with: url) { tmp, _, err in
+        let t0 = Date()
+        let task = URLSession.shared.downloadTask(with: url) { tmp, resp, err in
+            IOLog().request(URLRequest(url: url), status: (resp as? HTTPURLResponse)?.statusCode, ms: IOLog.ms(since: t0), error: err?.localizedDescription)
             guard let tmp = tmp else {
                 DispatchQueue.main.async { self.fail(err?.localizedDescription ?? "download failed") }
                 return
