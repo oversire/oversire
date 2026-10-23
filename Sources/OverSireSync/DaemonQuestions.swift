@@ -79,6 +79,7 @@ public final class DaemonQuestions: QuestionChannel, @unchecked Sendable {
         case .form: via = .form
         case .permission: via = .permission
         case .turn: via = .turn
+        case .askReply: via = .askReply
         case .waiting: via = .waiting
         }
         return SessionQuestion(id: questionID(q.id), session: session, origin: .session, round: 1, items: q.items,

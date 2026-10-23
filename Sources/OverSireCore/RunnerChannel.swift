@@ -262,7 +262,7 @@ extension SessionOrder {
     public var account: String {
         switch self {
         case .start(let r): return r.environment.flatMap { $0.isEmpty ? nil : $0 } ?? "local"
-        case .stop(let s), .read(let s, _), .send(let s, _, _, _), .history(let s, _): return s.workspace.account.id
+        case .stop(let s), .read(let s, _, _), .send(let s, _, _, _), .history(let s, _): return s.workspace.account.id
         }
     }
 
@@ -276,7 +276,7 @@ extension SessionOrder {
             r.environment = nil
             return .start(r)
         case .stop(let s): return .stop(here(s))
-        case .read(let s, let lines): return .read(here(s), lines: lines)
+        case .read(let s, let lines, let scrollback): return .read(here(s), lines: lines, scrollback: scrollback)
         case .send(let s, let text, let permission, let answer): return .send(here(s), text: text, permission: permission, answer: answer)
         case .history(let s, let budget): return .history(here(s), budget: budget)
         }

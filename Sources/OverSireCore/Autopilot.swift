@@ -143,7 +143,8 @@ public struct AIJobRun: StoreRecord {
 public enum SessionOrder: Hashable, Sendable {
     case start(LaunchRequest)
     case stop(SessionRef)
-    case read(SessionRef, lines: Int)
+    /// `scrollback` reads the scrollback with blank lines, not the visible screen.
+    case read(SessionRef, lines: Int, scrollback: Bool = false)
     /// `permission` answers the PermissionPrompt, `answer` the RunnerQuestion of a runner session. Then `text` is empty.
     case send(SessionRef, text: String, permission: PermissionAnswer? = nil, answer: RunnerAnswer? = nil)
     case history(SessionRef, budget: HistoryBudget? = nil)
@@ -163,7 +164,7 @@ public enum SessionOrder: Hashable, Sendable {
 
 extension SessionOrder: Codable {
     private enum CodingKeys: String, CodingKey { case op, payload }
-    private enum PayloadKeys: String, CodingKey { case session, lines, text, permission, answer, budget }
+    private enum PayloadKeys: String, CodingKey { case session, lines, scrollback, text, permission, answer, budget }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -173,7 +174,8 @@ extension SessionOrder: Codable {
         case .sessionStop: self = .stop(try payload().decode(SessionRef.self, forKey: .session))
         case .sessionRead:
             let p = try payload()
-            self = .read(try p.decode(SessionRef.self, forKey: .session), lines: try p.decode(Int.self, forKey: .lines))
+            self = .read(try p.decode(SessionRef.self, forKey: .session), lines: try p.decode(Int.self, forKey: .lines),
+                         scrollback: try p.decodeIfPresent(Bool.self, forKey: .scrollback) ?? false)
         case .sessionSend:
             let p = try payload()
             self = .send(try p.decode(SessionRef.self, forKey: .session), text: try p.decode(String.self, forKey: .text),
@@ -194,10 +196,11 @@ extension SessionOrder: Codable {
         case .stop(let s):
             var p = payload()
             try p.encode(s, forKey: .session)
-        case .read(let s, let lines):
+        case .read(let s, let lines, let scrollback):
             var p = payload()
             try p.encode(s, forKey: .session)
             try p.encode(lines, forKey: .lines)
+            if scrollback { try p.encode(true, forKey: .scrollback) }
         case .send(let s, let text, let permission, let answer):
             var p = payload()
             try p.encode(s, forKey: .session)
@@ -246,12 +249,17 @@ public struct WorkOrderResult: Hashable, Sendable, Codable {
     public var session: SessionRef?      // sessionStart
     public var lines: [String]?          // sessionRead
     public var digest: SessionDigest?    // sessionHistory
+    public var paneKey: String?          // sessionStart: the DaemonSession id
+    public var turnStarted: Bool?        // sessionStart, sessionSend
     public var error: String?
 
-    public init(session: SessionRef? = nil, lines: [String]? = nil, digest: SessionDigest? = nil, error: String? = nil) {
+    public init(session: SessionRef? = nil, lines: [String]? = nil, digest: SessionDigest? = nil, paneKey: String? = nil,
+                turnStarted: Bool? = nil, error: String? = nil) {
         self.session = session
         self.lines = lines
         self.digest = digest
+        self.paneKey = paneKey
+        self.turnStarted = turnStarted
         self.error = error
     }
 }
