@@ -152,7 +152,7 @@ final class MachineRuntimeTests: XCTestCase {
         let l = try await rt.launch(LaunchRequest(repo: repo, name: "TOWERTAIL-9", agent: .claude, prompt: "Go", environment: "mbp"))
         XCTAssertEqual(l, Launch(card: "r-1::/Users/ada/Projects/towertail-wt/TOWERTAIL-9", handle: "term_1", paneKey: "tab-1:leaf-1", turnStarted: true))
         let o = try XCTUnwrap(d.runtime.orders.first)
-        XCTAssertEqual([o.id, o.runner, o.runtime.rawValue, o.suggestion], ["wo-1", "mba", "orca", ""])
+        XCTAssertEqual([o.id, o.runner, o.runtime.rawValue, o.suggestion], ["wo-1", "mba", "orca", "wo-1"], "a direct order names itself")
         XCTAssertEqual(o.createdAt, at)
         guard case .start(let r) = o.order else { return XCTFail("\(o.order)") }
         XCTAssertNil(r.environment, "the daemon runs the order on its own machine")

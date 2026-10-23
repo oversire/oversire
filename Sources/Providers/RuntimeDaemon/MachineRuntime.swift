@@ -209,7 +209,9 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
 
     /// Sends one direct work order and waits for its end.
     func run(_ order: SessionOrder, runtime rt: String) async throws -> WorkOrderResult {
-        let o = WorkOrderDraft(runtime: ProviderID(rawValue: rt), order: order.onTarget).order(suggestion: "", runner: machine, id: newID(), now: now())
+        // A direct order has no suggestion. The daemon needs one, so the order names itself, as the daemon does.
+        let id = newID()
+        let o = WorkOrderDraft(runtime: ProviderID(rawValue: rt), order: order.onTarget).order(suggestion: id, runner: machine, id: id, now: now())
         var state = try await client.start(o)
         var wait = Duration.milliseconds(200)
         let end = now().addingTimeInterval(Self.orderTimeout)

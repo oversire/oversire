@@ -85,6 +85,8 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                 return (204, Data())
             case ("POST", ["v1", "orders"]):
                 let o = try Self.decoder.decode(WorkOrder.self, from: body ?? Data())
+                // As the daemon: wire.WorkOrder.UnmarshalJSON.
+                guard !o.id.isEmpty, !o.runner.isEmpty, !o.suggestion.isEmpty else { return error(400, "wire: order needs id, runner and suggestion") }
                 if let st = _states[o.id] { return try ok(st) }
                 _orders.append(o)
                 _states[o.id] = run(o, machine: machine, sessions: &sessions)
