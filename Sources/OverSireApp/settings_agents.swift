@@ -76,7 +76,7 @@ extension SettingsPage {
             AgentCommandsCard.User(name: "\(r.name) · \(place)", terminal: r.id == "orca")
         }
         for r in cloudAIRecords?.runners ?? [] where r.online {
-            out += r.runtimes.map { AgentCommandsCard.User(name: "Runner \(r.device) · \($0.rawValue)", terminal: $0 == .orca) }
+            out += r.runtimes.map { AgentCommandsCard.User(name: "Runner \(r.device) · \($0.rawValue)", terminal: $0.rawValue == "orca") }
         }
         return out
     }

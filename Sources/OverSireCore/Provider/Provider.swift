@@ -40,7 +40,6 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let cancel: Capability = "cancel"
     public static let logs: Capability = "logs"
     public static let annotations: Capability = "annotations"
-    public static let remoteEnvironments: Capability = "remoteEnvironments"
     public static let sessionInput: Capability = "sessionInput"
     public static let sessionTail: Capability = "sessionTail"
     public static let reveal: Capability = "reveal"

@@ -4,7 +4,6 @@ import OverSireTestKit
 import TrackerTemplate
 import CodeHostTemplate
 import CITemplate
-import RuntimeTemplate
 
 struct NoSecrets: SecretReader {
     func secret(_ key: String) -> String? { nil }
@@ -16,9 +15,9 @@ final class TemplateTests: XCTestCase {
 
     func testTheRegistryMakesEachTemplate() throws {
         let registry = ProviderRegistry()
-        let all = [TemplateTracker.descriptor, TemplateCodeHost.descriptor, TemplateCI.descriptor, TemplateRuntime.descriptor]
+        let all = [TemplateTracker.descriptor, TemplateCodeHost.descriptor, TemplateCI.descriptor]
         for d in all { registry.register(d) }
-        XCTAssertEqual(all.map(\.layer), [.tracker, .codeHost, .ci, .runtime])
+        XCTAssertEqual(all.map(\.layer), [.tracker, .codeHost, .ci])
         for d in all {
             let p = try registry.make(AccountConfig(account: AccountID(provider: d.id, id: "acme")), environment: env)
             XCTAssertEqual(p.id, d.id)
@@ -34,7 +33,6 @@ final class TemplateTests: XCTestCase {
             TemplateTracker(account: a(.trackerTemplate), http: NoHTTP(), token: nil),
             TemplateCodeHost(account: a(.codeHostTemplate), http: NoHTTP(), token: nil),
             TemplateCI(account: a(.ciTemplate), http: NoHTTP(), token: nil),
-            TemplateRuntime(account: a(.runtimeTemplate), commands: ReplayGH(), exe: ""),
         ]
         for p in providers {
             do {

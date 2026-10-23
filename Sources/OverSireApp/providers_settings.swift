@@ -56,7 +56,6 @@ extension SettingsPage {
         (.tracker, "Tracker", "Items, projects and comments"),
         (.codeHost, "Code host", "Repos, branches and pull requests"),
         (.ci, "CI", "Runs and logs"),
-        (.runtime, "Agent runtime", "Agent sessions and workspaces"),
     ]
 
     /// The features that the UI hides without the capability.
@@ -74,7 +73,7 @@ extension SettingsPage {
                 if !list.isEmpty { cards.append(serviceCard(d, list)) }
             }
         }
-        cards.append(ServiceCard(icon: ServiceCard.icon("+", color: nil), name: "Add a service", detail: "Tracker, code host, CI or agent runtime",
+        cards.append(ServiceCard(icon: ServiceCard.icon("+", color: nil), name: "Add a service", detail: "Tracker, code host or CI",
                                  status: nil, actions: [], dashed: true) { [weak self] in self?.openForm(.tracker) })
         let v = NSStackView(v: [SectionTitle("Services")], spacing: 6)
         v.addFull(CardGrid(cards, minWidth: 240))

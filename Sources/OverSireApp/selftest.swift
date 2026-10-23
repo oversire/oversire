@@ -1,7 +1,6 @@
 import Cocoa
 import OverSireCore
 import OverSireAI
-import RuntimeOrca
 import TrackerPlane
 import OverSireSync
 import GitHubKit
@@ -362,23 +361,24 @@ func runSelfTest() {
     cap.modifiers = 0
     check(cap.shortcutLabel == "None" && !cap.hasShortcut, "cleared shortcut")
 
-    // Orca: agent index, prompt template.
-    let psJSON = #"""
-    {"ok":true,"result":{"worktrees":[
-     {"worktreeId":"r1::/w::workspace:a","repo":"towertail-workspace","path":"/w","displayName":"TOWERTAIL-2","liveTerminalCount":1,"lastActivityAt":1000,
-      "agents":[{"paneKey":"t1:l1","state":"done","agentType":"claude","prompt":"second","stateStartedAt":1000000},
-                {"paneKey":"t2:l2","state":"waiting","agentType":"claude","prompt":"x","stateStartedAt":2000000}]},
-     {"worktreeId":"r2::/c","repo":"oversire","path":"/c","displayName":"main","liveTerminalCount":1,"lastActivityAt":1000,
-      "agents":[{"paneKey":"t3:l3","state":"working","agentType":"claude","prompt":"work on https://app.plane.so/ocral/browse/FRITZ-17/ now","stateStartedAt":3000000},
-                {"paneKey":"t4:l4","state":"done","agentType":"claude","prompt":"no key here","stateStartedAt":3000000},
-                {"paneKey":"t5:l5","state":"working","agentType":"codex","prompt":"other","stateStartedAt":3000000}]},
-     {"worktreeId":"r3::/x","repo":"x","path":"/x","displayName":"TREBI-9","liveTerminalCount":0,"lastActivityAt":1000,
-      "agents":[{"paneKey":"t6:l6","state":"done","agentType":"claude","stateStartedAt":3000000}]},
-     {"worktreeId":"r4::/y","repo":"y","path":"/y","displayName":"OLD","isArchived":true,"agents":[]}]}}
-    """#
-    if let r = (try? JSONSerialization.jsonObject(with: Data(psJSON.utf8)) as? [String: Any])?["result"] as? [String: Any] {
-        let cards = OrcaRuntime.cards(from: r)
-        check(cards.count == 3 && cards[0].agents.count == 2 && cards[0].liveTerminals == 1, "orca cards parse")
+    // Agent index, prompt template.
+    do {
+        func agent(_ card: String, _ pane: String, _ phase: AgentSession.Phase, _ at: TimeInterval, _ name: AgentName = .claude,
+                   repo: String, prompt: String? = nil) -> AgentSession {
+            AgentSession(phase: phase, since: Date(timeIntervalSince1970: at), card: card, paneKey: pane, agent: name, repo: repo, prompt: prompt)
+        }
+        let one = Date(timeIntervalSince1970: 1)
+        let cards = [
+            Workspace(id: "r1::/w::workspace:a", repo: "towertail-workspace", path: "/w", name: "TOWERTAIL-2", comment: nil, liveTerminals: 1, lastActivity: one,
+                      agents: [agent("r1::/w::workspace:a", "t1:l1", .done, 1000, repo: "towertail-workspace", prompt: "second"),
+                               agent("r1::/w::workspace:a", "t2:l2", .waiting, 2000, repo: "towertail-workspace", prompt: "x")]),
+            Workspace(id: "r2::/c", repo: "oversire", path: "/c", name: "main", comment: nil, liveTerminals: 1, lastActivity: one,
+                      agents: [agent("r2::/c", "t3:l3", .working, 3000, repo: "oversire", prompt: "work on https://app.plane.so/ocral/browse/FRITZ-17/ now"),
+                               agent("r2::/c", "t4:l4", .done, 3000, repo: "oversire", prompt: "no key here"),
+                               agent("r2::/c", "t5:l5", .working, 3000, "codex", repo: "oversire", prompt: "other")]),
+            Workspace(id: "r3::/x", repo: "x", path: "/x", name: "TREBI-9", comment: nil, liveTerminals: 0, lastActivity: one,
+                      agents: [agent("r3::/x", "t6:l6", .done, 3000, repo: "x")]),
+        ]
         let t0 = Date(timeIntervalSince1970: 3100)
         let launches = ["SLING-5": AgentIndex.PendingLaunch(at: t0, card: "r2::/c", paneKey: "t5:l5"),
                         "SLING-6": AgentIndex.PendingLaunch(at: t0, error: "Orca is not reachable"),
@@ -399,7 +399,7 @@ func runSelfTest() {
         check(AgentIndex.index(doneOnly, launches: [:], now: t0.addingTimeInterval(2 * 86400))["TOWERTAIL-2"] == nil, "an old done agent of a closed item drops")
         check(AgentIndex.index(doneOnly, launches: [:], open: { $0 == "TOWERTAIL-2" }, now: t0.addingTimeInterval(2 * 86400))["TOWERTAIL-2"]?.phase == .done,
               "an old done agent of an open item stays")
-        let link = AgentLink(key: "SLING-5", workspace: WorkspaceRef(account: AccountID(provider: .orca, id: "local"), id: "r2::/c"), pane: "t5:l5", at: t0)
+        let link = AgentLink(key: "SLING-5", workspace: WorkspaceRef(account: AccountID(provider: .daemon, id: "mba"), id: "r2::/c"), pane: "t5:l5", at: t0)
         let linked = AgentIndex.index(cards, launches: [:], links: ["SLING-5": link], now: t0.addingTimeInterval(3600))
         check(linked["SLING-5"]?.agent == "codex", "a stored agent link keeps the pane after the launch expires")
         check(AgentSession(phase: .working, since: t0).label(now: t0.addingTimeInterval(4 * 60 + 5)) == "Working 4m", "working label")
@@ -415,9 +415,9 @@ func runSelfTest() {
         let back = AgentSession(phase: .working, since: t0.addingTimeInterval(120), repo: "r")
         f2.record(before: ["A-1": ask], after: ["A-1": back])
         check(f2.events.map(\.text) == ["Got input, works again", "Needs input: Pick one", "Session works"], "feed transitions \(f2.events.map(\.text))")
-    } else { check(false, "orca ps parse") }
+    }
     func term(_ h: String, _ title: String, _ pane: String, orphaned: Bool = false) -> RuntimeSession {
-        RuntimeSession(ref: SessionRef(workspace: WorkspaceRef(account: AccountID(provider: .orca, id: "local"), id: "c"), id: h),
+        RuntimeSession(ref: SessionRef(workspace: WorkspaceRef(account: AccountID(provider: .daemon, id: "mba"), id: "c"), id: h),
                        title: title, paneKey: pane, orphaned: orphaned)
     }
     let terms = [term("h1", "Terminal 1", "t1:l1"), term("h2", "✳ FRITZ-27", "t2:l2")]
@@ -434,12 +434,14 @@ func runSelfTest() {
     rc.prompt = "{KEY}: {title}"
     check(rc.prompt(for: draftItem) == "FRITZ-7: Add quick capture", "runtime prompt fields")
     if let d = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"orca":{"environment":"mbp","roots":{"a/b":"/w"}}}"#.utf8)) {
-        check(d.orca.environment == "mbp" && d.runtime.agent == "claude" && d.orca.roots["a/b"] == "/w" && d.notifications.agentDone, "orca config decode")
+        check(d.orca.legacyEnvironment == "mbp" && d.runtime.agent == "claude" && d.orca.roots["a/b"] == "/w" && d.notifications.agentDone, "orca config decode")
+        let json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(d))) as? [String: Any]
+        check((json?["orca"] as? [String: Any])?.keys.sorted() == ["roots"], "a save writes only the roots")
     } else { check(false, "orca config decode") }
 
     // Runtime config: an old config moves orca.agent and orca.prompt. A save writes runtime only.
     if let old = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"orca":{"agent":"codex","prompt":"go {KEY}","cli":"/o"}}"#.utf8)) {
-        check(old.runtime.agent == "codex" && old.runtime.prompt == "go {KEY}" && old.orca.cli == "/o", "old orca agent migrates")
+        check(old.runtime.agent == "codex" && old.runtime.prompt == "go {KEY}", "old orca agent migrates")
         let json = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(old))) as? [String: Any]
         let orca = json?["orca"] as? [String: Any], runtime = json?["runtime"] as? [String: Any]
         check(orca?["agent"] == nil && orca?["prompt"] == nil && runtime?["agent"] as? String == "codex", "save writes runtime")
@@ -512,15 +514,13 @@ func runSelfTest() {
             var old = c
             old.accounts = nil
             let b = AppEnvironment.accounts(from: old)
-            check(b.prefix(3).map { "\($0.account.provider.rawValue):\($0.account.id)" } == ["plane:ocral", "plane:btd", "orca:mbp"], "old accounts")
+            check(b.prefix(3).map { "\($0.account.provider.rawValue):\($0.account.id)" } == ["plane:ocral", "plane:btd", "github:oversire"], "old accounts")
             check(b[1].values["host"] == "https://plane.example.com" && b[0].secretKeys == ["PLANE_TOKEN_ocral"], "plane account")
-            check(b[2].values["agent"] == "codex" && b[2].values["cli"] == nil, "orca account")
             var p = ProjectsConfig()
             AppEnvironment.applyLegacyFields(b, to: &p)
             check(p.workspaces.map(\.slug) == ["ocral", "btd"] && p.workspaces[1].host == "https://plane.example.com", "plane fields")
-            check(p.orca.enabled && p.orca.environment == "mbp" && p.orca.cli == OrcaRuntime.defaultPath, "orca fields")
             AppEnvironment.applyLegacyFields(a, to: &p)
-            check(p.workspaces.map(\.slug) == ["gone"] && !p.orca.enabled, "fields follow the accounts")
+            check(p.workspaces.map(\.slug) == ["gone"], "fields follow the accounts")
         } else { check(false, "accounts fixture decode") }
     }
     do {

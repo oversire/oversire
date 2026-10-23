@@ -36,3 +36,5 @@ jobs:
         run: |
           # Only OverSireApp may import AppKit.
           ! grep -rlE "^import (Cocoa|AppKit)" Sources --include=*.swift | grep -v "^Sources/OverSireApp/"
+          # The daemon runs Orca. No Swift source runs the orca CLI.
+          ! grep -rnE 'bin/orca|run\(\s*"orca"|"/usr/bin/env",\s*\["orca"' Sources --include=*.swift

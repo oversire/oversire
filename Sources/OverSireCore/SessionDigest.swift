@@ -95,25 +95,3 @@ public struct SessionDigest: Hashable, Sendable, Codable {
 public protocol SessionHistoryReading: AgentRuntime {
     func history(of session: AgentSession, in workspace: Workspace, budget: HistoryBudget) async throws -> SessionDigest
 }
-
-/// Reads agent transcript files on this Mac. The app gives one through AgentBinder; adapters get it injected.
-public protocol TranscriptReading: Sendable {
-    /// The digest of one transcript file. The source of the result is file.
-    func digest(file: String, agent: AgentName, budget: HistoryBudget) throws -> SessionDigest
-    /// The transcript file of a harness session id.
-    func locate(agent: AgentName, sessionId: String) -> String?
-    /// The newest transcript file of the sessions that ran in `cwd`.
-    func newest(agent: AgentName, cwd: String) -> String?
-    /// The last `bytes` of a transcript file. nil when there is no such file.
-    func tail(file: String, bytes: Int) -> Data?
-}
-
-extension TranscriptReading {
-    public func tail(file: String, bytes: Int) -> Data? {
-        guard let h = FileHandle(forReadingAtPath: file) else { return nil }
-        defer { try? h.close() }
-        guard let end = try? h.seekToEnd() else { return nil }
-        try? h.seek(toOffset: end > UInt64(bytes) ? end - UInt64(bytes) : 0)
-        return try? h.readToEnd() ?? Data()
-    }
-}

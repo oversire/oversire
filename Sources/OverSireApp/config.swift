@@ -596,21 +596,24 @@ struct RuntimeConfig: Codable, Equatable {
 // ▶ starts a Plane item in an Orca terminal. `roots` maps a project key ("slug/uuid")
 // to the Orca workspace folder. The environment is per Mac: nil runs on this Mac.
 struct OrcaConfig: Codable, Equatable {
-    var enabled = true
-    var cli = ""   // the runtime account sets it
-    var environment: String?
     var roots: [String: String] = [:]
+    /// The old "Run sessions on" Orca environment. The migration reads it; the config does not save it.
+    private(set) var legacyEnvironment: String?
+
+    private enum CodingKeys: String, CodingKey { case roots, environment }
 
     init() {}
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        cli = try c.decodeIfPresent(String.self, forKey: .cli) ?? ""
-        environment = try c.decodeIfPresent(String.self, forKey: .environment)
         roots = try c.decodeIfPresent([String: String].self, forKey: .roots) ?? [:]
+        legacyEnvironment = try c.decodeIfPresent(String.self, forKey: .environment)
     }
 
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(roots, forKey: .roots)
+    }
 
     // The Orca workspace whose name matches the project: "towertail-workspace" for TOWERTAIL.
     static func guess(_ p: ProjectSummary, _ repos: [RuntimeRepo]) -> String? {
@@ -843,7 +846,8 @@ func isValidRepo(_ s: String) -> Bool {
 /// A process that did not read the config (a test) or could not decode it must not overwrite it.
 private(set) var CONFIG_READ = false
 
-func loadConfig() {
+/// `save: false` (`--uishots`): the migrations change only the memory, not the file.
+func loadConfig(save: Bool = true) {
     guard let data = FileManager.default.contents(atPath: CONFIG_PATH) else { CONFIG_READ = true; return }
     guard let c = try? JSONDecoder().decode(AppConfig.self, from: data) else {
         log.error("Cannot decode \(CONFIG_PATH, privacy: .public). OverSire does not save the config.")
@@ -873,8 +877,13 @@ func loadConfig() {
     if let l = c.logs { LOGS_CFG = l }
     if let m = c.machines { MACHINES = m }
     ACCOUNTS = AppEnvironment.accounts(from: c)
+    let moved = LegacyMigration.moveOrca(&ACCOUNTS, machines: &MACHINES, environment: PROJECTS_CFG.orca.legacyEnvironment)
     AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
     ENV.load(ACCOUNTS)
+    if moved {
+        log.notice("Removed the Orca runtime account. The daemon runs Orca now. Sessions run on \(MACHINES.sessions ?? "this Mac", privacy: .public).")
+        if save { saveConfig() }
+    }
 }
 
 func saveConfig() {

@@ -2,7 +2,7 @@ import Foundation
 import CIGitHubActions
 import CodeHostGitHub
 import OverSireCore
-import RuntimeOrca
+import OverSireSync
 import Security
 import TrackerPlane
 
@@ -92,13 +92,24 @@ extension LegacyMigration {
                 out.append(AccountConfig(account: AccountID(provider: p, id: o), values: ["repos": repos[o]!.joined(separator: ",")]))
             }
         }
-        let orca = c.projects?.orca ?? OrcaConfig()
-        if orca.enabled {
-            var values = ["agent": c.projects?.runtime.agent ?? "claude"]
-            if !orca.cli.isEmpty { values["cli"] = orca.cli }
-            if let e = orca.environment { values["environment"] = e }
-            out.append(AccountConfig(account: AccountID(provider: .orca, id: orca.environment ?? "local"), values: values))
-        }
         return out
+    }
+}
+
+// The daemon runs Orca since OVERSIRE-289. The Orca accounts go, and the old "Run sessions on" Orca environment
+// becomes the sessions machine.
+extension LegacyMigration {
+    static let orca: ProviderID = "orca"
+
+    /// Returns true when it changed the accounts or the machines.
+    static func moveOrca(_ accounts: inout [AccountConfig], machines: inout MachinesConfig, environment: String?) -> Bool {
+        let old = accounts.filter { $0.account.provider == orca }
+        guard !old.isEmpty || environment != nil else { return false }
+        accounts.removeAll { $0.account.provider == orca }
+        if machines.sessions == nil {
+            let env = old.first?.values["environment"].flatMap { $0.isEmpty ? nil : $0 } ?? environment
+            machines.sessions = MachinesConfig.sessions(orcaEnvironment: env, legacy: machines.legacyAccounts)
+        }
+        return true
     }
 }

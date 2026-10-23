@@ -5,7 +5,6 @@ import GitHubKit
 import TrackerPlane
 import CodeHostGitHub
 import CIGitHubActions
-import RuntimeOrca
 import RuntimeDaemon
 
 // ─── Composition root ────────────────────────────────────────────────────────
@@ -25,7 +24,7 @@ final class AppEnvironment: @unchecked Sendable {
 
     init(secrets: KeychainSecrets = KeychainSecrets()) {
         self.secrets = secrets
-        for d in [PlaneTracker.descriptor, GitHubCodeHost.descriptor, ActionsCI.descriptor, OrcaRuntime.descriptor] {
+        for d in [PlaneTracker.descriptor, GitHubCodeHost.descriptor, ActionsCI.descriptor] {
             registry.register(d)
         }
     }
@@ -34,8 +33,7 @@ final class AppEnvironment: @unchecked Sendable {
     func io(_ p: ProviderID, secrets other: (any SecretReader)? = nil) -> ProviderEnvironment {
         let gh = p == .github || p == .githubActions
         return ProviderEnvironment(http: gh ? URLSessionTransport.noRedirects : URLSessionTransport(),
-                                   commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil), secrets: other ?? secrets,
-                                   transcripts: BinderTranscripts(), log: AppLog())
+                                   commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil), secrets: other ?? secrets, log: AppLog())
     }
 
     /// Runs after the Providers page removes an account, for example to delete its webhook.
@@ -118,8 +116,7 @@ final class AppEnvironment: @unchecked Sendable {
     /// The union of the capabilities of the accounts of a layer, or of all accounts.
     /// The runtime layer is the sessions machine.
     func capabilities(_ layer: Layer? = nil) -> Set<Capability> {
-        let list = (layer.map(accounts) ?? accounts).filter { registry.descriptor($0.account.provider)?.layer != .runtime }
-        var caps = list.compactMap(provider).reduce(into: Set<Capability>()) { $0.formUnion($1.capabilities) }
+        var caps = (layer.map(accounts) ?? accounts).compactMap(provider).reduce(into: Set<Capability>()) { $0.formUnion($1.capabilities) }
         if layer == nil || layer == .runtime, let rt = runtime { caps.formUnion(rt.capabilities) }
         return caps
     }
@@ -235,12 +232,6 @@ extension AppEnvironment {
         p.workspaces = accounts.filter { $0.account.provider == .plane }.map { a in
             PlaneWorkspace(slug: a.values["workspace"] ?? a.account.id,
                            host: a.values["host"].flatMap { $0.isEmpty ? nil : $0 } ?? PlaneWorkspace.cloudHost)
-        }
-        let orca = accounts.first { $0.account.provider == .orca }
-        p.orca.enabled = orca != nil
-        if let orca {
-            p.orca.cli = orca.values["cli"].flatMap { $0.isEmpty ? nil : $0 } ?? OrcaRuntime.defaultPath
-            p.orca.environment = orca.values["environment"].flatMap { $0.isEmpty ? nil : $0 }
         }
     }
 

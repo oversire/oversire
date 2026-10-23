@@ -20,8 +20,7 @@ final class AgentsPage: Page {
 
     override func sections() -> [PageSection]? {
         let idx = data.agentIndex
-        let cfg = PROJECTS_CFG.orca
-        var caption = cfg.environment.map { "Orca environment \($0)" } ?? "Orca on this Mac"
+        var caption = "Sessions on \(idx.place)"
         caption += " · read every 15 s"
         if data.statusJob.on { caption += " · status after \(Int(AGENTS.quietMinutes)) min idle" }
         if let e = idx.lastError { caption += " · last read failed: \(e)" }
@@ -30,9 +29,9 @@ final class AgentsPage: Page {
         let active = cards.filter { Self.isActive($0, linked: cardKey($0) != nil) }
         let ready = idx.ready != nil, all = allWorktrees
         let top = WorkPage.header(self, tab: .worktrees, caption: caption, extra: [ready, all, active.count, cards.count] as [AnyHashable], actions: {
-            [NeedsYouCard.refreshButton(data),
-             ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) },
-             ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() }]
+            [NeedsYouCard.refreshButton(data)]
+                + (idx.canReveal ? [ActionButton("Open Orca", symbol: "terminal") { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Orca.app")) }] : [])
+                + [ActionButton("Refresh", symbol: "arrow.clockwise") { idx.poll() }]
         }, trailing: { [weak self] in
             guard ready else { return [] }
             return [Segmented(["With item \(active.count)", "All \(cards.count)"], selected: all ? 1 : 0, label: "Worktrees") { i in

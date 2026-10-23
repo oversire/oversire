@@ -19,7 +19,7 @@ enum SessionStartError: LocalizedError, Equatable {
         switch self {
         case .noProject(let k): return "OverSire does not track the project \(k)."
         case .noRoot(let k): return "Choose an Orca workspace folder for \(k) first."
-        case .noRuntime: return "Add an agent runtime account in Settings › Accounts and sync."
+        case .noRuntime: return "No OverSire daemon runs on the sessions machine. See Settings › Machines."
         case .noIntake(let k): return "The tracker of \(k) cannot make intake items with files."
         case .noCreate(let k): return "The tracker of \(k) cannot take files."
         case .badCommand(let e): return "The agent command is not valid: \(e)"

@@ -4,7 +4,6 @@ import OverSireCore
 import OverSireAI
 import OverSireSync
 import OverSireAssistant
-import RuntimeOrca
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
 // one PNG per route and theme. It sends no global input, so it is safe while someone uses the Mac.
@@ -619,7 +618,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        loadConfig()
+        loadConfig(save: false)
         if let fx = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FIXTURES"], FileManager.default.fileExists(atPath: fx + "/ci.json") {
             AI_CFG.digest = true
         }

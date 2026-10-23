@@ -40,7 +40,7 @@ final class AgentCommandsCard: NSStackView {
                                     size: 12, color: Palette.dim, lines: 2)
         card.add(note)
         let used: [NSView] = [NSTextField.text("Used by", size: 12, color: Palette.mut)] + (usedBy.isEmpty
-            ? [NSTextField.text("No runtime account. Add one in Settings › Accounts and sync.", size: 12, color: Palette.dim)]
+            ? [NSTextField.text("No reachable runtime on the sessions machine. See Settings › Machines.", size: 12, color: Palette.dim)]
             : usedBy.map { u in
                 let c = Chiplet(u.terminal ? "✓ \(u.name)" : "– \(u.name) (no terminal)", color: u.terminal ? Palette.ok : Palette.dim)
                 c.toolTip = u.terminal ? "Types the command into a terminal." : "Starts the agent over its protocol, without a command line."

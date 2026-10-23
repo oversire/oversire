@@ -25,17 +25,15 @@ let package = Package(
         .target(name: "TrackerPlane", dependencies: ["OverSireCore"], path: "Sources/Providers/TrackerPlane"),
         .target(name: "CodeHostGitHub", dependencies: ["OverSireCore", "GitHubKit"], path: "Sources/Providers/CodeHostGitHub"),
         .target(name: "CIGitHubActions", dependencies: ["OverSireCore", "GitHubKit"], path: "Sources/Providers/CIGitHubActions"),
-        .target(name: "RuntimeOrca", dependencies: ["OverSireCore"], path: "Sources/Providers/RuntimeOrca"),
         .target(name: "RuntimeDaemon", dependencies: ["OverSireCore"], path: "Sources/Providers/RuntimeDaemon"),
         // Skeletons for new adapters. The app does not register them. See docs/adding-a-provider.md.
         .target(name: "TrackerTemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/TrackerTemplate"),
         .target(name: "CodeHostTemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/CodeHostTemplate"),
         .target(name: "CITemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/CITemplate"),
-        .target(name: "RuntimeTemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/RuntimeTemplate"),
         .executableTarget(
             name: "OverSireApp",
             dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", "GitHubKit",
-                           "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "RuntimeDaemon",
+                           "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeDaemon",
                            .product(name: "AgentBinder", package: "agent-binder")],
             // The UI code predates strict concurrency. It moves to .v6 page by page.
             swiftSettings: [.swiftLanguageMode(.v5)],
@@ -53,11 +51,10 @@ let package = Package(
         .testTarget(name: "TrackerPlaneTests", dependencies: ["TrackerPlane", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "OverSireTestKit"]),
-        .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),
         .testTarget(name: "RuntimeDaemonTests", dependencies: ["RuntimeDaemon", "OverSireTestKit"]),
-        .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "RuntimeTemplate", "OverSireTestKit"]),
+        .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "OverSireTestKit"]),
         .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI"]),
-        .testTarget(name: "LiveTests", dependencies: ["OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", .product(name: "AgentBinder", package: "agent-binder"), "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "OverSireTestKit"]),
+        .testTarget(name: "LiveTests", dependencies: ["OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", .product(name: "AgentBinder", package: "agent-binder"), "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "OverSireTestKit"]),
     ],
     swiftLanguageModes: [.v6]
 )

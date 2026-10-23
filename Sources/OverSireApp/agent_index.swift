@@ -109,7 +109,6 @@ final class AgentIndex: NSObject {
     /// True when the item of the key is tracked and not Completed or Cancelled.
     var open: (String) -> Bool = { _ in false }
 
-    private var cfg: OrcaConfig { PROJECTS_CFG.orca }
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
 
     static let linkAge: TimeInterval = 30 * 86400
