@@ -346,7 +346,7 @@ public struct JoinResult: Codable, Hashable, Sendable {
 /// One open pause of a session. The fields match SessionQuestion. An item can have the kind approve.
 public struct DaemonQuestion: Codable, Hashable, Sendable, Identifiable {
     public enum Via: String, Codable, Sendable { case form, permission, turn, waiting, askReply }
-    public enum Source: String, Codable, Sendable { case hook, screen, transcript }
+    public enum Source: String, Codable, Sendable { case hook, screen, transcript, mail }
 
     public var id: QuestionID
     public var session: String              // DaemonSession.id
