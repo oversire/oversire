@@ -152,6 +152,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         log.info("OverSire launching — repos: \(REPOS.count), poll: \(POLL_NORMAL)s/\(POLL_ACTIVE)s")
         if LegacyMigration().run() { log.info("migrated the Cat Eye data") }
         loadConfig()
+        UILog.watchMenus()
         // The loads of the store owners must see the moved records.
         Task { @MainActor in
             await StoreMigration.runForApp(STORE_WRITES)

@@ -41,7 +41,10 @@ enum AlertConfirm {
     }
 
     private static func answer(_ a: NSAlert, _ r: NSApplication.ModalResponse) -> Answer {
-        Answer(button: r.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue, checked: a.suppressionButton?.state == .on)
+        let ans = Answer(button: r.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue, checked: a.suppressionButton?.state == .on)
+        let button = a.buttons.indices.contains(ans.button) ? a.buttons[ans.button].title : "closed"
+        UILog.write("Dialog", "\(a.messageText): \(button)")
+        return ans
     }
 
     /// A sheet on `window`, else a modal alert.

@@ -364,7 +364,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         sidebar.onPick = { [weak self] r in if self?.router.current != r { self?.router.go(r) } }
         sidebar.commander = RowCommander(data: data) { [weak self] in self?.router.go($0) }
         sidebar.onLive = { [weak self] in self?.router.go(.activity) }
-        router.onChange = { [weak self] r in self?.display(r) }
+        router.onChange = { [weak self] r in
+            UILog.shown(r.title)
+            self?.display(r)
+        }
         busObservation = data.bus.observe { [weak self] c in self?.dataChanged(c) }
         gate.onHeldChange = { [weak self] on in
             self?.pill.set(held: on)

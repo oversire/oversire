@@ -1,4 +1,4 @@
-import Foundation
+import Cocoa
 import OverSireCore
 
 // ─── Logs ────────────────────────────────────────────────────────────────────
@@ -11,6 +11,34 @@ var APP_LOG: any LogSink = NoLog()
 /// Writes to APP_LOG at the time of the write. Adapters get it before the log store starts.
 struct AppLog: LogSink {
     func write(_ e: LogEntry) { APP_LOG.write(e) }
+}
+
+/// Lines in the area ui: what the user did. The label of a control, never typed text.
+enum UILog {
+    static var sink: any LogSink = AppLog()
+    /// The page of the main window.
+    private(set) static var page = ""
+    private static var menus: NSObjectProtocol?
+
+    static func write(_ job: String, _ message: String) {
+        sink.write(LogEntry(level: .ok, area: .ui, job: job, subject: page.isEmpty ? nil : page, message: message))
+    }
+
+    static func shown(_ title: String) {
+        guard title != page else { return }
+        write("Page", page.isEmpty ? title : "\(page) → \(title)")
+        page = title
+    }
+
+    /// Each menu action: the app menu, the status menu and the context menus.
+    static func watchMenus() {
+        guard menus == nil else { return }
+        menus = NotificationCenter.default.addObserver(forName: NSMenu.didSendActionNotification, object: nil, queue: .main) { n in
+            guard let item = n.userInfo?["MenuItem"] as? NSMenuItem else { return }
+            let menu = (n.object as? NSMenu)?.title ?? ""
+            write("Menu", menu.isEmpty ? item.title : "\(menu) › \(item.title)")
+        }
+    }
 }
 
 final class LogStore: LogSink, @unchecked Sendable {

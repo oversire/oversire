@@ -197,7 +197,11 @@ final class ActionButton: NSButton {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func fire() { onClick?() }
+    @objc private func fire() {
+        let label = title.isEmpty ? (toolTip ?? accessibilityLabel() ?? "button") : title
+        UILog.write("Click", (window as? DialogSheet).map { "\(label) in \"\($0.title)\"" } ?? label)
+        onClick?()
+    }
 
     // A long title shrinks with an ellipsis, in place of a wider row. Below labels (250), so it shrinks first.
     func truncates() {

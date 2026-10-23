@@ -754,7 +754,10 @@ final class DialogSheet: NSWindow {
         recalculateKeyViewLoop()
     }
 
-    override func cancelOperation(_ sender: Any?) { onCancel() }
+    override func cancelOperation(_ sender: Any?) {
+        UILog.write("Dialog", "\(title): Escape")
+        onCancel()
+    }
 
     func present(over parent: NSWindow?) {
         MachineSheets.open = self
