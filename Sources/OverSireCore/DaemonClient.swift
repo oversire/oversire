@@ -119,7 +119,12 @@ public final class DaemonClient: Sendable {
 
     public func repos() async throws -> DaemonReposPage { try await get("/v1/repos") }
 
-    public func workspaces() async throws -> DaemonWorkspacesPage { try await get("/v1/workspaces") }
+    /// The daemon asks each runtime. Orca with many workspaces takes more than the default timeout.
+    public func workspaces() async throws -> DaemonWorkspacesPage {
+        var r = request("/v1/workspaces")
+        r.timeoutInterval = 30
+        return try Self.decode(try await send(r))
+    }
 
     public func removeWorkspace(_ id: String, _ rm: WorkspaceRemove) async throws -> WorkspaceRemoval {
         var r = try json("DELETE", "/v1/workspaces/\(Self.escape(id))", rm)

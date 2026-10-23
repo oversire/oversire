@@ -436,7 +436,7 @@ extension SettingsPage {
         install.isEnabled = !busy
         let note = m.installed
             ? "The oversire CLI is at \(m.path), but the daemon does not answer on loopback :7690."
-            : "The daemon sends session state the moment an agent stops or asks a question. Without it, OverSire polls Orca each 15 to 60 s."
+            : "The daemon sends session state the moment an agent stops or asks a question. Without it, OverSire shows no agent sessions."
         let text = NSStackView(v: [NSTextField.text("Run the OverSire daemon on this Mac", size: 13.5, weight: .semibold),
                                    NSTextField.text(note, size: 12, color: Palette.dim, lines: 3),
                                    NSTextField.text("Installs \(m.path) from the GitHub release, checks the signature, then runs oversire daemon install. No password.",

@@ -45,7 +45,8 @@ codesign --verify --deep --strict OverSire.app
 echo "Done. $(ls -lh OverSire.app/Contents/MacOS/oversire | awk '{print $5}') binary"
 # CI and release builds only package the app. NO_RESTART=1 does the same locally.
 if [ -n "$CI" ] || [ "$RELEASE" = 1 ] || [ "$NO_RESTART" = 1 ]; then exit 0; fi
-pkill -x oversire 2>/dev/null && sleep 0.5 || true
+# The daemon binary is also named oversire. Stop only the app.
+pkill -f '\.app/Contents/MacOS/oversire( |$)' 2>/dev/null && sleep 0.5 || true
 DEST="$PWD/OverSire.app"
 # Refresh an installed copy only if it is a real directory with our bundle id.
 # rsync --delete on the wrong target removes an unrelated app.

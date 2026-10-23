@@ -231,7 +231,7 @@ final class StatusJob {
         }
     }
 
-    /// Refresh: polls Orca, reads the screens, then reads each session at once, also while it works.
+    /// Refresh: polls the daemon runtimes, reads the screens, then reads each session at once, also while it works.
     func refresh(keys: [String]) {
         let ks = keys.map { $0.uppercased() }.filter { agents.agent($0) != nil && !reading.contains($0) }
         guard !ks.isEmpty else { return }
