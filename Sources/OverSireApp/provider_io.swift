@@ -29,9 +29,11 @@ struct IOLog {
     func command(_ exe: String, _ args: [String], status: Int32?, ms: Int, stderr: String = "", error: String? = nil) {
         let name = (exe as NSString).lastPathComponent
         let shown = args.prefix(12).map { $0.count > 80 ? $0.prefix(77) + "…" : $0 } + (args.count > 12 ? ["…"] : [])
-        let failed = error != nil || status != 0
+        // gh exits 1 on a 304. GitHubKit takes it as a success.
+        let notModified = name == "gh" && status == 1 && stderr.contains("HTTP 304")
+        let failed = error != nil || (status != 0 && !notModified)
         var msg = ([name] + shown).joined(separator: " ")
-        if let error { msg += ": " + error } else if let status, status != 0 { msg += ": exit \(status)" }
+        if let error { msg += ": " + error } else if notModified { msg += ": 304" } else if let status, status != 0 { msg += ": exit \(status)" }
         var e = LogEntry(level: failed ? .warn : .ok, area: .cmd, job: name, message: msg, ms: ms)
         e.exit = status.map(Int.init)
         if failed, !stderr.isEmpty { e.outputTail = String(stderr.suffix(300)) }

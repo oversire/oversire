@@ -71,6 +71,16 @@ final class IOLogTests: XCTestCase {
         XCTAssertNil(ok.outputTail)
     }
 
+    func testAGh304IsRoutine() throws {
+        let l = Lines()
+        IOLog(sink: l).command("/opt/homebrew/bin/gh", ["api", "-i", "repos/o/r/actions/runs"], status: 1, ms: 80, stderr: "gh: HTTP 304\n")
+        let e = try XCTUnwrap(l.all.first)
+        XCTAssertEqual(e.level, .ok)
+        XCTAssertEqual(e.verbose, true)
+        XCTAssertEqual(e.message, "gh api -i repos/o/r/actions/runs: 304")
+        XCTAssertNil(e.outputTail)
+    }
+
     func testTheRunnerWritesALine() throws {
         let l = Lines()
         var r = ProcessRunner()
