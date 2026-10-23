@@ -25,9 +25,19 @@ Each background job writes one line when it ends. The log stays on this Mac in `
 | Sessions | The history read of a session |
 | Sync | The Plane and GitHub polls |
 | Runner | The work orders of the runner |
+| Network | Each HTTP request and WebSocket connect: method, path, status, time, host and request id |
+| Command | Each child process: the CLI name, the arguments, the exit code and the time |
+| UI | Each click, menu action, page change and dialog answer |
+
+The Network, Command and UI areas are records. They open no problem, and the Logs page has a filter for each one.
+
+- **Network.** A failure is a warning with the start of the error body (300 characters). A write that works is an ok line. A read that works is routine. The line has no headers, no body of a request and no query.
+- **Request id.** Each daemon request sends a new `X-Request-Id`. The line shows it as `id=…`. The daemon log has the same id, so the two sides join. See `cli/README.md`, section Log.
+- **Command.** Each argument is cut to 80 characters, with 12 arguments at most. A failure is a warning with the end of stderr (300 characters). A command that works is routine.
+- **UI.** A line names the page and the label of the control. It has no typed text.
 
 - The log removes secrets before it writes a line: the API key of the settings, `Authorization` and `x-api-key` values, and known token formats.
-- Settings › Logs › Log settings sets the keep days (7 by default), the AI input and output, and the detail. Normal detail keeps no routine ok line, for example a poll that worked. Debug keeps all lines.
+- Settings › Logs › Log settings sets the keep days (7 by default), the AI input and output, and the detail. Normal detail keeps no routine ok line, for example a poll that worked or a read that worked. Debug keeps all lines.
 - An adapter or a target with no AppKit writes through `LogSink`. The default is `NoLog`.
 
 ### Problems
