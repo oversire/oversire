@@ -56,7 +56,7 @@ final class AgentsPage: Page {
         }
         guard ready else {
             // Without a daemon on this Mac, the header has the install banner.
-            guard ENV.machines?.noLocalDaemon != true else { return out }
+            guard ENV.machines?.needsDaemon != true else { return out }
             out.append(PageSection("off", rows: [PageRow("banner", MACHINES.sessions) { [weak self] in
                 Banner(.idle, title: "OverSire cannot reach \(MACHINES.sessions ?? "the daemon on this Mac").",
                        body: "The machine that runs the agent sessions does not answer. Its sessions and worktrees show here when it does.",

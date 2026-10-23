@@ -70,6 +70,19 @@ final class MachineRuntimeCallerTests: XCTestCase {
         XCTAssertFalse(h.noLocalDaemon)
     }
 
+    func testAViewerMacNeedsNoDaemon() async {
+        let d = FakeDaemon()
+        d.online = false
+        let h = hub(d)
+        h.refresh()
+        await wait { h.read }
+        h.use([mbp])
+        await wait { h.noLocalDaemon }
+        XCTAssertTrue(h.needsDaemon, "this Mac runs the sessions")
+        h.config = { MachinesConfig(sessions: "mbp") }
+        XCTAssertFalse(h.needsDaemon, "the sessions run on mbp")
+    }
+
     // MARK: AgentTerminal and AgentIndex
 
     func testOpenTerminalStartsInPlaceAndOnlyThisMacShows() async throws {

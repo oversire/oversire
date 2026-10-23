@@ -633,9 +633,9 @@ extension SettingsPage {
 }
 
 /// Opens the menu of a button under it.
-/// The banner of Work and the Session tab when this Mac has no daemon. It has the install button of Settings › Machines.
+/// The banner of Work and the Session tab when this Mac needs a daemon. It has the install button of Settings › Machines.
 enum DaemonBanner {
-    static var shown: () -> Bool = { ENV.machines?.noLocalDaemon == true }
+    static var shown: () -> Bool = { ENV.machines?.needsDaemon == true }
 
     static func rows() -> [PageRow] {
         guard shown() else { return [] }

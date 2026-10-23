@@ -134,6 +134,9 @@ final class MachineHub {
     /// The first read found no daemon on this Mac.
     var noLocalDaemon: Bool { read && !links.contains { $0.local } }
 
+    /// This Mac has no daemon and runs the sessions itself. A Mac that shows the sessions of another machine needs no daemon.
+    var needsDaemon: Bool { noLocalDaemon && config().sessions == nil }
+
     func isLive(_ machine: String) -> Bool { health[machine] == .live }
 
     // MARK: Sources
