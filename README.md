@@ -88,20 +88,19 @@ What AI does:
 **Extra context** is text that OverSire adds to each prompt, for example your team words or title rules. OverSire sends only the text you see in the dialog and the names of the projects, fields and options.
 
 ### Orca agents (optional)
-OverSire can start a coding agent on a Plane item in an [Orca](https://github.com/stablyai/orca) terminal. The Orca server can be this Mac or a paired server.
+OverSire can start a coding agent on a Plane item in an [Orca](https://github.com/stablyai/orca) terminal. The app does not run Orca. The [OverSire daemon](#the-oversire-daemon-optional-free) on each machine runs the Orca of that machine, and the app talks only to the daemons.
 
 - **▶ Start** — hover a Todo or Backlog row and click ▶. The item window has the chip **▶ Start in Orca**. OverSire opens an Orca card with the item key as its name (for example `TOWERTAIL-2`). In it, OverSire starts `claude -n 'TOWERTAIL-2'` and sends the prompt. The copy menu of a row also has **Start in Orca**
 - **Agent pill** — a row with an agent shows its state: **Starting…**, **Working 12m**, **Needs input**, **Agent done** or **Not started**. Click the pill to open the terminal in Orca. Click **Not started** to see the error, try again or choose another workspace
-- **Agent card** — the Overview tab of the item window shows the agent, its last lines on the screen, **Send…** (type a reply to the agent) and **Open terminal**
+- **Agent card** — the Overview tab of the item window shows the agent, its last lines on the screen, **Send…** (type a reply to the agent) and **Open terminal**. **Open terminal** and **Open in Orca** show only for sessions on this Mac
 - **Notifications** — "Agent needs input" and "Agent done". Turn them on or off in Settings › Notifications › Agents and mentions. A project can override them
 - **The agent does the work** — ▶ does not change the Plane item. The agent sets In progress, does the work and closes the item. The default prompt is `work on {url} in worktree group .wt/{key}`
 
 To set it up:
 
-1. Install Orca. OverSire uses the CLI at `/Applications/Orca.app/Contents/Resources/bin/orca`.
-2. Open Settings › Accounts and sync and add the Orca service. The card shows the Orca version.
-3. On a client Mac, set the Orca account to the paired server.
-4. Set the Orca workspace of each Plane project in the project settings (Links › Orca and branches). If you leave "— ask each time —", ▶ shows a menu of the Orca workspaces and saves your choice.
+1. Install Orca and the OverSire daemon on the machine that runs the sessions.
+2. Open Settings › Machines. The card of each machine shows its runtimes. Set **Run sessions on** to the machine (default: this Mac). Work, Intake and cleanup use that machine.
+3. Set the Orca workspace of each Plane project in the project settings (Links › Orca and branches). If you leave "— ask each time —", ▶ shows a menu of the Orca workspaces and saves your choice.
 
 A workspace root often holds many repositories that depend on each other. The agent then makes a worktree group: one folder `.wt/<key>/` with a git worktree for each changed repository and a symlink for each other entry. The root `CLAUDE.md` tells the agent the rules of that root. The help line of the Orca workspace field shows whether the root `CLAUDE.md` tells the agent about worktree groups.
 
@@ -115,7 +114,7 @@ A workspace root often holds many repositories that depend on each other. The ag
 The sidebar of the window has these pages:
 
 - **Home** — six counters, the morning digest and the **Needs you** list. The badge counts the rows that need you. **Moving now** shows the sessions and runs that work now
-- **Work** — **Items** shows your open items in priority lanes, then **Up next** (the queue). **Worktrees** shows the Orca worktrees and their state. **Lane board** shows each queue lane as a board
+- **Work** — **Items** shows your open items in priority lanes, then **Up next** (the queue). **Worktrees** shows the Orca worktrees of the sessions machine and their state. **Lane board** shows each queue lane as a board
 - **Intake** — the items that wait for triage
 - **Runs**, **Pull requests** and **Insights**
 - **Projects** — one page for each tracked project
@@ -287,7 +286,8 @@ Config lives in `~/.config/oversire/config.json` (managed via the Settings panel
 | `projects.folded` | `[]` | Folded projects |
 | `projects.showSubItems` | `false` | List sub-items as rows. When it is off, the list shows top-level items only, with a sub-item ring |
 | `projects.capture` | on, ⌃⌥N | Quick capture: `enabled`, the Carbon `keyCode` and `modifiers`, `pasteClipboard` and `aiTitle`. Set it in Settings › General › Quick capture and snap |
-| `projects.orca` | on, `claude` | Orca agents: `enabled`, `cli` (the path of the Orca CLI), `environment` (the paired Orca server, or none for this Mac), `agent`, `prompt` and `roots` (the Orca workspace path of each project key; `""` asks each time) |
+| `projects.orca` | `{}` | `roots`: the Orca workspace path of each project key (`""` asks each time). The first start after the daemon change removes the old Orca account and moves its `environment` to `machines.sessions` |
+| `machines.sessions` | this Mac | The machine that runs the sessions. Set it in Settings › Machines › Run sessions on |
 | `ai` | off | AI settings, written by **Settings › AI**. The API key is in the Keychain |
 
 ## Updates
@@ -298,7 +298,7 @@ A release build (from the [releases page](https://github.com/oversire/oversire/r
 
 ## The OverSire daemon (optional, free)
 
-The [oversire CLI](https://github.com/oversire/cli) runs a daemon on each machine with agents. The daemon watches the agent sessions (agent hooks and Orca), finds their questions, and sends live events to the app on loopback or over Tailscale. The machines of one user make one group ("My machines"). The app finds the members of the group, and no machine name must be typed. Without a daemon, the app polls as before.
+The [oversire CLI](https://github.com/oversire/cli) runs a daemon on each machine with agents. The daemon owns the agent runtimes of its machine: it runs the local Orca, watches the agent sessions (agent hooks and Orca), finds their questions, and sends live events to the app on loopback or over Tailscale. The app talks only to the daemons, never to Orca. The machines of one user make one group ("My machines"). The app finds the members of the group, and no machine name must be typed. Without a daemon, the trackers, code hosts and CI still poll, and the app shows "Install the OverSire daemon to see agent sessions".
 
 | Free (self-hosted daemon) | Paid (cloud hub) |
 |---|---|

@@ -1,13 +1,14 @@
 # Add a provider
 
-A provider is an adapter for one vendor in one layer. OverSire has four layers:
+A provider is an adapter for one vendor in one layer. The app has three provider layers:
 
 | Layer | Protocol | Example | Template |
 |---|---|---|---|
 | Tracker | `Tracker` | Plane | `Sources/Providers/TrackerTemplate` |
 | Code host | `CodeHost` | GitHub | `Sources/Providers/CodeHostTemplate` |
 | CI | `CIProvider` | GitHub Actions | `Sources/Providers/CITemplate` |
-| Agent runtime | `AgentRuntime` | Orca | `Sources/Providers/RuntimeTemplate` |
+
+The agent runtimes (Orca, later Conductor or Superset) are not app adapters. The OverSire daemon on each machine runs them. The app has one runtime adapter, `RuntimeDaemon`, with one `MachineRuntime` for each machine of the group. To add a runtime, add it to the daemon. See `docs/adding-a-runtime.md` in the `oversire/cli` repo.
 
 The protocols are in `Sources/OverSireCore`. The app uses only the protocols. Only `Sources/OverSireApp/AppEnvironment.swift` names the concrete adapters.
 
@@ -99,7 +100,7 @@ Rules for `poll(since:)`:
 - Set `busy: true` when a subject is in progress, for example a running build. The app then polls at the active interval.
 - Set `retryAfter` and `budget` from the rate headers when the vendor sends them.
 
-`Sources/Providers/RuntimeOrca/OrcaPoll.swift` is a short example. `Sources/Providers/TrackerPlane/PlanePoll.swift` uses `updated_at` filters.
+`Sources/Providers/RuntimeDaemon/MachinePoll.swift` is a short example. `Sources/Providers/TrackerPlane/PlanePoll.swift` uses `updated_at` filters.
 
 ## 4. Implement the layer protocol
 
@@ -134,12 +135,6 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 - `perform(_:on:)` runs a rerun or a cancel. Throw `.unsupported(.rerun)` or `.unsupported(.cancel)` for an action that you do not support.
 - To re-run one job, add `.rerunJob` and conform to `JobRerunning`. On the wire, this is the RunAction `rerun` on a `job` subject.
 
-### Agent runtime
-
-- `environments`, `repos(in:)`, `workspaces`, `sessions`, `launch`.
-- A runtime is often a CLI. Call it through the `CommandRunner`.
-- A runtime that starts the agent in a terminal uses `LaunchRequest.command` when it is set. The app resolves it from Settings › Agents and queue › Agent commands and quotes each value. When the field is empty or missing, use the default of the agent: `LaunchCommand.defaultFor(agent)`. A runtime that starts the agent over a protocol (no command line) ignores the field.
-
 ## 5. Add the capabilities that you support
 
 A capability is an optional feature. Some capabilities need a second protocol:
@@ -166,7 +161,7 @@ A capability is an optional feature. Some capabilities need a second protocol:
 
 Add the capability to `capabilities` and conform to the protocol. The suite fails when one is there without the other. The UI hides a feature that no account supports.
 
-`SessionHistoryReading` gives the status job the turns of a session as a `SessionDigest`. Read the transcript of the agent, not the screen. For a session on this Mac, use the injected `TranscriptReading`. For a remote host, run a read command on that host. Throw `ProviderError.notFound` when there is no record. Throw `.unsupported(.sessionHistory)` when the session cannot have a record. Then the app uses the screen only and writes no warning. Each other error writes a warning to Settings › Logs.
+The runtime capabilities (`.sessionInput`, `.sessionTail`, `.reveal`, `.sessionHistory`) belong to `MachineRuntime`. The daemon reads the session data on its machine. Only the runtime of this Mac has `.reveal`.
 
 ## 6. Record fixtures
 
@@ -210,7 +205,7 @@ In the `.unauthorized` scenario, `probe()` must throw `ProviderError.unauthorize
 
 - `ProviderConformance.run` checks the probe, two polls, the cursor, the event ids and the refused token.
 - `ProviderConformance.capabilities(p)` checks only the capabilities. It does no I/O.
-- `TrackerConformance.run`, `CodeHostConformance.run(sha:make:)`, `CIConformance.run(repo:make:)` and `RuntimeConformance.run(repo:make:)` check the layer. The tracker suite writes one item and one comment.
+- `TrackerConformance.run`, `CodeHostConformance.run(sha:make:)`, `CIConformance.run(repo:make:)` and `RuntimeConformance.run(repo:make:)` (for `MachineRuntime`) check the layer. The tracker suite writes one item and one comment.
 - The report lists each problem. Fix the problems one at a time.
 
 `Tests/OverSireTestKitTests/FakeConformanceTests.swift` runs the suites on the fakes in `OverSireTestKit`. Use it as an example.
@@ -222,7 +217,7 @@ To run a suite against the real vendor, add a test to `Tests/LiveTests`. These t
 Add the descriptor to the list in `AppEnvironment.init` in `Sources/OverSireApp/AppEnvironment.swift`:
 
 ```swift
-for d in [PlaneTracker.descriptor, LinearTracker.descriptor, GitHubCodeHost.descriptor, ActionsCI.descriptor, OrcaRuntime.descriptor] {
+for d in [PlaneTracker.descriptor, LinearTracker.descriptor, GitHubCodeHost.descriptor, ActionsCI.descriptor] {
 ```
 
 Then add the import of the target at the top of the file, and add the target to the `OverSireApp` dependencies in `Package.swift`. The vendor is now on the Providers page.

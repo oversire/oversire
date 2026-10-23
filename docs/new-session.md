@@ -18,9 +18,9 @@ A toast at the bottom right tells the result. It has the links **Show in Orca** 
 | Intake | Result |
 |---|---|
 | On (the default) | OverSire makes one intake item. The prompt is its description, and the files go on the item. The agent gets the prompt and the item key. |
-| Off | No item. The files go to the Orca host into `/tmp/oversire/<id>/`, and the prompt gets their paths. With no files, the prompt goes to the agent as typed. |
+| Off | No item. The files go to the sessions machine, into a folder that its daemon chooses, and the prompt gets their paths. With no files, the prompt goes to the agent as typed. |
 
-The route with intake off copies the files through a hidden Orca terminal with `base64`. It then compares the SHA-256 of each file on the host with the local file. Thus it also works on a remote Orca host. The total size of the files has a limit (10 MB by default). For more, turn on intake.
+The route with intake off sends the files to the daemon of the sessions machine. Thus it also works on a remote machine. The total size of the files has a limit (10 MB by default). For more, turn on intake.
 
 ## Keys
 
@@ -44,8 +44,8 @@ Placeholders of the intake template: `{text}` the prompt, `{key}` item key, `{it
 
 - A project with no Orca workspace shows **Choose folder…**. Start stays off until the project has a folder.
 - A file that does not upload to the item after three tries shows in the toast. The terminal still opens.
-- When the files do not go to the Orca host, no terminal opens. The panel shows the error and **Send with intake**.
+- When the files do not go to the sessions machine, no terminal opens. The panel shows the error and **Send with intake**.
 
 ## Privacy
 
-Dictation is on-device speech to text. No audio is kept or sent. The files go only to the tracker (intake on) or to the Orca host (intake off).
+Dictation is on-device speech to text. No audio is kept or sent. The files go only to the tracker (intake on) or to the sessions machine (intake off).
