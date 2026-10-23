@@ -385,7 +385,7 @@ final class ProjectSettingsPage: Page {
             saveConfig()
         }
         let choose = ActionButton("Choose…") { [weak self] in self?.chooseRoot() }
-        let md = Self.claudeMDState(PROJECTS_CFG.orcaRoot(p), remote: PROJECTS_CFG.orca.environment != nil)
+        let md = Self.claudeMDState(PROJECTS_CFG.orcaRoot(p), remote: data.agentIndex.remote)
         c2.add(field("Orca workspace", NSStackView(h: [root, choose], spacing: 6), help: "The folder that Orca opens for new sessions of this project." + (md.map { " Root CLAUDE.md: \($0)." } ?? "")))
         let sample = data.projectStore.snapshots.values.first { $0.summary.identifier.uppercased() == key }?.items.first
         let branch = TextInput(l.branchTemplate ?? "", placeholder: ProjectLocalSettings.defaultBranch, label: "Branch name", mono: true) { [weak self] v in

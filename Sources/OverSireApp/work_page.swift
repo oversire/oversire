@@ -94,6 +94,7 @@ final class WorkPage: Page {
         let tabs: [Route.WorkTab] = [.items, .worktrees]
         return [
             PageRow("header", caption, extra) { PageHeader("Work", caption: caption, actions: actions()) },
+        ] + DaemonBanner.rows() + [
             PageRow("tabs", tab.rawValue, mine, worktrees, extra) { [weak page] in
                 let strip = TabStrip(["Items", "Worktrees"], selected: tabs.firstIndex(of: tab) ?? 0, counts: [mine, worktrees])
                 strip.onSelect = { i in page?.go(.work(tabs[i])) }

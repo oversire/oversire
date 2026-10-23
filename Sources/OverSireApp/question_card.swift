@@ -11,6 +11,8 @@ struct QuestionPlace: Equatable {
     var local = true
     /// The runner is offline. The hub keeps a sent answer for 60 min.
     var offline = false
+    /// The app that shows the session. nil: the runtime.
+    var app: String? = nil
 
     var text: String { "\(runtime) · \(host)" }
 }
@@ -363,14 +365,14 @@ final class QuestionCard: Card, NSTextFieldDelegate {
         var views: [NSView] = []
         let sending = entry.state == .sending
         if inRuntime {
-            if let reveal = actions.reveal { views.append(ActionButton("Open in \(place.runtime) ↗", style: .primary) { reveal() }) }
+            if let reveal = actions.reveal { views.append(ActionButton("Open in \(place.app ?? place.runtime) ↗", style: .primary) { reveal() }) }
             views.append(Spacer())
         } else if question.items.count == 1, let item = question.items.first, item.kind == .approve {
             let allow = ActionButton(QuestionItem.allow, style: .primary) { [weak self] in self?.pick(0, of: item.id) }
             let deny = ActionButton(QuestionItem.deny) { [weak self] in self?.pick(1, of: item.id) }
             if sending { allow.busy("Sending…"); deny.isEnabled = false }
             views += [allow, deny]
-            if let reveal = actions.reveal { views.append(ActionButton("Open in \(place.runtime) ↗") { reveal() }) }
+            if let reveal = actions.reveal { views.append(ActionButton("Open in \(place.app ?? place.runtime) ↗") { reveal() }) }
             views.append(Spacer())
         } else {
             let s = ActionButton("Send answers", style: .primary) { [weak self] in self?.send() }
@@ -378,7 +380,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
             if sending { s.busy("Sending…") }
             views.append(s)
             if let reveal = actions.reveal {
-                let o = ActionButton("Open in \(place.runtime) ↗") { reveal() }
+                let o = ActionButton("Open in \(place.app ?? place.runtime) ↗") { reveal() }
                 o.isEnabled = !sending
                 views.append(o)
             }

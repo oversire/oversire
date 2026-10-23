@@ -738,10 +738,13 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         box.layer?.borderColor = NSColor.separatorColor.cgColor
         box.layer?.backgroundColor = AgentPill.orca.withAlphaComponent(0.1).cgColor
         doc.addSubview(box)
-        let open = button("Open terminal", #selector(revealAgent), in: doc)
-        open.frame.origin = NSPoint(x: pad + cw - open.frame.width - 8, y: y + 13)
         let send = button("Send…", #selector(sendAgent), in: doc)
-        send.frame.origin = NSPoint(x: open.frame.minX - send.frame.width - 6, y: y + 13)
+        send.frame.origin = NSPoint(x: pad + cw - send.frame.width - 8, y: y + 13)
+        if agents.canReveal {
+            let open = button("Open terminal", #selector(revealAgent), in: doc)
+            open.frame.origin = NSPoint(x: pad + cw - open.frame.width - 8, y: y + 13)
+            send.frame.origin.x = open.frame.minX - send.frame.width - 6
+        }
         let words: String
         switch a.phase {
         case .working: words = "Session working · " + AgentSession.minutes(Date().timeIntervalSince(a.since))
@@ -755,7 +758,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         doc.addSubview(t)
         let df = DateFormatter()
         df.dateFormat = "HH:mm"
-        var sub = [a.agent.rawValue, a.repo.isEmpty ? "Orca" : a.repo, PROJECTS_CFG.orca.environment ?? "this Mac"].joined(separator: " · ")
+        var sub = [a.agent.rawValue, a.repo.isEmpty ? "Orca" : a.repo, agents.place].joined(separator: " · ")
         if let p = a.prompt, !p.isEmpty { sub += " \"\(p.count > 70 ? p.prefix(70) + "…" : Substring(p))\"" }
         sub += " · since " + df.string(from: a.since)
         let st = NSTextField(labelWithString: sub)

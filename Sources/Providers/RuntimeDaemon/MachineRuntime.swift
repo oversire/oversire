@@ -90,7 +90,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         return page.workspaces.map { w in
             let repo = w.repo ?? ""
             let agents = (byWorkspace[w.id] ?? []).filter { $0.runtime == w.runtime }.map { s in
-                AgentSession(phase: Self.phase(s.state), since: s.stateSince, card: w.id, paneKey: s.id, agent: AgentName(rawValue: s.harness),
+                AgentSession(phase: Self.phase(s), since: s.stateSince, card: w.id, paneKey: s.id, agent: AgentName(rawValue: s.harness),
                              repo: repo, prompt: s.prompt, message: s.lastMessage)
             }
             return Workspace(id: w.id, repo: repo, path: w.path, name: w.name ?? "", comment: w.comment, liveTerminals: w.liveTerminals,
@@ -243,10 +243,11 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         lock.withLock { for w in page.workspaces { runtimeOf[w.id] = w.runtime } }
     }
 
-    static func phase(_ s: DaemonSession.State) -> AgentSession.Phase {
-        switch s {
+    /// A question keeps a done session done: AgentSession.needsInput shows it as needs input.
+    static func phase(_ s: DaemonSession) -> AgentSession.Phase {
+        switch s.state {
         case .starting: return .starting
-        case .working: return .working
+        case .working: return s.reason == .question ? .waiting : .working
         case .waiting: return .waiting
         case .done: return .done
         case .failed: return .failed

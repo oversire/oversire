@@ -103,8 +103,9 @@ final class SnapSender {
             "key": made.item.key, "item": made.item.id, "intake": made.intake.id, "count": "\(b.shots.count)",
             "workspace": p.account.id, "project": p.key ?? b.project, "dir": store.outDir(b.id).path + "/download",
         ]).replacingOccurrences(of: "\n", with: " ")
-        let s = try await term.openTerminal(path: path, title: "snap-" + made.item.key, command: cmd, prompt: prompt)
-        try? await term.reveal(s)
+        let s = try await term.openTerminal(path: path, title: "snap-" + made.item.key, agent: AgentName(rawValue: PROJECTS_CFG.runtime.agent),
+                                         command: cmd, prompt: prompt)
+        try? await term.show(s)
         result.session = s
         return result
     }

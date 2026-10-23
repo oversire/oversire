@@ -1,25 +1,14 @@
 import Cocoa
 import OverSireCore
 import OverSireAI
-import RuntimeOrca
 
 // ─── Intake agent (Enhance) ──────────────────────────────────────────────────
-// A read-only Orca worker reads the code for a new intake item, asks the user what the code cannot tell
+// A read-only worker on the sessions machine reads the code for a new intake item, asks the user what the code cannot tell
 // (the native AskUserQuestion form, shown with QuestionCard), and sends a new description in its `worker_done`. The user then
 // checks the properties to write, and accepts the item in the same step.
 
 /// The calls of a runtime that runs an Enhance worker.
-protocol EnhanceHost: AnyObject, Sendable {
-    var account: AccountID { get }
-    var installed: Bool { get }
-    func startWorker(spec: String, title: String, path: String, agent: String) async throws -> OrcaWorker
-    func workerState(_ w: OrcaWorker) async throws -> OrcaWorkerState
-    func stopWorker(_ w: OrcaWorker) async throws
-    func releaseWorker(_ w: OrcaWorker) async throws
-    func reveal(_ s: SessionRef) async throws
-}
-
-extension OrcaRuntime: EnhanceHost {}
+typealias EnhanceHost = WorkerSupervising
 
 /// A tracker with a web page for the intake of a project.
 protocol IntakePage: Tracker { func intakeURL(_ p: ProjectRef) -> String }
@@ -30,7 +19,7 @@ final class IntakeAgent {
     static let timeout: TimeInterval = 1800
 
     struct Run: Equatable {
-        var worker: OrcaWorker
+        var worker: Worker
         var session: SessionRef?       // the worker terminal, that asks the questions
         var item: ItemRef
         var original: String
@@ -80,7 +69,7 @@ final class IntakeAgent {
         self.questions = questions
     }
 
-    var available: Bool { AI_CFG.intakeAgent && host()?.installed == true }
+    var available: Bool { AI_CFG.intakeAgent && host()?.capabilities.contains(.workers) == true }
 
     func state(_ item: IntakeItem) -> State? { states[item.id] ?? sample?(item) }
 
@@ -116,7 +105,7 @@ final class IntakeAgent {
             set(item.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once.", kept: nil))
             return
         }
-        guard let rt = host() else { set(item.id, .failed("Add an Orca account in Settings › Accounts and sync.", kept: nil)); return }
+        guard let rt = host() else { set(item.id, .failed("Install the OverSire daemon in Settings › Machines.", kept: nil)); return }
         let url = (ENV.tracker(snap.summary.ref.workspace) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
         set(item.id, .starting)
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
@@ -130,7 +119,7 @@ final class IntakeAgent {
             Task {
                 if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
                 let spec = self.spec(key: key, title: item.name, url: url, body: body, vision: vision)
-                let r = await Result(awaiting: { try await rt.startWorker(spec: spec, title: "Enhance " + key, path: path, agent: "claude") })
+                let r = await Result(awaiting: { try await rt.startWorker(WorkerStart(spec: spec, title: "Enhance " + key, path: path, agent: "claude")) })
                 DispatchQueue.main.async {
                     switch r {
                     case .success(let w):
@@ -178,13 +167,14 @@ final class IntakeAgent {
         }
     }
 
-    private func advance(_ id: String, _ old: Run, _ r: Result<OrcaWorkerState, ProviderError>) {
+    private func advance(_ id: String, _ old: Run, _ r: Result<WorkerState, ProviderError>) {
         guard states[id]?.run?.worker == old.worker else { return }
         var run = states[id]?.run ?? old
         let t = now()
         switch r {
         case .failure(let e): finish(id, run, .failed(e.message, kept: nil))
-        case .success(.done(_, let body)):
+        case .success(let w) where w.state == .done:
+            let body = w.body ?? ""
             if let result = EnhanceResult.parse(body) {
                 if let at = run.askedAt { run.waited += t.timeIntervalSince(at); run.askedAt = nil }
                 if let s = run.session { questions.untrack(intake: s) }
@@ -192,8 +182,9 @@ final class IntakeAgent {
             } else {
                 finish(id, run, .failed("The agent sent no result that OverSire can read. Its text is below.", kept: body))
             }
-        case .success(.ended(let why)): finish(id, run, .failed("The worker stopped (\(why)) with no result.", kept: nil))
-        case .success(.running):
+        case .success(let w) where w.state == .ended:
+            finish(id, run, .failed("The worker stopped (\(w.reason ?? "no reason")) with no result.", kept: nil))
+        case .success:
             let n = run.session.map { questions.count(session: $0) } ?? 0
             if n > 0 {
                 if run.askedAt == nil { run.askedAt = t }
@@ -201,7 +192,7 @@ final class IntakeAgent {
             } else {
                 if let at = run.askedAt { run.waited += t.timeIntervalSince(at); run.askedAt = nil }
                 if run.worked(t) > Self.timeout {
-                    finish(id, run, .failed("No result after 30 minutes of work. Open it in Orca to look.", kept: nil))
+                    finish(id, run, .failed("No result after 30 minutes of work. Open the worker terminal to look.", kept: nil))
                 } else {
                     set(id, .enhancing(run))
                 }
@@ -303,9 +294,11 @@ final class IntakeAgent {
         }
     }
 
+    var canReveal: Bool { host() is any Revealing }
+
     func reveal(_ item: IntakeItem) {
         guard let s = state(item)?.run?.session, let rt = host() else { return }
-        Task { try? await rt.reveal(s) }
+        Task { try? await (rt as? any Revealing)?.reveal(s) }
     }
 
     func discard(_ item: IntakeItem) {
@@ -362,25 +355,24 @@ final class IntakePanel: Card {
                               Chiplet(AGENTS.intakeScratch ? "scratch worktree" : "main checkout", mono: true), Chiplet("read-only")]
         if let p = IntakeAgent.pill(state) { head.append(Pill(p.tone, text: p.text)) }
         add(NSStackView(h: head, spacing: 6))
-        let open = ActionButton("Open in Orca ↗") { agent.reveal(item) }
+        // Only a worker on this Mac opens in the runtime UI.
+        let open: [NSView] = agent.canReveal ? [ActionButton("Open in Orca ↗") { agent.reveal(item) }] : []
         switch state {
         case .starting:
-            add(NSTextField.text("OverSire starts a worker in Orca.", size: 12, color: Palette.mut))
+            add(NSTextField.text("OverSire starts a worker on \(IntakePanel.place(agent)).", size: 12, color: Palette.mut))
         case .enhancing:
             add(NSTextField.text("The agent reads the code and the related items. It asks here when the code cannot tell.", size: 12, color: Palette.mut, lines: 2))
-            add(NSStackView(h: [open, ActionButton("Stop") { agent.discard(item) }], spacing: 6))
+            add(NSStackView(h: open + [ActionButton("Stop") { agent.discard(item) }], spacing: 6))
         case .asking(let run, _):
             for e in run.session.map({ questions.open(session: $0) }) ?? [] { add(questions.card(e)) }
-            add(NSStackView(h: [open, ActionButton("Stop") { agent.discard(item) }], spacing: 6))
+            add(NSStackView(h: open + [ActionButton("Stop") { agent.discard(item) }], spacing: 6))
         case .ready(let res, let run):
             review(res, run)
             add(NSStackView(h: [
                 ActionButton("Accept", style: .primary) { agent.apply(projectKey: projectKey, item: item, accept: true, done: after) },
                 ActionButton("Accept and queue") { agent.apply(projectKey: projectKey, item: item, accept: true, queue: true, done: after) },
                 ActionButton("Write to the item") { agent.apply(projectKey: projectKey, item: item, accept: false, done: after) },
-                open,
-                ActionButton("Discard") { agent.discard(item) },
-            ], spacing: 6))
+            ] + open + [ActionButton("Discard") { agent.discard(item) }], spacing: 6))
         case .applied:
             add(NSTextField.text("OverSire wrote the checked changes. The original text is in the section \"Original note\".", size: 12, color: Palette.mut, lines: 2))
         case .failed(let msg, let kept):
@@ -393,8 +385,8 @@ final class IntakePanel: Card {
     required init?(coder: NSCoder) { fatalError() }
 
     static func place(_ agent: IntakeAgent) -> String {
-        guard let rt = agent.host() as? OrcaRuntime else { return "Orca" }
-        return rt.environment.map { "Orca · \($0)" } ?? "Orca · this Mac"
+        guard let rt = agent.host() else { return "no machine" }
+        return rt is any Revealing ? "this Mac" : rt.account.id
     }
 
     private func review(_ res: EnhanceResult, _ run: IntakeAgent.Run) {

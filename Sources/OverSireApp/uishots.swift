@@ -18,6 +18,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     let projectStore: ProjectStore
     let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: UIShots.tmp + "/store")))
     lazy var agentIndex = AgentIndex(writes: writes)
+    private var machineHub: MachineHub?
     let workstreams = WorkstreamIndex()
     let cleaner = Cleaner(defaults: UserDefaults(suiteName: "oversire-uishots")!)
     lazy var queue = WorkQueue(writes: writes, store: projectStore, agents: agentIndex)
@@ -116,6 +117,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
     // OVERSIRE_UISHOTS_SESSIONS=1: one OVERSIRE session in each state, a blocked checklist and a quiet check.
     static let sessions = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SESSIONS"] == "1"
+    // OVERSIRE_UISHOTS_SESSION_KEY: the item of the waiting sample session, in place of OVERSIRE-143.
+    static let sessionKey = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SESSION_KEY"] ?? "OVERSIRE-143"
     /// Finished items with leftovers, and OVERSIRE-205 as Done with open sub-items.
     static let cleanup = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLEANUP"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
@@ -197,7 +200,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         """
         // key, phase, minutes since, live terminals, screen same for, counter moves, shells, message
         let rows: [(String, AgentSession.Phase, Double, Int, Double, Bool, Int, String?)] = [
-            ("OVERSIRE-143", .waiting, 3, 1, 3, false, 0, "Do you want the Inbox to show the blocked rows too, or only Sessions?"),
+            (UIShots.sessionKey, .waiting, 3, 1, 3, false, 0, "Do you want the Inbox to show the blocked rows too, or only Sessions?"),
             ("OVERSIRE-109", .done, 26, 1, 26, false, 0, blocked),
             ("OVERSIRE-142", .done, 27, 1, 2, false, 1, "The tests run in the background. I check the result when they end."),
             ("OVERSIRE-91", .done, 44, 1, 44, false, 0, "The Planner page is merged into main. All tests pass."),
@@ -258,6 +261,23 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         }
     }
 
+    /// No daemon answers: the sessions come from the seeds.
+    struct Offline: HTTPTransport {
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw URLError(.cannotConnectToHost) }
+    }
+
+    /// This Mac (mba) and mbp. OVERSIRE_UISHOTS_MACHINE=mbp: mbp runs the sessions. none: no daemon on this Mac.
+    private func useSampleMachines() {
+        let pick = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_MACHINE"]
+        let hub = MachineHub(local: DaemonClient(base: DaemonClient.loopback, token: nil, http: Offline()), http: Offline(), cache: nil)
+        hub.config = { MachinesConfig(sessions: pick == "mbp" ? "mbp" : nil) }
+        let mbp = MachineLink(machine: "mbp", base: URL(string: "http://mbp:7690")!, token: "uishots", local: false)
+        hub.use(pick == "none" ? [mbp] : [MachineLink(machine: "mba", base: DaemonClient.loopback, token: nil, local: true), mbp])
+        hub.read = true
+        machineHub = hub
+        ENV.machines = hub
+    }
+
     private func seedCleanup() {
         guard UIShots.cleanup, let found = projectStore.item(key: "OVERSIRE-205") else { return }
         let snap = found.snap
@@ -303,7 +323,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
 
     /// One ask of OVERSIRE-143 (found by its terminal), one Orca form of OVERSIRE-140, one answer in Orca for OVERSIRE-142.
     private func seedQuestions(_ ago: @escaping (Double) -> Date) {
-        let account = AccountID(provider: "orca", id: "local")
+        let account = ENV.machines?.sessions?.account ?? AccountID(provider: .daemon, id: "mba")
         let s = { (id: String) in SessionRef(workspace: WorkspaceRef(account: account, id: "w-" + id), id: "term-" + id) }
         let store = QuestionItem(id: "q1", header: "Inbox", text: "Do you want the Inbox to show the blocked rows too?",
                                  why: "Sessions shows them now.", kind: .single,
@@ -311,9 +331,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let tests = QuestionItem(id: "q2", header: "Tests", text: "Which tests do you want?", kind: .multi,
                                  options: [.init(label: "Unit"), .init(label: "uishots")])
         let q = { (id: String, items: [QuestionItem], via: SessionQuestion.Via, at: Double) in
-            SessionQuestion(id: QuestionID(rawValue: "orca:local:\(id)"), session: s(id), origin: .session, items: items, via: via, askedAt: ago(at))
+            SessionQuestion(id: QuestionID(rawValue: "daemon:mba:\(id)"), session: s(id), origin: .session, items: items, via: via, askedAt: ago(at))
         }
-        let answer = QuestionAnswer(question: "orca:local:m3", items: [.init(id: "q1", choices: ["Both"])])
+        let answer = QuestionAnswer(question: "daemon:mba:m3", items: [.init(id: "q1", choices: ["Both"])])
         let runner = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "oversire", id: "local"), id: "r1"), id: "s-1")
         let permission = SessionQuestion(id: "runner:s-1:p-1", session: runner, origin: .session,
                                          items: [.approve(id: "permission", header: "Bash", text: "npm test")], via: .permission,
@@ -324,7 +344,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             QuestionBoard.Entry(question: q("f2", [store], .form, 41), state: .open, firstSeen: ago(41)),
             QuestionBoard.Entry(question: q("m3", [store], .askReply, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
             QuestionBoard.Entry(question: q("e1", [UIShots.enhanceAsk, tests], .askReply, 2), state: .open, firstSeen: ago(2)),
-        ], keys: [runner: "OVERSIRE-137", s("m1"): "OVERSIRE-143", s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"],
+        ], keys: [runner: "OVERSIRE-137", s("m1"): UIShots.sessionKey, s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"],
            intake: [s("e1"): UIShots.intakeRef])
         seedEnhance(ago)
     }
@@ -337,9 +357,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
 
     /// The first intake rows of the shot get the Enhance states in this order.
     private func seedEnhance(_ ago: @escaping (Double) -> Date) {
-        let session = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w-e1"), id: "term-e1")
+        let session = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "daemon", id: "mba"), id: "intake"), id: "term-e1")
         let run = { (n: String, at: Double, note: String) in
-            IntakeAgent.Run(worker: OrcaWorker(dispatch: "ctx_" + n, task: "task_" + n, terminal: "term-" + n),
+            IntakeAgent.Run(worker: Worker(id: "wk-" + n, runtime: "orca", terminal: "term-" + n, startedAt: ago(at)),
                             session: n == "e1" ? session : nil, item: UIShots.intakeRef, original: note, since: ago(at))
         }
         var asking = run("e1", 6, "labels get lost on sync")
@@ -626,6 +646,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]
             AgentCommandsCard.drafts = ["codex": "codex --full-auto; echo done"]
         }
+        useSampleMachines()
         agentIndex.poll()
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         refresh(force: true) { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.shoot() } }
@@ -637,6 +658,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedSummaries()
         seedSessions()
         seedCleanup()
+        // The seeded sessions join their items.
+        workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
         // The heuristics only: a shot never calls the AI.
         statusJob.ai = { nil }
         statusJob.tick(workstreams: workstreams, store: projectStore)
@@ -879,7 +902,7 @@ extension UIShots {
         cfg.intake = frame != "direct"
         var m = NewSessionModel(choices: choices, cfg: cfg, agent: "claude")
         if frame == "toast" {
-            let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:/x"), id: "t1")
+            let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: .daemon, id: "mba"), id: "path:/x"), id: "t1")
             let item = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"), id: "i1", key: "OVERSIRE-153", url: URL(string: "https://app.plane.so")!)
             c.showToast(SessionStarter.Result(session: s, item: item, paths: [], missing: [], terminal: "claude-the-runs-page"),
                         agent: "claude", root: choices[0].root ?? "", files: 2)
@@ -905,7 +928,7 @@ extension UIShots {
         }
         if frame == "listening" { m.text = "Why is the sync slow"; m.phase = .listening }
         if frame == "wide" { m.text = "When I scroll down tables I want to see the top and the columns." }
-        if frame == "failed" { m.intake = false; m.phase = .failed(SessionStartError.hostFiles("runs.png did not arrive whole on the Orca host.").localizedDescription) }
+        if frame == "failed" { m.intake = false; m.phase = .failed(SessionStartError.hostFiles("runs.png did not arrive whole on the sessions machine.").localizedDescription) }
         let p = c.present(m, near: nil)
         p.promptView.string = m.text
         p.titleField.stringValue = m.titleText
@@ -1112,7 +1135,7 @@ extension UIShots {
     static func questionsSample(_ set: String) -> NSWindow {
         let now = Date()
         let ago = { (m: Double) in now.addingTimeInterval(-m * 60) }
-        let account = AccountID(provider: "orca", id: "local")
+        let account = AccountID(provider: .daemon, id: "mba")
         let project = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE")
         let item = { (k: String) in ItemRef(project: project, id: k, key: k, url: URL(string: "https://app.plane.so/ocral/browse/\(k)/")!) }
         let session = SessionRef(workspace: WorkspaceRef(account: account, id: "w1"), id: "term_1")
@@ -1124,15 +1147,15 @@ extension UIShots {
                                  options: [.init(label: "Unit"), .init(label: "uishots"), .init(label: "Live")])
         let free = QuestionItem(id: "q1", text: "What name do you want for the new setting?", kind: .free)
         let q = { (id: String, items: [QuestionItem], via: SessionQuestion.Via, at: Double, origin: SessionQuestion.Origin) in
-            SessionQuestion(id: QuestionID(rawValue: "orca:local:\(id)"), session: session, origin: origin, items: items, via: via, askedAt: ago(at),
+            SessionQuestion(id: QuestionID(rawValue: "daemon:mba:\(id)"), session: session, origin: origin, items: items, via: via, askedAt: ago(at),
                             expiresAt: via == .permission ? now.addingTimeInterval(240) : nil)
         }
         let e = { (q: SessionQuestion, s: QuestionState) in QuestionBoard.Entry(question: q, state: s, firstSeen: q.askedAt) }
-        let here = QuestionPlace(runtime: "Orca", host: "this Mac")
-        let remote = QuestionPlace(runtime: "Orca", host: "remote: studio", local: false)
+        let here = QuestionPlace(runtime: "OverSire daemon", host: "this Mac")
+        let remote = QuestionPlace(runtime: "OverSire daemon", host: "remote: studio", local: false)
         let runner = QuestionPlace(runtime: "OverSire runner", host: "mba", local: false)
         let work = SessionQuestion.Origin.work(item("OVERSIRE-186"))
-        let answer = QuestionAnswer(question: "orca:local:m1", items: [.init(id: "q1", choices: ["Local JSON files"]), .init(id: "q2", choices: ["Unit", "uishots"])])
+        let answer = QuestionAnswer(question: "daemon:mba:m1", items: [.init(id: "q1", choices: ["Local JSON files"]), .init(id: "q2", choices: ["Unit", "uishots"])])
         var acts = QuestionCard.Actions()
         acts.reveal = {}
         let cards: [[(QuestionBoard.Entry, QuestionPlace, QuestionCard.Actions, ((QuestionCard) -> Void)?)]]
@@ -1149,17 +1172,17 @@ extension UIShots {
                                   why: "Which store? → JSON\nWhich tests? → Unit, perf", kind: .single,
                                   options: [.init(label: "Submit answers"), .init(label: "Cancel")])
         let pause = { (id: String, item: QuestionItem, at: Double) in
-            e(SessionQuestion(id: QuestionID(rawValue: "orca:local:form:\(id)"), session: session, origin: work, items: [item], via: .permission,
+            e(SessionQuestion(id: QuestionID(rawValue: "daemon:mba:form:\(id)"), session: session, origin: work, items: [item], via: .permission,
                               askedAt: ago(at)), .open)
         }
         if set == "pauses" {
             cards = [
                 [(pause("t1", bash, 1), here, acts, nil), (pause("t2", plan, 2), here, acts, nil)],
-                [(e(SessionQuestion(id: "orca:local:turn:term_1:1", session: session, origin: work, items: [turn], via: .turn, askedAt: ago(3)), .open),
+                [(e(SessionQuestion(id: "daemon:mba:turn:term_1:1", session: session, origin: work, items: [turn], via: .turn, askedAt: ago(3)), .open),
                   here, acts, nil),
-                 (e(SessionQuestion(id: "orca:local:wait:term_1:1", session: session, origin: work, items: [wait], via: .waiting, askedAt: ago(5)), .open),
+                 (e(SessionQuestion(id: "daemon:mba:wait:term_1:1", session: session, origin: work, items: [wait], via: .waiting, askedAt: ago(5)), .open),
                   here, acts, nil),
-                 (e(SessionQuestion(id: "orca:mbp:form:term_1:1", session: session, origin: work, items: [review], via: .form, askedAt: ago(6)), .open),
+                 (e(SessionQuestion(id: "daemon:mbp:form:term_1:1", session: session, origin: work, items: [review], via: .form, askedAt: ago(6)), .open),
                   here, acts, nil)],
             ]
         } else if set == "closed" {
@@ -1183,7 +1206,7 @@ extension UIShots {
                  (e(q("m2", [free], .askReply, 2, work), .sending), here, acts, { c in c.write("Ask about questions", in: "q1") }),
                  (failed, runner, acts, nil)],
                 [(e(q("f1", [store, tests], .form, 52, work), .open), here, acts, nil),
-                 (e(SessionQuestion(id: "orca:studio:m5", session: session, origin: .intake(item("TREBI-471")), round: 2, items: [tests], via: .askReply,
+                 (e(SessionQuestion(id: "daemon:studio:m5", session: session, origin: .intake(item("TREBI-471")), round: 2, items: [tests], via: .askReply,
                                     askedAt: ago(1)), .open), remote, enhance, nil)],
             ]
         }
@@ -1267,8 +1290,7 @@ extension UIShots {
     static func machines(_ scene: String, in w: AppWindow) {
         let c = MachinesController.shared
         c.frozen = true
-        c.config = { MachinesConfig(runtimeAccounts: ["mba": "mbp", "devbox": ""], hooksConsent: true) }
-        c.environments = { ["mbp"] }
+        c.config = { MachinesConfig(sessions: "mbp", hooksConsent: true) }
         c.installed = { scene != "machines-empty" }
         c.use(MachinesSnapshot.sample(scene))
         w.router.go(.settings(.general))   // a fresh page, so the pane takes the new height

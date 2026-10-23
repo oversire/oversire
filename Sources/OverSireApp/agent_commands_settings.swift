@@ -82,7 +82,7 @@ final class AgentCommandsCard: NSStackView {
                      help: "The first message of a new session with an intake item. {text} the prompt · {key} item key · {item} item id · "
                          + "{intake} intake id · {workspace} · {project}. With no files, the lines with {item} drop.") { PROJECTS_CFG.runtime.sessionIntakePrompt = $0 }
         promptEditor(card, "New session prompt (files)", value: PROJECTS_CFG.runtime.sessionFilesPrompt, initial: SessionPrompt.filesDefault,
-                     help: "The first message of a new session with files and no item. {text} the prompt · {paths} the file paths on the Orca host, "
+                     help: "The first message of a new session with files and no item. {text} the prompt · {paths} the file paths on the sessions machine, "
                          + "one on each line. With no files, the prompt goes as typed.") { PROJECTS_CFG.runtime.sessionFilesPrompt = $0 }
     }
     required init?(coder: NSCoder) { fatalError() }

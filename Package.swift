@@ -35,7 +35,7 @@ let package = Package(
         .executableTarget(
             name: "OverSireApp",
             dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", "GitHubKit",
-                           "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca",
+                           "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "RuntimeDaemon",
                            .product(name: "AgentBinder", package: "agent-binder")],
             // The UI code predates strict concurrency. It moves to .v6 page by page.
             swiftSettings: [.swiftLanguageMode(.v5)],
@@ -43,7 +43,7 @@ let package = Package(
         ),
         .target(name: "OverSireTestKit", dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "OverSireAssistant"]),
 
-        .testTarget(name: "OverSireAppTests", dependencies: ["OverSireApp", "OverSireSync", "OverSireTestKit"], exclude: ["Fixtures"], swiftSettings: [.swiftLanguageMode(.v5)]),
+        .testTarget(name: "OverSireAppTests", dependencies: ["OverSireApp", "OverSireSync", "OverSireTestKit", "RuntimeDaemon"], exclude: ["Fixtures"], swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "OverSireCoreTests", dependencies: ["OverSireCore", "OverSireTestKit"]),
         .testTarget(name: "OverSireSyncTests", dependencies: ["OverSireSync", "OverSireTestKit"]),
         .testTarget(name: "OverSireAITests", dependencies: ["OverSireAI", "OverSireTestKit"], exclude: ["Fixtures"]),

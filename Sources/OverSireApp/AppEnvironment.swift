@@ -6,6 +6,7 @@ import TrackerPlane
 import CodeHostGitHub
 import CIGitHubActions
 import RuntimeOrca
+import RuntimeDaemon
 
 // ─── Composition root ────────────────────────────────────────────────────────
 // Only this file names the concrete adapters. The rest of the app uses the protocols.
@@ -60,8 +61,12 @@ final class AppEnvironment: @unchecked Sendable {
 
     func descriptor(_ a: AccountID) -> ProviderDescriptor? { registry.descriptor(a.provider) }
 
+    /// The daemons of the group. Each machine is one runtime account (provider `daemon`, id the machine name).
+    weak var machines: MachineHub?
+
     /// nil when the account is unknown or its adapter cannot be made. `error(_:)` then tells why.
     func provider(_ id: AccountID) -> (any Provider)? {
+        if id.provider == .daemon { return machines?.runtime(id.id) }
         guard let c = accounts.first(where: { $0.account == id }) else { return nil }
         return provider(c)
     }
@@ -97,8 +102,8 @@ final class AppEnvironment: @unchecked Sendable {
 
     func ci(owner: String) -> (any CIProvider)? { adapter(.ci, owner: owner) }
 
-    /// The first runtime account.
-    var runtime: (any AgentRuntime)? { accounts(.runtime).first.flatMap { provider($0) as? any AgentRuntime } }
+    /// The runtime of the sessions machine. Work, Intake and cleanup use it.
+    var runtime: (any AgentRuntime)? { machines?.sessions }
 
     /// The account of the owner. An owner with no account (an org in the repo picker) gets
     /// an adapter of the first provider of the layer.
@@ -111,9 +116,12 @@ final class AppEnvironment: @unchecked Sendable {
     }
 
     /// The union of the capabilities of the accounts of a layer, or of all accounts.
+    /// The runtime layer is the sessions machine.
     func capabilities(_ layer: Layer? = nil) -> Set<Capability> {
-        let list = layer.map(accounts) ?? accounts
-        return list.compactMap(provider).reduce(into: Set()) { $0.formUnion($1.capabilities) }
+        let list = (layer.map(accounts) ?? accounts).filter { registry.descriptor($0.account.provider)?.layer != .runtime }
+        var caps = list.compactMap(provider).reduce(into: Set<Capability>()) { $0.formUnion($1.capabilities) }
+        if layer == nil || layer == .runtime, let rt = runtime { caps.formUnion(rt.capabilities) }
+        return caps
     }
 
     func has(_ c: Capability) -> Bool { capabilities().contains(c) }
@@ -162,7 +170,14 @@ extension PlaneTracker: HTMLBodies {
     func html(fromMarkdown md: String) -> String { PlaneMarkup.html(fromMarkdown: md) }
 }
 
-extension OrcaRuntime: AgentTerminal {}
+extension MachineRuntime: AgentTerminal {
+    func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
+        let l = try await launch(LaunchRequest(repo: path, agent: agent, prompt: prompt, command: command, title: title, inPlace: true))
+        return SessionRef(workspace: WorkspaceRef(account: account, id: l.card), id: l.handle)
+    }
+
+    func show(_ s: SessionRef) async throws { try await (self as? any Revealing)?.reveal(s) }
+}
 
 extension GitHubCodeHost: RepoAddressing {}
 extension ActionsCI: RepoAddressing, KnownJobFailures, RawLogReading {}

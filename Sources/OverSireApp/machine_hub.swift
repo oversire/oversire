@@ -1,19 +1,13 @@
 import Foundation
 import OverSireCore
 import OverSireSync
-import RuntimeOrca
+import RuntimeDaemon
 
 // ─── Machine hub ─────────────────────────────────────────────────────────────
 // The daemons of the group in the app. It keeps the links from Machines, the health of the source of each machine,
-// and the question channel of each machine. LiveSync runs the sources. Main thread only.
+// and the runtime of each machine (its sessions and its questions). LiveSync runs the sources. Main thread only.
 
 extension SecretStore: CredentialKeeping, @unchecked Sendable {}
-
-/// The sessions of a daemon for AgentIndex.
-struct DaemonSessions: AgentSessionsReading {
-    let client: DaemonClient
-    func sessions() async throws -> [DaemonSession] { try await client.sessions().sessions }
-}
 
 final class MachineHub {
     static let changed = Notification.Name("MachineHubChanged")
@@ -26,14 +20,13 @@ final class MachineHub {
     private(set) var links: [MachineLink] = []
     /// The source health of each machine. A machine with no entry has no source yet.
     private(set) var health: [String: SourceHealth] = [:]
-    private var channels: [String: DaemonQuestions] = [:]
-    private var pushes: [String: DaemonQuestions.Pushes] = [:]
+    private var runtimes: [String: (link: MachineLink, runtime: MachineRuntime)] = [:]
+    private var pushes: [String: MachineRuntime.Pushes] = [:]
     private var watcher: Task<Void, Never>?
+    /// True after the first read of the group. Before it, the app does not know if this Mac has a daemon.
+    var read = false
 
     var config: () -> MachinesConfig = { MACHINES }
-    /// The Orca environments of this app. An environment with the name of a machine is its default account.
-    var environments: () -> [String] = { ENV.accounts(.runtime).filter { $0.account.provider == .orca }.map(\.account.id) }
-    var orca: (AccountID) -> OrcaRuntime? = { ENV.provider($0) as? OrcaRuntime }
     /// The links changed: the sources and the question channels start again.
     var onLinks: () -> Void = {}
     /// The sessions of the account changed, or its daemon came or went.
@@ -98,13 +91,19 @@ final class MachineHub {
     func use(_ links: [MachineLink]) {
         Task { [weak self, machines] in
             let name = await machines.group?.name
-            await MainActor.run { self?.groupName = name }
+            let read = await machines.refreshed
+            await MainActor.run {
+                guard let self else { return }
+                self.groupName = name
+                guard read, !self.read else { return }
+                self.read = true
+                NotificationCenter.default.post(name: Self.changed, object: self)
+            }
         }
         guard links != self.links else { return }
         self.links = links
         health = health.filter { h in links.contains { $0.machine == h.key } }
-        channels = [:]
-        applyScreens()
+        runtimes = Dictionary(uniqueKeysWithValues: links.map { l in (l.machine, runtimes[l.machine].flatMap { $0.link == l ? $0 : nil } ?? (l, make(l))) })
         onLinks()
         NotificationCenter.default.post(name: Self.changed, object: self)
     }
@@ -115,21 +114,25 @@ final class MachineHub {
         return c.enabled ? links.filter { !c.muted.contains($0.machine) } : []
     }
 
-    // MARK: Accounts
+    // MARK: Runtimes
 
-    func runtimeAccount(_ link: MachineLink) -> AccountID? {
-        config().runtimeAccount(link, environments: environments()).map { AccountID(provider: .orca, id: $0) }
+    private func make(_ l: MachineLink) -> MachineRuntime {
+        let p = pushes[l.machine] ?? MachineRuntime.Pushes()
+        pushes[l.machine] = p
+        let c = l.client(http: http)
+        let rt = l.local ? LocalMachineRuntime(machine: l.machine, client: c, pushes: p) : MachineRuntime(machine: l.machine, client: c, pushes: p)
+        Task { try? await rt.refresh() }
+        return rt
     }
 
-    /// machine → the Orca account id. RefreshPlan uses it.
-    var accountsByMachine: [String: String] {
-        Dictionary(active.compactMap { l in runtimeAccount(l).map { (l.machine, $0.id) } }, uniquingKeysWith: { a, _ in a })
-    }
+    /// The runtime of the machine, while it has a link.
+    func runtime(_ machine: String) -> MachineRuntime? { runtimes[machine]?.runtime }
 
-    /// The live link of the account, if any.
-    func liveLink(for account: AccountID) -> MachineLink? {
-        active.first { health[$0.machine] == .live && runtimeAccount($0) == account }
-    }
+    /// The runtime of the sessions machine (Settings › Machines). nil: the machine has no link.
+    var sessions: MachineRuntime? { config().sessionsLink(links).flatMap { runtime($0.machine) } }
+
+    /// The first read found no daemon on this Mac.
+    var noLocalDaemon: Bool { read && !links.contains { $0.local } }
 
     func isLive(_ machine: String) -> Bool { health[machine] == .live }
 
@@ -140,49 +143,25 @@ final class MachineHub {
         let was = health[machine] == .live
         health[machine] = h
         guard was != (h == .live) else { return }
-        applyScreens()
-        if let link = links.first(where: { $0.machine == machine }), let a = runtimeAccount(link) { onSessions(a) }
+        if h == .live, let rt = runtime(machine) { Task { try? await rt.refresh() } }
+        if let rt = runtime(machine) { onSessions(rt.account) }
         NotificationCenter.default.post(name: Self.changed, object: self)
-    }
-
-    /// Without a live daemon, OrcaRuntime finds the forms on the screen. With one, it gives only the asks.
-    func applyScreens() {
-        for c in ENV.accounts(.runtime) where c.account.provider == .orca {
-            orca(c.account)?.screenQuestions = liveLink(for: c.account) == nil
-        }
-    }
-
-    func sessionsReader(for account: AccountID) -> (any AgentSessionsReading)? {
-        liveLink(for: account).map { DaemonSessions(client: $0.client(http: http)) }
     }
 
     // MARK: Questions
 
-    /// One channel for each active link with an Orca account.
-    func questionChannels() -> [any QuestionChannel] {
-        active.compactMap { l -> DaemonQuestions? in
-            guard let account = runtimeAccount(l) else { return nil }
-            if let c = channels[l.machine], c.account == account, c.link == l { return c }
-            let p = pushes[l.machine] ?? DaemonQuestions.Pushes()
-            pushes[l.machine] = p
-            let orca = self.orca
-            let c = DaemonQuestions(link: l, account: account, client: l.client(http: http), supervised: {
-                (try? await orca(account)?.supervised()) ?? []
-            }, pushes: p)
-            channels[l.machine] = c
-            return c
-        }
-    }
+    /// One channel for each active link.
+    func questionChannels() -> [any QuestionChannel] { active.compactMap { runtime($0.machine) } }
 
     /// The question board reads the daemon of the machine at once.
     func pushQuestions(_ machine: String) { pushes[machine]?.push() }
 
-    /// An event of a daemon named a session of the Orca account.
-    func sessionsChanged(_ account: String) { onSessions(AccountID(provider: .orca, id: account)) }
+    /// An event of a daemon named a session of the machine.
+    func sessionsChanged(_ machine: String) { onSessions(AccountID(provider: .daemon, id: machine)) }
 
     /// The event log of the machine has a gap: read its sessions and questions again.
     func logGap(_ machine: String) {
         pushQuestions(machine)
-        if let link = links.first(where: { $0.machine == machine }), let a = runtimeAccount(link) { onSessions(a) }
+        sessionsChanged(machine)
     }
 }

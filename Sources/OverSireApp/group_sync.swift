@@ -73,7 +73,7 @@ final class GroupSync {
 
     var choice: RunnerChoice {
         RunnerChoice(targets: hub.links.map { l in
-            RunnerTarget(link: l, live: hub.isLive(l.machine), runtimes: runtimes[l.machine], account: hub.runtimeAccount(l)?.id)
+            RunnerTarget(link: l, live: hub.isLive(l.machine), runtimes: runtimes[l.machine])
         }, cloud: cloud != nil)
     }
 

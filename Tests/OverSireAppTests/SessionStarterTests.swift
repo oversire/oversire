@@ -6,14 +6,16 @@ import XCTest
 final class SessionStarterTests: XCTestCase {
     private final class Terminal: AgentTerminal, @unchecked Sendable {
         var opened: [(path: String, title: String, command: String, prompt: String)] = []
+        var agents: [AgentName] = []
         var revealed: [SessionRef] = []
 
-        func openTerminal(path: String, title: String, command: String, prompt: String) async throws -> SessionRef {
+        func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
             opened.append((path, title, command, prompt))
+            agents.append(agent)
             return SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:" + path), id: "t1")
         }
 
-        func reveal(_ s: SessionRef) async throws { revealed.append(s) }
+        func show(_ s: SessionRef) async throws { revealed.append(s) }
     }
 
     private var tracker: FakeTracker!
@@ -173,12 +175,12 @@ final class SessionStarterTests: XCTestCase {
     }
 
     func testHostFileErrorOpensNoTerminal() async throws {
-        runtime.base.fail(.vendor(code: "checksum", message: "a.png did not arrive whole on the Orca host."))
+        runtime.base.fail(.vendor(code: "checksum", message: "a.png did not arrive whole on the sessions machine."))
         do {
             _ = try await start(request("go", files: 1, intake: false))
             XCTFail("expected an error")
         } catch {
-            XCTAssertEqual(error as? SessionStartError, .hostFiles("a.png did not arrive whole on the Orca host."))
+            XCTAssertEqual(error as? SessionStartError, .hostFiles("a.png did not arrive whole on the sessions machine."))
         }
         XCTAssertTrue(term.opened.isEmpty)
     }
@@ -201,7 +203,7 @@ final class SessionStarterTests: XCTestCase {
         r.missing = ["b.png"]
         XCTAssertEqual(r.detail(files: 2), "1 of 2 files did not upload to FAKE-9: b.png.")
         r = SessionStarter.Result(session: s, item: nil, paths: ["/tmp/a"], missing: [], terminal: "claude-go")
-        XCTAssertEqual(r.detail(files: 1), "1 file copied to the Orca host. The prompt has their paths.")
+        XCTAssertEqual(r.detail(files: 1), "1 file copied to the sessions machine. The prompt has their paths.")
         r.paths = []
         XCTAssertEqual(r.detail(files: 0), "The prompt went as typed.")
     }

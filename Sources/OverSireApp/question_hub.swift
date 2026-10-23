@@ -2,7 +2,7 @@ import Cocoa
 import OverSireAI
 import OverSireCore
 import OverSireSync
-import RuntimeOrca
+import RuntimeDaemon
 
 // ─── Question hub ────────────────────────────────────────────────────────────
 // The question board of the app. It gives the board the sessions of the open work, maps each session to its item,
@@ -134,8 +134,12 @@ final class QuestionHub {
             let state = writes.load(RunnerState.self).first { $0.device == runner }
             return QuestionPlace(runtime: "OverSire runner", host: runner ?? "runner", local: false, offline: state.map { !$0.online } ?? false)
         }
+        if account.provider == .daemon {
+            let local = ENV.provider(account) is any Revealing
+            return local ? QuestionPlace(runtime: "OverSire daemon", host: "this Mac", app: "Orca")
+                         : QuestionPlace(runtime: "OverSire daemon", host: "remote: \(account.id)", local: false)
+        }
         let name = ENV.registry.descriptors(.runtime).first { $0.id == account.provider }?.displayName ?? account.provider.rawValue.capitalized
-        if let env = (ENV.provider(account) as? OrcaRuntime)?.environment { return QuestionPlace(runtime: name, host: "remote: \(env)", local: false) }
         return QuestionPlace(runtime: name, host: "this Mac")
     }
 

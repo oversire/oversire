@@ -159,7 +159,7 @@ struct NewSessionModel: Equatable {
         switch (intake, files.isEmpty) {
         case (true, false): return "The prompt is the description. The files go on the item."
         case (true, true): return "Tracks this work. The prompt is the description."
-        case (false, false): return "No item. The files go to the Orca host and the prompt gets their paths."
+        case (false, false): return "No item. The files go to the sessions machine and the prompt gets their paths."
         case (false, true): return "No item. Good for a question or a quick chat."
         }
     }

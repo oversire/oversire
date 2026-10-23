@@ -39,8 +39,8 @@ struct MachinesModel: Equatable {
         var status: String
         var sessions: Int
         var waiting: Int
-        /// The Orca account id. nil: none.
-        var account: String?
+        /// The machine runs the agent sessions of Work and Intake.
+        var runsSessions: Bool
         var muted: Bool
         /// The CLI version. nil: not known, a CLI before 0.2.2.
         var version: String?
@@ -95,8 +95,10 @@ struct MachinesModel: Equatable {
     var updateStatus: DaemonUpdate?
     /// The machines run different CLI versions. nil: one version.
     var mismatch: String?
-    /// The Orca account choices: ids, then nil for none.
-    var accounts: [String?]
+    /// The machines that can run the sessions, this Mac first.
+    var sessionChoices: [String]
+    /// The machine that runs the sessions. nil: none of the list (no daemon on this Mac, or a removed machine).
+    var sessionsMachine: String?
 
     var title: String {
         switch state {
@@ -108,7 +110,7 @@ struct MachinesModel: Equatable {
     /// Hooks that the consent installs.
     var missingHooks: [String] { hooks.filter { $0.state == .missing || $0.state == .outdated }.map(\.name) }
 
-    init(_ s: MachinesSnapshot, config: MachinesConfig, environments: [String], now: Date = Date()) {
+    init(_ s: MachinesSnapshot, config: MachinesConfig, now: Date = Date()) {
         daemon = s.info
         installed = s.installed
         path = s.path
@@ -134,16 +136,13 @@ struct MachinesModel: Equatable {
             default: online = isThis && s.info != nil
             }
             let active = (s.sessions[name] ?? []).filter { [.starting, .working, .waiting].contains($0.state) }
-            let account: String?
-            if let a = config.runtimeAccounts[name] { account = a.isEmpty ? nil : a }
-            else if isThis { account = "local" }
-            else { account = environments.first { $0.caseInsensitiveCompare(name) == .orderedSame } }
+            let runs = config.sessions.map { $0 == name } ?? isThis
             let addr = m.addrs.first ?? m.host
             let version = isThis ? s.info?.version ?? m.version : m.version
             return Machine(name: name, host: m.port == 7690 || addr.contains(":") ? addr : "\(addr):\(m.port)", isThis: isThis,
                            home: s.group?.home == m.machine || (s.group == nil && isThis), runner: m.roles.contains("runner"), online: online,
                            status: online ? "Online" : Self.offline(m.lastSeen, now: now), sessions: active.count,
-                           waiting: active.filter { $0.state == .waiting }.count, account: account, muted: config.muted.contains(name),
+                           waiting: active.filter { $0.state == .waiting }.count, runsSessions: runs, muted: config.muted.contains(name),
                            version: version, behind: false)
         }
         let newest = ([s.latest] + machines.map(\.version)).compactMap { $0 }.max { Updater.isNewer($1, than: $0) }
@@ -161,7 +160,8 @@ struct MachinesModel: Equatable {
             ? s.peers.filter { $0.machine.rawValue != me && !known.contains($0.machine) }.map(Found.init)
             : []
         hooks = s.info == nil ? [] : s.hooks.map(Self.hook)
-        accounts = ["local"] + environments.filter { $0 != "local" } + [nil]
+        sessionChoices = machines.filter(\.isThis).map(\.name) + machines.filter { !$0.isThis }.map(\.name)
+        sessionsMachine = machines.first(where: \.runsSessions)?.name
     }
 
     static func offline(_ seen: Date?, now: Date) -> String {
@@ -216,7 +216,6 @@ final class MachinesController {
         return await i.shellFinds()
     }
     var config: () -> MachinesConfig = { MACHINES }
-    var environments: () -> [String] = { MachinesController.shared.hub?.environments() ?? [] }
     var changed: () -> Void = { ChangeBus.shared.post(DataChange(.connection, origin: .user)) }
 
     private(set) var snapshot = MachinesSnapshot()
@@ -238,7 +237,7 @@ final class MachinesController {
     var frozen = false
     private var setupObserver: Any?
 
-    var model: MachinesModel { MachinesModel(snapshot, config: config(), environments: environments()) }
+    var model: MachinesModel { MachinesModel(snapshot, config: config()) }
     var busy: Bool { DaemonSetup.shared.busy }
 
     /// Reads again when the data is older than 20 s.
@@ -382,9 +381,9 @@ final class MachinesController {
         configChanged()
     }
 
-    /// nil: no Orca account.
-    func setAccount(_ machine: String, _ account: String?) {
-        MACHINES.runtimeAccounts[machine] = account ?? ""
+    /// The machine that runs the agent sessions. This Mac is the default, kept as nil.
+    func setSessions(_ machine: String) {
+        MACHINES.sessions = machine == snapshot.info?.machine.rawValue ? nil : machine
         configChanged()
     }
 
@@ -400,7 +399,6 @@ final class MachinesController {
 
     private func configChanged() {
         saveConfig()
-        hub?.applyScreens()
         hub?.onLinks()
         changed()
     }
@@ -486,15 +484,13 @@ extension SettingsPage {
             if x.home { badges.append(Chiplet("HOME")) }
             if x.runner { badges.append(Chiplet("RUNNER")) }
             if x.muted { badges.append(Chiplet("MUTED", symbol: "speaker.slash")) }
+            if x.runsSessions { badges.append(Chiplet("SESSIONS", symbol: "terminal")) }
             let name = NSStackView(v: [NSStackView(h: badges, spacing: 6),
                                        NSTextField.text(x.hostText, size: 11.5, color: Palette.dim, mono: true)], spacing: 3)
             name.setContentHuggingPriority(.init(1), for: .horizontal)
             let status = Pill(Tone(symbol: x.online ? "circle.fill" : "circle", color: x.online ? Palette.ok : Palette.dim, word: x.status))
             let sessions = Pill(x.waiting > 0 ? Tone(symbol: "exclamationmark.circle.fill", color: Palette.warn, word: x.sessionsText)
                                               : Tone(symbol: "terminal", color: Palette.dim, word: x.sessionsText))
-            let titles = m.accounts.map { "Orca: \($0 ?? "none")" }
-            let picked = m.accounts.firstIndex { $0 == x.account } ?? (m.accounts.count - 1)
-            let pop = PopUp(titles, selected: picked, label: "Orca account for \(x.name)") { i in c.setAccount(x.name, m.accounts[i]) }
             let more = IconButton("ellipsis.circle", label: "More for \(x.name)", tip: "Make home · Mute sessions · Remove…")
             let menu = NSMenu()
             let home = SnapMenuItem(title: "Make home") { c.setHome(x.name) }
@@ -521,8 +517,17 @@ extension SettingsPage {
                 up.setAccessibilityLabel("Update oversire on \(x.name)")
                 cells.append(up)
             }
-            card.add(Row(cells + [pop, more], height: 54,
-                         label: "\(x.name), \(x.status), \(x.sessionsText), oversire \(x.version ?? "before 0.2.2")\(x.behind ? ", older version" : "")\(x.home ? ", home" : "")"))
+            card.add(Row(cells + [more], height: 54,
+                         label: "\(x.name), \(x.status), \(x.sessionsText), oversire \(x.version ?? "before 0.2.2")\(x.behind ? ", older version" : "")\(x.home ? ", home" : "")\(x.runsSessions ? ", runs the sessions" : "")"))
+        }
+        if !m.sessionChoices.isEmpty {
+            let titles = m.sessionChoices.map { n in m.machines.first { $0.name == n }?.isThis == true ? "\(n) (this Mac)" : n }
+            let picked = m.sessionsMachine.flatMap { m.sessionChoices.firstIndex(of: $0) }
+            let pop = PopUp(titles + (picked == nil ? ["None"] : []), selected: picked ?? titles.count, label: "Run sessions on") { i in
+                if i < m.sessionChoices.count { c.setSessions(m.sessionChoices[i]) }
+            }
+            card.add(Row([TwoLine("Run sessions on", "Work, Intake and cleanup use the agent sessions of this machine. Each machine gives its questions.",
+                                  lines: 2), Spacer(), pop], height: 62, label: "Run sessions on"))
         }
         v.addFull(card)
         v.addFull(NSTextField.text("Home keeps the shared OverSire state. Use the row menu to make another machine home.",
@@ -628,6 +633,23 @@ extension SettingsPage {
 }
 
 /// Opens the menu of a button under it.
+/// The banner of Work and the Session tab when this Mac has no daemon. It has the install button of Settings › Machines.
+enum DaemonBanner {
+    static var shown: () -> Bool = { ENV.machines?.noLocalDaemon == true }
+
+    static func rows() -> [PageRow] {
+        guard shown() else { return [] }
+        let busy = DaemonSetup.shared.busy
+        return [PageRow("daemon", busy) {
+            let install = ActionButton(busy ? "Installing…" : "Install", style: .primary) { MachinesController.shared.install() }
+            install.isEnabled = !busy
+            return Banner(.warning, title: "Install the OverSire daemon to see agent sessions",
+                          body: "The daemon on this Mac runs the agent sessions and sends their state. Installs the oversire CLI from the GitHub release.",
+                          actions: [install])
+        }]
+    }
+}
+
 final class MenuOpener: NSObject {
     static let shared = MenuOpener()
     @objc func open(_ sender: NSButton) {

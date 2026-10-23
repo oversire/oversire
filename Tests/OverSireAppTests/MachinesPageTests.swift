@@ -208,7 +208,7 @@ final class MachinesModelTests: XCTestCase {
         let v = s.info!.version
         for (latest, want) in [(nil, nil), (v, nil), ("0.0.1", nil), ("99.0.0", "99.0.0")] as [(String?, String?)] {
             s.latest = latest
-            XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).update, want, "\(latest ?? "nil")")
+            XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), now: now).update, want, "\(latest ?? "nil")")
         }
     }
 
@@ -229,7 +229,7 @@ final class MachinesModelTests: XCTestCase {
     }
 
     func testRowsFromTheGroupAndHealth() {
-        let m = MachinesModel(snapshot(), config: MachinesConfig(), environments: ["mbp"], now: now)
+        let m = MachinesModel(snapshot(), config: MachinesConfig(), now: now)
         XCTAssertEqual(m.state, .group)
         XCTAssertEqual(m.title, "My machines · 3")
         XCTAssertEqual(m.machines.map(\.name), ["mbp", "mba", "devbox"])
@@ -244,27 +244,30 @@ final class MachinesModelTests: XCTestCase {
         XCTAssertTrue(m.found.isEmpty)
     }
 
-    func testOrcaAccountDefaults() {
+    func testSessionsMachine() {
         var cfg = MachinesConfig()
-        var m = MachinesModel(snapshot(), config: cfg, environments: ["mbp"], now: now)
-        XCTAssertEqual(m.machines.map(\.account), ["local", nil, nil], "this Mac: local; a machine with the name of an environment: that one")
-        XCTAssertEqual(m.accounts, ["local", "mbp", nil])
+        var m = MachinesModel(snapshot(), config: cfg, now: now)
+        XCTAssertEqual(m.machines.map(\.runsSessions), [true, false, false], "default: this Mac")
+        XCTAssertEqual(m.sessionChoices, ["mbp", "mba", "devbox"])
+        XCTAssertEqual(m.sessionsMachine, "mbp")
 
-        // The app on mba: mbp is the Orca environment "mbp".
+        // The app on mba: this Mac comes first.
         var s = snapshot()
         s.info = info("mba", "100.71.4.12")
-        m = MachinesModel(s, config: cfg, environments: ["mbp"], now: now)
-        XCTAssertEqual(m.machines.map(\.account), ["mbp", "local", nil])
+        m = MachinesModel(s, config: cfg, now: now)
+        XCTAssertEqual(m.sessionChoices, ["mba", "mbp", "devbox"])
+        XCTAssertEqual(m.sessionsMachine, "mba")
 
-        cfg.runtimeAccounts = ["mba": "mbp", "mbp": ""]
-        m = MachinesModel(s, config: cfg, environments: ["mbp"], now: now)
-        XCTAssertEqual(m.machines.map(\.account), [nil, "mbp", nil], "a stored choice wins; an empty id is none")
+        cfg.sessions = "devbox"
+        m = MachinesModel(s, config: cfg, now: now)
+        XCTAssertEqual(m.machines.map(\.runsSessions), [false, false, true])
+        XCTAssertEqual(m.sessionsMachine, "devbox")
     }
 
     func testOfflineMembersAndMuted() {
         var s = snapshot()
         s.health = [:]
-        let m = MachinesModel(s, config: MachinesConfig(muted: ["devbox"]), environments: [], now: now)
+        let m = MachinesModel(s, config: MachinesConfig(muted: ["devbox"]), now: now)
         XCTAssertTrue(m.machines[1].online, "seen 20 s ago")
         XCTAssertFalse(m.machines[2].online)
         XCTAssertTrue(m.machines[2].muted)
@@ -277,7 +280,7 @@ final class MachinesModelTests: XCTestCase {
         var s = snapshot()
         s.group = group([member("mbp", "100.97.81.23")])
         s.peers = [info("mbp"), info("mba", "100.71.4.12"), info("devbox", "100.88.20.3")]
-        let m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        let m = MachinesModel(s, config: MachinesConfig(), now: now)
         XCTAssertEqual(m.state, .solo)
         XCTAssertEqual(m.title, "My machines · this Mac only")
         XCTAssertEqual(m.found.map(\.name), ["mba", "devbox"])
@@ -285,11 +288,11 @@ final class MachinesModelTests: XCTestCase {
     }
 
     func testNoDaemonAndHooks() {
-        let empty = MachinesModel(MachinesSnapshot(), config: MachinesConfig(), environments: [], now: now)
+        let empty = MachinesModel(MachinesSnapshot(), config: MachinesConfig(), now: now)
         XCTAssertEqual(empty.state, .noDaemon)
         XCTAssertTrue(empty.hooks.isEmpty)
 
-        let m = MachinesModel(snapshot(), config: MachinesConfig(), environments: [], now: now)
+        let m = MachinesModel(snapshot(), config: MachinesConfig(), now: now)
         XCTAssertEqual(m.hooks.map(\.title), ["Claude Code", "Codex", "OpenCode"])
         XCTAssertEqual(m.hooks.map(\.status), ["Installed", "Needs approval in Codex", "Not installed"])
         XCTAssertEqual(m.hooks.map(\.action), [.remove, .remove, .install])
@@ -300,7 +303,7 @@ final class MachinesModelTests: XCTestCase {
         var s = snapshot()
         s.group = group([member("mbp", "100.97.81.23", version: "0.3.0"), member("mba", "100.71.4.12", version: "0.3.2"),
                          member("devbox", "100.88.20.3", version: nil)])
-        var m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        var m = MachinesModel(s, config: MachinesConfig(), now: now)
         XCTAssertEqual(m.machines.map(\.version), ["0.4.0", "0.3.2", nil], "this Mac: the version of its daemon")
         XCTAssertEqual(m.machines.map(\.behind), [false, true, true], "a member without a version runs a CLI before 0.2.2")
         XCTAssertEqual(m.machines[2].hostText, "100.88.20.3 · oversire before 0.2.2")
@@ -308,31 +311,31 @@ final class MachinesModelTests: XCTestCase {
                        + "Update the older ones, so that all machines speak the same API.")
 
         s.group = group([member("mbp", "100.97.81.23", version: "0.4.0"), member("mba", "100.71.4.12", version: "0.4.0")])
-        m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        m = MachinesModel(s, config: MachinesConfig(), now: now)
         XCTAssertNil(m.mismatch)
         XCTAssertEqual(m.machines.map(\.behind), [false, false])
 
         s.latest = "0.5.0"
-        m = MachinesModel(s, config: MachinesConfig(), environments: [], now: now)
+        m = MachinesModel(s, config: MachinesConfig(), now: now)
         XCTAssertNil(m.mismatch, "one version, but a newer release")
         XCTAssertEqual(m.machines.map(\.behind), [true, true])
     }
 
     func testUpdateNote() {
         var s = snapshot()
-        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).updateNote(now: now),
+        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), now: now).updateNote(now: now),
                        "The daemon checks GitHub each 6 hours. No check yet.")
         s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-600), latest: "0.4.0")
-        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).updateNote(now: now),
+        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), now: now).updateNote(now: now),
                        "The daemon checks GitHub each 6 hours. Last check 10 min ago: latest 0.4.0.")
         s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-7200), latest: "0.4.1", error: "update: no write access to /usr/local/bin")
-        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), environments: [], now: now).updateNote(now: now),
+        XCTAssertEqual(MachinesModel(s, config: MachinesConfig(), now: now).updateNote(now: now),
                        "The last update failed 2 h ago: update: no write access to /usr/local/bin")
     }
 
     func testSampleScenesBuildTheirState() {
         let states = ["machines-empty", "machines-found", "machines-group"].map {
-            MachinesModel(MachinesSnapshot.sample($0, now: now), config: MachinesConfig(), environments: ["mbp"], now: now).state
+            MachinesModel(MachinesSnapshot.sample($0, now: now), config: MachinesConfig(), now: now).state
         }
         XCTAssertEqual(states, [.noDaemon, .solo, .group])
     }

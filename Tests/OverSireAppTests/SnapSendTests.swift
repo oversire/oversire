@@ -9,14 +9,16 @@ import XCTest
 final class SnapSendTests: XCTestCase {
     private final class Terminal: AgentTerminal, @unchecked Sendable {
         var opened: [(path: String, title: String, command: String, prompt: String)] = []
+        var agents: [AgentName] = []
         var revealed: [SessionRef] = []
 
-        func openTerminal(path: String, title: String, command: String, prompt: String) async throws -> SessionRef {
+        func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
             opened.append((path, title, command, prompt))
+            agents.append(agent)
             return SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:" + path), id: "t1")
         }
 
-        func reveal(_ s: SessionRef) async throws { revealed.append(s) }
+        func show(_ s: SessionRef) async throws { revealed.append(s) }
     }
 
     private var dir: URL!

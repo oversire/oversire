@@ -2,29 +2,10 @@ import AppKit
 import OverSireCore
 
 /// The runtime calls of the agent index.
-typealias AgentHost = AgentRuntime & SessionIO & Revealing
+typealias AgentHost = AgentRuntime & SessionIO
 
 /// A runtime that runs a local tool, which can be missing.
 protocol InstallChecking { var installed: Bool { get } }
-
-/// The agent sessions of one machine, from its daemon.
-protocol AgentSessionsReading: Sendable { func sessions() async throws -> [DaemonSession] }
-
-extension DaemonSession {
-    /// A question keeps a done session done: AgentSession.needsInput shows it as needs input.
-    var agentSession: AgentSession {
-        let phase: AgentSession.Phase
-        switch state {
-        case .starting: phase = .starting
-        case .working: phase = reason == .question ? .waiting : .working
-        case .waiting: phase = .waiting
-        case .done: phase = .done
-        case .failed: phase = .failed
-        }
-        return AgentSession(phase: phase, since: stateSince, card: workspace, paneKey: id, agent: AgentName(rawValue: harness),
-                            repo: repo ?? "", prompt: prompt, message: lastMessage)
-    }
-}
 
 // The Orca agent of each Plane item. OverSire finds agents by the card name (the item
 // key), by the pane of an agent it started, and by the item URL in the prompt.
@@ -111,11 +92,6 @@ final class AgentIndex: NSObject {
     private var lastPoll = Date.distantPast
     private var timer: (() -> Void)?
     private var holdChecks: [String: (tag: String, cancel: () -> Void)] = [:]   // pane key → the check at since + 10 s
-    private var lastPS = Date.distantPast
-    /// With a live daemon, `worktree ps` runs only this often, for the card data. The daemon gives the agent states.
-    static let psEvery: TimeInterval = 60
-    /// The daemon of the runtime account, while it is live.
-    var sessionsReader: (AccountID) -> (any AgentSessionsReading)? = { _ in nil }
 
     var now: () -> Date = Date.init
     var visible: () -> Bool = { false }
@@ -259,13 +235,11 @@ final class AgentIndex: NSObject {
         guard ready != nil, !hold, let rt = runtime() else { done?(); return }
         polling = true
         lastPoll = now()
-        let reader = sessionsSource(), cached = cards, psDue = now().timeIntervalSince(lastPS) >= Self.psEvery - 1
         Task { [weak self] in
-            let (r, ps) = await AgentIndex.read(rt, reader: reader, cached: cached, psDue: psDue)
+            let r = await Result(awaiting: { try await rt.workspaces() })
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.polling = false
-                if ps { self.lastPS = self.now() }
                 switch r {
                 case .failure(let e): self.lastError = e.message
                 case .success(let cards):
@@ -279,39 +253,6 @@ final class AgentIndex: NSObject {
                 self.againDone = []
                 self.poll { after.forEach { $0() } }
             }
-        }
-    }
-
-    func sessionsSource() -> (any AgentSessionsReading)? { runtime().flatMap { sessionsReader($0.account) } }
-
-    /// The cards of the runtime. With a daemon, its sessions give the agents, and `worktree ps` runs when due or when a session
-    /// is in an unknown card. A daemon that fails gives `worktree ps` at once. `ps`: true when `worktree ps` ran and succeeded.
-    static func read(_ rt: any AgentHost, reader: (any AgentSessionsReading)?, cached: [Workspace],
-                     psDue: Bool) async -> (Result<[Workspace], ProviderError>, ps: Bool) {
-        guard let reader, case .success(let sessions) = await Result(awaiting: { try await reader.sessions() }) else {
-            let r = await Result(awaiting: { try await rt.workspaces() })
-            return (r, r.isOk)
-        }
-        var cards = cached, ps = false
-        let unknown = sessions.contains { s in s.workspace.map { w in !cached.contains { $0.id == w } } ?? false }
-        if psDue || cached.isEmpty || unknown, case .success(let fresh) = await Result(awaiting: { try await rt.workspaces() }) {
-            cards = fresh
-            ps = true
-        }
-        return (.success(merge(cards, sessions)), ps)
-    }
-
-    /// The cards with the agents of the daemon sessions in place of the agents of `worktree ps`.
-    static func merge(_ cards: [Workspace], _ sessions: [DaemonSession]) -> [Workspace] {
-        let byCard = Dictionary(grouping: sessions.filter { $0.workspace != nil }, by: { $0.workspace! })
-        return cards.map { c in
-            let agents = (byCard[c.id] ?? []).sorted { $0.id < $1.id }.map { s -> AgentSession in
-                var a = s.agentSession
-                if !c.repo.isEmpty { a.repo = c.repo }
-                return a
-            }
-            return Workspace(id: c.id, repo: c.repo, path: c.path, name: c.name, comment: c.comment, liveTerminals: c.liveTerminals,
-                             lastActivity: c.lastActivity, agents: agents, kind: c.kind, branch: c.branch)
         }
     }
 
@@ -373,13 +314,22 @@ final class AgentIndex: NSObject {
         publish()
     }
 
+    /// Only a session on this Mac opens in the runtime UI.
+    var canReveal: Bool { runtime() is any Revealing }
+
+    /// "this Mac", or the name of the sessions machine.
+    var place: String { remote ? runtime()?.account.id ?? "this Mac" : "this Mac" }
+
+    /// The sessions machine is not this Mac.
+    var remote: Bool { runtime().map { !($0 is any Revealing) } ?? false }
+
     // Shows the item's terminal in Orca.
     func reveal(_ key: String) {
         guard let a = agent(key), let card = a.card, let rt = runtime() else { return }
         Task {
             guard let ts = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)),
                   let t = AgentIndex.pick(ts, agent: a, key: key) ?? ts.first(where: { !$0.orphaned }) else { return }
-            try? await rt.reveal(t.ref)
+            try? await (rt as? any Revealing)?.reveal(t.ref)
         }
     }
 
@@ -388,7 +338,7 @@ final class AgentIndex: NSObject {
         guard let rt = runtime() else { return }
         Task {
             guard let t = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)).first(where: { !$0.orphaned }) else { return }
-            try? await rt.reveal(t.ref)
+            try? await (rt as? any Revealing)?.reveal(t.ref)
         }
     }
 

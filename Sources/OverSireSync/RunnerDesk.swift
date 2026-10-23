@@ -11,14 +11,11 @@ public struct RunnerTarget: Hashable, Sendable {
     public var live: Bool
     /// The runtimes of the daemon (whoami). nil: not known, for example when the machine is offline.
     public var runtimes: [ProviderID]?
-    /// The runtime account of the machine in this app (Orca: "local", "mbp"). nil: no account.
-    public var account: String?
 
-    public init(link: MachineLink, live: Bool, runtimes: [ProviderID]?, account: String?) {
+    public init(link: MachineLink, live: Bool, runtimes: [ProviderID]?) {
         self.link = link
         self.live = live
         self.runtimes = runtimes
-        self.account = account
     }
 }
 
@@ -46,20 +43,21 @@ public struct RunnerChoice: Hashable, Sendable {
         self.cloud = cloud
     }
 
-    /// The target is the member whose runtimes hold the runtime and whose account matches.
-    public func target(runtime: ProviderID, account: String) -> RunnerTarget? {
-        targets.first { $0.account == account && ($0.runtimes?.contains(runtime) ?? true) }
+    /// The target is the member with the machine name whose runtimes hold the runtime. "local" is this Mac.
+    public func target(runtime: ProviderID, machine: String) -> RunnerTarget? {
+        targets.first { ($0.link.machine == machine || machine == "local" && $0.link.local) && ($0.runtimes?.contains(runtime) ?? true) }
     }
 
-    public func route(runtime: ProviderID, account: String) throws -> RunnerRoute {
-        let t = target(runtime: runtime, account: account)
+    public func route(runtime: ProviderID, machine: String) throws -> RunnerRoute {
+        let t = target(runtime: runtime, machine: machine)
         if let t, t.live { return .daemon(t.link) }
         if cloud { return .hub }
-        throw RunnerOffline(machine: t?.link.machine ?? account)
+        throw RunnerOffline(machine: t?.link.machine ?? machine)
     }
 
+    /// The runner of the draft, else the account of its order.
     public func route(_ draft: WorkOrderDraft) throws -> RunnerRoute {
-        try route(runtime: draft.runtime, account: draft.order.account)
+        try route(runtime: draft.runtime, machine: draft.runner ?? draft.order.account)
     }
 }
 

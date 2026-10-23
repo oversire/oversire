@@ -636,7 +636,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func session(stream: Workstream?) -> [PageRow] {
-        var rows = questionRows()
+        var rows = DaemonBanner.rows() + questionRows()
         if let a = stream?.agent {
             let s = data.statusJob.item(key)
             rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
@@ -653,7 +653,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func terminalCard(_ a: AgentSession, status s: ItemStatus?) -> NSView {
-        let c = Card(title: "Terminal", trailing: [ActionButton("Open in Orca", symbol: "terminal", action: "session.reveal", ["key": .string(key)])])
+        let agents = data.agentIndex
+        let c = Card(title: "Terminal", trailing: agents.canReveal ? [ActionButton("Open in Orca", symbol: "terminal", action: "session.reveal", ["key": .string(key)])]
+                                                                   : [Chiplet("on \(agents.place)", symbol: "desktopcomputer", mono: false)])
         c.add(NSStackView(h: [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"),
                               RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()], spacing: 6))
         if let h = s?.headline, !h.isEmpty { c.add(NSTextField.text(h, size: 12.5, color: Palette.mut, lines: 3)) }

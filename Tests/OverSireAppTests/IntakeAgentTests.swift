@@ -2,22 +2,9 @@ import OverSireAI
 import OverSireCore
 import OverSireSync
 import OverSireTestKit
-import RuntimeOrca
+import RuntimeDaemon
 import XCTest
 @testable import OverSireApp
-
-private final class FakeEnhanceHost: EnhanceHost, @unchecked Sendable {
-    let account = AccountID(provider: "orca", id: "local")
-    let installed = true
-    var state: OrcaWorkerState = .running
-    func startWorker(spec: String, title: String, path: String, agent: String) async throws -> OrcaWorker {
-        OrcaWorker(dispatch: "d1", task: "t1", terminal: "term-1")
-    }
-    func workerState(_ w: OrcaWorker) async throws -> OrcaWorkerState { state }
-    func stopWorker(_ w: OrcaWorker) async throws {}
-    func releaseWorker(_ w: OrcaWorker) async throws {}
-    func reveal(_ s: SessionRef) async throws {}
-}
 
 final class IntakeAgentTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_700_000_000)
@@ -25,7 +12,7 @@ final class IntakeAgentTests: XCTestCase {
     private lazy var ref = ItemRef(project: project, id: "w1", key: "OVERSIRE-9", url: URL(string: "https://plane.example/OVERSIRE-9")!)
     private let item = IntakeItem(id: "in1", workItemId: "w1", name: "labels drop", priority: nil, createdAt: Date(), author: nil, source: nil)
 
-    private func make() -> (IntakeAgent, QuestionHub, FakeEnhanceHost) {
+    private func make() -> (IntakeAgent, QuestionHub, FakeDaemon) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-tests-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let writes = StoreWrites(store: LocalStore(dir: dir))
@@ -34,23 +21,33 @@ final class IntakeAgentTests: XCTestCase {
         let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
                                  statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         let agent = IntakeAgent(store: store, memory: ProjectMemory(writes: writes), questions: hub)
-        let host = FakeEnhanceHost()
+        let daemon = FakeDaemon()
+        let host = LocalMachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: daemon), pause: { _ in })
         agent.host = { host }
         agent.now = { self.t0 }
-        return (agent, hub, host)
+        return (agent, hub, daemon)
     }
 
-    private func run(_ host: FakeEnhanceHost) -> IntakeAgent.Run {
-        let s = SessionRef(workspace: WorkspaceRef(account: host.account, id: "intake"), id: "term-1")
-        return IntakeAgent.Run(worker: OrcaWorker(dispatch: "d1", task: "t1", terminal: "term-1"), session: s, item: ref,
-                               original: "label sync is broken", since: t0)
+    private static let account = AccountID(provider: .daemon, id: "mba")
+
+    private func run(_ w: Worker = Worker(id: "wk-1", runtime: "orca", terminal: "term_w1", startedAt: Date())) -> IntakeAgent.Run {
+        let s = SessionRef(workspace: WorkspaceRef(account: Self.account, id: "intake"), id: w.terminal ?? "")
+        return IntakeAgent.Run(worker: w, session: s, item: ref, original: "label sync is broken", since: t0)
+    }
+
+    /// A run with a worker that the FakeDaemon started.
+    private func started(_ agent: IntakeAgent) async throws -> IntakeAgent.Run {
+        let host = try XCTUnwrap(agent.host())
+        return run(try await host.startWorker(WorkerStart(spec: "Read the item.", title: "Enhance OVERSIRE-9",
+                                                          path: "/Users/ada/Projects/towertail", agent: "claude")))
     }
 
     private let result = ###"{"verdict":"vague","description":"## Problem\nThe sync drops labels.","priority":"high","labels":["bug","nope"],"relations":[{"kind":"blocked_by","key":"OVERSIRE-3","reason":"api"},{"kind":"relates_to","key":"OVERSIRE-404","reason":""}],"findings":["One page of labels."]}"###
 
-    func testRunMovesFromEnhancingToAskingToReady() async {
-        let (agent, hub, host) = make()
-        let r = run(host)
+    func testRunMovesFromEnhancingToAskingToReady() async throws {
+        let (agent, hub, daemon) = make()
+        let r = try await started(agent)
+        XCTAssertEqual(daemon.runtime.workerCalls, ["start"])
         agent.begin(item.id, r)
         XCTAssertEqual(agent.states[item.id], .enhancing(r))
 
@@ -66,7 +63,7 @@ final class IntakeAgentTests: XCTestCase {
         XCTAssertEqual(n, 2)
         XCTAssertEqual(IntakeAgent.pill(agent.states[item.id]!)?.text, "2 questions")
 
-        host.state = .done(outcome: "succeeded", body: "I read the code.\n" + result)
+        daemon.runtime.worker(r.worker.id, WorkerState(state: .done, outcome: "succeeded", body: "I read the code.\n" + result))
         await agent.poll()
         guard case .ready(let res, _) = agent.states[item.id] else { return XCTFail("\(String(describing: agent.states[item.id]))") }
         XCTAssertEqual(res.verdict, .vague)
@@ -74,20 +71,42 @@ final class IntakeAgentTests: XCTestCase {
         XCTAssertNil(hub.key(q), "the worker is no longer tracked")
     }
 
-    func testNoResultFailsAndKeepsTheText() async {
-        let (agent, _, host) = make()
-        agent.begin(item.id, run(host))
-        host.state = .done(outcome: "succeeded", body: "I could not finish.")
+    func testNoResultFailsAndKeepsTheText() async throws {
+        let (agent, _, daemon) = make()
+        let r = try await started(agent)
+        agent.begin(item.id, r)
+        daemon.runtime.worker(r.worker.id, WorkerState(state: .done, outcome: "succeeded", body: "I could not finish."))
         await agent.poll()
         XCTAssertEqual(agent.states[item.id], .failed("The agent sent no result that OverSire can read. Its text is below.", kept: "I could not finish."))
     }
 
+    func testEndedWorkerFails() async throws {
+        let (agent, _, daemon) = make()
+        let r = try await started(agent)
+        agent.begin(item.id, r)
+        daemon.runtime.worker(r.worker.id, WorkerState(state: .ended, reason: "terminal closed"))
+        await agent.poll()
+        XCTAssertEqual(agent.states[item.id], .failed("The worker stopped (terminal closed) with no result.", kept: nil))
+    }
+
+    func testOnlyThisMacOpensTheWorker() {
+        let (agent, _, daemon) = make()
+        XCTAssertTrue(agent.canReveal)
+        XCTAssertEqual(IntakePanel.place(agent), "this Mac")
+        let remote = MachineRuntime(machine: "mbp", client: DaemonClient(base: URL(string: "http://mbp:7690")!, token: "t", http: daemon))
+        agent.host = { remote }
+        XCTAssertFalse(agent.canReveal)
+        XCTAssertEqual(IntakePanel.place(agent), "mbp")
+        agent.host = { nil }
+        XCTAssertEqual(IntakePanel.place(agent), "no machine")
+    }
+
     func testEditHasOnlyTheCheckedProperties() throws {
-        let (agent, _, host) = make()
+        let (agent, _, _) = make()
         let res = try XCTUnwrap(EnhanceResult.parse(result))
         let labels = [StatusOption(id: "L1", name: "Bug", color: "#f00"), StatusOption(id: "L2", name: "ui", color: "#0f0")]
         let blocker = ItemRef(project: project, id: "w3", key: "OVERSIRE-3", url: URL(string: "https://plane.example/OVERSIRE-3")!)
-        let all = agent.edit(item, res, run: run(host), labels: labels, keep: ["L2"], items: ["OVERSIRE-3": blocker])
+        let all = agent.edit(item, res, run: run(), labels: labels, keep: ["L2"], items: ["OVERSIRE-3": blocker])
         XCTAssertEqual(all.patch.priority, "high")
         XCTAssertEqual(all.patch.labels, ["L2", "L1"], "the known label adds to the kept ones")
         XCTAssertEqual(all.relations, [ItemRelation(kind: .blockedBy, item: blocker)], "an unknown key drops")
@@ -98,7 +117,7 @@ final class IntakeAgentTests: XCTestCase {
         agent.toggle(item, .priority)
         agent.toggle(item, .label("bug"))
         agent.toggle(item, .relation("OVERSIRE-3"))
-        XCTAssertTrue(agent.edit(item, res, run: run(host), labels: labels, keep: ["L2"], items: ["OVERSIRE-3": blocker]).isEmpty)
+        XCTAssertTrue(agent.edit(item, res, run: run(), labels: labels, keep: ["L2"], items: ["OVERSIRE-3": blocker]).isEmpty)
         agent.toggle(item, .priority)
         XCTAssertTrue(agent.isChecked(item, .priority))
     }
@@ -154,7 +173,7 @@ final class AcceptAndQueueTests: XCTestCase {
         let res = EnhanceResult(verdict: .clear, description: "", relations: [
             .init(kind: "blocked_by", key: "OVERSIRE-3", reason: ""), .init(kind: "blocks", key: "OVERSIRE-4", reason: ""),
             .init(kind: "relates_to", key: "OVERSIRE-5", reason: "")])
-        let run = IntakeAgent.Run(worker: OrcaWorker(dispatch: "d", task: "t", terminal: nil), session: nil, item: ref(9), original: "x", since: Date())
+        let run = IntakeAgent.Run(worker: Worker(id: "wk-1", runtime: "orca", startedAt: Date()), session: nil, item: ref(9), original: "x", since: Date())
         let items = ["OVERSIRE-3": ref(3), "OVERSIRE-4": ref(4), "OVERSIRE-5": ref(5)]
         // OVERSIRE-3 waits for OVERSIRE-9 already: 9 blocked by 3 makes a cycle.
         let graph = BlockGraph(["OVERSIRE-3": [ItemRelation(kind: .blockedBy, item: ref(9))]])

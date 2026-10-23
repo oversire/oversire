@@ -12,8 +12,8 @@ final class RunnerDeskTests: XCTestCase {
     }
 
     func choice(mbpLive: Bool, cloud: Bool) -> RunnerChoice {
-        RunnerChoice(targets: [RunnerTarget(link: mba, live: true, runtimes: ["orca"], account: "local"),
-                               RunnerTarget(link: mbp, live: mbpLive, runtimes: mbpLive ? ["orca", "oversire"] : nil, account: "mbp")],
+        RunnerChoice(targets: [RunnerTarget(link: mba, live: true, runtimes: ["orca"]),
+                               RunnerTarget(link: mbp, live: mbpLive, runtimes: mbpLive ? ["orca", "oversire"] : nil)],
                      cloud: cloud)
     }
 

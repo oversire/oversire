@@ -25,7 +25,7 @@ final class DirectOrderTests: XCTestCase {
         return b
     }
 
-    private func target(live: Bool) -> RunnerTarget { RunnerTarget(link: mbp, live: live, runtimes: nil, account: "mbp") }
+    private func target(live: Bool) -> RunnerTarget { RunnerTarget(link: mbp, live: live, runtimes: nil) }
 
     func testLiveDaemonRunsTheOrder() {
         let http = RecordedHTTP()

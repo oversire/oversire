@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import RuntimeDaemon
 
 // Settings › Agents and queue: how sessions start, the queue, the intake agent and the Planner.
 extension SettingsPage {
@@ -16,14 +17,12 @@ extension SettingsPage {
         intakeAndPlanner(b)
     }
 
-    // Only when Orca is off or OverSire cannot read it. The project settings page has the workspace of each project.
+    // Only when OverSire cannot reach the sessions machine. The project settings page has the workspace of each project.
     private func orcaStatus(_ b: NSStackView) {
-        let o = PROJECTS_CFG.orca
-        guard !o.enabled || data.agentIndex.ready == nil else { return }
-        b.addFull(Banner(o.enabled ? .warning : .idle,
-                         title: o.enabled ? "Orca is on, but OverSire could not read it." : "Orca is off.",
-                         body: "CLI \(o.cli.isEmpty ? "not set" : o.cli) · \(o.environment.map { "environment \($0)" } ?? "this Mac")",
-                         actions: [ActionButton("Accounts and sync ›") { [weak self] in self?.go(.settings(.accounts)) }]))
+        guard data.agentIndex.ready == nil else { return }
+        b.addFull(Banner(.warning, title: "OverSire cannot reach the machine that runs the agent sessions.",
+                         body: "Sessions run on \(MACHINES.sessions ?? "this Mac"). Install the OverSire daemon there, or pick another machine.",
+                         actions: [ActionButton("Machines ›") { [weak self] in self?.go(.settings(.machines)) }]))
     }
 
     private func newSessions(_ b: NSStackView) {
@@ -70,11 +69,11 @@ extension SettingsPage {
         return out
     }
 
-    // Each runtime account, and each runtime of an online runner. Orca types a command; agent-wire does not.
+    // Each runtime of the sessions machine, and each runtime of an online runner. Orca types a command; agent-wire does not.
     private var commandUsers: [AgentCommandsCard.User] {
-        var out = ENV.accounts(.runtime).map { a in
-            AgentCommandsCard.User(name: "\(a.account.provider.rawValue.capitalized) · \(a.account.id == "local" ? "this Mac" : a.account.id)",
-                                   terminal: a.account.provider == .orca)
+        let place = data.agentIndex.place
+        var out = ((ENV.runtime as? MachineRuntime)?.runtimes ?? []).filter(\.reachable).map { r in
+            AgentCommandsCard.User(name: "\(r.name) · \(place)", terminal: r.id == "orca")
         }
         for r in cloudAIRecords?.runners ?? [] where r.online {
             out += r.runtimes.map { AgentCommandsCard.User(name: "Runner \(r.device) · \($0.rawValue)", terminal: $0 == .orca) }

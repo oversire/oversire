@@ -3,7 +3,7 @@ import OverSireCore
 
 // ─── New session start ───────────────────────────────────────────────────────
 // Intake on: an intake item with the files, then a terminal with a prompt that names the item.
-// Intake off: the files go to the Orca host, then a terminal with a prompt that lists their paths.
+// Intake off: the files go to the sessions machine, then a terminal with a prompt that lists their paths.
 // Intake and Item modes: only the item and its files. No terminal.
 
 enum SessionStartError: LocalizedError, Equatable {
@@ -23,7 +23,7 @@ enum SessionStartError: LocalizedError, Equatable {
         case .noIntake(let k): return "The tracker of \(k) cannot make intake items with files."
         case .noCreate(let k): return "The tracker of \(k) cannot take files."
         case .badCommand(let e): return "The agent command is not valid: \(e)"
-        case .hostFiles(let e): return "The files did not go to the Orca host: \(e)"
+        case .hostFiles(let e): return "The files did not go to the sessions machine: \(e)"
         }
     }
 }
@@ -125,7 +125,7 @@ final class SessionStarter {
                 if !missing.isEmpty { return "\(missing.count) of \(n) did not upload to \(i.key): \(missing.joined(separator: ", "))." }
                 return files == 0 ? "Intake \(i.key) tracks this work. The prompt names it." : "Intake \(i.key) holds \(n). The prompt names it."
             }
-            return paths.isEmpty ? "The prompt went as typed." : "\(n) copied to the Orca host. The prompt has their paths."
+            return paths.isEmpty ? "The prompt went as typed." : "\(n) copied to the sessions machine. The prompt has their paths."
         }
     }
 
@@ -246,8 +246,8 @@ final class SessionStarter {
             prompt = r.text
         }
         progress("Opening terminal…")
-        let s = try await term.openTerminal(path: path, title: name, command: cmd, prompt: prompt)
-        try? await term.reveal(s)
+        let s = try await term.openTerminal(path: path, title: name, agent: AgentName(rawValue: agent), command: cmd, prompt: prompt)
+        try? await term.show(s)
         return Result(session: s, item: item, paths: paths, missing: missing, terminal: name)
     }
 }

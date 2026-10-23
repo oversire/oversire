@@ -77,7 +77,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         a.visible = { [weak self] in (self?.popover.isShown ?? false) || ItemWindow.isOpen }
         a.onAlert = { [weak self] key, agent in self?.agentAlert(key, agent) }
         a.open = { [weak self] k in self.map { $0.projectStore.item(key: k) != nil && !$0.projectStore.isDone(key: k) } ?? false }
-        a.sessionsReader = { [weak self] account in self?.machineHub.sessionsReader(for: account) }
         return a
     }()
     lazy var machineHub: MachineHub = {
@@ -85,6 +84,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         h.onLinks = { [weak self] in
             self?.relay.update()
             self?.startQuestions()
+            self?.agentIndex.poll()
         }
         h.onSessions = { [weak self] account in
             self?.agentIndex.hint(account: account)
@@ -220,6 +220,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             refresh(force: true)
         }
         MachinesController.shared.hub = machineHub
+        ENV.machines = machineHub
         MainActor.assumeIsolated {
             machineHub.approvals.onShow = { [weak self] r in
                 guard NSApp.isActive, let self else { return }
@@ -289,6 +290,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.scanCheckouts()
             self?.reloadList(DataChange(.agents, origin: .event))
             self?.updateIcon()
+        }
+        // The daemon banner of Work and the Session tab.
+        NotificationCenter.default.addObserver(forName: MachineHub.changed, object: machineHub, queue: .main) { [weak self] _ in
+            self?.reloadList(DataChange(.agents, origin: .event))
         }
         NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { [weak self] n in
             let k = n.userInfo?[Cleaner.keyInfo] as? String
@@ -774,9 +779,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func startQuestions() {
-        machineHub.applyScreens()
-        questions.start(channels: ENV.accounts(.runtime).compactMap { ENV.provider($0.account) as? any QuestionChannel }
-                        + machineHub.questionChannels())
+        questions.start(channels: machineHub.questionChannels())
     }
 
     // MARK: - Icon

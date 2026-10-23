@@ -904,11 +904,13 @@ final class NewSessionController {
     }
 
     func showToast(_ r: SessionStarter.Result, agent: String, root: String, files: Int) {
-        present(SessionToast(title: "Started \(agent) in \((root as NSString).lastPathComponent)", subtitle: "Orca terminal \(r.terminal)",
-                             detail: r.detail(files: files), bad: !r.missing.isEmpty, actions: [
-                                ("Show in Orca", { Task { try? await (ENV.runtime as? AgentTerminal)?.reveal(r.session) } }),
-                                ("New session", { [weak self] in self?.show(near: nil) }),
-                             ]))
+        let term = ENV.runtime as? AgentTerminal
+        let local = ENV.runtime is any Revealing
+        var actions: [(String, () -> Void)] = [("New session", { [weak self] in self?.show(near: nil) })]
+        if local { actions.insert(("Show in Orca", { Task { try? await term?.show(r.session) } }), at: 0) }
+        present(SessionToast(title: "Started \(agent) in \((root as NSString).lastPathComponent)",
+                             subtitle: "Terminal \(r.terminal) on \(local ? "this Mac" : r.session.workspace.account.id)",
+                             detail: r.detail(files: files), bad: !r.missing.isEmpty, actions: actions))
     }
 
     func showToast(_ r: SessionStarter.Made, mode: NewSessionModel.Mode, files: Int) {

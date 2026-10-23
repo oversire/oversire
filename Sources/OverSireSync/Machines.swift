@@ -34,39 +34,52 @@ public protocol CredentialKeeping: Sendable {
 /// The choices of the user about the machines. config.json keeps them.
 public struct MachinesConfig: Codable, Equatable, Sendable {
     public var enabled = true
-    /// machine → the Orca account id in this app ("local", "mbp"). An empty id: no Orca account.
-    public var runtimeAccounts: [String: String] = [:]
+    /// The machine that runs the agent sessions of Work, Intake and cleanup. nil: this Mac.
+    public var sessions: String?
     /// The machines whose sessions the user hides.
     public var muted: Set<String> = []
     /// The answer to "Install agent hooks for live status?". nil: the app did not ask yet.
     public var hooksConsent: Bool?
+    /// machine → Orca account id of an old config. Only the migration reads it. It is not encoded.
+    public private(set) var legacyAccounts: [String: String] = [:]
 
-    public init(enabled: Bool = true, runtimeAccounts: [String: String] = [:], muted: Set<String> = [], hooksConsent: Bool? = nil) {
+    public init(enabled: Bool = true, sessions: String? = nil, muted: Set<String> = [], hooksConsent: Bool? = nil) {
         self.enabled = enabled
-        self.runtimeAccounts = runtimeAccounts
+        self.sessions = sessions
         self.muted = muted
         self.hooksConsent = hooksConsent
     }
 
+    private enum CodingKeys: String, CodingKey { case enabled, sessions, muted, hooksConsent, runtimeAccounts }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        runtimeAccounts = try c.decodeIfPresent([String: String].self, forKey: .runtimeAccounts) ?? [:]
+        sessions = try c.decodeIfPresent(String.self, forKey: .sessions)
         muted = try c.decodeIfPresent(Set<String>.self, forKey: .muted) ?? []
         hooksConsent = try c.decodeIfPresent(Bool.self, forKey: .hooksConsent)
+        legacyAccounts = try c.decodeIfPresent([String: String].self, forKey: .runtimeAccounts) ?? [:]
     }
 
-    /// The Orca account id of the machine: the choice of the user; else "local" for this machine;
-    /// else the Orca environment of this app with the machine name. nil: the user must pick one.
-    public func runtimeAccount(_ link: MachineLink, environments: [String]) -> String? {
-        if let a = runtimeAccounts[link.machine] { return a.isEmpty ? nil : a }
-        if link.local { return "local" }
-        return environments.first { $0.caseInsensitiveCompare(link.machine) == .orderedSame }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(sessions, forKey: .sessions)
+        try c.encode(muted, forKey: .muted)
+        try c.encodeIfPresent(hooksConsent, forKey: .hooksConsent)
     }
 
-    /// The machine of an Orca account id. The reverse of runtimeAccount.
-    public func machine(account: String, links: [MachineLink], environments: [String]) -> String? {
-        links.first { runtimeAccount($0, environments: environments) == account }?.machine
+    /// The old "Run sessions on" Orca environment as the sessions machine: the machine with that Orca account, else the machine
+    /// with its name. nil: this Mac.
+    public static func sessions(orcaEnvironment env: String?, legacy: [String: String]) -> String? {
+        guard let env, !env.isEmpty, env != "local" else { return nil }
+        return legacy.first { $0.value == env }?.key ?? env
+    }
+
+    /// The link of the sessions machine. nil: the machine has no link.
+    public func sessionsLink(_ links: [MachineLink]) -> MachineLink? {
+        guard let sessions else { return links.first { $0.local } }
+        return links.first { $0.machine == sessions }
     }
 }
 
@@ -90,6 +103,8 @@ public actor Machines {
     public private(set) var group: Group?
     /// The time of the last read that got a group or a local daemon.
     public private(set) var checkedAt: Date?
+    /// True after the first read. The first read gives the links also when they did not change.
+    public private(set) var refreshed = false
 
     /// cache: a file that keeps the last group, so an app without a local daemon finds the members after a restart.
     public init(local: DaemonClient, keychain: any CredentialKeeping, http: any HTTPTransport, deviceName: String = Machines.defaultName,
@@ -193,7 +208,9 @@ public actor Machines {
     }
 
     private func publish(_ links: [MachineLink]) {
-        guard links != current else { return }
+        let first = !refreshed
+        refreshed = true
+        guard links != current || first else { return }
         current = links
         for w in watchers.values { w.yield(links) }
     }

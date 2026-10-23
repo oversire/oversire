@@ -234,14 +234,21 @@ final class DaemonSourceTests: XCTestCase {
         let local = MachineLink(machine: "mba", base: loopback, token: nil, local: true)
         let remote = MachineLink(machine: "mbp", base: URL(string: "http://mbp:7690")!, token: "t", local: false)
         let other = MachineLink(machine: "mini", base: URL(string: "http://mini:7690")!, token: "t", local: false)
-        XCTAssertEqual(c.runtimeAccount(local, environments: ["mbp"]), "local")
-        XCTAssertEqual(c.runtimeAccount(remote, environments: ["mbp"]), "mbp")
-        XCTAssertNil(c.runtimeAccount(other, environments: ["mbp"]))
+        XCTAssertEqual(c.sessionsLink([remote, local]), local, "this Mac by default")
         var picked = c
-        picked.runtimeAccounts["mini"] = "lab"
-        XCTAssertEqual(picked.runtimeAccount(other, environments: []), "lab")
-        let decoded = try JSONDecoder().decode(MachinesConfig.self, from: Data(#"{"muted":["mbp"]}"#.utf8))
-        XCTAssertEqual(decoded, MachinesConfig(enabled: true, runtimeAccounts: [:], muted: ["mbp"]))
+        picked.sessions = "mbp"
+        XCTAssertEqual(picked.sessionsLink([local, remote]), remote)
+        picked.sessions = "gone"
+        XCTAssertNil(picked.sessionsLink([local, remote, other]))
+        let old = try JSONDecoder().decode(MachinesConfig.self, from: Data(#"{"muted":["mbp"],"runtimeAccounts":{"mbp":"lab","mba":"local"}}"#.utf8))
+        XCTAssertEqual(old.muted, ["mbp"])
+        XCTAssertNil(old.sessions)
+        XCTAssertEqual(MachinesConfig.sessions(orcaEnvironment: "lab", legacy: old.legacyAccounts), "mbp")
+        XCTAssertEqual(MachinesConfig.sessions(orcaEnvironment: "mini", legacy: old.legacyAccounts), "mini")
+        XCTAssertNil(MachinesConfig.sessions(orcaEnvironment: nil, legacy: old.legacyAccounts))
+        let again = try JSONDecoder().decode(MachinesConfig.self, from: JSONEncoder().encode(picked))
+        XCTAssertEqual(again, picked)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("runtimeAccounts"))
     }
 
     // MARK: DaemonQuestions

@@ -143,7 +143,7 @@ extension SettingsPage {
         if let e = Self.sessionError { rows.append(Padded(Banner(.bad, title: e))) }
         rows.append(SwitchRow("Create intake item by default", note: "The panel keeps the last choice.", on: c.intake) { PROJECTS_CFG.capture.session.intake = $0 })
         let mb = c.maxBytes / (1024 * 1024)
-        rows.append(FieldRow("File limit without intake", note: "The total size that goes to the Orca host.",
+        rows.append(FieldRow("File limit without intake", note: "The total size that goes to the sessions machine.",
                              Segmented(Self.sessionLimits.map { "\($0) MB" }, selected: Self.sessionLimits.firstIndex(of: mb) ?? 1,
                                        label: "File limit without intake") { i in PROJECTS_CFG.capture.session.maxBytes = Self.sessionLimits[i] * 1024 * 1024 }))
         return rows

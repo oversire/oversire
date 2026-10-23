@@ -180,7 +180,7 @@ final class NewSessionModelTests: XCTestCase {
         m.add([.init(name: "a.png", data: Data(count: 3))])
         XCTAssertEqual(m.intakeHint, "The prompt is the description. The files go on the item.")
         m.intake = false
-        XCTAssertEqual(m.intakeHint, "No item. The files go to the Orca host and the prompt gets their paths.")
+        XCTAssertEqual(m.intakeHint, "No item. The files go to the sessions machine and the prompt gets their paths.")
         XCTAssertTrue(m.picksAgent)
         m.files = []
         XCTAssertEqual(m.intakeHint, "No item. Good for a question or a quick chat.")

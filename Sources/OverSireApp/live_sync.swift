@@ -24,14 +24,14 @@ struct RefreshPlan {
     var includePRs = false
     var completedRuns: [(String, String)] = []
     var projects: [(workspace: String, project: String?)] = []   // nil project: all projects of the tracker account
-    /// The Orca account ids whose sessions changed. AgentIndex polls them.
-    var sessionAccounts: [String] = []
+    /// The machines whose sessions changed. AgentIndex polls them.
+    var sessionMachines: [String] = []
     /// The machines whose daemon has a new question or a new waiting session.
     var questionMachines: [String] = []
 
     /// resyncs: tracker accounts that must refresh all their projects.
-    /// machines: machine → Orca account id. A session event of a daemon names its machine in account.id.
-    init(_ events: [ProviderEvent], resyncs: [AccountID] = [], knownRepos: [String], machines: [String: String] = [:]) {
+    /// machines: the machines of the group. A session event of a daemon names its machine in account.id.
+    init(_ events: [ProviderEvent], resyncs: [AccountID] = [], knownRepos: [String], machines: Set<String> = []) {
         let byLower = Dictionary(knownRepos.map { ($0.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
         for a in resyncs { project(a.id, nil) }
         for e in events {
@@ -46,8 +46,8 @@ struct RefreshPlan {
             case .item(let i): project(i.project.account.id, i.project.id)
             case .session:
                 let machine = e.account.id
-                guard let account = machines[machine] else { break }
-                if !sessionAccounts.contains(account) { sessionAccounts.append(account) }
+                guard machines.contains(machine) else { break }
+                if !sessionMachines.contains(machine) { sessionMachines.append(machine) }
                 if ["question", "waiting"].contains(e.action), !questionMachines.contains(machine) { questionMachines.append(machine) }
             default: break
             }
@@ -355,10 +355,10 @@ final class LiveSync {
         }
         let trackers = Set(ENV.trackerIds)
         let plan = RefreshPlan(events, resyncs: accounts.filter { trackers.contains($0.id) }, knownRepos: REPOS,
-                               machines: machines?.accountsByMachine ?? [:])
+                               machines: Set(machines?.active.map(\.machine) ?? []))
         if let hub = machines {
             plan.questionMachines.forEach(hub.pushQuestions)
-            plan.sessionAccounts.forEach(hub.sessionsChanged)
+            plan.sessionMachines.forEach(hub.sessionsChanged)
         }
         if plan.wantsRepoRefresh {
             log.info("Sync: \(events.count) event(s) for \(plan.repos.count) repo(s)")
