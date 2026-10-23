@@ -1,5 +1,4 @@
 import Foundation
-import OverSireCore
 
 /// The REST calls of an oversire daemon. Contract: daemon.json.
 /// A nil token sends no Authorization header: the daemon trusts loopback.
@@ -87,16 +86,8 @@ public final class DaemonClient: Sendable {
     /// This daemon asks the member at host to join. The decision comes as a joinResult frame on the local WebSocket.
     public func ask(host: String) async throws -> JoinPending { try await post("/v1/group/ask", ["host": host]) }
 
-    /// The open join requests on this daemon.
-    public func joinRequests() async throws -> [JoinRequestFrame] { try await get("/v1/group/requests") }
-
     public func decide(_ request: String, approve: Bool) async throws {
         let _: Done = try await post("/v1/group/requests/\(Self.escape(request))/\(approve ? "approve" : "deny")", [String: String]())
-    }
-
-    @discardableResult
-    public func setHome(_ machine: String) async throws -> HomeMove {
-        try await post("/v1/group/home", ["machine": machine])
     }
 
     /// Removes a member from the group.
@@ -107,7 +98,7 @@ public final class DaemonClient: Sendable {
     /// Public route of a member: an app on a machine without a daemon joins with a code (kind app).
     public func join(_ r: JoinRequest) async throws -> JoinResult { try await post("/v1/group/join", r) }
 
-    private struct Done: Decodable {}
+    package struct Done: Decodable {}
 
     public func questions() async throws -> DaemonQuestionsPage { try await get("/v1/questions") }
 
@@ -122,33 +113,79 @@ public final class DaemonClient: Sendable {
         return g.answer
     }
 
+    // MARK: Runtimes (member routes)
+
+    public func runtimes() async throws -> DaemonRuntimesPage { try await get("/v1/runtimes") }
+
+    public func repos() async throws -> DaemonReposPage { try await get("/v1/repos") }
+
+    public func workspaces() async throws -> DaemonWorkspacesPage { try await get("/v1/workspaces") }
+
+    public func removeWorkspace(_ id: String, _ rm: WorkspaceRemove) async throws -> WorkspaceRemoval {
+        var r = try json("DELETE", "/v1/workspaces/\(Self.escape(id))", rm)
+        r.timeoutInterval = 120
+        return try Self.decode(try await send(r))
+    }
+
+    /// The daemon writes the files into a new folder of its own and gives their paths.
+    public func writeFiles(_ files: WorkspaceFiles) async throws -> WorkspaceFilesResult {
+        var r = try json("POST", "/v1/files", files)
+        r.timeoutInterval = 120
+        return try Self.decode(try await send(r))
+    }
+
+    /// Loopback only. Shows the session in the runtime UI.
+    public func reveal(_ s: SessionRef) async throws { _ = try await send(try json("POST", "/v1/reveal", s)) }
+
+    /// Starts a direct work order. nil: the daemon runs it (202). Else the daemon knows the id and gives its state (200).
+    public func start(_ order: WorkOrder) async throws -> DaemonOrderState? {
+        let (data, resp) = try await exchange(try json("POST", "/v1/orders", order))
+        return resp.statusCode == 202 ? nil : try Self.decode(try Self.check(data, resp))
+    }
+
+    public func startWorker(_ w: WorkerStart) async throws -> Worker {
+        var r = try json("POST", "/v1/workers", w)
+        r.timeoutInterval = 200
+        return try Self.decode(try await send(r))
+    }
+
+    public func worker(id: String) async throws -> WorkerState { try await get("/v1/workers/\(Self.escape(id))") }
+
+    public func stopWorker(id: String) async throws {
+        _ = try await send(try json("POST", "/v1/workers/\(Self.escape(id))/stop", Optional<[String: String]>.none))
+    }
+
+    public func releaseWorker(id: String) async throws {
+        _ = try await send(try json("DELETE", "/v1/workers/\(Self.escape(id))", Optional<[String: String]>.none))
+    }
+
     // Question ids hold ":" and other characters that a path segment must escape.
-    static func escape(_ id: String) -> String {
+    package static func escape(_ id: String) -> String {
         var allowed = CharacterSet.urlPathAllowed
         allowed.remove(charactersIn: "/?#")
         return id.addingPercentEncoding(withAllowedCharacters: allowed) ?? id
     }
 
-    func request(_ path: String) -> URLRequest {
+    package func request(_ path: String) -> URLRequest {
         var r = URLRequest(url: URL(string: base.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path)!,
                            timeoutInterval: timeout)
         if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return r
     }
 
-    private func get<T: Decodable>(_ path: String) async throws -> T {
+    package func get<T: Decodable>(_ path: String) async throws -> T {
         try Self.decode(try await send(request(path)))
     }
 
-    private func post<T: Decodable, B: Encodable>(_ path: String, _ body: B) async throws -> T {
+    package func post<T: Decodable, B: Encodable>(_ path: String, _ body: B) async throws -> T {
         try await call("POST", path, body)
     }
 
-    private func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B?) async throws -> T {
+    package func call<T: Decodable, B: Encodable>(_ method: String, _ path: String, _ body: B?) async throws -> T {
         try Self.decode(try await send(try json(method, path, body)))
     }
 
-    private func json<B: Encodable>(_ method: String, _ path: String, _ body: B?) throws -> URLRequest {
+    package func json<B: Encodable>(_ method: String, _ path: String, _ body: B?) throws -> URLRequest {
         var r = request(path)
         r.httpMethod = method
         if let body {
@@ -160,18 +197,18 @@ public final class DaemonClient: Sendable {
         return r
     }
 
-    private func exchange(_ r: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    package func exchange(_ r: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do { return try await http.send(r) } catch let e as ProviderError { throw e } catch {
             throw ProviderError.transport(error.localizedDescription)
         }
     }
 
-    private func send(_ r: URLRequest) async throws -> Data {
+    package func send(_ r: URLRequest) async throws -> Data {
         let (data, resp) = try await exchange(r)
         return try Self.check(data, resp)
     }
 
-    private static func check(_ data: Data, _ resp: HTTPURLResponse) throws -> Data {
+    package static func check(_ data: Data, _ resp: HTTPURLResponse) throws -> Data {
         switch resp.statusCode {
         case 200..<300: return data
         case 401: throw ProviderError.unauthorized
@@ -181,7 +218,7 @@ public final class DaemonClient: Sendable {
         }
     }
 
-    static func decode<T: Decodable>(_ data: Data) throws -> T {
+    package static func decode<T: Decodable>(_ data: Data) throws -> T {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .custom { d in
             let s = try d.singleValueContainer().decode(String.self)

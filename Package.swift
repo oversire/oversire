@@ -26,6 +26,7 @@ let package = Package(
         .target(name: "CodeHostGitHub", dependencies: ["OverSireCore", "GitHubKit"], path: "Sources/Providers/CodeHostGitHub"),
         .target(name: "CIGitHubActions", dependencies: ["OverSireCore", "GitHubKit"], path: "Sources/Providers/CIGitHubActions"),
         .target(name: "RuntimeOrca", dependencies: ["OverSireCore"], path: "Sources/Providers/RuntimeOrca"),
+        .target(name: "RuntimeDaemon", dependencies: ["OverSireCore"], path: "Sources/Providers/RuntimeDaemon"),
         // Skeletons for new adapters. The app does not register them. See docs/adding-a-provider.md.
         .target(name: "TrackerTemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/TrackerTemplate"),
         .target(name: "CodeHostTemplate", dependencies: ["OverSireCore"], path: "Sources/Providers/CodeHostTemplate"),
@@ -53,6 +54,7 @@ let package = Package(
         .testTarget(name: "CodeHostGitHubTests", dependencies: ["CodeHostGitHub", "OverSireTestKit"], exclude: ["Fixtures"]),
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "OverSireTestKit"]),
         .testTarget(name: "RuntimeOrcaTests", dependencies: ["RuntimeOrca", "OverSireTestKit"]),
+        .testTarget(name: "RuntimeDaemonTests", dependencies: ["RuntimeDaemon", "OverSireTestKit"]),
         .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "RuntimeTemplate", "OverSireTestKit"]),
         .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI"]),
         .testTarget(name: "LiveTests", dependencies: ["OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", .product(name: "AgentBinder", package: "agent-binder"), "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeOrca", "OverSireTestKit"]),

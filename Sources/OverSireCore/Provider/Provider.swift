@@ -48,6 +48,7 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let removeWorkspace: Capability = "removeWorkspace"
     public static let sessionHistory: Capability = "sessionHistory"
     public static let questions: Capability = "questions"
+    public static let workers: Capability = "workers"
     public static let cloudDispatch: Capability = "cloudDispatch"
     public static let projectSettings: Capability = "projectSettings"
     public static let projectSettingsEdit: Capability = "projectSettingsEdit"

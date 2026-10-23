@@ -248,3 +248,12 @@ public protocol WorkspaceRemoving: AgentRuntime {
     /// `force` removes a worktree with changes. `runHooks` runs the archive hooks of the repo; a failed hook stops the removal.
     func remove(_ w: Workspace, force: Bool, runHooks: Bool) async throws -> WorkspaceRemoval
 }
+
+/// Runs supervised workers: an agent does one task and reports the result. The runtime keeps the worker over a restart.
+public protocol WorkerSupervising: AgentRuntime {
+    func startWorker(_ w: WorkerStart) async throws -> Worker
+    func workerState(_ w: Worker) async throws -> WorkerState
+    func stopWorker(_ w: Worker) async throws
+    /// Closes the terminal of the worker. The runtime then forgets it.
+    func releaseWorker(_ w: Worker) async throws
+}

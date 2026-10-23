@@ -13,6 +13,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _events: [ProviderEvent] = []
     private var _results: [String: DaemonAnswerResult] = [:]
     private var _given: [String: RunnerAnswer] = [:]
+    private var _answered: Set<String> = []
     private var _answers: [(id: String, answer: RunnerAnswer)] = []
     private var _requests: [URLRequest] = []
     private var _acks: [Int] = []
@@ -31,6 +32,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
 
     /// The credential that a call must carry. nil: no check (loopback).
     public let token: String?
+    /// The runtime routes: runtimes, workspaces, files, orders and workers.
+    public let runtime = FakeDaemonRuntimes()
 
     public init(info: DaemonInfo, group: Group? = nil, token: String? = nil) {
         _info = info
@@ -153,7 +156,9 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
 
     // Runs under the lock.
     private func route(_ method: String, _ url: URL, body: Data?) throws -> (Int, Data) {
-        let parts = url.path.split(separator: "/").map(String.init).map { $0.removingPercentEncoding ?? $0 }
+        // Split the escaped path: an id can hold an escaped "/".
+        let path = URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath ?? url.path
+        let parts = path.split(separator: "/").map(String.init).map { $0.removingPercentEncoding ?? $0 }
         switch (method, parts) {
         case ("GET", ["v1", "whoami"]): return try ok(_info)
         case ("GET", ["v1", "health"]): return (200, Data(#"{"ok":true}"#.utf8))
@@ -169,8 +174,12 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         case ("POST", let p) where p.count == 4 && p[1] == "questions" && p[3] == "answer":
             let a = try Self.decoder.decode(RunnerAnswer.self, from: body ?? Data())
             _answers.append((p[2], a))
-            let r = _results[p[2]] ?? DaemonAnswerResult(result: _questions.contains { $0.id.rawValue == p[2] } ? .sent : .gone)
-            if r.result == .sent { _questions.removeAll { $0.id.rawValue == p[2] } }
+            let open = _questions.contains { $0.id.rawValue == p[2] }
+            let r = _results[p[2]] ?? DaemonAnswerResult(result: open ? .sent : _answered.contains(p[2]) ? .alreadyAnswered : .gone)
+            if r.result == .sent {
+                _questions.removeAll { $0.id.rawValue == p[2] }
+                _answered.insert(p[2])
+            }
             return try ok(r)
         case ("GET", let p) where p.count == 4 && p[1] == "questions" && p[3] == "given":
             struct Given: Encodable { let answer: RunnerAnswer? }
@@ -230,7 +239,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         case ("POST", ["v1", "ack"]):
             if let body, let d = try JSONSerialization.jsonObject(with: body) as? [String: Int], let seq = d["seq"] { _acks.append(seq) }
             return (200, Data(#"{"ok":true}"#.utf8))
-        default: return missing
+        default: return try runtime.route(method, parts, body: body, machine: _info.machine, sessions: &_sessions) ?? missing
         }
     }
 }

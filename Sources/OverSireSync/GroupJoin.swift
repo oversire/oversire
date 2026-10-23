@@ -61,6 +61,14 @@ public enum DaemonFrame: Hashable, Sendable {
 }
 
 extension DaemonClient {
+    /// The open join requests on this daemon.
+    public func joinRequests() async throws -> [JoinRequestFrame] { try await get("/v1/group/requests") }
+
+    @discardableResult
+    public func setHome(_ machine: String) async throws -> HomeMove {
+        try await post("/v1/group/home", ["machine": machine])
+    }
+
     /// The text of an error of a group route: the "error" field of the body, without the "group: " prefix.
     public static func reason(_ error: Error) -> String {
         guard let e = error as? ProviderError else { return error.localizedDescription }
