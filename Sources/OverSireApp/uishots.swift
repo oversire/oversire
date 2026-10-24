@@ -1558,18 +1558,19 @@ extension UIShots {
         w.contentView = root
         let request = stream ?? URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
         let socket: any WebSocketConnecting = stream == nil ? NoSockets() : URLSessionWebSockets()
+        let poll = frame == "poll", place = poll || frame == "control" ? "mini" : "this Mac"
+        var trailing: [NSView] = [ActionButton("Pop out", symbol: "macwindow")]
+        if place == "this Mac" { trailing.append(ActionButton("Open in Orca ↗")) }
         let card = LiveTerminalCard(sessionID: "s-1", stream: SessionStream(request: request, view: .terminal, socket: socket),
-                                    trailing: [ActionButton("Pop out", symbol: "macwindow"), Chiplet("on mbp", symbol: "desktopcomputer", mono: false)])
+                                    runtime: "Orca", place: place, trailing: trailing)
+        card.onDetails = {}
+        card.onRetry = {}
         let since = Date().addingTimeInterval(-22 * 60)
-        let reply = NSTextField()
-        reply.placeholderString = "Send to the session…"
-        card.setHead([Pill(.working, text: "Working"), Chiplet("claude", symbol: "cpu"), RelativeTimeLabel({ since }, size: 12, format: { "since " + $0 }), Spacer()],
-                     headline: "Runs the cli tests after the turn log change.",
-                     footer: frame == "ended" ? nil : NSStackView(h: [reply, ActionButton("Send", style: .primary)], spacing: 6))
+        card.setHead([Chiplet("claude"), Chiplet("Orca · \(place)")], since: since)
         page.rebuild { col in col.addFull(card) }
         if stream != nil { w.orderFrontRegardless(); return w }
-        let poll = frame == "poll"
-        let a = StreamAttached(source: poll ? .poll : .stream, cols: 96, rows: 22, writable: true, resizable: !poll,
+        // The live frame is wider than the card: the font shrinks to fit.
+        let a = StreamAttached(source: poll ? .poll : .stream, cols: frame == "live" ? 132 : 96, rows: 22, writable: true, resizable: !poll,
                                reason: poll ? "Orca does not let the daemon pair. The view polls the screen." : nil)
         card.handle(.attached(a))
         card.handle(.snapshot(Data(sampleScreen.utf8)))
@@ -1597,12 +1598,9 @@ extension UIShots {
         let request = stream ?? URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
         let socket: any WebSocketConnecting = stream == nil ? NoSockets() : URLSessionWebSockets()
         let card = SessionChatCard(sessionID: "s-1", agent: "claude", stream: SessionStream(request: request, view: .chat, socket: socket),
-                                   trailing: [ActionButton("Open in a terminal", symbol: "terminal"), Chiplet("on mbp", symbol: "desktopcomputer", mono: false)])
-        card.onStop = {}
+                                   trailing: [ActionButton("Open in a terminal", symbol: "terminal"), ActionButton("Stop session", style: .link)])
         let since = Date().addingTimeInterval(-9 * 60)
-        let phase = frame == "ended" ? Pill(.ok, text: "Done") : Pill(.working, text: "Working")
-        card.setHead([phase, Chiplet("claude", symbol: "cpu"), RelativeTimeLabel({ since }, size: 12, format: { "since " + $0 }), Spacer()],
-                     headline: "Adds a retry to the OAuth callback.", footer: nil)
+        card.setHead([Chiplet("claude · agent-wire"), Chiplet("OverSire runner · mba")], since: nil)
         page.rebuild { col in col.addFull(card) }
         if stream != nil { w.orderFrontRegardless(); return w }
         card.handle(.attached(StreamAttached(source: .wire, cols: 0, rows: 0, writable: true, resizable: false)))

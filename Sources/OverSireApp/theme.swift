@@ -19,8 +19,8 @@ enum Palette {
     static let run = pair(0x5AB8EC, 0x1D7FB8)
     static let warn = pair(0xE9A21A, 0xA86F00)
     static let intake = pair(0xB98AD6, 0x8A55AE)
-    static let term = pair(0x0D0E11, 0x15171B)
-    static let termFg = pair(0xC9CDD4, 0xD5D8DE)
+    static let term = pair(0x0F1013, 0xFBFBFC)
+    static let termFg = pair(0xD9DBE0, 0x1E2024)
 
     static func isDark(_ a: NSAppearance) -> Bool { a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
 

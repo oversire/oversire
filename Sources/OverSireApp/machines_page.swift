@@ -425,8 +425,8 @@ final class MachinesController {
         }
     }
 
-    /// The daemon of machine connects the live view of the runtime again and gives its new state.
-    func retry(_ machine: String, runtime id: String) {
+    /// The daemon of machine connects the live view of the runtime again and gives its new state. done runs after a success.
+    func retry(_ machine: String, runtime id: String, done: (() -> Void)? = nil) {
         let key = "\(machine)/\(id)"
         guard !retrying.contains(key) else { return }
         guard let client = daemon(machine) else {
@@ -440,6 +440,7 @@ final class MachinesController {
             do {
                 let d = try await client.retryRuntime(id)
                 if let i = self.snapshot.runtimes[machine]?.firstIndex(where: { $0.id == id }) { self.snapshot.runtimes[machine]?[i] = d }
+                done?()
             } catch {
                 self.notice = "Retry \(id) on \(machine): \(DaemonClient.reason(error))"
             }

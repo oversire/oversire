@@ -83,6 +83,12 @@ public actor SessionStream {
         try await conn.send(Self.encode(.send(text: text)))
     }
 
+    /// Stops the current turn of the agent.
+    public func interrupt() async throws {
+        guard let conn else { throw ProviderError.transport("The stream is not connected.") }
+        try await conn.send(Self.encode(.interrupt))
+    }
+
     /// Takes the size of the terminal. The size also goes with each new attach.
     public func control(cols: Int, rows: Int) async {
         size = (cols, rows)

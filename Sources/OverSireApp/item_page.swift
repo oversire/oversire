@@ -186,9 +186,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             data.agentIndex.stream(k) { [weak self] t in
                 guard let self, self.key == k, self.tab == .session, let t, let id = a.paneKey else { return }
                 self.live?.stop()
-                self.live = t.view == .chat ? self.chatCard(a, session: id, request: t.request)
-                    : LiveTerminalCard(sessionID: id, stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets()),
-                                       trailing: self.liveTrailing(t.request, session: id))
+                self.live = t.view == .chat ? self.chatCard(a, session: id, request: t.request) : self.terminalCard(session: id, request: t.request)
                 self.reload()
             }
         }
@@ -671,8 +669,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let a = stream?.agent {
             let s = data.statusJob.item(key)
             if let live, live.sessionID == a.paneKey {
-                let chat = live is SessionChatCard
-                let fill = { [unowned self] in live.setHead(self.terminalHead(a, status: s), headline: s?.headline, footer: chat ? nil : self.replyRowIfOpen(a)) }
+                let fill = { [unowned self] in live.setHead(self.liveChips(a, chat: live is SessionChatCard), since: a.since) }
                 rows.append(PageRow("live-" + live.sessionID, ObjectIdentifier(live), Self.sig(a, s), sending, update: { _ in fill() }) { fill(); return live })
             } else {
                 rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
@@ -710,24 +707,52 @@ final class ItemPage: Page, NSTextFieldDelegate {
                                 : Chiplet("on \(agents.place)", symbol: "desktopcomputer", mono: false)
     }
 
-    private func liveTrailing(_ request: URLRequest, session id: String) -> [NSView] {
-        let k = key
+    /// The agent and the place of a live card: "claude", "Orca · this Mac".
+    private func liveChips(_ a: AgentSession, chat: Bool) -> [NSView] {
+        let place = data.agentIndex.place
+        return chat ? [Chiplet("\(a.agent.rawValue) · agent-wire"), Chiplet("OverSire runner · \(place)")]
+                    : [Chiplet(a.agent.rawValue), Chiplet("Orca · \(place)")]
+    }
+
+    private func terminalCard(session id: String, request: URLRequest) -> LiveTerminalCard {
+        let k = key, place = data.agentIndex.place
         let pop = ActionButton("Pop out", symbol: "macwindow") {
             LiveTerminalWindow.show(sessionID: id, title: "\(k) terminal",
-                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()))
+                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()), runtime: "Orca", place: place)
         }
         pop.setAccessibilityLabel("Open the terminal in its own window")
-        return [pop, placeChip()]
+        var trailing: [NSView] = [pop]
+        // Only a session on this Mac opens in Orca. A remote session uses Pop out.
+        if data.agentIndex.canReveal { trailing.append(ActionButton("Open in Orca ↗", action: "session.reveal", ["key": .string(k)])) }
+        let c = LiveTerminalCard(sessionID: id, stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()),
+                                 runtime: "Orca", place: place, trailing: trailing)
+        c.onDetails = { [weak self] in self?.go(.settings(.machines)) }
+        c.onRetry = { [weak self] in self?.retryLive(k) }
+        return c
+    }
+
+    /// The daemon of the session pairs with its runtime again. Then the card connects again.
+    private func retryLive(_ k: String) {
+        data.agentIndex.daemonSession(k) { [weak self] s in
+            guard let self, let s else { return }
+            MachinesController.shared.retry(s.machine.rawValue, runtime: s.runtime) { [weak self] in
+                guard let self, self.key == k else { return }
+                self.live?.stop()
+                self.live = nil
+                self.streamChecked = .distantPast
+                self.reload()
+            }
+        }
     }
 
     private func chatCard(_ a: AgentSession, session id: String, request: URLRequest) -> SessionChatCard {
         let k = key
         let open = ActionButton("Open in a terminal", symbol: "terminal") { [weak self] in self?.openInTerminal(k) }
-        open.setAccessibilityLabel("Open the folder of the session in a terminal, and copy the session id")
-        let c = SessionChatCard(sessionID: id, agent: a.agent.rawValue, stream: SessionStream(request: request, view: .chat, socket: URLSessionWebSockets()),
-                                trailing: [open, Chiplet("on \(data.agentIndex.place)", symbol: "desktopcomputer", mono: false)])
-        c.onStop = { [weak self] in self?.confirmStop(k) }
-        return c
+        open.setAccessibilityLabel("Resume the session in a terminal")
+        let stop = ActionButton("Stop session", style: .link) { [weak self] in self?.confirmStop(k) }
+        stop.setAccessibilityLabel("Stop the session")
+        return SessionChatCard(sessionID: id, agent: a.agent.rawValue, stream: SessionStream(request: request, view: .chat, socket: URLSessionWebSockets()),
+                               trailing: [open, stop])
     }
 
     /// On this Mac, Terminal opens in the folder of the session. The harness session id goes to the clipboard.

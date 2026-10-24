@@ -20,18 +20,20 @@ With no daemon, or when the daemon has no view for the session, the tab shows th
 
 ### Terminal
 
-- The card starts in view mode. Keys do nothing.
-- **Take control** sends the keys to the session. On a live stream, the terminal also takes the size of the card. **Give back** returns the size to the runtime UI.
-- The chips show the link (**Live**, **Text only**, **Disconnected**, **Ended**), who has the size, and the size.
+- On a live stream, click the terminal to type. The keys go to the session. ⌘. leaves the terminal. ⌘V pastes the text as one block.
+- **Take control** gives the terminal the size of the card. **Give back** returns the size to the runtime UI. With no control, the font shrinks to fit the columns of the runtime (**· fit**).
+- In text only mode, a banner tells why. **Retry** asks the daemon to pair again, and **Machine details** opens Settings › Machines. **Send text** sends the text plus Return. **Interrupt** sends Ctrl+C.
+- The chips show the link (**Live**, **Text only**, **Disconnected**, **Ended**), who has the size, the agent, the runtime and machine, and the size. In a narrow card the less important chips go away first.
 - **Pop out** opens the terminal in its own window. Each window has its own stream.
 - A lost link connects again with backoff. The pill shows **Disconnected** with the reason until then.
 
 ### Chat
 
 - The newest 60 turns show. **Show earlier turns** shows 60 more.
-- Tool calls in a row fold into one group. Click a tool to see its input and the start of its result.
+- The first turn of each speaker shows **You** or **Agent** and the time. Each tool call is one line: the status, the tool and its input, and the first line of the result. Hover a tool line to see the full input and result.
 - Return sends the text. Shift-Return adds a line. The text goes to the agent as a `sessionSend`.
-- **Stop** stops the session after a confirmation. The worktree and the turns stay.
+- **Stop turn** stops the current turn (the `interrupt` frame). The session stays open.
+- **Stop session** stops the session after a confirmation. The worktree and the turns stay.
 - **Open in a terminal** opens Terminal in the folder of the session (on this Mac only) and copies the harness session id. Resume the session by hand with the agent CLI. OverSire has no resume command, because AgentBinder has no API for it. Stop the chat session before you resume it.
 
 ## Runtime state

@@ -53,6 +53,7 @@ public enum StreamClientFrame: Hashable, Sendable, Codable {
     case control(cols: Int, rows: Int)
     case release
     case send(text: String)
+    case interrupt
 
     private enum Keys: String, CodingKey { case type, view, cols, rows, after, seq, text }
 
@@ -66,6 +67,7 @@ public enum StreamClientFrame: Hashable, Sendable, Codable {
         case "control": self = .control(cols: try c.decode(Int.self, forKey: .cols), rows: try c.decode(Int.self, forKey: .rows))
         case "release": self = .release
         case "send": self = .send(text: try c.decode(String.self, forKey: .text))
+        case "interrupt": self = .interrupt
         case let t: throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown frame type \(t)")
         }
     }
@@ -91,6 +93,8 @@ public enum StreamClientFrame: Hashable, Sendable, Codable {
         case .send(let text):
             try c.encode("send", forKey: .type)
             try c.encode(text, forKey: .text)
+        case .interrupt:
+            try c.encode("interrupt", forKey: .type)
         }
     }
 }
