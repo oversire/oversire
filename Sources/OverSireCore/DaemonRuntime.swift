@@ -28,16 +28,28 @@ public struct DaemonRuntime: Codable, Hashable, Sendable, Identifiable {
 }
 
 /// The state of the live session stream of a runtime. POST /v1/runtimes/{id}/retry connects again.
+/// POST /v1/runtimes/{id}/pair keeps a pairing link, DELETE forgets it.
 public struct RuntimeStream: Codable, Hashable, Sendable {
     public enum State: String, Codable, Sendable { case live, pairing, textOnly }
 
     public var state: State
     public var reason: String?
+    /// The runtime takes a pairing link from the user.
+    public var pairable: Bool?
+    public var paired: Bool?
 
-    public init(state: State, reason: String? = nil) {
+    public init(state: State, reason: String? = nil, pairable: Bool? = nil, paired: Bool? = nil) {
         self.state = state
         self.reason = reason
+        self.pairable = pairable
+        self.paired = paired
     }
+}
+
+/// The body of POST /v1/runtimes/{id}/pair. The link holds a device token: do not log it.
+public struct RuntimePair: Codable, Hashable, Sendable {
+    public var link: String
+    public init(link: String) { self.link = link }
 }
 
 public struct DaemonRuntimesPage: Codable, Hashable, Sendable {

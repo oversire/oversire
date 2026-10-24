@@ -1295,7 +1295,8 @@ extension MachinesSnapshot {
         let caps = ["sessionInput", "sessionTail", "sessionStream"]
         s.runtimes["mbp"] = [
             DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.223", capabilities: caps,
-                          stream: RuntimeStream(state: .textOnly, reason: "Orca does not let the daemon pair by itself. The view is text only.")),
+                          stream: RuntimeStream(state: .textOnly, reason: "Pair Orca to see the live terminal: in Orca, open Settings and make a runtime pairing link for this computer only.",
+                                                pairable: true)),
             DaemonRuntime(id: "oversire", name: "OverSire", installed: true, reachable: true, capabilities: caps, stream: RuntimeStream(state: .live)),
         ]
         s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running.")]

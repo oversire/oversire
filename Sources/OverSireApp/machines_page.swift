@@ -92,6 +92,9 @@ struct MachinesModel: Equatable {
         var state: State
         /// Why the runtime has this state. nil: no reason.
         var note: String?
+        /// The runtime takes a pairing link for its live view.
+        var pairable = false
+        var paired = false
 
         init(machine: String, _ r: DaemonRuntime) {
             self.machine = machine
@@ -112,6 +115,8 @@ struct MachinesModel: Equatable {
                 case nil: state = .running
                 }
                 note = r.stream?.reason
+                pairable = r.stream?.pairable == true
+                paired = r.stream?.paired == true
             }
         }
 
@@ -130,8 +135,10 @@ struct MachinesModel: Equatable {
             }
         }
 
-        /// Retry connects the live view again, or probes a runtime that did not answer.
-        var canRetry: Bool { state == .textOnly || state == .down }
+        /// Retry connects the live view again, or probes a runtime that did not answer. A runtime with no pairing needs Pair first.
+        var canRetry: Bool { state == .down || state == .textOnly && (!pairable || paired) }
+        var canPair: Bool { pairable && state == .textOnly }
+        var canUnpair: Bool { paired && state == .live }
     }
 
     var state: State
@@ -282,8 +289,8 @@ final class MachinesController {
     var notice: String?
     /// The machines that run POST /v1/update now.
     private(set) var updating: Set<String> = []
-    /// The runtimes that run POST /v1/runtimes/{id}/retry now, as Runtime.key.
-    private(set) var retrying: Set<String> = []
+    /// The runtimes with a retry, pair or unpair call now: Runtime.key → the verb.
+    private(set) var runtimeCalls: [String: String] = [:]
     /// The daemon of a machine: loopback for this Mac, else the link of the hub. nil: no link.
     lazy var daemon: (String) -> DaemonClient? = { [unowned self] name in
         if name == self.snapshot.info?.machine.rawValue { return self.local }
@@ -427,24 +434,38 @@ final class MachinesController {
 
     /// The daemon of machine connects the live view of the runtime again and gives its new state. done runs after a success.
     func retry(_ machine: String, runtime id: String, done: (() -> Void)? = nil) {
+        runtimeCall("Retry", machine, id, done: done) { try await $0.retryRuntime(id) }
+    }
+
+    /// The link holds a device token. It goes only in the body of the request.
+    func pair(_ machine: String, runtime id: String, link: String) {
+        runtimeCall("Pair", machine, id) { try await $0.pairRuntime(id, link: link) }
+    }
+
+    func unpair(_ machine: String, runtime id: String) {
+        runtimeCall("Unpair", machine, id) { try await $0.unpairRuntime(id) }
+    }
+
+    private func runtimeCall(_ verb: String, _ machine: String, _ id: String, done: (() -> Void)? = nil,
+                             _ call: @escaping (DaemonClient) async throws -> DaemonRuntime) {
         let key = "\(machine)/\(id)"
-        guard !retrying.contains(key) else { return }
+        guard runtimeCalls[key] == nil else { return }
         guard let client = daemon(machine) else {
-            notice = "Retry \(id) on \(machine): OverSire has no link to \(machine). Check that it is online."
+            notice = "\(verb) \(id) on \(machine): OverSire has no link to \(machine). Check that it is online."
             changed()
             return
         }
-        retrying.insert(key)
+        runtimeCalls[key] = verb
         changed()
         Task { @MainActor in
             do {
-                let d = try await client.retryRuntime(id)
+                let d = try await call(client)
                 if let i = self.snapshot.runtimes[machine]?.firstIndex(where: { $0.id == id }) { self.snapshot.runtimes[machine]?[i] = d }
                 done?()
             } catch {
-                self.notice = "Retry \(id) on \(machine): \(DaemonClient.reason(error))"
+                self.notice = "\(verb) \(id) on \(machine): \(DaemonClient.reason(error))"
             }
-            self.retrying.remove(key)
+            self.runtimeCalls[key] = nil
             self.changed()
         }
     }
@@ -635,12 +656,26 @@ extension SettingsPage {
             case .missing: tone = Tone(symbol: "circle.dashed", color: Palette.dim, word: r.status)
             }
             var cells: [NSView] = [Glyph("terminal", color: Palette.mut, size: 16), TwoLine(r.title, r.detail, lines: 2), Spacer(), Pill(tone)]
+            let call = c.runtimeCalls[r.key]
             if r.canRetry {
-                let busy = c.retrying.contains(r.key)
-                let retry = ActionButton(busy ? "Retrying…" : "Retry") { c.retry(r.machine, runtime: r.id) }
-                retry.isEnabled = !busy
+                let retry = ActionButton(call == "Retry" ? "Retrying…" : "Retry") { c.retry(r.machine, runtime: r.id) }
+                retry.isEnabled = call == nil
                 retry.setAccessibilityLabel("Retry \(r.title)")
                 cells.append(retry)
+            }
+            if r.canPair {
+                let pair = ActionButton(call == "Pair" ? "Pairing…" : r.paired ? "Pair again…" : "Pair…", style: r.paired ? .plain : .primary) { [weak self] in
+                    self?.askPair(r)
+                }
+                pair.isEnabled = call == nil
+                pair.setAccessibilityLabel("Pair \(r.title)")
+                cells.append(pair)
+            }
+            if r.canUnpair {
+                let unpair = ActionButton(call == "Unpair" ? "Unpairing…" : "Unpair", style: .plain) { [weak self] in self?.askUnpair(r) }
+                unpair.isEnabled = call == nil
+                unpair.setAccessibilityLabel("Unpair \(r.title)")
+                cells.append(unpair)
             }
             return Row(cells, height: r.note == nil ? 52 : 62, label: "\(r.title), \(r.status)\(r.note.map { ", \($0)" } ?? "")")
         }
@@ -741,6 +776,21 @@ extension SettingsPage {
             guard let w = self?.view.window else { return }
             MachineSheets.add(over: w, invite: inv)
         }
+    }
+
+    private func askPair(_ r: MachinesModel.Runtime) {
+        AlertConfirm.input("Pair \(r.title)",
+                           info: "In \(r.name), open Settings and make a runtime pairing link. Pick This computer only. Paste the link here. "
+                               + "The daemon on \(r.machine) checks the link, then keeps it in the Keychain.",
+                           placeholder: "orca://pair?code=…", button: "Pair", width: 420, in: view.window) {
+            MachinesController.shared.pair(r.machine, runtime: r.id, link: $0)
+        }
+    }
+
+    private func askUnpair(_ r: MachinesModel.Runtime) {
+        AlertConfirm.ask("Unpair \(r.title)?",
+                         info: "The session view goes back to text only. The daemon forgets the link. The device stays in \(r.name) › Settings until you remove it there.",
+                         button: "Unpair", in: view.window) { MachinesController.shared.unpair(r.machine, runtime: r.id) }
     }
 
     private func confirmRemove(_ machine: String, group: String) {

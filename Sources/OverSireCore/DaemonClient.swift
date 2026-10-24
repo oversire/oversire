@@ -124,6 +124,17 @@ public final class DaemonClient: Sendable {
         return try Self.decode(try await send(r))
     }
 
+    /// The daemon checks the pairing link with the runtime, then keeps it. HTTP 400: the link did not pair.
+    public func pairRuntime(_ id: String, link: String) async throws -> DaemonRuntime {
+        var r = try json("POST", "/v1/runtimes/\(Self.escape(id))/pair", RuntimePair(link: link))
+        r.timeoutInterval = 30
+        return try Self.decode(try await send(r))
+    }
+
+    public func unpairRuntime(_ id: String) async throws -> DaemonRuntime {
+        try Self.decode(try await send(try json("DELETE", "/v1/runtimes/\(Self.escape(id))/pair", Optional<[String: String]>.none)))
+    }
+
     public func repos() async throws -> DaemonReposPage { try await runtimeGet("/v1/repos") }
 
     public func workspaces() async throws -> DaemonWorkspacesPage { try await runtimeGet("/v1/workspaces") }

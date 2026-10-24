@@ -59,6 +59,7 @@ final class ContractTests: XCTestCase {
         "daemon-answer-result": roundTrip(DaemonAnswerResult.self),
         "session-ask": roundTrip(SessionAsk.self),
         "daemon-runtimes-page": roundTrip(DaemonRuntimesPage.self),
+        "runtime-pair": roundTrip(RuntimePair.self),
         "daemon-repos-page": roundTrip(DaemonReposPage.self),
         "daemon-workspaces-page": roundTrip(DaemonWorkspacesPage.self),
         "workspace-remove": roundTrip(WorkspaceRemove.self),

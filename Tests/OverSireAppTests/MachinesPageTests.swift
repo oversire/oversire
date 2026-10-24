@@ -262,7 +262,23 @@ final class MachinesModelTests: XCTestCase {
         XCTAssertEqual(rows[0].detail, "Orca 1.4.2 · no pairing")
         XCTAssertEqual(rows[4].detail, "Orca is not running.")
         XCTAssertEqual(rows[5].note, "The daemon found no Y on devbox.")
+        XCTAssertEqual(rows.map(\.canPair), [false, false, false, false, false, false])
     }
+
+    func testRuntimePairRows() {
+        var s = snapshot()
+        s.runtimes["mbp"] = [
+            DaemonRuntime(id: "a", name: "A", installed: true, reachable: true, stream: RuntimeStream(state: .textOnly, reason: "Pair A.", pairable: true)),
+            DaemonRuntime(id: "b", name: "B", installed: true, reachable: true,
+                          stream: RuntimeStream(state: .textOnly, reason: "Pairing failed: no answer", pairable: true, paired: true)),
+            DaemonRuntime(id: "c", name: "C", installed: true, reachable: true, stream: RuntimeStream(state: .live, pairable: true, paired: true)),
+        ]
+        let rows = MachinesModel(s, config: MachinesConfig(), now: now).runtimes
+        XCTAssertEqual(rows.map(\.canPair), [true, true, false])
+        XCTAssertEqual(rows.map(\.canRetry), [false, true, false], "no pairing: Retry does not help")
+        XCTAssertEqual(rows.map(\.canUnpair), [false, false, true])
+    }
+
 
     func testSessionsMachine() {
         var cfg = MachinesConfig()
@@ -389,19 +405,46 @@ final class MachineUpdateTests: XCTestCase {
         s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running.")]
         c.use(s)
         c.retry("mba", runtime: "orca")
-        XCTAssertTrue(c.retrying.contains("mba/orca"))
-        for _ in 0..<200 where !c.retrying.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(c.runtimeCalls["mba/orca"], "Retry")
+        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertEqual(mba.calls, ["POST /v1/runtimes/orca/retry"])
         XCTAssertEqual(c.model.runtimes.first?.state, .live)
         XCTAssertNil(c.notice)
 
         c.retry("mba", runtime: "nope")
-        for _ in 0..<200 where !c.retrying.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
         XCTAssertEqual(c.notice?.hasPrefix("Retry nope on mba:"), true)
 
         let none = controller(nil)
         none.retry("mbp", runtime: "orca")
         XCTAssertEqual(none.notice, "Retry orca on mbp: OverSire has no link to mbp. Check that it is online.")
+    }
+
+    func testRuntimePair() async {
+        let mba = FakeDaemon(machine: "mba")
+        mba.runtime.runtimes = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true,
+                                              stream: RuntimeStream(state: .textOnly, reason: "Pair Orca.", pairable: true))]
+        let c = controller(mba)
+        var s = c.snapshot
+        s.runtimes["mba"] = mba.runtime.runtimes
+        c.use(s)
+        c.pair("mba", runtime: "orca", link: "bad")
+        XCTAssertEqual(c.runtimeCalls["mba/orca"], "Pair")
+        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(c.notice, "Pair orca on mba: Orca refused the device token.")
+        XCTAssertEqual(c.model.runtimes.first?.state, .textOnly)
+
+        c.notice = nil
+        c.pair("mba", runtime: "orca", link: "orca://pair?code=x")
+        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertNil(c.notice)
+        XCTAssertEqual(c.model.runtimes.first?.state, .live)
+        XCTAssertEqual(c.model.runtimes.first?.canUnpair, true)
+
+        c.unpair("mba", runtime: "orca")
+        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(c.model.runtimes.first?.canPair, true)
+        XCTAssertEqual(mba.calls, ["POST /v1/runtimes/orca/pair", "POST /v1/runtimes/orca/pair", "DELETE /v1/runtimes/orca/pair"])
     }
 
     func testRemoteUpdate() async {

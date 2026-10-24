@@ -69,6 +69,13 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
             case ("POST", let p) where p.count == 4 && p[1] == "runtimes" && p[3] == "retry":
                 guard let rt = _runtimes.first(where: { $0.id == p[2] }) else { return error(404, "no runtime \(p[2])") }
                 return try ok(rt)
+            case (let m, let p) where (m == "POST" || m == "DELETE") && p.count == 4 && p[1] == "runtimes" && p[3] == "pair":
+                guard let i = _runtimes.firstIndex(where: { $0.id == p[2] }) else { return error(404, "no runtime \(p[2])") }
+                // As the daemon: the link "bad" does not pair.
+                if m == "POST", try Self.decoder.decode(RuntimePair.self, from: body ?? Data()).link == "bad" { return error(400, "Orca refused the device token.") }
+                _runtimes[i].stream = m == "POST" ? RuntimeStream(state: .live, pairable: true, paired: true)
+                    : RuntimeStream(state: .textOnly, reason: "Pair Orca to see the live terminal.", pairable: true, paired: false)
+                return try ok(_runtimes[i])
             case ("GET", ["v1", "repos"]): return try ok(DaemonReposPage(repos: _repos))
             case ("GET", ["v1", "workspaces"]): return try ok(DaemonWorkspacesPage(workspaces: _workspaces))
             case ("DELETE", let p) where p.count == 3 && p[1] == "workspaces":
