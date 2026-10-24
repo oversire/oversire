@@ -5,7 +5,8 @@ import OverSireSync
 
 // ─── Live terminal ───────────────────────────────────────────────────────────
 // The terminal of a session through the daemon of its machine (OVERSIRE-285). SwiftTerm draws the screen.
-// Keys go to the session while the terminal has focus. "Take control" gives the session the size of this view.
+// Keys go to the session while the terminal has focus. A click or a key in the terminal gives the session the size
+// of this view, and leaving the terminal gives it back. "Take control" holds the size until "Give back".
 // A text only source takes text from the "Send text" row.
 
 /// A card that shows a session through its stream. The page keeps it over reloads.
@@ -146,7 +147,18 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
     private(set) var link = StreamLink.connecting { didSet { refresh() } }
     private(set) var holder = LeaseHolder.none { didSet { refresh() } }
     private(set) var controlling = false { didSet { refresh() } }
-    private var focused = false { didSet { if focused != oldValue { refresh() } } }
+    /// The size came from focus, not from Take control. Leaving the terminal gives it back.
+    private var auto = false
+    /// Give back while the terminal has focus: no auto take until the focus leaves.
+    private var paused = false
+    private var focused = false {
+        didSet {
+            guard focused != oldValue else { return }
+            paused = false
+            if focused { autoTake() } else if controlling && auto { giveBack() }
+            refresh()
+        }
+    }
     private var remote: (cols: Int, rows: Int)?
 
     /// runtime and place name the source: "Orca", "this Mac". popped: the card fills its own window.
@@ -175,9 +187,9 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
         scrollHeight.isActive = true
         applyTheme()
 
-        take.onClick = { [weak self] in self?.toggleControl() }
+        take.onClick = { [weak self] in self?.takeControl(auto: false) }
         take.setAccessibilityLabel("Take control of the terminal size")
-        give.onClick = { [weak self] in self?.toggleControl() }
+        give.onClick = { [weak self] in self?.giveBack() }
         give.setAccessibilityLabel("Give back the terminal size")
         details.onClick = { [weak self] in self?.onDetails?() }
         retry.onClick = { [weak self] in self?.onRetry?() }
@@ -199,6 +211,7 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
         textField.action = #selector(sendText)
         textField.setContentHuggingPriority(.init(1), for: .horizontal)
         term.onLeave = { [weak self] in self?.window?.makeFirstResponder(nil) }
+        term.onUse = { [weak self] in self?.autoTake() }
         add(head)
         add(CardRule())
         add(banner)
@@ -259,7 +272,10 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
             if !(controlling && holder == .you) { show(cols: cols, rows: rows) }
         case .lease(let h):
             holder = h
-            if h != .you, controlling, attached?.resizable == true { controlling = false }
+            if h != .you, controlling, attached?.resizable == true {
+                controlling = false
+                auto = false
+            }
         case .ended(let reason):
             controlling = false
             link = .ended(StreamLink.endText(reason))
@@ -309,17 +325,27 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
         refresh()
     }
 
-    func toggleControl() {
-        guard let a = attached, a.resizable else { return }
-        if controlling {
-            controlling = false
-            Task { [stream] in await stream.release() }
-            if let r = remote { show(cols: r.cols, rows: r.rows) }
-            return
-        }
+    func takeControl(auto: Bool) {
+        guard let a = attached, a.resizable, !controlling else { return }
+        self.auto = auto
         controlling = true
         fitToView()
-        window?.makeFirstResponder(term)
+        if !auto { window?.makeFirstResponder(term) }
+    }
+
+    /// A click or a key in the terminal. Another OverSire viewer keeps its size.
+    private func autoTake() {
+        guard focused, !paused, !controlling, attached?.writable == true, holder != .other else { return }
+        takeControl(auto: true)
+    }
+
+    func giveBack() {
+        guard controlling else { return }
+        if focused { paused = true }
+        controlling = false
+        auto = false
+        Task { [stream] in await stream.release() }
+        if let r = remote { show(cols: r.cols, rows: r.rows) }
     }
 
     // MARK: Text only
@@ -368,8 +394,9 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
         details.isHidden = !isPoll || onDetails == nil
 
         if controlling {
+            let back = auto ? "when you leave the terminal, when you use it in \(runtime)" : "when you click Give back"
             bannerText.attributedStringValue = Self.banner("The terminal on \(place) now has the size of this window.",
-                                                           "OverSire gives the size back when you click Give back, when you close the view, or after 10 min with no key.")
+                                                           "OverSire gives the size back \(back), when you close the view, or after 10 min with no key.")
             banner.fill = Palette.acc.withAlphaComponent(0.08)
             retry.isHidden = true
         } else if isPoll {
@@ -410,7 +437,8 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
             if controlling {
                 size = popped ? "The terminal follows the size of this window." : "Pop out gives a bigger window, and the terminal follows its size."
             } else {
-                size = "\(runtime) keeps the size." + (zoom < 0.999 ? " The font shrinks to fit \(cols) columns." : "")
+                size = "\(runtime) keeps the size." + (typable && a?.resizable == true ? " Click the terminal to fit it to this view."
+                                                         : zoom < 0.999 ? " The font shrinks to fit \(cols) columns." : "")
             }
             footer.addArrangedSubview(text(size))
         }
@@ -499,7 +527,10 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
 /// The terminal view of a session. Command-period leaves it.
 private final class SessionTerminal: TerminalView {
     var onLeave: (() -> Void)?
+    /// A click or a key in the terminal.
+    var onUse: (() -> Void)?
     private var wheel: Any?
+    private var keys: Any?
     /// SwiftTerm writes mouse reports only while this is true.
     private(set) var wheeling = false
 
@@ -507,9 +538,15 @@ private final class SessionTerminal: TerminalView {
     // into arrow keys on the alternate screen. An app that tracks the mouse gets wheel events instead.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let w = wheel { NSEvent.removeMonitor(w) }
+        [wheel, keys].compactMap { $0 }.forEach(NSEvent.removeMonitor)
         wheel = nil
+        keys = nil
         guard window != nil else { return }
+        // keyDown is not open in SwiftTerm.
+        keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            if let self, e.window === self.window, self.window?.firstResponder === self { self.onUse?() }
+            return e
+        }
         wheel = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
             guard let self, e.window === self.window, self.terminal.mouseMode != .off, !e.modifierFlags.contains(.shift),
                   self.visibleRect.contains(self.convert(e.locationInWindow, from: nil)) else { return e }
@@ -520,6 +557,11 @@ private final class SessionTerminal: TerminalView {
             self.wheeling = false
             return nil
         }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onUse?()
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

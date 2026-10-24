@@ -1576,7 +1576,7 @@ extension UIShots {
         card.handle(.attached(a))
         card.handle(.snapshot(Data(sampleScreen.utf8)))
         switch frame {
-        case "control": card.toggleControl()
+        case "control": card.takeControl(auto: false)
         case "lost": card.handle(.disconnected("The daemon did not answer.", stopped: false))
         case "ended": card.handle(.ended(reason: "exited"))
         case "live": card.handle(.lease(.desktop))
