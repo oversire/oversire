@@ -296,11 +296,11 @@ final class ToolLine: Box {
         case .failed: status = Glyph("xmark", color: Palette.bad, size: 10); word = "failed"
         case .running: status = Glyph("circle.dotted", color: Palette.run, size: 10); word = "running"
         }
-        let input = tool.input?.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        let input = Self.brief(input: tool.input ?? "")
         let call = NSTextField.text(input.isEmpty ? tool.name : "\(tool.name) \(input)", size: 11.5, color: Palette.mut, mono: true)
         call.lineBreakMode = .byTruncatingTail
         call.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        let result = tool.summary?.split(separator: "\n", maxSplits: 1).first.map { String($0.prefix(48)) } ?? ""
+        let result = String(Self.brief(result: tool.summary ?? "").prefix(48))
         let stat = NSTextField.text(result, size: 11.5, color: tool.status == .failed ? Palette.bad : Palette.dim)
         stat.lineBreakMode = .byTruncatingTail
         let row = NSStackView(h: [status, call, Spacer(), stat], spacing: 8)
@@ -319,4 +319,31 @@ final class ToolLine: Box {
         setAccessibilityLabel("\(tool.name) \(input), \(word). \(result)")
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The keys that name what a tool works on, most telling first.
+    private static let keys = ["command", "file_path", "path", "pattern", "url", "query", "description", "prompt"]
+
+    /// The first line of the main argument. A JSON input `{"command":"npm test"}` gives `npm test`.
+    /// The daemon clips an input at 200 characters, so the JSON can be cut.
+    static func brief(input: String) -> String {
+        let t = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("{") else { return firstLine(t) }
+        for key in keys {
+            guard let r = t.range(of: #""\#(key)"\s*:\s*"((?:[^"\\]|\\.)*)"#, options: .regularExpression) else { continue }
+            let raw = t[r].split(separator: ":", maxSplits: 1)[1].trimmingCharacters(in: .whitespaces).dropFirst()
+            let quoted = "\"" + raw.replacingOccurrences(of: #"\\?$"#, with: "", options: .regularExpression) + "\""
+            let value = (try? JSONDecoder().decode(String.self, from: Data(quoted.utf8))) ?? String(raw)
+            return firstLine(value)
+        }
+        return t == "{}" ? "" : firstLine(t)
+    }
+
+    /// The first line of a result, with no `<tag>` marks.
+    static func brief(result: String) -> String {
+        firstLine(result.replacingOccurrences(of: #"</?[a-z_]+>"#, with: "", options: .regularExpression))
+    }
+
+    private static func firstLine(_ s: String) -> String {
+        s.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    }
 }
