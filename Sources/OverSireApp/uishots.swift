@@ -122,6 +122,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let cleanup = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLEANUP"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
+    // OVERSIRE_UISHOTS_STREAM=<ws url>: the chat: and stream: shots connect to this daemon stream, with no sample frames.
+    static let stream = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_STREAM"].flatMap(URL.init(string:)).map { URLRequest(url: $0) }
     // OVERSIRE_UISHOTS_AI=on: Settings › AI shows a sample key that passed Test. No AI job runs.
     static let aiKey = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AI"] == "on" ? "sk-ant-uishots-3f9a" : nil
     // OVERSIRE_UISHOTS_OVERRIDES=on: Settings › Notifications shows one muted project and one with custom notifications.
@@ -800,6 +802,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 }
                 // The chat views and the Markdown web views need time.
                 if p.hasPrefix("assistant:") { steps += Array(repeating: {}, count: 4) }
+                if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
                 steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
@@ -1553,8 +1556,9 @@ extension UIShots {
         NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: root.leadingAnchor), page.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                                      page.topAnchor.constraint(equalTo: root.topAnchor), page.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
         w.contentView = root
-        let request = URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
-        let card = LiveTerminalCard(sessionID: "s-1", stream: SessionStream(request: request, view: .terminal, socket: NoSockets()),
+        let request = stream ?? URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
+        let socket: any WebSocketConnecting = stream == nil ? NoSockets() : URLSessionWebSockets()
+        let card = LiveTerminalCard(sessionID: "s-1", stream: SessionStream(request: request, view: .terminal, socket: socket),
                                     trailing: [ActionButton("Pop out", symbol: "macwindow"), Chiplet("on mbp", symbol: "desktopcomputer", mono: false)])
         let since = Date().addingTimeInterval(-22 * 60)
         let reply = NSTextField()
@@ -1563,6 +1567,7 @@ extension UIShots {
                      headline: "Runs the cli tests after the turn log change.",
                      footer: frame == "ended" ? nil : NSStackView(h: [reply, ActionButton("Send", style: .primary)], spacing: 6))
         page.rebuild { col in col.addFull(card) }
+        if stream != nil { w.orderFrontRegardless(); return w }
         let poll = frame == "poll"
         let a = StreamAttached(source: poll ? .poll : .stream, cols: 96, rows: 22, writable: true, resizable: !poll,
                                reason: poll ? "Orca does not let the daemon pair. The view polls the screen." : nil)
@@ -1589,8 +1594,9 @@ extension UIShots {
         NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: root.leadingAnchor), page.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                                      page.topAnchor.constraint(equalTo: root.topAnchor), page.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
         w.contentView = root
-        let request = URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
-        let card = SessionChatCard(sessionID: "s-1", agent: "claude", stream: SessionStream(request: request, view: .chat, socket: NoSockets()),
+        let request = stream ?? URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
+        let socket: any WebSocketConnecting = stream == nil ? NoSockets() : URLSessionWebSockets()
+        let card = SessionChatCard(sessionID: "s-1", agent: "claude", stream: SessionStream(request: request, view: .chat, socket: socket),
                                    trailing: [ActionButton("Open in a terminal", symbol: "terminal"), Chiplet("on mbp", symbol: "desktopcomputer", mono: false)])
         card.onStop = {}
         let since = Date().addingTimeInterval(-9 * 60)
@@ -1598,6 +1604,7 @@ extension UIShots {
         card.setHead([phase, Chiplet("claude", symbol: "cpu"), RelativeTimeLabel({ since }, size: 12, format: { "since " + $0 }), Spacer()],
                      headline: "Adds a retry to the OAuth callback.", footer: nil)
         page.rebuild { col in col.addFull(card) }
+        if stream != nil { w.orderFrontRegardless(); return w }
         card.handle(.attached(StreamAttached(source: .wire, cols: 0, rows: 0, writable: true, resizable: false)))
         let at = { (m: Double) in since.addingTimeInterval(m * 60) }
         let tool = { (seq: Int, name: String, st: TurnTool.Status, input: String, out: String?) in

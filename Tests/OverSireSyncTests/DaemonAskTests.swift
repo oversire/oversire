@@ -39,6 +39,20 @@ final class DaemonAskTests: XCTestCase {
         XCTAssertEqual(b["readOnly"] as? Bool, true)
     }
 
+    func testWritesWithNoBodyAreJSON() async throws {
+        let http = RecordedHTTP()
+        http.on("POST", "\(base)/v1/runtimes/orca/retry", 200, #"{"id":"orca","name":"Orca","installed":true,"reachable":true,"capabilities":[]}"#)
+        http.on("POST", "\(base)/v1/workers/w-1/stop", 200, "{}")
+        let c = client(http)
+        _ = try await c.retryRuntime("orca")
+        try await c.stopWorker(id: "w-1")
+        XCTAssertEqual(http.requests.count, 2)
+        for r in http.requests {
+            XCTAssertEqual(r.value(forHTTPHeaderField: "Content-Type"), "application/json", r.url?.path ?? "")
+            XCTAssertNil(r.httpBody)
+        }
+    }
+
     func testAskSendsTheDefaultsAndClampsTheTimeout() async throws {
         let http = RecordedHTTP()
         http.on("POST", askURL, 200, try fixture("session-ask-reply", "reply"))

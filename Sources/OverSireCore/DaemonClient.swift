@@ -217,8 +217,9 @@ public final class DaemonClient: Sendable {
     package func json<B: Encodable>(_ method: String, _ path: String, _ body: B?) throws -> URLRequest {
         var r = request(path)
         r.httpMethod = method
+        // The loopback listener refuses a write that is not JSON, also with no body.
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let body {
-            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
             let enc = JSONEncoder()
             enc.dateEncodingStrategy = .iso8601
             r.httpBody = try enc.encode(body)
