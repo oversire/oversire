@@ -465,6 +465,8 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         guard typable else { return }
         let d = Data(data)
+        // SwiftTerm reports each mouse move in mode 1003, also with reports off. Only the wheel goes to the session.
+        if !term.wheeling, d.starts(with: [0x1b, 0x5b, 0x3c]) || d.starts(with: [0x1b, 0x5b, 0x4d]) { return }
         Task { [stream] in await stream.input(d) }
     }
 
@@ -497,6 +499,28 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
 /// The terminal view of a session. Command-period leaves it.
 private final class SessionTerminal: TerminalView {
     var onLeave: (() -> Void)?
+    private var wheel: Any?
+    /// SwiftTerm writes mouse reports only while this is true.
+    private(set) var wheeling = false
+
+    // Mouse reports stay off so that a click selects text. With reports off, SwiftTerm turns the wheel
+    // into arrow keys on the alternate screen. An app that tracks the mouse gets wheel events instead.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let w = wheel { NSEvent.removeMonitor(w) }
+        wheel = nil
+        guard window != nil else { return }
+        wheel = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            guard let self, e.window === self.window, self.terminal.mouseMode != .off, !e.modifierFlags.contains(.shift),
+                  self.visibleRect.contains(self.convert(e.locationInWindow, from: nil)) else { return e }
+            self.allowMouseReporting = true
+            self.wheeling = true
+            self.scrollWheel(with: e)
+            self.allowMouseReporting = false
+            self.wheeling = false
+            return nil
+        }
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if window?.firstResponder === self, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
