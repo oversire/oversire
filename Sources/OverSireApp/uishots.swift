@@ -128,6 +128,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let overrides = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_OVERRIDES"] == "on"
     // OVERSIRE_UISHOTS_LOGS=1: sample log lines and two open problems. A partial Status on OVERSIRE-91.
     static let sampleLogs = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOGS"] == "1"
+    // OVERSIRE_UISHOTS_FAILED=1, with OVERSIRE_UISHOTS_SESSIONS=1: a new session of FRITZ-17 did not start.
+    static let failedStart = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FAILED"] == "1"
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()
@@ -244,6 +246,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             }
         }
         agentIndex.seed(cards: cards)
+        if UIShots.failedStart {
+            agentIndex.fail("FRITZ-17", "mbp refused the order: the repo /Users/ada/src/oversire is not in the allow list.")
+        }
         statusJob.seed(SessionStatus(id: "uishots-quiet", key: "OVERSIRE-140",
                                      reply: StatusReply(state: .stuck, headline: "The tests fail in StatusJobTests and the agent does not go on.",
                                                         done: ["The status job is written."], next: ["Fix the failing tests."],

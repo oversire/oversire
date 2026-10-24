@@ -340,17 +340,22 @@ final class StatusJob {
     }
 
     /// Looks done: frees the slot. Looks stuck: sends the nudge.
-    func approve(_ id: String) {
-        guard let s = statuses.first(where: { $0.id == id }) else { return }
-        switch s.state {
-        case .done: if StatusJob.frees(s) { queue.release(s.key) }
-        case .stuck: if !s.reply.nudge.isEmpty { agents.send(s.key, text: s.reply.nudge) { _ in } }
-        default: break
+    /// A failed nudge keeps the status open and gives the error to done.
+    func approve(_ id: String, done: ((ProviderError?) -> Void)? = nil) {
+        guard let s = statuses.first(where: { $0.id == id }) else { done?(nil); return }
+        if s.state == .stuck, !s.reply.nudge.isEmpty {
+            agents.send(s.key, text: s.reply.nudge) { [weak self] err in
+                if err == nil { self?.update(id) { $0.handled = .approved } }
+                done?(err)
+            }
+            return
         }
+        if s.state == .done, StatusJob.frees(s) { queue.release(s.key) }
         update(id) { $0.handled = .approved }
+        done?(nil)
     }
 
-    func approve(all ids: [String]) { ids.forEach(approve) }
+    func approve(all ids: [String]) { ids.forEach { approve($0) } }
 
     /// Frees the slot instead of a nudge.
     func release(_ id: String) {
@@ -371,12 +376,14 @@ final class StatusJob {
     }
 
     /// Not finished: asks the agent to go on with the open steps.
-    func ask(_ id: String) {
-        guard let s = statuses.first(where: { $0.id == id }) else { return }
+    func ask(_ id: String, done: ((ProviderError?) -> Void)? = nil) {
+        guard let s = statuses.first(where: { $0.id == id }) else { done?(nil); return }
         let open = s.reply.next.map { "- " + $0 }.joined(separator: "\n")
         agents.send(s.key, text: open.isEmpty ? "The goal of \(s.key) is not met yet. Continue." :
-                        "The goal of \(s.key) is not met yet. Continue with:\n" + open) { _ in }
-        update(id) { $0.handled = .approved }
+                        "The goal of \(s.key) is not met yet. Continue with:\n" + open) { [weak self] err in
+            if err == nil { self?.update(id) { $0.handled = .approved } }
+            done?(err)
+        }
     }
 
     /// Ticks or clears one step. The ticks stay on this Mac.

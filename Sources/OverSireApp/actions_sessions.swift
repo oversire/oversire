@@ -46,10 +46,12 @@ struct SessionActions {
             ActionSpec(id: "session.reveal", title: "Show terminal", help: "Shows the agent terminal of the item in Orca.", kind: .change,
                        input: ActionSpec.args(["key": key, "card": ("string", "An Orca card id, in place of a key.")]), capability: .reveal) { a in
                 await link.run { d, done in
-                    if let card = a.string("card") { d.agentIndex.reveal(card: card); done(.ok(summary: "Orca shows the worktree.")); return }
+                    if let card = a.string("card") {
+                        d.agentIndex.reveal(card: card) { done($0.map { .failed("Orca cannot show the worktree: \($0.message)") } ?? .ok(summary: "Orca shows the worktree.")) }
+                        return
+                    }
                     guard let k = a.string("key"), d.agentIndex.agent(k) != nil else { done(.notAllowed("Give the key of an item with a session.")); return }
-                    d.agentIndex.reveal(k)
-                    done(.ok(summary: "Orca shows the terminal of \(k.uppercased())."))
+                    d.agentIndex.reveal(k) { done($0.map { .failed("Orca cannot show the terminal: \($0.message)") } ?? .ok(summary: "Orca shows the terminal of \(k.uppercased()).")) }
                 }
             },
             ActionSpec(id: "session.history", title: "Session history", help: "Reads the turns of the agent session of the item: the first prompt, earlier turns and the last turn.",
@@ -95,8 +97,9 @@ struct SessionActions {
                         }
                         items.append(QuestionAnswer.Item(id: q.id, choices: known, other: other.isEmpty ? nil : other))
                     }
-                    d.questions.answer(e.question.id, QuestionAnswer(question: e.question.id, items: items, note: a.string("note")))
-                    done(.ok(summary: "The answer is sent."))
+                    d.questions.answer(e.question.id, QuestionAnswer(question: e.question.id, items: items, note: a.string("note"))) { why in
+                        done(why.map { .failed("The answer did not reach the session: \($0)") } ?? .ok(summary: "The answer is sent."))
+                    }
                 }
             },
             ActionSpec(id: "question.dismiss", title: "Dismiss question", help: "Hides an open question in OverSire. The agent still waits.", kind: .change,
@@ -107,10 +110,11 @@ struct SessionActions {
                     done(.ok(summary: "The question is hidden."))
                 }
             },
-            status("status.approve", "Approve result", "Accepts the end-of-turn result of the session.") { $0.approve($1) },
-            status("status.hold", "Hold result", "Keeps the result open for later.") { $0.hold($1) },
-            status("status.markBlocked", "Mark blocked", "Marks the session as not finished: it waits for the developer.") { $0.markBlocked($1) },
-            status("status.snooze", "Snooze result", "Hides the result for one day.") { $0.snooze($1) },
+            status("status.approve", "Approve result", "Accepts the end-of-turn result of the session. A stuck session gets its nudge.") { $0.approve($1, done: $2) },
+            status("status.ask", "Ask the agent", "Asks the agent to go on with the open steps of a result that is not finished.") { $0.ask($1, done: $2) },
+            status("status.hold", "Hold result", "Keeps the result open for later.") { $0.hold($1); $2(nil) },
+            status("status.markBlocked", "Mark blocked", "Marks the session as not finished: it waits for the developer.") { $0.markBlocked($1); $2(nil) },
+            status("status.snooze", "Snooze result", "Hides the result for one day.") { $0.snooze($1); $2(nil) },
             ActionSpec(id: "worktree.remove", title: "Remove worktree", help: "Removes the finished worktrees of the item: orca worktree rm, plus merged branches. `force` also removes worktrees with changes that are not in the base branch. `lines` limits the cleanup lines.",
                        kind: .outward, input: ActionSpec.args(["key": key, "force": ("boolean", "Remove also the lines that are not safe."),
                                                                "lines": ("array", "Cleanup line ids. Empty: all lines.")], required: ["key"]),
@@ -130,7 +134,7 @@ struct SessionActions {
         ]
     }
 
-    private func status(_ id: String, _ title: String, _ help: String, _ op: @escaping (StatusJob, String) -> Void) -> ActionSpec {
+    private func status(_ id: String, _ title: String, _ help: String, _ op: @escaping (StatusJob, String, @escaping (ProviderError?) -> Void) -> Void) -> ActionSpec {
         let link = link
         return ActionSpec(id: id, title: title, help: help + " Give the item key or the status id.", kind: .change,
                           input: ActionSpec.args(["key": ItemActions.key, "id": ("string", "The status id.")])) { a in
@@ -138,8 +142,9 @@ struct SessionActions {
                 guard let s = a.string("id").flatMap({ id in d.statusJob.statuses.first { $0.id == id } }) ?? a.string("key").flatMap({ d.statusJob.status($0) }) else {
                     done(.notAllowed("No session result for \(a.string("key") ?? a.string("id") ?? "it").")); return
                 }
-                op(d.statusJob, s.id)
-                done(.ok(summary: "\(title): \(s.key)."))
+                op(d.statusJob, s.id) { err in
+                    done(err.map { .failed("Could not send to the session of \(s.key): \($0.message)") } ?? .ok(summary: "\(title): \(s.key)."))
+                }
             }
         }
     }

@@ -495,7 +495,7 @@ final class QueuePage: Page {
             guard !open.isEmpty else { continue }
             let sub = NSMenu()
             for i in open.prefix(40) {
-                let a = MenuAction("\(i.key)  \(i.title.prefix(70))") { [weak self] in self?.data.actions.run("queue.add", ["key": .string(i.key)]) }
+                let a = MenuAction("\(i.key)  \(i.title.prefix(70))") { [weak self] in self?.data.actions.click("queue.add", ["key": .string(i.key)], in: self?.view.window) }
                 keep.append(a)
                 sub.addItem(a.item)
             }

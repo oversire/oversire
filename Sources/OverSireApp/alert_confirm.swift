@@ -67,7 +67,9 @@ enum AlertConfirm {
         }
     }
 
+    /// Shows a failure. The app log keeps it too.
     static func tell(_ title: String, info: String = "", in window: NSWindow?) {
+        UILog.failed(title, info)
         show(Spec(title: title, info: info, style: .warning), in: window)
     }
 

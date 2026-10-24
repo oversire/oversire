@@ -24,6 +24,14 @@ final class UILogTests: XCTestCase {
         XCTAssertNotEqual(e?.verbose, true, "the log keeps each action")
     }
 
+    func testAFailureWritesAWarning() {
+        UILog.shown("Work")
+        UILog.failed("Start session did not work", "Not allowed: the repo")
+        let e = lines.all.last
+        XCTAssertEqual([e?.area.rawValue, e?.job, e?.subject, e?.message], ["ui", "Error", "Work", "Start session did not work: Not allowed: the repo"])
+        XCTAssertEqual(e?.level, .warn)
+    }
+
     func testAnIconButtonUsesItsAccessibilityLabel() {
         ActionButton("", symbol: "arrow.clockwise") {}.performClick(nil)
         XCTAssertEqual(lines.all.last?.message, "arrow.clockwise")

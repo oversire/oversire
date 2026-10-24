@@ -10,7 +10,8 @@ struct SessionStartMenu {
 
     /// Starts in the saved workspace of the project. Without one, a menu at `anchor` asks for it.
     func start(_ item: Item, snap: ProjectSnapshot, at anchor: NSView, agent: String? = nil) {
-        pickRoot(snap, at: anchor, key: item.key) { root in self.run(item, root: root, agent: agent) }
+        let window = anchor.window
+        pickRoot(snap, at: anchor, key: item.key) { root in self.run(item, root: root, agent: agent, in: window) }
     }
 
     /// Gives nil when the project has a saved Orca workspace. Else a menu at `anchor` asks for one.
@@ -19,7 +20,9 @@ struct SessionStartMenu {
         let agents = data.agentIndex
         agents.workspaces { [weak anchor] r in
             switch r {
-            case .failure(let e): agents.fail(key, e.message)
+            case .failure(let e):
+                agents.fail(key, e.message)
+                AlertConfirm.tell("OverSire cannot read the Orca workspaces", info: e.message, in: anchor?.window)
             case .success(let repos):
                 let menu = NSMenu()
                 menu.addItem(withTitle: "Run \(snap.summary.identifier) items in…", action: nil, keyEquivalent: "").isEnabled = false
@@ -49,7 +52,7 @@ struct SessionStartMenu {
     // A failed start offers a retry. Other states open the terminal.
     func pill(_ item: Item, snap: ProjectSnapshot, at anchor: NSView) {
         let agents = data.agentIndex
-        guard let a = agents.agent(item.key), a.phase == .failed else { data.actions.run("session.reveal", ["key": .string(item.key)]); return }
+        guard let a = agents.agent(item.key), a.phase == .failed else { data.actions.click("session.reveal", ["key": .string(item.key)], in: anchor.window); return }
         let menu = NSMenu()
         let head = NSMenuItem(title: a.message ?? "The session did not start", action: nil, keyEquivalent: "")
         head.isEnabled = false
@@ -93,10 +96,11 @@ struct SessionStartMenu {
         return menu
     }
 
-    private func run(_ item: Item, root: String?, agent: String?) {
+    // A failure shows its reason: the pill alone is easy to miss.
+    private func run(_ item: Item, root: String?, agent: String?, in window: NSWindow?) {
         var args: [String: JSONValue] = ["key": .string(item.key)]
         if let root { args["root"] = .string(root) }
         if let agent { args["agent"] = .string(agent) }
-        data.actions.run("session.start", args)
+        data.actions.click("session.start", args, in: window, asked: true)
     }
 }

@@ -482,8 +482,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             let approvals = machineHub.approvals
             guard let r = approvals.request(request), MachineSheets.open == nil else { return }
             open(.settings(.machines))
-            MachineSheets.approve(r, group: machineHub.groupName ?? "My machines", over: appWindow.window) { yes in
-                Task { @MainActor in try? await approvals.decide(request, approve: yes) }
+            MachineSheets.approve(r, group: machineHub.groupName ?? "My machines", over: appWindow.window) { [weak self] yes in
+                Task { @MainActor in await approvals.decide(request, approve: yes, in: self?.appWindow.window) }
             }
         }
     }
@@ -1041,7 +1041,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 case UserJoinNotifier.approve, UserJoinNotifier.deny:
                     let yes = response.actionIdentifier == UserJoinNotifier.approve
                     let approvals = self.machineHub.approvals
-                    Task { @MainActor in try? await approvals.decide(request, approve: yes) }
+                    Task { @MainActor in await approvals.decide(request, approve: yes, in: nil) }
                 default: self.showJoinRequest(request)
                 }
                 return

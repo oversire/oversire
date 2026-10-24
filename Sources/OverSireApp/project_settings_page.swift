@@ -509,7 +509,7 @@ final class ProjectSettingsPage: Page {
             } catch ProjectMemory.SaveError.tooLong(let n) {
                 self.note = (.warning, "An entry has at most \(MemoryDraft.maxText) characters. This one has \(n).")
             } catch {
-                self.editingFact = nil
+                self.note = (.bad, "Could not save the entry: \(error.localizedDescription)")
             }
             self.reload()
         }
@@ -536,7 +536,9 @@ final class ProjectSettingsPage: Page {
             note = nil
         } catch ProjectMemory.SaveError.tooLong(let n) {
             note = (.warning, "The vision has at most \(MemoryDraft.maxText) characters. It has \(n). Make it shorter to save.")
-        } catch {}
+        } catch {
+            note = (.bad, "Could not save the vision: \(error.localizedDescription)")
+        }
         reload()
     }
 

@@ -44,6 +44,10 @@ struct ItemStatus {
             facts.append(a.label(now: now))
         }
         if let n = terminals { facts.append("\(n) terminal\(n == 1 ? "" : "s")") }
+        // An old status must not hide why the new session did not start.
+        if let a = agent, a.phase == .failed {
+            return ItemStatus(source: .phase, tone: Tone(a.phase), text: a.label(now: now), headline: a.message ?? "", facts: [], attention: 4)
+        }
         if let s = status, outOfDate == nil {
             let r = s.reply
             let rank = state == .needsInput ? 0 : [.blocked: 1, .stuck: 2, .working: 3][s.state] ?? 4

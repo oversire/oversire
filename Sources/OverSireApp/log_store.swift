@@ -24,6 +24,12 @@ enum UILog {
         sink.write(LogEntry(level: .ok, area: .ui, job: job, subject: page.isEmpty ? nil : page, message: message))
     }
 
+    /// A failure that the user sees. Warn, so that the log shows it.
+    static func failed(_ title: String, _ reason: String) {
+        sink.write(LogEntry(level: .warn, area: .ui, job: "Error", subject: page.isEmpty ? nil : page,
+                            message: reason.isEmpty ? title : "\(title): \(reason)"))
+    }
+
     static func shown(_ title: String) {
         guard title != page else { return }
         write("Page", page.isEmpty ? title : "\(page) → \(title)")

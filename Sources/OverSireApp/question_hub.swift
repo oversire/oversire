@@ -148,7 +148,11 @@ final class QuestionHub {
     func card(_ e: QuestionBoard.Entry, stop: (() -> Void)? = nil) -> QuestionCard {
         let id = e.id
         var a = QuestionCard.Actions()
-        a.send = { [weak self] answer in self?.answer(id, answer) }
+        a.send = { [weak self] answer in
+            self?.answer(id, answer) { why in
+                if let why { AlertConfirm.tell("The answer did not reach the session", info: why, in: NSApp.keyWindow) }
+            }
+        }
         a.dismiss = { [weak self] in self?.dismiss(id) }
         a.draft = { [weak self] d in self?.lock.withLock { self?.drafts[id] = d } }
         a.stop = stop
@@ -156,15 +160,19 @@ final class QuestionHub {
         return QuestionCard(e, place: place(e.question), checkedAt: checkedAt(e.question), draft: lock.withLock { drafts[id] } ?? QuestionDraft(), actions: a)
     }
 
-    func answer(_ id: QuestionID, _ a: QuestionAnswer) {
-        guard let board else { return }
+    /// `done` runs on the main thread with the reason of a failure.
+    func answer(_ id: QuestionID, _ a: QuestionAnswer, done: ((String?) -> Void)? = nil) {
+        guard let board else { done?("No daemon has this question."); return }
         Task {
+            var why: String?
             do {
                 try await board.answer(id, a)
                 self.lock.withLock { self.drafts[id] = nil }
             } catch {
                 log.error("Question answer failed: \(String(describing: error), privacy: .public)")
+                why = (error as? ProviderError)?.message ?? error.localizedDescription
             }
+            DispatchQueue.main.async { done?(why) }
         }
     }
 
@@ -179,7 +187,11 @@ final class QuestionHub {
 
     func reveal(_ q: SessionQuestion) {
         guard let r = channel(q) as? any Revealing else { return }
-        Task { try? await r.reveal(q.session) }
+        Task {
+            if case .failure(let e) = await Result(awaiting: { try await r.reveal(q.session) }) {
+                await MainActor.run { AlertConfirm.tell("OverSire cannot open the session", info: e.message, in: NSApp.keyWindow) }
+            }
+        }
     }
 
     private func channel(_ q: SessionQuestion) -> (any AgentRuntime)? {

@@ -104,9 +104,11 @@ final class NeedsYouCard: NSObject {
         var trailing: [NSView] = []
         let freeing = checks.filter(StatusJob.frees)
         if freeing.count >= 2 {
-            trailing.append(ActionButton("Approve all \(freeing.count) \"free the slot\"") {
-                freeing.forEach { d.actions.run("status.approve", ["id": .string($0.id)]) }
-            })
+            let all = ActionButton("Approve all \(freeing.count) \"free the slot\"")
+            all.onClick = { [weak all] in
+                freeing.forEach { d.actions.click("status.approve", ["id": .string($0.id)], in: all?.window) }
+            }
+            trailing.append(all)
         }
         trailing.append(NeedsYouCard.refreshButton(d, title: "Refresh"))
         let c = Card(title: "Needs you · \(n)", trailing: trailing, padding: 10, spacing: 2,
@@ -186,7 +188,7 @@ final class NeedsYouCard: NSObject {
                        ActionButton("Hold", action: "status.hold", ["id": .string(st.id)])]
         case .unfinished:
             pill = Chiplet("Not finished", symbol: "circle.lefthalf.filled")
-            buttons = [ActionButton("Ask the agent", style: .primary) { job.ask(st.id) }, ActionButton("Mark as blocked on you", action: "status.markBlocked", ["id": .string(st.id)])]
+            buttons = [ActionButton("Ask the agent", style: .primary, action: "status.ask", ["id": .string(st.id)]), ActionButton("Mark as blocked on you", action: "status.markBlocked", ["id": .string(st.id)])]
         default:
             pill = Chiplet(frees ? "Free slot" : "Seen", symbol: "square.dashed")
             buttons = [ActionButton("Approve", style: .primary, action: "status.approve", ["id": .string(st.id)]),
@@ -236,7 +238,7 @@ final class NeedsYouCard: NSObject {
         }
         let menu: () -> [MenuAction] = { [weak self] in
             [MenuAction("Open session") { self?.page?.go(.item(key, .session)) },
-             MenuAction("Show in Orca") { self?.data?.actions.run("session.reveal", ["key": .string(key)]) }]
+             MenuAction("Show in Orca") { self?.data?.actions.click("session.reveal", ["key": .string(key)], in: NSApp.keyWindow) }]
         }
         let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(key),
                        NSTextField.text(tone.word, size: 12.5, weight: .medium, color: tone.color), text, Spacer(), reply,
@@ -303,7 +305,7 @@ final class NeedsYouCard: NSObject {
         let menu: () -> [MenuAction] = { [weak self] in
             [MenuAction("Refresh") { job.refresh(keys: [e.key]) },
              MenuAction("Open session") { self?.page?.go(.item(e.key, .session)) },
-             MenuAction("Snooze 1 day") { self?.data?.actions.run("status.snooze", ["id": .string(e.id)]) }]
+             MenuAction("Snooze 1 day") { self?.data?.actions.click("status.snooze", ["id": .string(e.id)], in: NSApp.keyWindow) }]
         }
         cells.append(moreButton(e.key, menu))
         let row = Row(cells, height: 34, inset: 6,
@@ -602,14 +604,13 @@ final class NeedsYouRow: Row {
         var actions: [NSView] = []
         if let a = n.act {
             actions.append(ActionButton(a.title, style: .primary) {
-                let job = data.statusJob
                 switch a {
                 case .answer: go(n.route)
                 case .answerInOrca(let id): if let e = data.questions.entries.first(where: { $0.id == id }) { data.questions.reveal(e.question) }
                 case .reply(let k): go(.item(k, .session))
                 case .checklist(let k): go(.item(k, .overview))
-                case .nudge(let id), .approve(let id): data.actions.run("status.approve", ["id": .string(id)])
-                case .ask(let id): job.ask(id)
+                case .nudge(let id), .approve(let id): data.actions.click("status.approve", ["id": .string(id)], in: NSApp.keyWindow)
+                case .ask(let id): data.actions.click("status.ask", ["id": .string(id)], in: NSApp.keyWindow)
                 case .rerun(let repo, let r): data.rerun(repo: repo, runs: [r], failedOnly: true)
                 case .open(let url): if let u = URL(string: url) { NSWorkspace.shared.open(u) }
                 case .closeSubItems(let k): NeedsYouRow.finish(k, data: data, window: NSApp.keyWindow)

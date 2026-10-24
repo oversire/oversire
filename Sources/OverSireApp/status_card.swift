@@ -36,12 +36,17 @@ struct StatusCard {
                 if reading { r.busy("Reading…") }
                 trailing.append(r)
             }
-            trailing.append(ActionButton("Open in Orca", symbol: "terminal") { agents.reveal(k) })
-            if agent?.phase == .failed { trailing.append(ActionButton("Dismiss") { agents.clearFailure(k) }) }
+            if agent?.phase == .failed {
+                trailing.append(ActionButton("Dismiss") { agents.clearFailure(k) })
+            } else if agents.canReveal {
+                trailing.append(ActionButton("Open in Orca", symbol: "terminal", action: "session.reveal", ["key": .string(k)]))
+            }
         }
         let c = Card(title: "Status", trailing: trailing, spacing: 10)
 
-        if closed && s == nil {
+        if agent?.phase == .failed {
+            c.add(Self.note("✕", "The session did not start. " + (agent?.message ?? ""), color: Palette.bad, key: k, go: go))
+        } else if closed && s == nil {
             c.add(NSStackView(h: [Glyph("checkmark.circle", color: Palette.dim, size: 13),
                                   NSTextField.text("The item is done. OverSire reads no AI status for a closed item.", size: 12.5, color: Palette.dim, lines: 2),
                                   Spacer()], spacing: 6))
@@ -58,23 +63,23 @@ struct StatusCard {
         } else {
             noStatus(c)
         }
-        if let why = s?.partial { c.add(Self.partialNote("From the screen only. " + why, key: k, go: go)) }
+        if let why = s?.partial, agent?.phase != .failed { c.add(Self.note("▲", "From the screen only. " + why, color: Palette.warn, key: k, go: go)) }
         c.add(chips())
         if let s { c.add(NSTextField.text(s.read + (s.byAI ? " · by AI" : "") + " · " + s.cause, size: 11.5, color: Palette.dim, lines: 2)) }
         return c
     }
 
-    // An amber note where the data is partial, with a link to the log lines of the item.
-    static func partialNote(_ text: String, key: String, go: @escaping (Route) -> Void) -> NSView {
-        let box = Box(fill: Palette.warn.withAlphaComponent(0.1), border: nil, radius: 6)
-        let row = NSStackView(h: [NSTextField.text("▲", size: 12, color: Palette.warn),
-                                  NSTextField.text(text, size: 12, color: Palette.fg, lines: 2),
+    // A note with a link to the log lines of the item: amber where the data is partial, red for a failure.
+    static func note(_ mark: String, _ text: String, color: NSColor, key: String, go: @escaping (Route) -> Void) -> NSView {
+        let box = Box(fill: color.withAlphaComponent(0.1), border: nil, radius: 6)
+        let row = NSStackView(h: [NSTextField.text(mark, size: 12, color: color),
+                                  NSTextField.text(text, size: 12, color: Palette.fg, lines: 3),
                                   ActionButton("View log", style: .link) {
                                       LogListView.model = LogListModel(filter: .all, text: key)
                                       go(.settings(.logs, anchor: SettingsAnchor.log.rawValue))
                                   }, Spacer()], spacing: 6, align: .top)
         row.setAccessibilityElement(true)
-        row.setAccessibilityLabel("Warning: " + text)
+        row.setAccessibilityLabel((color == Palette.bad ? "Error: " : "Warning: ") + text)
         box.addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -126,12 +131,12 @@ struct StatusCard {
         var b: [NSView]
         switch s.state {
         case .stuck:
-            b = [ActionButton("Send nudge", style: .primary) { job.approve(s.id) }, ActionButton("Free the slot") { job.release(s.id) },
+            b = [ActionButton("Send nudge", style: .primary, action: "status.approve", ["id": .string(s.id)]), ActionButton("Free the slot") { job.release(s.id) },
                  ActionButton("Hold") { job.hold(s.id) }]
         case .unfinished:
-            b = [ActionButton("Mark as blocked on you", style: .primary) { job.markBlocked(s.id) }, ActionButton("Ask the agent") { job.ask(s.id) }]
+            b = [ActionButton("Mark as blocked on you", style: .primary) { job.markBlocked(s.id) }, ActionButton("Ask the agent", action: "status.ask", ["id": .string(s.id)])]
         case .done:
-            b = [ActionButton(StatusJob.frees(s) ? "Free the slot" : "Approve", style: .primary) { job.approve(s.id) },
+            b = [ActionButton(StatusJob.frees(s) ? "Free the slot" : "Approve", style: .primary, action: "status.approve", ["id": .string(s.id)]),
                  ActionButton("Hold") { job.hold(s.id) }]
         case .working:
             b = [NSTextField.text("Nothing for you. The session works.", size: 12, color: Palette.dim)]

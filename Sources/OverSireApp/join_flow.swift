@@ -190,6 +190,13 @@ protocol JoinNotifying {
         drop(id)
     }
 
+    /// A failure shows its reason over `window`.
+    func decide(_ id: String, approve: Bool, in window: NSWindow?) async {
+        do { try await decide(id, approve: approve) } catch {
+            AlertConfirm.tell("OverSire could not \(approve ? "approve" : "deny") the Mac", info: (error as? ProviderError)?.message ?? error.localizedDescription, in: window)
+        }
+    }
+
     /// Reads the open requests of the local daemon, for a Mac without a WebSocket to it.
     func sync() async {
         guard let list = try? await local.joinRequests() else { return }

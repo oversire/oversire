@@ -60,6 +60,14 @@ final class ItemStatusTests: XCTestCase {
         XCTAssertEqual(s.text, "Needs input")
     }
 
+    func testAFailedStartWinsOverAnOldStatus() throws {
+        let failed = AgentSession(phase: .failed, since: now, message: "Not allowed: the repo")
+        let s = try XCTUnwrap(resolve(blocked, agent: failed))
+        XCTAssertEqual(s.source, .phase)
+        XCTAssertEqual(s.headline, "Not allowed: the repo")
+        XCTAssertEqual(s.text, "Not started")
+    }
+
     func testNoSession() {
         XCTAssertNil(resolve(nil, state: nil, agent: nil))
     }

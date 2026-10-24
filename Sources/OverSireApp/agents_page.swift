@@ -299,7 +299,7 @@ final class AgentsPage: Page {
         }
         trailing.append(slot)
         let open = ActionButton("Open", style: .plain) { [weak self] in
-            if let key { self?.go(.item(key, .session)) } else { self?.data.actions.run("session.reveal", ["card": .string(c.id)]) }
+            if let key { self?.go(.item(key, .session)) } else { self?.data.actions.click("session.reveal", ["card": .string(c.id)], in: self?.view.window) }
         }
         open.setAccessibilityLabel(key.map { "Open the session of \($0)" } ?? "Open \(c.name) in Orca")
         trailing.append(open)
@@ -314,7 +314,7 @@ final class AgentsPage: Page {
             } else if detail != nil {
                 if self.expanded.remove(c.id) == nil { self.expanded.insert(c.id) }
                 self.reload()
-            } else if let key { self.go(.item(key, .overview)) } else { self.data.actions.run("session.reveal", ["card": .string(c.id)]) }
+            } else if let key { self.go(.item(key, .overview)) } else { self.data.actions.click("session.reveal", ["card": .string(c.id)], in: self.view.window) }
         }
         if let box = row.cells.boxes["worktree"] { worktree.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true }
         if detail != nil { row.setAccessibilityExpanded(isOpen) }

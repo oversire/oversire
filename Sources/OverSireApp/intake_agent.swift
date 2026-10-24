@@ -298,7 +298,10 @@ final class IntakeAgent {
 
     func reveal(_ item: IntakeItem) {
         guard let s = state(item)?.run?.session, let rt = host() else { return }
-        Task { try? await (rt as? any Revealing)?.reveal(s) }
+        Task {
+            guard let r = rt as? any Revealing, case .failure(let e) = await Result(awaiting: { try await r.reveal(s) }) else { return }
+            await MainActor.run { AlertConfirm.tell("Orca cannot show the session", info: e.message, in: NSApp.keyWindow) }
+        }
     }
 
     func discard(_ item: IntakeItem) {

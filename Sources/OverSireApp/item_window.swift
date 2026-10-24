@@ -814,7 +814,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     private var starter: SessionStartMenu? { (NSApp.delegate as? AppData).map(SessionStartMenu.init) }
 
     @objc private func revealAgent() {
-        if let id = itemId, let key = store.item(id)?.item.key { run("session.reveal", ["key": .string(key)]) { _, _ in } }
+        if let id = itemId, let key = store.item(id)?.item.key { (NSApp.delegate as? AppData)?.actions.click("session.reveal", ["key": .string(key)], in: window) }
     }
 
     @objc private func sendAgent() {

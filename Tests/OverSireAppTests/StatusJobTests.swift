@@ -172,6 +172,22 @@ final class StatusJobTests: XCTestCase {
         XCTAssertTrue(job.pending.isEmpty)
     }
 
+    func testAFailedSendKeepsTheStatusOpen() throws {
+        engine.on(.status, .success(#"{"state":"unfinished","headline":"Half done.","next":["Add the tests"]}"#))
+        seed(.done, message: "I stop here.")
+        tick()
+        settle()
+        let s = try XCTUnwrap(job.status("A-1"))
+        agents.runtime = { nil }
+        var err: ProviderError?
+        let sent = expectation(description: "done")
+        job.ask(s.id) { err = $0; sent.fulfill() }
+        wait(for: [sent], timeout: 5)
+        XCTAssertEqual(err?.message, "No machine runs the sessions. Pick one in Settings › Machines.")
+        XCTAssertEqual(job.status("A-1")?.handled, .open, "the user can try again")
+        XCTAssertEqual(job.pending.count, 1)
+    }
+
     func testTheStatusesStayOnDisk() {
         job.ai = { nil }
         seed(.done, message: "I need you to set the API key.")

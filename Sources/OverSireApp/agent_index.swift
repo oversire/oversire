@@ -323,21 +323,23 @@ final class AgentIndex: NSObject {
     var remote: Bool { runtime().map { !($0 is any Revealing) } ?? false }
 
     // Shows the item's terminal in Orca.
-    func reveal(_ key: String) {
-        guard let a = agent(key), let card = a.card, let rt = runtime() else { return }
-        Task {
-            guard let ts = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)),
-                  let t = AgentIndex.pick(ts, agent: a, key: key) ?? ts.first(where: { !$0.orphaned }) else { return }
-            try? await (rt as? any Revealing)?.reveal(t.ref)
-        }
+    func reveal(_ key: String, done: @escaping (ProviderError?) -> Void) {
+        guard let a = agent(key), let card = a.card else { done(.notFound); return }
+        reveal(card: card, pick: { AgentIndex.pick($0, agent: a, key: key) }, done: done)
     }
 
     // Shows the first live terminal of a worktree in Orca.
-    func reveal(card: String) {
-        guard let rt = runtime() else { return }
+    func reveal(card: String, pick: @escaping ([RuntimeSession]) -> RuntimeSession? = { _ in nil }, done: @escaping (ProviderError?) -> Void) {
+        guard let rt = runtime() as? any Revealing & AgentHost else { done(.unsupported(.reveal)); return }
         Task {
-            guard let t = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)).first(where: { !$0.orphaned }) else { return }
-            try? await (rt as? any Revealing)?.reveal(t.ref)
+            let r = await Result(awaiting: { () async throws -> Void in
+                let ts = try await rt.sessions(WorkspaceRef(account: rt.account, id: card))
+                guard let t = pick(ts) ?? ts.first(where: { !$0.orphaned }) else {
+                    throw ProviderError.vendor(code: "no_terminal", message: "The worktree has no live terminal")
+                }
+                try await rt.reveal(t.ref)
+            })
+            DispatchQueue.main.async { if case .failure(let e) = r { done(e) } else { done(nil) } }
         }
     }
 
@@ -368,6 +370,7 @@ final class AgentIndex: NSObject {
     }
 
     func send(_ key: String, text: String, done: @escaping (ProviderError?) -> Void) {
+        guard runtime() != nil else { done(.vendor(code: "no_runtime", message: "No machine runs the sessions. Pick one in Settings › Machines.")); return }
         terminal(key) { rt, s in
             guard let s else { return ProviderError.vendor(code: "no_terminal", message: "The session terminal is closed") }
             if case .failure(let e) = await Result(awaiting: { try await rt.send(s, text: text) }) { return e }
