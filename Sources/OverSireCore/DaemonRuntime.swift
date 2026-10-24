@@ -12,9 +12,10 @@ public struct DaemonRuntime: Codable, Hashable, Sendable, Identifiable {
     public var version: String?
     public var error: String?
     public var capabilities: [String]       // Capability raw values
+    public var stream: RuntimeStream?
 
     public init(id: String, name: String, installed: Bool, reachable: Bool, version: String? = nil, error: String? = nil,
-                capabilities: [String] = []) {
+                capabilities: [String] = [], stream: RuntimeStream? = nil) {
         self.id = id
         self.name = name
         self.installed = installed
@@ -22,6 +23,20 @@ public struct DaemonRuntime: Codable, Hashable, Sendable, Identifiable {
         self.version = version
         self.error = error
         self.capabilities = capabilities
+        self.stream = stream
+    }
+}
+
+/// The state of the live session stream of a runtime. POST /v1/runtimes/{id}/retry connects again.
+public struct RuntimeStream: Codable, Hashable, Sendable {
+    public enum State: String, Codable, Sendable { case live, pairing, textOnly }
+
+    public var state: State
+    public var reason: String?
+
+    public init(state: State, reason: String? = nil) {
+        self.state = state
+        self.reason = reason
     }
 }
 
