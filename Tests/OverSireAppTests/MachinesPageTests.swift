@@ -244,6 +244,26 @@ final class MachinesModelTests: XCTestCase {
         XCTAssertTrue(m.found.isEmpty)
     }
 
+    func testRuntimeRows() {
+        var s = snapshot()
+        s.runtimes["mbp"] = [
+            DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.2", stream: RuntimeStream(state: .textOnly, reason: "no pairing")),
+            DaemonRuntime(id: "oversire", name: "OverSire", installed: true, reachable: true, stream: RuntimeStream(state: .live)),
+            DaemonRuntime(id: "x", name: "X", installed: true, reachable: true),
+        ]
+        s.runtimes["devbox"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running."),
+                                DaemonRuntime(id: "y", name: "Y", installed: false, reachable: false)]
+        s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, stream: RuntimeStream(state: .pairing))]
+        let rows = MachinesModel(s, config: MachinesConfig(), now: now).runtimes
+        XCTAssertEqual(rows.map(\.key), ["mbp/orca", "mbp/oversire", "mbp/x", "mba/orca", "devbox/orca", "devbox/y"], "in the order of the machines")
+        XCTAssertEqual(rows.map(\.state), [.textOnly, .live, .running, .connecting, .down, .missing])
+        XCTAssertEqual(rows.map(\.canRetry), [true, false, false, false, true, false])
+        XCTAssertEqual(rows[0].title, "Orca on mbp")
+        XCTAssertEqual(rows[0].detail, "Orca 1.4.2 · no pairing")
+        XCTAssertEqual(rows[4].detail, "Orca is not running.")
+        XCTAssertEqual(rows[5].note, "The daemon found no Y on devbox.")
+    }
+
     func testSessionsMachine() {
         var cfg = MachinesConfig()
         var m = MachinesModel(snapshot(), config: cfg, now: now)
@@ -359,6 +379,29 @@ final class MachineUpdateTests: XCTestCase {
 
     private func settle(_ c: MachinesController) async {
         for _ in 0..<200 where !c.updating.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+    }
+
+    func testRuntimeRetry() async {
+        let mba = FakeDaemon(machine: "mba")
+        mba.runtime.runtimes = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, stream: RuntimeStream(state: .live))]
+        let c = controller(mba)
+        var s = c.snapshot
+        s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running.")]
+        c.use(s)
+        c.retry("mba", runtime: "orca")
+        XCTAssertTrue(c.retrying.contains("mba/orca"))
+        for _ in 0..<200 where !c.retrying.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(mba.calls, ["POST /v1/runtimes/orca/retry"])
+        XCTAssertEqual(c.model.runtimes.first?.state, .live)
+        XCTAssertNil(c.notice)
+
+        c.retry("mba", runtime: "nope")
+        for _ in 0..<200 where !c.retrying.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(c.notice?.hasPrefix("Retry nope on mba:"), true)
+
+        let none = controller(nil)
+        none.retry("mbp", runtime: "orca")
+        XCTAssertEqual(none.notice, "Retry orca on mbp: OverSire has no link to mbp. Check that it is online.")
     }
 
     func testRemoteUpdate() async {

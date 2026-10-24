@@ -66,6 +66,9 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
         try with {
             switch (method, p) {
             case ("GET", ["v1", "runtimes"]): return try ok(DaemonRuntimesPage(runtimes: _runtimes))
+            case ("POST", let p) where p.count == 4 && p[1] == "runtimes" && p[3] == "retry":
+                guard let rt = _runtimes.first(where: { $0.id == p[2] }) else { return error(404, "no runtime \(p[2])") }
+                return try ok(rt)
             case ("GET", ["v1", "repos"]): return try ok(DaemonReposPage(repos: _repos))
             case ("GET", ["v1", "workspaces"]): return try ok(DaemonWorkspacesPage(workspaces: _workspaces))
             case ("DELETE", let p) where p.count == 3 && p[1] == "workspaces":

@@ -1289,6 +1289,13 @@ extension MachinesSnapshot {
         s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-7200), latest: "0.4.1",
                                       error: "update: no write access to /usr/local/bin. Give your user write access to it, or remove /usr/local/bin/oversire and install the CLI again from the OverSire app")
         s.sessions["mba"] = []
+        let caps = ["sessionInput", "sessionTail", "sessionStream"]
+        s.runtimes["mbp"] = [
+            DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.223", capabilities: caps,
+                          stream: RuntimeStream(state: .textOnly, reason: "Orca does not let the daemon pair by itself. The view is text only.")),
+            DaemonRuntime(id: "oversire", name: "OverSire", installed: true, reachable: true, capabilities: caps, stream: RuntimeStream(state: .live)),
+        ]
+        s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running.")]
         return s
     }
 }

@@ -22,6 +22,8 @@ struct MachinesSnapshot: Equatable {
     /// machine → its sessions. A machine without an entry has no count.
     var sessions: [String: [DaemonSession]] = [:]
     var health: [String: SourceHealth] = [:]
+    /// machine → its agent runtimes. A machine without an entry gave no answer.
+    var runtimes: [String: [DaemonRuntime]] = [:]
 }
 
 /// The rows of the page. It has no AppKit types, so tests compare it.
@@ -80,6 +82,58 @@ struct MachinesModel: Equatable {
         }
     }
 
+    /// One agent runtime of one machine, with the state of its live session view.
+    struct Runtime: Equatable {
+        enum State: Equatable { case live, textOnly, connecting, running, down, missing }
+        var machine: String
+        var id: String
+        var name: String
+        var version: String?
+        var state: State
+        /// Why the runtime has this state. nil: no reason.
+        var note: String?
+
+        init(machine: String, _ r: DaemonRuntime) {
+            self.machine = machine
+            id = r.id
+            name = r.name
+            version = r.version
+            if !r.installed {
+                state = .missing
+                note = "The daemon found no \(r.name) on \(machine)."
+            } else if !r.reachable {
+                state = .down
+                note = r.error
+            } else {
+                switch r.stream?.state {
+                case .live?: state = .live
+                case .textOnly?: state = .textOnly
+                case .pairing?: state = .connecting
+                case nil: state = .running
+                }
+                note = r.stream?.reason
+            }
+        }
+
+        var key: String { "\(machine)/\(id)" }
+        var title: String { "\(name) on \(machine)" }
+        var detail: String { [version.map { "\(name) \($0)" }, note].compactMap { $0 }.joined(separator: " · ") }
+
+        var status: String {
+            switch state {
+            case .live: return "Live"
+            case .textOnly: return "Text only"
+            case .connecting: return "Connecting"
+            case .running: return "Running"
+            case .down: return "Not running"
+            case .missing: return "Not installed"
+            }
+        }
+
+        /// Retry connects the live view again, or probes a runtime that did not answer.
+        var canRetry: Bool { state == .textOnly || state == .down }
+    }
+
     var state: State
     var groupName: String
     var machines: [Machine]
@@ -99,6 +153,8 @@ struct MachinesModel: Equatable {
     var sessionChoices: [String]
     /// The machine that runs the sessions. nil: none of the list (no daemon on this Mac, or a removed machine).
     var sessionsMachine: String?
+    /// The runtimes of each machine that answered, in the order of the machines.
+    var runtimes: [Runtime]
 
     var title: String {
         switch state {
@@ -162,6 +218,7 @@ struct MachinesModel: Equatable {
         hooks = s.info == nil ? [] : s.hooks.map(Self.hook)
         sessionChoices = machines.filter(\.isThis).map(\.name) + machines.filter { !$0.isThis }.map(\.name)
         sessionsMachine = machines.first(where: \.runsSessions)?.name
+        runtimes = machines.flatMap { m in (s.runtimes[m.name] ?? []).map { Runtime(machine: m.name, $0) } }
     }
 
     static func offline(_ seen: Date?, now: Date) -> String {
@@ -225,6 +282,8 @@ final class MachinesController {
     var notice: String?
     /// The machines that run POST /v1/update now.
     private(set) var updating: Set<String> = []
+    /// The runtimes that run POST /v1/runtimes/{id}/retry now, as Runtime.key.
+    private(set) var retrying: Set<String> = []
     /// The daemon of a machine: loopback for this Mac, else the link of the hub. nil: no link.
     lazy var daemon: (String) -> DaemonClient? = { [unowned self] name in
         if name == self.snapshot.info?.machine.rawValue { return self.local }
@@ -265,12 +324,15 @@ final class MachinesController {
             if (s.group?.members.count ?? 0) <= 1 { s.peers = (try? await local.peers()) ?? [] }
             s.hooks = (try? await local.hookState()) ?? me.harnesses
             if let list = try? await local.sessions() { s.sessions[me.machine.rawValue] = list.sessions }
+            if let page = try? await local.runtimes() { s.runtimes[me.machine.rawValue] = page.runtimes }
             await hub?.approvals.sync()
         }
         if let hub {
             s.health = hub.health
             for l in hub.links where !l.local && hub.isLive(l.machine) {
-                if let list = try? await l.client(http: hub.http).sessions() { s.sessions[l.machine] = list.sessions }
+                let client = l.client(http: hub.http)
+                if let list = try? await client.sessions() { s.sessions[l.machine] = list.sessions }
+                if let page = try? await client.runtimes() { s.runtimes[l.machine] = page.runtimes }
             }
         }
         snapshot = s
@@ -363,6 +425,29 @@ final class MachinesController {
         }
     }
 
+    /// The daemon of machine connects the live view of the runtime again and gives its new state.
+    func retry(_ machine: String, runtime id: String) {
+        let key = "\(machine)/\(id)"
+        guard !retrying.contains(key) else { return }
+        guard let client = daemon(machine) else {
+            notice = "Retry \(id) on \(machine): OverSire has no link to \(machine). Check that it is online."
+            changed()
+            return
+        }
+        retrying.insert(key)
+        changed()
+        Task { @MainActor in
+            do {
+                let d = try await client.retryRuntime(id)
+                if let i = self.snapshot.runtimes[machine]?.firstIndex(where: { $0.id == id }) { self.snapshot.runtimes[machine]?[i] = d }
+            } catch {
+                self.notice = "Retry \(id) on \(machine): \(DaemonClient.reason(error))"
+            }
+            self.retrying.remove(key)
+            self.changed()
+        }
+    }
+
     /// Updates each machine that runs an older CLI and that the page can reach.
     func updateAll() {
         for m in model.machines where m.behind && (m.isThis || m.online) { update(m.name) }
@@ -419,6 +504,7 @@ extension SettingsPage {
         if m.state == .noDaemon { machineSetup(b, m) }
         if m.state == .solo && !m.found.isEmpty { machineFound(b, m) }
         if m.state != .noDaemon || !m.machines.isEmpty { machineList(b, m) }
+        machineRuntimes(b, m)
         if m.state != .noDaemon { machineHooks(b, m); machineDaemon(b, m) }
         if c.wantsConsent, MachineSheets.open == nil {
             DispatchQueue.main.async { [weak self] in
@@ -533,6 +619,37 @@ extension SettingsPage {
         v.addFull(NSTextField.text("Home keeps the shared OverSire state. Use the row menu to make another machine home.",
                                    size: 11.5, color: Palette.dim, lines: 2))
         v.identifier = SettingsAnchor.machines.id
+        b.addFull(v)
+    }
+
+    private func machineRuntimes(_ b: NSStackView, _ m: MachinesModel) {
+        guard !m.runtimes.isEmpty else { return }
+        let c = MachinesController.shared
+        let rows: [NSView] = m.runtimes.map { r in
+            let tone: Tone
+            switch r.state {
+            case .live, .running: tone = Tone(symbol: "checkmark.circle.fill", color: Palette.ok, word: r.status)
+            case .textOnly, .down: tone = Tone(symbol: "exclamationmark.circle.fill", color: Palette.warn, word: r.status)
+            case .connecting: tone = Tone(symbol: "circle.dashed", color: Palette.acc, word: r.status)
+            case .missing: tone = Tone(symbol: "circle.dashed", color: Palette.dim, word: r.status)
+            }
+            var cells: [NSView] = [Glyph("terminal", color: Palette.mut, size: 16), TwoLine(r.title, r.detail, lines: 2), Spacer(), Pill(tone)]
+            if r.canRetry {
+                let busy = c.retrying.contains(r.key)
+                let retry = ActionButton(busy ? "Retrying…" : "Retry") { c.retry(r.machine, runtime: r.id) }
+                retry.isEnabled = !busy
+                retry.setAccessibilityLabel("Retry \(r.title)")
+                cells.append(retry)
+            }
+            return Row(cells, height: r.note == nil ? 52 : 62, label: "\(r.title), \(r.status)\(r.note.map { ", \($0)" } ?? "")")
+        }
+        let v = NSStackView(v: [SectionTitle(SettingsAnchor.runtimes.title)], spacing: 6)
+        let card = ListCard()
+        rows.forEach { card.add($0) }
+        v.addFull(card)
+        v.addFull(NSTextField.text("Each daemon drives the runtimes of its own machine. Live: the session view has color and keys. "
+                                   + "Text only: the daemon reads the screen as text.", size: 11.5, color: Palette.dim, lines: 2))
+        v.identifier = SettingsAnchor.runtimes.id
         b.addFull(v)
     }
 

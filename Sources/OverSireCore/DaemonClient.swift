@@ -117,6 +117,13 @@ public final class DaemonClient: Sendable {
 
     public func runtimes() async throws -> DaemonRuntimesPage { try await runtimeGet("/v1/runtimes") }
 
+    /// Connects the live view of the runtime again, when it can, and gives its new state.
+    public func retryRuntime(_ id: String) async throws -> DaemonRuntime {
+        var r = try json("POST", "/v1/runtimes/\(Self.escape(id))/retry", Optional<[String: String]>.none)
+        r.timeoutInterval = 30
+        return try Self.decode(try await send(r))
+    }
+
     public func repos() async throws -> DaemonReposPage { try await runtimeGet("/v1/repos") }
 
     public func workspaces() async throws -> DaemonWorkspacesPage { try await runtimeGet("/v1/workspaces") }

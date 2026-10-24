@@ -6,7 +6,7 @@ enum SettingsAnchor: String, CaseIterable {
     case services, live
     case projects, refresh, repos, linking, writeback
     case sessions, queue, worktrees, planner
-    case thisMac = "this-mac", joinOnly = "join-only", found, machines, hooks, daemon
+    case thisMac = "this-mac", joinOnly = "join-only", found, machines, runtimes, hooks, daemon
     case engine, localCLI = "local-cli", apiKey = "api-key", use, assistant, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
     case problems, log, logSettings = "log-settings"
@@ -34,6 +34,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .joinOnly: return "Use other machines only"
         case .found: return "Found on your tailnet"
         case .machines: return "My machines"
+        case .runtimes: return "Agent runtimes"
         case .hooks: return "Agent hooks on this Mac"
         case .daemon: return "Daemon"
         case .engine: return "Engine"
@@ -59,7 +60,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .worktrees, .planner: return .agents
-        case .thisMac, .joinOnly, .found, .machines, .hooks, .daemon: return .machines
+        case .thisMac, .joinOnly, .found, .machines, .runtimes, .hooks, .daemon: return .machines
         case .engine, .localCLI, .apiKey, .use, .assistant, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
         case .problems, .log, .logSettings: return .logs
@@ -220,6 +221,7 @@ struct SettingsIndex {
         Entry("Orca account for a machine", .machines, "runtime environment"),
         Entry("Mute sessions", .machines, "silence machine"),
         Entry("Remove a machine", .machines, "group member delete"),
+        Entry("Orca live terminal", .runtimes, "runtime stream text only pairing retry"),
         Entry("Install hooks", .hooks, "claude codex opencode live status"),
         Entry("Remove hooks", .hooks, "claude codex opencode"),
         Entry("Runner", .daemon, "work orders cloud hub"),
