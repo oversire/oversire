@@ -2,13 +2,13 @@
 
 # OverSire — GitHub Actions & PR Monitor for macOS
 
-> A lightweight, native macOS menu bar app for monitoring GitHub Actions, pull request reviews, Plane projects, and weekly CI health. Open source, about 1.3 MB, accessible, zero Electron.
+> A lightweight, native macOS menu bar app for monitoring GitHub Actions, pull request reviews, Plane projects, and weekly CI health. Open source, about 13 MB, accessible, zero Electron.
 
 **There are plenty of GitHub status apps out there.** Most are Electron wrappers that eat 200MB+ of RAM to show you a green checkmark. OverSire exists because a status indicator shouldn't cost more than the IDE it sits next to.
 
 OverSire is built on three principles:
 
-- **Extremely low footprint** — a native Swift binary of about 1.3 MB, ~35MB of RAM, zero frameworks beyond AppKit. No runtime, no bundled browser, no background bloat.
+- **Extremely low footprint** — a native Swift binary of about 13 MB, ~35MB of RAM, AppKit plus one Swift package (SwiftTerm, for the live terminal). No runtime, no bundled browser, no background bloat.
 - **Minimalist** — just the important information: are your Actions passing, do any PRs need your review, and did a tracked project change. Deeper stats live behind the Insights tab, so the default view stays a status light, not a dashboard.
 - **Accessible** — colour is never the only signal. Status uses the Okabe-Ito colour-blind-safe palette plus shape and text cues, and everything is keyboard navigable.
 
@@ -136,7 +136,7 @@ Old links still work: `oversire://mine` opens Work › Items, `oversire://sessio
 - **Hot-reload config** — change tracked repos from settings without restarting
 - **Auto-detects `gh` CLI** — finds your GitHub CLI install automatically
 - **Error feedback** — clear messages when gh CLI is missing, auth fails, or API errors occur
-- **Tiny footprint** — about 1.3 MB, ~35MB memory, zero dependencies beyond macOS
+- **Tiny footprint** — about 13 MB, ~35MB memory, one Swift package (SwiftTerm) and nothing else beyond macOS
 
 ## Requirements
 
@@ -408,7 +408,7 @@ A small amber ▲ on the icon means that a background job of OverSire has a prob
 
 | | OverSire | Typical Electron app |
 |---|---|---|
-| **Binary** | ~1.3 MB | 150–300 MB |
+| **Binary** | ~13 MB | 150–300 MB |
 | **Memory** | ~35 MB (0.2%) | 200–400 MB |
 | **CPU at idle** | 0% | 0.5–2% |
 | **Dependencies** | macOS + `gh` CLI | Node.js, Chromium, npm packages |
@@ -422,13 +422,13 @@ OverSire is native Swift, compiled to one binary. No runtime, no garbage collect
 |---|---|
 | **Process name** | `oversire` |
 | **Spotlight name** | OverSire |
-| **Binary size** | ~1.3 MB |
+| **Binary size** | ~13 MB |
 | **Memory** | ~35 MB / 0.2% on 16GB Mac |
 | **Bundle ID** | `com.oversire.app` |
 
 ## Contributing
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The short version: keep it lean (native Swift, zero dependencies), keep it secure, keep it accessible.
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The short version: keep it lean (native Swift, no dependencies other than SwiftTerm), keep it secure, keep it accessible.
 
 ## License
 

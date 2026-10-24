@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 import OverSireAssistant
 
 // A chip that opens a menu of choices, for status, priority and the like.
@@ -34,6 +35,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var hiddenSummaries: Set<String> = []
     private var timeline: [ActivityEntry]?
     private var tail: [String] = []
+    /// The live terminal of the session, when its daemon gives a stream (OVERSIRE-285).
+    private var live: LiveTerminalCard?
+    private var streamChecked = Date.distantPast
     private var tailAt = Date.distantPast
     private var saving: String?
     private var note: (Tone, String)?
@@ -62,8 +66,23 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override func show(_ r: Route) {
-        if case .item(let k, let t) = r, k != key || t != tab { if k != key { timeline = nil; tail = []; descriptionOpen = false }; tailAt = .distantPast }
+        if case .item(let k, let t) = r, k != key || t != tab {
+            if k != key { timeline = nil; tail = []; descriptionOpen = false }
+            tailAt = .distantPast
+            dropLive()
+        }
         super.show(r)
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        dropLive()
+    }
+
+    private func dropLive() {
+        live?.stop()
+        live = nil
+        streamChecked = .distantPast
     }
 
     override var watches: DataDomains {
@@ -161,7 +180,18 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 if self.tab == .activity { self.reload() }
             }
         }
-        if stream?.agent != nil, tab == .session, -tailAt.timeIntervalSinceNow > 5 {
+        if let a = stream?.agent, tab == .session, live?.sessionID != a.paneKey, -streamChecked.timeIntervalSinceNow > 15 {
+            streamChecked = Date()
+            let k = key
+            data.agentIndex.stream(k) { [weak self] t in
+                guard let self, self.key == k, self.tab == .session, let t, t.view == .terminal, let id = a.paneKey else { return }
+                self.live?.stop()
+                self.live = LiveTerminalCard(sessionID: id, stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets()),
+                                             trailing: self.liveTrailing(t.request, session: id))
+                self.reload()
+            }
+        }
+        if stream?.agent != nil, live == nil, tab == .session, -tailAt.timeIntervalSinceNow > 5 {
             tailAt = Date()
             data.agentIndex.tail(key, lines: 60) { [weak self] lines in
                 guard let self, lines != self.tail else { return }
@@ -639,7 +669,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
         var rows = DaemonBanner.rows() + questionRows()
         if let a = stream?.agent {
             let s = data.statusJob.item(key)
-            rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
+            if let live, live.sessionID == a.paneKey {
+                let fill = { [unowned self] in live.setHead(self.terminalHead(a, status: s), headline: s?.headline, footer: self.replyRowIfOpen(a)) }
+                rows.append(PageRow("live-terminal", ObjectIdentifier(live), Self.sig(a, s), sending, update: { _ in fill() }) { fill(); return live })
+            } else {
+                rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
+            }
         } else {
             rows.append(PageRow("no-session", key) { Banner(.idle, title: "No Orca session yet.", body: "Start the item in Orca to see its session here.") })
         }
@@ -653,15 +688,34 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func terminalCard(_ a: AgentSession, status s: ItemStatus?) -> NSView {
-        let agents = data.agentIndex
-        let c = Card(title: "Terminal", trailing: agents.canReveal ? [ActionButton("Open in Orca", symbol: "terminal", action: "session.reveal", ["key": .string(key)])]
-                                                                   : [Chiplet("on \(agents.place)", symbol: "desktopcomputer", mono: false)])
-        c.add(NSStackView(h: [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"),
-                              RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()], spacing: 6))
+        let c = Card(title: "Terminal", trailing: [placeChip()])
+        c.add(NSStackView(h: terminalHead(a, status: s), spacing: 6))
         if let h = s?.headline, !h.isEmpty { c.add(NSTextField.text(h, size: 12.5, color: Palette.mut, lines: 3)) }
         c.add(tail.isEmpty ? InlineSpinner("Reading the terminal…") : TermView(lines: tail, height: 300))
-        if a.phase != .done && a.phase != .failed { c.add(replyRow()) }
+        if let r = replyRowIfOpen(a) { c.add(r) }
         return c
+    }
+
+    private func terminalHead(_ a: AgentSession, status s: ItemStatus?) -> [NSView] {
+        [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"), RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()]
+    }
+
+    private func replyRowIfOpen(_ a: AgentSession) -> NSView? { a.phase != .done && a.phase != .failed ? replyRow() : nil }
+
+    private func placeChip() -> NSView {
+        let agents = data.agentIndex
+        return agents.canReveal ? ActionButton("Open in Orca", symbol: "terminal", action: "session.reveal", ["key": .string(key)])
+                                : Chiplet("on \(agents.place)", symbol: "desktopcomputer", mono: false)
+    }
+
+    private func liveTrailing(_ request: URLRequest, session id: String) -> [NSView] {
+        let k = key
+        let pop = ActionButton("Pop out", symbol: "macwindow") {
+            LiveTerminalWindow.show(sessionID: id, title: "\(k) terminal",
+                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()))
+        }
+        pop.setAccessibilityLabel("Open the terminal in its own window")
+        return [pop, placeChip()]
     }
 
     private func summaryCard(hasAgent: Bool) -> NSView {

@@ -166,6 +166,17 @@ public final class DaemonClient: Sendable {
         _ = try await send(try json("DELETE", "/v1/workers/\(Self.escape(id))", Optional<[String: String]>.none))
     }
 
+    /// The WebSocket of the live view of a session (session-stream.json). The socket stays open for a long time.
+    public func streamRequest(session id: String) -> URLRequest {
+        var r = request("/v1/sessions/\(Self.escape(id))/stream")
+        r.timeoutInterval = 300
+        if let u = r.url, var c = URLComponents(url: u, resolvingAgainstBaseURL: false) {
+            c.scheme = c.scheme == "https" ? "wss" : "ws"
+            r.url = c.url
+        }
+        return r
+    }
+
     // Question ids hold ":" and other characters that a path segment must escape.
     package static func escape(_ id: String) -> String {
         var allowed = CharacterSet.urlPathAllowed

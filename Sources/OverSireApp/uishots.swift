@@ -780,6 +780,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.glance = UIShots.menuIconSample()
                     } else if p == "kit" {
                         self.glance = UIShots.kitSample()
+                    } else if p.hasPrefix("stream:") {
+                        self.glance = UIShots.streamSample(String(p.dropFirst(7)))
                     } else if p.hasPrefix("questions:") {
                         self.glance = UIShots.questionsSample(String(p.dropFirst(10)))
                     } else if p.hasPrefix("palette:") {
@@ -1519,4 +1521,74 @@ extension UIShots {
         guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return Data() }
         return rep.representation(using: .png, properties: [:]) ?? Data()
     }
+}
+
+// MARK: Live terminal samples
+
+/// A connector that never connects: the sample feeds the card its events.
+private struct NoSockets: WebSocketConnecting {
+    func connect(_ request: URLRequest) async throws -> any WebSocketConnection {
+        try await Task.sleep(for: .seconds(3600))
+        throw CancellationError()
+    }
+}
+
+extension UIShots {
+    /// stream:<frame>: the live terminal card. Frames: live, control, poll, lost, ended.
+    static func streamSample(_ frame: String) -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 900, height: 620), styleMask: [.titled], backing: .buffered, defer: false)
+        w.title = "Session"
+        let page = PageScroll(maxWidth: 900)
+        let root = Box(fill: Palette.bg, border: nil, radius: 0)
+        root.addSubview(page)
+        NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: root.leadingAnchor), page.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                                     page.topAnchor.constraint(equalTo: root.topAnchor), page.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
+        w.contentView = root
+        let request = URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
+        let card = LiveTerminalCard(sessionID: "s-1", stream: SessionStream(request: request, view: .terminal, socket: NoSockets()),
+                                    trailing: [ActionButton("Pop out", symbol: "macwindow"), Chiplet("on mbp", symbol: "desktopcomputer", mono: false)])
+        let since = Date().addingTimeInterval(-22 * 60)
+        let reply = NSTextField()
+        reply.placeholderString = "Send to the session…"
+        card.setHead([Pill(.working, text: "Working"), Chiplet("claude", symbol: "cpu"), RelativeTimeLabel({ since }, size: 12, format: { "since " + $0 }), Spacer()],
+                     headline: "Runs the cli tests after the turn log change.",
+                     footer: frame == "ended" ? nil : NSStackView(h: [reply, ActionButton("Send", style: .primary)], spacing: 6))
+        page.rebuild { col in col.addFull(card) }
+        let poll = frame == "poll"
+        let a = StreamAttached(source: poll ? .poll : .stream, cols: 96, rows: 22, writable: true, resizable: !poll,
+                               reason: poll ? "Orca does not let the daemon pair. The view polls the screen." : nil)
+        card.handle(.attached(a))
+        card.handle(.snapshot(Data(sampleScreen.utf8)))
+        switch frame {
+        case "control": card.toggleControl()
+        case "lost": card.handle(.disconnected("The daemon did not answer.", stopped: false))
+        case "ended": card.handle(.ended(reason: "exited"))
+        case "live": card.handle(.lease(.desktop))
+        default: break
+        }
+        w.orderFrontRegardless()
+        return w
+    }
+
+    private static let sampleScreen = [
+        "\u{1b}[1;38;5;173m✻ Claude Code\u{1b}[0m  \u{1b}[2m~/Projects/oversire-workspace/.wt/oversire-192/cli\u{1b}[0m",
+        "",
+        "\u{1b}[1m>\u{1b}[0m Run the tests of the turn log",
+        "",
+        "\u{1b}[32m●\u{1b}[0m \u{1b}[1mBash\u{1b}[0m(go test ./runtime/oversire/...)",
+        "  ⎿  ok   github.com/oversire/cli/runtime/oversire  4.211s",
+        "",
+        "\u{1b}[32m●\u{1b}[0m \u{1b}[1mRead\u{1b}[0m(runtime/oversire/turns.go)",
+        "  ⎿  Read 305 lines",
+        "",
+        "\u{1b}[33m●\u{1b}[0m \u{1b}[1mBash\u{1b}[0m(go vet ./...)",
+        "  ⎿  \u{1b}[2mRunning…\u{1b}[0m",
+        "",
+        "\u{1b}[38;5;173m✶\u{1b}[0m Checking the feed queue… \u{1b}[2m(esc to interrupt)\u{1b}[0m",
+        "",
+        "\u{1b}[2m╭──────────────────────────────────────────────────────────────────────────────╮\u{1b}[0m",
+        "\u{1b}[2m│\u{1b}[0m > \u{1b}[7m \u{1b}[0m                                                                           \u{1b}[2m│\u{1b}[0m",
+        "\u{1b}[2m╰──────────────────────────────────────────────────────────────────────────────╯\u{1b}[0m",
+        "  \u{1b}[2m⏵⏵ accept edits on\u{1b}[0m",
+    ].joined(separator: "\r\n")
 }

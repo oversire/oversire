@@ -1,6 +1,6 @@
 # Contributing to OverSire
 
-Thanks for your interest! OverSire is intentionally small: native Swift, zero dependencies beyond macOS and the `gh` CLI. Contributions that keep it that way are very welcome.
+Thanks for your interest! OverSire is intentionally small: native Swift, one Swift package (SwiftTerm, for the live terminal), and no other dependencies beyond macOS and the `gh` CLI. Contributions that keep it that way are very welcome.
 
 ## Getting started
 

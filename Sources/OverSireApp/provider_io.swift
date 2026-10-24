@@ -258,6 +258,22 @@ final class URLSessionWebSocket: WebSocketConnection, @unchecked Sendable {
         do { try await task.send(.string(text)) } catch { throw mapped(error) }
     }
 
+    func receiveMessage() async throws -> WebSocketMessage {
+        do {
+            switch try await task.receive() {
+            case .string(let s): return .text(s)
+            case .data(let d): return .data(d)
+            @unknown default: return .text("")
+            }
+        } catch {
+            throw mapped(error)
+        }
+    }
+
+    func send(data: Data) async throws {
+        do { try await task.send(.data(data)) } catch { throw mapped(error) }
+    }
+
     func close() { task.cancel(with: .goingAway, reason: nil) }
 
     // 4001: the cloud removed this Mac.

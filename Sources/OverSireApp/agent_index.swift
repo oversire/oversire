@@ -4,6 +4,11 @@ import OverSireCore
 /// The runtime calls of the agent index.
 typealias AgentHost = AgentRuntime & SessionIO
 
+/// A runtime that gives the live view of a session (OVERSIRE-285).
+protocol SessionStreaming {
+    func stream(of s: AgentSession) async -> (request: URLRequest, view: StreamView)?
+}
+
 /// A runtime that runs a local tool, which can be missing.
 protocol InstallChecking { var installed: Bool { get } }
 
@@ -383,6 +388,15 @@ final class AgentIndex: NSObject {
             guard let s, case .success(let lines) = await Result(awaiting: { try await rt.tail(s, lines: n) }) else { return [] }
             return lines
         } done: { done($0) }
+    }
+
+    /// The live view of the session of the key. nil when its daemon gives no stream.
+    func stream(_ key: String, done: @escaping ((request: URLRequest, view: StreamView)?) -> Void) {
+        guard let a = agent(key), let rt = runtime() as? any SessionStreaming else { done(nil); return }
+        Task {
+            let t = await rt.stream(of: a)
+            DispatchQueue.main.async { done(t) }
+        }
     }
 
     private func terminal<T>(_ key: String, _ work: @escaping (any AgentHost, SessionRef?) async -> T, done: @escaping (T) -> Void) {

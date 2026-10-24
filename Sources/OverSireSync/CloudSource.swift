@@ -11,6 +11,19 @@ public protocol WebSocketConnection: Sendable {
     func receive() async throws -> String
     func send(_ text: String) async throws
     func close()
+    /// Text and binary messages, for the session stream.
+    func receiveMessage() async throws -> WebSocketMessage
+    func send(data: Data) async throws
+}
+
+public enum WebSocketMessage: Hashable, Sendable {
+    case text(String)
+    case data(Data)
+}
+
+extension WebSocketConnection {
+    public func receiveMessage() async throws -> WebSocketMessage { .text(try await receive()) }
+    public func send(data: Data) async throws { throw ProviderError.transport("This socket sends no binary frames.") }
 }
 
 /// A WebSocket that pokes, and a REST read of the event log: the paid push path to oversire/cloud, and an oversire daemon.

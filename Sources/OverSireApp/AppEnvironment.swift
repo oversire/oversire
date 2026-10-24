@@ -167,6 +167,8 @@ extension PlaneTracker: HTMLBodies {
     func html(fromMarkdown md: String) -> String { PlaneMarkup.html(fromMarkdown: md) }
 }
 
+extension MachineRuntime: SessionStreaming {}
+
 extension MachineRuntime: AgentTerminal {
     func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
         let l = try await launch(LaunchRequest(repo: path, agent: agent, prompt: prompt, command: command, title: title, inPlace: true))

@@ -244,16 +244,29 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     }
 }
 
-/// One WebSocket of a FakeDaemon. It answers "ping" with "pong".
+/// One WebSocket of a FakeDaemon. It answers "ping" with "pong". `sent` keeps the other messages of the client.
 public final class FakeDaemonSocket: WebSocketConnection, @unchecked Sendable {
     private let lock = NSLock()
-    private var queue: [String] = []
-    private var waiter: CheckedContinuation<String, Error>?
+    private var queue: [WebSocketMessage] = []
+    private var waiter: CheckedContinuation<WebSocketMessage, Error>?
     private var closed = false
+    private var _sent: [WebSocketMessage] = []
+
+    public init() {}
+
+    public var sent: [WebSocketMessage] { lock.withLock { _sent } }
+    public var isClosed: Bool { lock.withLock { closed } }
 
     public func receive() async throws -> String {
+        switch try await receiveMessage() {
+        case .text(let s): return s
+        case .data(let d): return String(decoding: d, as: UTF8.self)
+        }
+    }
+
+    public func receiveMessage() async throws -> WebSocketMessage {
         try await withCheckedThrowingContinuation { c in
-            let next: Result<String, Error>? = lock.withLock {
+            let next: Result<WebSocketMessage, Error>? = lock.withLock {
                 if closed { return .failure(ProviderError.transport("closed")) }
                 if queue.isEmpty { waiter = c; return nil }
                 return .success(queue.removeFirst())
@@ -263,11 +276,22 @@ public final class FakeDaemonSocket: WebSocketConnection, @unchecked Sendable {
     }
 
     public func send(_ text: String) async throws {
-        if text == "ping" { push("pong") }
+        if text == "ping" { push("pong"); return }
+        try lock.withLock {
+            if closed { throw ProviderError.transport("closed") }
+            _sent.append(.text(text))
+        }
+    }
+
+    public func send(data: Data) async throws {
+        try lock.withLock {
+            if closed { throw ProviderError.transport("closed") }
+            _sent.append(.data(data))
+        }
     }
 
     public func close() {
-        let w: CheckedContinuation<String, Error>? = lock.withLock {
+        let w: CheckedContinuation<WebSocketMessage, Error>? = lock.withLock {
             closed = true
             defer { waiter = nil }
             return waiter
@@ -275,13 +299,15 @@ public final class FakeDaemonSocket: WebSocketConnection, @unchecked Sendable {
         w?.resume(throwing: ProviderError.transport("closed"))
     }
 
-    func push(_ text: String) {
-        let w: CheckedContinuation<String, Error>? = lock.withLock {
+    public func push(_ text: String) { push(.text(text)) }
+
+    public func push(_ m: WebSocketMessage) {
+        let w: CheckedContinuation<WebSocketMessage, Error>? = lock.withLock {
             if closed { return nil }
             if let w = waiter { waiter = nil; return w }
-            queue.append(text)
+            queue.append(m)
             return nil
         }
-        w?.resume(returning: text)
+        w?.resume(returning: m)
     }
 }

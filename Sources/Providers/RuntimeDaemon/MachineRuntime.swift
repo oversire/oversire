@@ -12,6 +12,8 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
                              @unchecked Sendable {
     /// The runtime of a workspace that the adapter did not see in a listing.
     public static let defaultRuntime = "orca"
+    /// The runtime that drives the agent over agent-wire. Its sessions have turns, not a terminal.
+    public static let chatRuntime = "oversire"
     /// The longest time of one work order. A start of Orca can take a minute.
     public static let orderTimeout: TimeInterval = 300
 
@@ -47,7 +49,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     public var capabilities: Set<Capability> {
         var caps: Set<Capability> = [.questions]
         for r in runtimes where r.reachable { caps.formUnion(r.capabilities.map(Capability.init(rawValue:))) }
-        let parts: Set<Capability> = [.sessionInput, .sessionTail, .sessionHistory, .hostFiles, .removeWorkspace, .workers, .questions]
+        let parts: Set<Capability> = [.sessionInput, .sessionTail, .sessionHistory, .hostFiles, .removeWorkspace, .workers, .questions, .sessionStream]
         return caps.intersection(reveals ? parts.union([.reveal]) : parts)
     }
 
@@ -138,6 +140,16 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     public func close(_ s: SessionRef) async throws {
         let rt = await runtime(of: s.workspace.id)
         _ = try await run(.stop(onDaemon(s, rt)), runtime: rt)
+    }
+
+    // MARK: Session stream
+
+    /// The live view of a session. nil when the session has no id or its runtime gives no stream.
+    public func stream(of s: AgentSession) async -> (request: URLRequest, view: StreamView)? {
+        guard let id = s.paneKey, !id.isEmpty, let card = s.card else { return nil }
+        let rt = await runtime(of: card)
+        guard runtimes.contains(where: { $0.id == rt && $0.reachable && $0.capabilities.contains(Capability.sessionStream.rawValue) }) else { return nil }
+        return (client.streamRequest(session: id), rt == Self.chatRuntime ? .chat : .terminal)
     }
 
     // MARK: HostFileWriting

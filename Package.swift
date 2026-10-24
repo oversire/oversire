@@ -10,8 +10,10 @@ let package = Package(
         .executable(name: "oversire", targets: ["OverSireApp"]),
     ],
     // The AgentBinder product only: it has no dependencies.
+    // SwiftTerm draws the live terminal of a session (OVERSIRE-285). Only OverSireApp links it.
     dependencies: [
         .package(url: "https://github.com/oversire/agent-binder.git", from: "0.2.1"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.20.0"),
     ],
     targets: [
         .target(name: "OverSireCore"),
@@ -34,7 +36,8 @@ let package = Package(
             name: "OverSireApp",
             dependencies: ["OverSireCore", "OverSireSync", "OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", "GitHubKit",
                            "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeDaemon",
-                           .product(name: "AgentBinder", package: "agent-binder")],
+                           .product(name: "AgentBinder", package: "agent-binder"),
+                           .product(name: "SwiftTerm", package: "SwiftTerm")],
             // The UI code predates strict concurrency. It moves to .v6 page by page.
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: ["Cocoa", "UserNotifications", "Network", "Carbon", "WebKit", "ScreenCaptureKit", "Speech", "CoreImage"].map { .linkedFramework($0) }
