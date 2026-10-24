@@ -7,6 +7,7 @@ typealias AgentHost = AgentRuntime & SessionIO
 /// A runtime that gives the live view of a session (OVERSIRE-285).
 protocol SessionStreaming {
     func stream(of s: AgentSession) async -> (request: URLRequest, view: StreamView)?
+    func session(id: String) async throws -> DaemonSession
 }
 
 /// A runtime that runs a local tool, which can be missing.
@@ -397,6 +398,24 @@ final class AgentIndex: NSObject {
             let t = await rt.stream(of: a)
             DispatchQueue.main.async { done(t) }
         }
+    }
+
+    /// The daemon record of the session of the key.
+    func daemonSession(_ key: String, done: @escaping (DaemonSession?) -> Void) {
+        guard let id = agent(key)?.paneKey, let rt = runtime() as? any SessionStreaming else { done(nil); return }
+        Task {
+            let s = try? await rt.session(id: id)
+            DispatchQueue.main.async { done(s) }
+        }
+    }
+
+    /// Stops the session of the key through its runtime.
+    func stop(_ key: String, done: @escaping (ProviderError?) -> Void) {
+        terminal(key) { rt, s in
+            guard let s else { return ProviderError.vendor(code: "no_session", message: "The session is closed") }
+            if case .failure(let e) = await Result(awaiting: { try await rt.close(s) }) { return e }
+            return nil
+        } done: { done($0) }
     }
 
     private func terminal<T>(_ key: String, _ work: @escaping (any AgentHost, SessionRef?) async -> T, done: @escaping (T) -> Void) {

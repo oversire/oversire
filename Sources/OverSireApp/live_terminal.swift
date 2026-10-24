@@ -7,14 +7,57 @@ import OverSireSync
 // The terminal of a session through the daemon of its machine (OVERSIRE-285). SwiftTerm draws the screen.
 // The card starts in view mode. "Take control" sends the keys and, on a live stream, the size of this view.
 
-final class LiveTerminalCard: Card, TerminalViewDelegate {
-    enum Link: Equatable {
-        case connecting
-        case live(StreamAttached)
-        case lost(String)
-        case ended(String)
+/// A card that shows a session through its stream. The page keeps it over reloads.
+protocol LiveSessionCard: NSView {
+    var sessionID: String { get }
+    func stop()
+    func setHead(_ views: [NSView], headline: String?, footer: NSView?)
+}
+
+/// The link of a stream, as the cards show it.
+enum StreamLink: Equatable {
+    case connecting
+    case live(StreamAttached)
+    case lost(String)
+    case ended(String)
+
+    var pill: NSView {
+        switch self {
+        case .connecting: return Pill(.running, text: "Connecting…")
+        case .live(let a) where a.source == .poll:
+            let p = Pill(.warning, text: "Text only")
+            p.toolTip = a.reason
+            return p
+        case .live: return Pill(.ok, text: "Live")
+        case .lost(let reason):
+            let p = Pill(.bad, text: "Disconnected")
+            p.toolTip = reason
+            return p
+        case .ended: return Pill(.idle, text: "Ended")
+        }
     }
 
+    /// The text under the card, or nil.
+    var note: String? {
+        switch self {
+        case .lost(let reason): return reason + " OverSire connects again."
+        case .ended(let reason): return reason
+        case .connecting, .live: return nil
+        }
+    }
+
+    var isLive: Bool { if case .live = self { return true }; return false }
+
+    static func endText(_ reason: String) -> String {
+        switch reason {
+        case "exited": return "The session ended."
+        case "closed": return "The runtime closed the terminal."
+        default: return "The stream ended: \(reason)."
+        }
+    }
+}
+
+final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
     let sessionID: String
     /// The parts of the page: the status chips, the headline and the reply row.
     private let head = NSStackView(h: [], spacing: 6)
@@ -27,7 +70,7 @@ final class LiveTerminalCard: Card, TerminalViewDelegate {
     private let control = ActionButton("Take control", symbol: "keyboard")
     private let note = NSTextField.text("", size: 11.5, color: Palette.dim, lines: 2)
     private var listener: Task<Void, Never>?
-    private(set) var link = Link.connecting { didSet { refresh() } }
+    private(set) var link = StreamLink.connecting { didSet { refresh() } }
     private(set) var holder = LeaseHolder.none { didSet { refresh() } }
     private(set) var controlling = false { didSet { refresh() } }
     private var remote: (cols: Int, rows: Int)?
@@ -126,20 +169,12 @@ final class LiveTerminalCard: Card, TerminalViewDelegate {
             if h != .you, controlling, case .live(let a) = link, a.resizable { controlling = false }
         case .ended(let reason):
             controlling = false
-            link = .ended(Self.endText(reason))
+            link = .ended(StreamLink.endText(reason))
         case .failed(_, let message):
             note.stringValue = message
         case .disconnected(let reason, let stopped):
             controlling = false
             link = stopped ? .ended(reason) : .lost(reason)
-        }
-    }
-
-    static func endText(_ reason: String) -> String {
-        switch reason {
-        case "exited": return "The session ended."
-        case "closed": return "The runtime closed the terminal."
-        default: return "The stream ended: \(reason)."
         }
     }
 
@@ -180,29 +215,10 @@ final class LiveTerminalCard: Card, TerminalViewDelegate {
 
     private func refresh() {
         chips.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        var views: [NSView] = []
+        var views = [link.pill]
         var writable = false
-        switch link {
-        case .connecting:
-            views.append(Pill(.running, text: "Connecting…"))
-        case .live(let a):
-            writable = a.writable
-            if a.source == .poll {
-                let p = Pill(.warning, text: "Text only")
-                p.toolTip = a.reason
-                views.append(p)
-            } else {
-                views.append(Pill(.ok, text: "Live"))
-            }
-        case .lost(let reason):
-            let p = Pill(.bad, text: "Disconnected")
-            p.toolTip = reason
-            views.append(p)
-            note.stringValue = reason + " OverSire connects again."
-        case .ended(let reason):
-            views.append(Pill(.idle, text: "Ended"))
-            note.stringValue = reason
-        }
+        if case .live(let a) = link { writable = a.writable }
+        if let n = link.note { note.stringValue = n }
         if controlling {
             views.append(Chiplet("You type", symbol: "keyboard", color: Palette.fg))
         } else {

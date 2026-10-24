@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// The live view of one session through the daemon of its machine (session-stream.json).
-/// It connects again with backoff. A terminal view acks each 64 KiB. A chat view attaches again after the last seq it saw.
+/// It connects again with backoff. A terminal view acks each 64 KiB. A chat view attaches again after the last seq it saw, or before a tool that runs.
 public actor SessionStream {
     public enum Event: Hashable, Sendable {
         case connecting
@@ -37,6 +37,8 @@ public actor SessionStream {
     private var received: UInt64 = 0
     private var acked: UInt64 = 0
     private var lastSeq = 0
+    /// The seqs of the tool turns that run. A new attach starts before them, so their end comes again.
+    private var running: Set<Int> = []
     private var attachedOnce = false
     /// The stream does not connect again.
     private var done = false
@@ -111,7 +113,7 @@ public actor SessionStream {
                 conn = c
                 received = 0
                 acked = 0
-                try await c.send(Self.encode(.attach(view: view, cols: size?.cols, rows: size?.rows, after: view == .chat ? lastSeq : nil)))
+                try await c.send(Self.encode(.attach(view: view, cols: size?.cols, rows: size?.rows, after: view == .chat ? resumeAfter : nil)))
                 try await withThrowingTaskGroup(of: Void.self) { g in
                     g.addTask {
                         while true {
@@ -174,6 +176,9 @@ public actor SessionStream {
             case .lease(let h): emit(.lease(h))
             case .turns(_, let to, let turns):
                 lastSeq = max(lastSeq, to)
+                for t in turns {
+                    if t.tool?.status == .running { running.insert(t.seq) } else { running.remove(t.seq) }
+                }
                 emit(.turns(turns))
             case .ended(let reason):
                 done = true
@@ -191,6 +196,8 @@ public actor SessionStream {
         }
         return false
     }
+
+    private var resumeAfter: Int { running.min().map { $0 - 1 } ?? lastSeq }
 
     private func ack(_ c: any WebSocketConnection, force: Bool) async throws {
         guard force || received - acked >= Self.ackEvery else { return }

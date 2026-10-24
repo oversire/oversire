@@ -780,6 +780,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.glance = UIShots.menuIconSample()
                     } else if p == "kit" {
                         self.glance = UIShots.kitSample()
+                    } else if p.hasPrefix("chat:") {
+                        self.glance = UIShots.chatSample(String(p.dropFirst(5)))
                     } else if p.hasPrefix("stream:") {
                         self.glance = UIShots.streamSample(String(p.dropFirst(7)))
                     } else if p.hasPrefix("questions:") {
@@ -1564,6 +1566,53 @@ extension UIShots {
         case "lost": card.handle(.disconnected("The daemon did not answer.", stopped: false))
         case "ended": card.handle(.ended(reason: "exited"))
         case "live": card.handle(.lease(.desktop))
+        default: break
+        }
+        w.orderFrontRegardless()
+        return w
+    }
+
+    /// chat:<frame>: the chat card of an oversire runtime session. Frames: live, lost, ended, empty.
+    static func chatSample(_ frame: String) -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 900, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+        w.title = "Session"
+        let page = PageScroll(maxWidth: 900)
+        let root = Box(fill: Palette.bg, border: nil, radius: 0)
+        root.addSubview(page)
+        NSLayoutConstraint.activate([page.leadingAnchor.constraint(equalTo: root.leadingAnchor), page.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                                     page.topAnchor.constraint(equalTo: root.topAnchor), page.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
+        w.contentView = root
+        let request = URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
+        let card = SessionChatCard(sessionID: "s-1", agent: "claude", stream: SessionStream(request: request, view: .chat, socket: NoSockets()),
+                                   trailing: [ActionButton("Open in a terminal", symbol: "terminal"), Chiplet("on mbp", symbol: "desktopcomputer", mono: false)])
+        card.onStop = {}
+        let since = Date().addingTimeInterval(-9 * 60)
+        let phase = frame == "ended" ? Pill(.ok, text: "Done") : Pill(.working, text: "Working")
+        card.setHead([phase, Chiplet("claude", symbol: "cpu"), RelativeTimeLabel({ since }, size: 12, format: { "since " + $0 }), Spacer()],
+                     headline: "Adds a retry to the OAuth callback.", footer: nil)
+        page.rebuild { col in col.addFull(card) }
+        card.handle(.attached(StreamAttached(source: .wire, cols: 0, rows: 0, writable: true, resizable: false)))
+        let at = { (m: Double) in since.addingTimeInterval(m * 60) }
+        let tool = { (seq: Int, name: String, st: TurnTool.Status, input: String, out: String?) in
+            SessionTurn(seq: seq, role: .tool, at: at(Double(seq)), text: "", tool: TurnTool(name: name, status: st, input: input, summary: out))
+        }
+        let turns: [SessionTurn] = [
+            SessionTurn(seq: 1, role: .user, at: at(0), text: "Add a retry to the OAuth callback. The token exchange fails on a slow network."),
+            tool(2, "Read", .done, "src/auth/callback.ts", "Read 142 lines"),
+            tool(3, "Grep", .done, "exchangeToken", "3 matches in 2 files"),
+            SessionTurn(seq: 4, role: .assistant, at: at(2), text: "The exchange runs once. I add a retry with **backoff**:\n\n- 3 tries, 0.5 s then 1 s then 2 s\n- only on a network error or a 5xx\n\nThen I add a test."),
+            tool(5, "Edit", .done, "src/auth/callback.ts", "+18 −2"),
+            tool(6, "Bash", .failed, "npm test -- callback", "1 failed: retries on 503"),
+            tool(7, "Bash", .running, "npm test -- callback", nil),
+        ]
+        if frame != "empty" { card.handle(.turns(turns)) }
+        switch frame {
+        case "lost": card.handle(.disconnected("The daemon did not answer.", stopped: false))
+        case "ended":
+            card.handle(.turns([tool(7, "Bash", .done, "npm test -- callback", "12 passed"),
+                                SessionTurn(seq: 8, role: .assistant, at: at(6), text: "The tests pass. The callback now tries 3 times."),
+                                SessionTurn(seq: 9, role: .system, at: at(6), text: "The session ended.")]))
+            card.handle(.ended(reason: "exited"))
         default: break
         }
         w.orderFrontRegardless()

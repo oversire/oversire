@@ -90,6 +90,11 @@ enum ToolSource {
         case "Queue": return "list.number"
         case "Daemon": return "server.rack"
         case "OverSire": return "sparkles"
+        // The tools of a session chat.
+        case "Bash": return "terminal"
+        case "Read": return "doc.text"
+        case "Edit", "Write", "MultiEdit": return "pencil"
+        case "Grep", "Glob": return "magnifyingglass"
         default: return "desktopcomputer"
         }
     }
@@ -557,7 +562,8 @@ final class ThoughtView: NSStackView {
 // MARK: - Tool group
 
 final class ToolGroupView: Box {
-    init(_ chips: [ToolChip], ctx: StreamContext) {
+    /// `canRetry`: a failed step shows a Retry button.
+    init(_ chips: [ToolChip], ctx: StreamContext, canRetry: Bool = true) {
         super.init(fill: Palette.panel, border: Palette.line, radius: 8)
         let key = "group:" + (chips.first?.id ?? "")
         let failed = chips.filter { $0.state == .failed }.count
@@ -580,7 +586,7 @@ final class ToolGroupView: Box {
         rows.isHidden = !open
         let chevron = Glyph(open ? "chevron.down" : "chevron.right", color: Palette.dim, size: 10)
         var headViews: [NSView] = [Glyph(tone, size: 12), NSTextField.text(title, size: 12, weight: .medium, color: Palette.fg), Spacer()]
-        if failed > 0 { headViews.append(ActionButton("Retry", symbol: "arrow.clockwise", style: .link) { ctx.retry() }) }
+        if failed > 0, canRetry { headViews.append(ActionButton("Retry", symbol: "arrow.clockwise", style: .link) { ctx.retry() }) }
         headViews.append(chevron)
         let head = Row(headViews, height: 26, inset: 8, label: "\(title). \(open ? "Open" : "Closed")")
         head.onClick = { [weak rows, weak head] in

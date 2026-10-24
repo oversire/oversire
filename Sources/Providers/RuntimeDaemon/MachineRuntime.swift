@@ -152,6 +152,9 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         return (client.streamRequest(session: id), rt == Self.chatRuntime ? .chat : .terminal)
     }
 
+    /// The daemon record of a session: its folder and the session id of its harness.
+    public func session(id: String) async throws -> DaemonSession { try await client.session(id: id) }
+
     // MARK: HostFileWriting
 
     /// The daemon chooses the folder. `dir` has no effect.

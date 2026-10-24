@@ -35,8 +35,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var hiddenSummaries: Set<String> = []
     private var timeline: [ActivityEntry]?
     private var tail: [String] = []
-    /// The live terminal of the session, when its daemon gives a stream (OVERSIRE-285).
-    private var live: LiveTerminalCard?
+    /// The live terminal or chat of the session, when its daemon gives a stream (OVERSIRE-285, OVERSIRE-286).
+    private var live: LiveSessionCard?
     private var streamChecked = Date.distantPast
     private var tailAt = Date.distantPast
     private var saving: String?
@@ -184,10 +184,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
             streamChecked = Date()
             let k = key
             data.agentIndex.stream(k) { [weak self] t in
-                guard let self, self.key == k, self.tab == .session, let t, t.view == .terminal, let id = a.paneKey else { return }
+                guard let self, self.key == k, self.tab == .session, let t, let id = a.paneKey else { return }
                 self.live?.stop()
-                self.live = LiveTerminalCard(sessionID: id, stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets()),
-                                             trailing: self.liveTrailing(t.request, session: id))
+                self.live = t.view == .chat ? self.chatCard(a, session: id, request: t.request)
+                    : LiveTerminalCard(sessionID: id, stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets()),
+                                       trailing: self.liveTrailing(t.request, session: id))
                 self.reload()
             }
         }
@@ -670,8 +671,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let a = stream?.agent {
             let s = data.statusJob.item(key)
             if let live, live.sessionID == a.paneKey {
-                let fill = { [unowned self] in live.setHead(self.terminalHead(a, status: s), headline: s?.headline, footer: self.replyRowIfOpen(a)) }
-                rows.append(PageRow("live-terminal", ObjectIdentifier(live), Self.sig(a, s), sending, update: { _ in fill() }) { fill(); return live })
+                let chat = live is SessionChatCard
+                let fill = { [unowned self] in live.setHead(self.terminalHead(a, status: s), headline: s?.headline, footer: chat ? nil : self.replyRowIfOpen(a)) }
+                rows.append(PageRow("live-" + live.sessionID, ObjectIdentifier(live), Self.sig(a, s), sending, update: { _ in fill() }) { fill(); return live })
             } else {
                 rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
             }
@@ -716,6 +718,47 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
         pop.setAccessibilityLabel("Open the terminal in its own window")
         return [pop, placeChip()]
+    }
+
+    private func chatCard(_ a: AgentSession, session id: String, request: URLRequest) -> SessionChatCard {
+        let k = key
+        let open = ActionButton("Open in a terminal", symbol: "terminal") { [weak self] in self?.openInTerminal(k) }
+        open.setAccessibilityLabel("Open the folder of the session in a terminal, and copy the session id")
+        let c = SessionChatCard(sessionID: id, agent: a.agent.rawValue, stream: SessionStream(request: request, view: .chat, socket: URLSessionWebSockets()),
+                                trailing: [open, Chiplet("on \(data.agentIndex.place)", symbol: "desktopcomputer", mono: false)])
+        c.onStop = { [weak self] in self?.confirmStop(k) }
+        return c
+    }
+
+    /// On this Mac, Terminal opens in the folder of the session. The harness session id goes to the clipboard.
+    private func openInTerminal(_ k: String) {
+        let agents = data.agentIndex
+        agents.daemonSession(k) { [weak self] s in
+            guard let self else { return }
+            defer { self.reload() }
+            guard let s else { self.note = (.bad, "OverSire could not read the session from its daemon."); return }
+            let id = s.harnessSession ?? s.id
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(id, forType: .string)
+            if agents.remote {
+                self.note = (.info, "The session runs on \(s.machine.rawValue), in \(s.cwd). The \(s.harness) session id \(id) is on the clipboard.")
+                return
+            }
+            NSWorkspace.shared.open([URL(fileURLWithPath: s.cwd)], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                                    configuration: NSWorkspace.OpenConfiguration())
+            self.note = (.info, "Terminal opens in \(s.cwd). The \(s.harness) session id \(id) is on the clipboard. Stop the chat session before you resume it.")
+        }
+    }
+
+    private func confirmStop(_ k: String) {
+        AlertConfirm.show(.init(title: "Stop the session of \(k)?", info: "The agent stops. The worktree and the turns stay.", buttons: ["Stop", "Cancel"],
+                                destructive: true), in: view.window) { [weak self] answer in
+            guard answer.button == 0, let self else { return }
+            self.data.agentIndex.stop(k) { e in
+                self.note = e.map { (.bad, "Could not stop the session: \($0.message)") }
+                self.reload()
+            }
+        }
     }
 
     private func summaryCard(hasAgent: Bool) -> NSView {

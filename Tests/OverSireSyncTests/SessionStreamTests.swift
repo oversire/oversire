@@ -105,6 +105,43 @@ final class SessionStreamTests: XCTestCase {
         await s.stop()
     }
 
+    func testTheChatAttachesBeforeARunningTool() async throws {
+        let sockets = Sockets()
+        let clock = ManualClock()
+        let s = SessionStream(request: request, view: .chat, socket: sockets, clock: clock)
+        let events = s.events()
+        await eventually("connect") { sockets.all.get().count == 1 }
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        let tool = SessionTurn(seq: 4, role: .tool, at: at, text: "", tool: TurnTool(name: "Bash", status: .running))
+        let text = SessionTurn(seq: 5, role: .assistant, at: at, text: "more")
+        sockets.socket(0).push(json(.turns(from: 4, to: 5, turns: [tool, text])))
+        _ = await take(2, from: events)
+        sockets.socket(0).close()
+        _ = await take(1, from: events)
+        try await clock.waitForSleepers()
+        clock.advance(by: .seconds(2))
+        await eventually("second connect") { sockets.all.get().count == 2 }
+        await eventually("attach") { !frames(sockets.socket(1)).isEmpty }
+        XCTAssertEqual(frames(sockets.socket(1)).first, .attach(view: .chat, cols: nil, rows: nil, after: 3))
+        await s.stop()
+    }
+
+    func testTurnBookMerges() {
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        let turn = { (seq: Int, text: String) in SessionTurn(seq: seq, role: .assistant, at: at, text: text) }
+        let tool = { (seq: Int, st: TurnTool.Status) in SessionTurn(seq: seq, role: .tool, at: at, text: "", tool: TurnTool(name: "Bash", status: st)) }
+        var b = TurnBook()
+        XCTAssertTrue(b.merge([turn(1, "a"), turn(4, "d")]), "a gap")
+        XCTAssertTrue(b.merge([turn(3, "c"), turn(2, "b")]), "out of order fills the gap")
+        XCTAssertEqual(b.turns.map(\.seq), [1, 2, 3, 4])
+        XCTAssertFalse(b.merge([turn(2, "b")]), "a repeat changes nothing")
+        XCTAssertTrue(b.merge([tool(5, .running)]))
+        XCTAssertTrue(b.merge([tool(5, .done)]), "the same seq replaces the turn")
+        XCTAssertEqual(b.turns.map(\.seq), [1, 2, 3, 4, 5])
+        XCTAssertEqual(b.turns.last?.tool?.status, .done)
+        XCTAssertEqual(TurnBook([turn(2, "b"), turn(1, "a"), turn(2, "b2")]).turns.map(\.text), ["a", "b2"])
+    }
+
     func testEndedStops() async throws {
         let sockets = Sockets()
         let clock = ManualClock()
