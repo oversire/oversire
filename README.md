@@ -93,6 +93,7 @@ OverSire can start a coding agent on a Plane item in an [Orca](https://github.co
 - **▶ Start** — hover a Todo or Backlog row and click ▶. The item window has the chip **▶ Start in Orca**. OverSire opens an Orca card with the item key as its name (for example `TOWERTAIL-2`). In it, OverSire starts `claude -n 'TOWERTAIL-2'` and sends the prompt. The copy menu of a row also has **Start in Orca**
 - **Agent pill** — a row with an agent shows its state: **Starting…**, **Working 12m**, **Needs input**, **Agent done** or **Not started**. Click the pill to open the terminal in Orca. Click **Not started** to see the error, try again or choose another workspace
 - **Agent card** — the Overview tab of the item window shows the agent, its last lines on the screen, **Send…** (type a reply to the agent) and **Open terminal**. **Open terminal** and **Open in Orca** show only for sessions on this Mac
+- **Session tab** — the item window shows the live session through the daemon of its machine: a terminal for an Orca session (text only for now), a chat for an `oversire` session. See [docs/live-session.md](docs/live-session.md)
 - **Notifications** — "Agent needs input" and "Agent done". Turn them on or off in Settings › Notifications › Agents and mentions. A project can override them
 - **The agent does the work** — ▶ does not change the Plane item. The agent sets In progress, does the work and closes the item. The default prompt is `work on {url} in worktree group .wt/{key}`
 
