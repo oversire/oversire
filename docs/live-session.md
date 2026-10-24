@@ -43,3 +43,12 @@ Orca is text only for now. A live Orca terminal needs a pairing between the daem
 ## SwiftTerm
 
 SwiftTerm draws the terminal. It is the only external Swift package of the app. Only `OverSireApp` links it. Do not add another package without the approval of the owner.
+
+## Manual check
+
+Do not test with the installed daemon. Run a second daemon in its own folder, with `serve.port` set to a free port (for example 7691) and `serve.tailscale: false`, and start it with `OVERSIRE_DAEMON_HOME=<dir> oversire daemon run`. Then render the real cards against it:
+
+```bash
+OVERSIRE_UISHOTS_STREAM=ws://127.0.0.1:7691/v1/sessions/<id>/stream \
+  OverSire.app/Contents/MacOS/oversire --uishots <dir> chat:real    # or stream:real for a terminal
+```
