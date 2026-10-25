@@ -645,7 +645,7 @@ extension ItemPatch {
         if let priority { f["priority"] = priority }
         if let assignees { f["assignees"] = assignees }
         if let labels { f["labels"] = labels }
-        if let parent { f["parent"] = parent }
+        if let parent { f["parent"] = parent.isEmpty ? NSNull() : parent }
         if let bodyMarkdown { f["description_html"] = PlaneMarkup.html(fromMarkdown: bodyMarkdown) }
         return f
     }
@@ -671,6 +671,7 @@ extension IntakeAction {
         case .decline: return ["status": -1]
         case .snooze(let d): return ["status": 0, "snoozed_till": ISO8601DateFormatter().string(from: d)]
         case .duplicate(let id): return ["status": 2, "duplicate_to": id]
+        case .pending: return ["status": -2]
         case .delete, .update: return nil
         }
     }

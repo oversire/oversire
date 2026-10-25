@@ -10,7 +10,7 @@ public final class FakeProvider: @unchecked Sendable {
     private var caps: Set<Capability>
     private var failure: ProviderError?
     private var events: [ProviderEvent] = []
-    var now: @Sendable () -> Date = Date.init
+    public var now: @Sendable () -> Date = Date.init
 
     public init(id: ProviderID, account: String, capabilities: Set<Capability>) {
         self.id = id

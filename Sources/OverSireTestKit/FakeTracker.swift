@@ -18,9 +18,14 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var patchList: [ProjectSettingsPatch] = []
     private var relationList: [String: [ItemRelation]] = [:]   // item id → relations
     private var intakeList: [String: [IntakeItem]] = [:]       // project id → pending intake items
+    private var declinedList: [String: Item] = [:]             // work item id → the item that decline removed
     private var edits: [IntakeEdit] = []
     /// The `update` actions, in order.
     public var intakeEdits: [IntakeEdit] { base.lockedValue { edits } }
+    private var triageList: [(intake: String, action: IntakeAction)] = []
+    /// Each triage call, in order.
+    public var triages: [(intake: String, action: IntakeAction)] { base.lockedValue { triageList } }
+    private var writeFailures: [String: Int] = [:]               // item id → failed writes left
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
     private var uploadTimes: [Date] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
@@ -95,13 +100,14 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
         try base.locked {
             guard let at = itemList[i.project.id]?.firstIndex(where: { $0.id == i.id }) else { throw ProviderError.notFound }
+            try failWrite(i.id)
             let o = itemList[i.project.id]![at]
             let now = base.now()
             itemList[i.project.id]![at] = Item(
                 id: o.id, key: o.key, title: patch.title ?? o.title, url: o.url, statusOptionId: patch.status ?? o.statusOptionId,
                 fields: o.fields, assignees: patch.assignees ?? o.assignees, labels: patch.labels ?? o.labels, author: o.author,
                 updatedBy: "me", updatedAt: now, activityAt: now, commentCount: o.commentCount, lastComment: o.lastComment,
-                mentionsMe: o.mentionsMe, body: patch.bodyMarkdown ?? o.body, parentId: patch.parent ?? o.parentId)
+                mentionsMe: o.mentionsMe, body: patch.bodyMarkdown ?? o.body, parentId: patch.parent.map { $0.isEmpty ? nil : $0 } ?? o.parentId)
             base.emit(.item, "updated", .item(i), title: patch.title ?? o.title)
         }
     }
@@ -109,6 +115,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     public func comment(_ i: ItemRef, markdown: String) async throws {
         try base.locked {
             guard let at = itemList[i.project.id]?.firstIndex(where: { $0.id == i.id }) else { throw ProviderError.notFound }
+            try failWrite(i.id)
             let c = Comment(id: "c\((commentList[i.id]?.count ?? 0) + 1)-\(i.id)", author: "me", createdAt: base.now(),
                             url: i.url.absoluteString, body: markdown)
             commentList[i.id, default: []].append(c)
@@ -130,6 +137,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
         guard capabilities.contains(.relations) else { throw ProviderError.unsupported(.relations) }
         try base.locked {
             guard itemList[item.project.id]?.contains(where: { $0.id == item.id }) == true else { throw ProviderError.notFound }
+            try failWrite(item.id)
             for r in patch.add where !(relationList[item.id] ?? []).contains(where: { $0.kind == r.kind && $0.item.id == r.item.id }) {
                 relationList[item.id, default: []].append(r)
                 relationList[r.item.id, default: []].append(ItemRelation(kind: r.kind.inverse, item: item))
@@ -157,15 +165,34 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     }
 
     public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
+        try base.locked { try failWrite(i.workItemId) }
+        base.lockedValue { triageList.append((i.id, a)) }
         if case .update(let e) = a {
             base.lockedValue { edits.append(e) }
             return
         }
         try base.locked {
             intakeList[p.id]?.removeAll { $0.id == i.id }
+            if a == .pending {
+                intakeList[p.id, default: []].append(i)
+                if let o = declinedList.removeValue(forKey: i.workItemId) { itemList[p.id, default: []].append(o) }
+            }
+            if a == .decline, let o = itemList[p.id]?.first(where: { $0.id == i.workItemId }) { declinedList[o.id] = o }
             if a == .delete || a == .decline { itemList[p.id]?.removeAll { $0.id == i.workItemId } }
         }
     }
+
+    /// The next `times` writes to the item fail: update, comment, relations and triage.
+    public func failWrites(to itemId: String, times: Int = 1) { base.lockedValue { writeFailures[itemId] = times } }
+
+    private func failWrite(_ id: String) throws {
+        guard let n = writeFailures[id], n > 0 else { return }
+        writeFailures[id] = n - 1
+        throw ProviderError.vendor(code: "403", message: "Plane said 403 for this project")
+    }
+
+    /// Adds a status to the project, for example a cancelled one.
+    public func addStatus(_ s: StatusOption, to p: ProjectRef? = nil) { base.lockedValue { statusList[(p ?? project).id, default: []].append(s) } }
 
     public func createIntake(_ d: ItemDraft, in p: ProjectRef) async throws -> (item: ItemRef, intake: IntakeItem) {
         guard capabilities.contains(.intakeCreate) else { throw ProviderError.unsupported(.intakeCreate) }

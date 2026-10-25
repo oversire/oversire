@@ -19,6 +19,7 @@ extension IntakeAction {
         case .snooze: return "Could not snooze: "
         case .duplicate: return "Could not mark as duplicate: "
         case .delete: return "Could not delete: "
+        case .pending: return "Could not put the item back in the intake: "
         case .update: return "Could not write the changes: "
         }
     }

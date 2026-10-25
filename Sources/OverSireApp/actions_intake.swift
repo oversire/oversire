@@ -75,6 +75,7 @@ extension IntakeAction {
         case .accept: return ("intake.accept", args)
         case .decline: return ("intake.decline", args)
         case .delete: return ("intake.delete", args)
+        case .pending: return nil
         case .snooze(let t): args["until"] = .string(ISO8601DateFormatter().string(from: t)); return ("intake.snooze", args)
         case .duplicate(let of): args["of"] = .string(of); return ("intake.merge", args)
         case .update(let e):

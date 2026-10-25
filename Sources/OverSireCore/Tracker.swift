@@ -539,8 +539,9 @@ public struct IntakeItem: Codable, Hashable, Sendable {
 }
 
 // What the user can do with a pending intake item. `update` writes the checked properties of a review and keeps the item in the intake.
+// `pending` puts a triaged item back in the intake (Undo of Groom).
 public enum IntakeAction: Hashable, Sendable {
-    case accept, decline, snooze(until: Date), duplicate(of: String), delete
+    case accept, decline, snooze(until: Date), duplicate(of: String), delete, pending
     case update(IntakeEdit)
 }
 
@@ -576,7 +577,7 @@ public struct ItemPatch: Hashable, Sendable, Codable {
     public var priority: String?      // priority option id
     public var assignees: [String]?   // person ids
     public var labels: [String]?      // label ids
-    public var parent: String?        // item id
+    public var parent: String?        // item id. An empty string removes the parent.
     public var bodyMarkdown: String?
 
     public init(title: String? = nil, status: String? = nil, priority: String? = nil, assignees: [String]? = nil,
