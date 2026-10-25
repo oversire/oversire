@@ -446,6 +446,7 @@ final class EnhancePanel: Card {
                 acts = [ActionButton("Apply to \(ref.key)", style: .primary) { agent.apply(ticket: ref, done: after) }]
             }
             add(NSStackView(h: acts + open + [ActionButton("Discard") { agent.discard(item) }], spacing: 6))
+            if item.isTicket { add(NSTextField.text("Writes the checked lines to Plane. No accept step: the item is already a ticket.", size: 12, color: Palette.dim, lines: 2)) }
         case .applied:
             add(NSTextField.text("OverSire wrote the checked changes. The original text is in the section \"Original note\".", size: 12, color: Palette.mut, lines: 2))
         case .failed(let msg, let kept):
