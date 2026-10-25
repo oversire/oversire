@@ -4,6 +4,7 @@ import OverSireCore
 import OverSireAI
 import OverSireSync
 import OverSireAssistant
+import RuntimeDaemon
 
 // `oversire --uishots <dir> [path …]` opens the window with real data, read only, and saves
 // one PNG per route and theme. It sends no global input, so it is safe while someone uses the Mac.
@@ -363,8 +364,24 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                          why: "Both paths write labels.", kind: .single,
                                          options: [.init(label: "Plane → Trebi"), .init(label: "Trebi → Plane")], allowsOther: true)
 
+    /// A daemon that answers only the runtime list: Orca with workers. The Enhance buttons then show.
+    struct Workers: HTTPTransport {
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            guard request.url?.path == "/v1/runtimes" else { throw URLError(.cannotConnectToHost) }
+            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, capabilities: ["workers"])])
+            return (try JSONEncoder().encode(page), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
     /// The first intake rows of the shot get the Enhance states in this order.
     private func seedEnhance(_ ago: @escaping (Double) -> Date) {
+        let host = LocalMachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: Workers()))
+        AGENTS.enhanceVague = false
+        enhanceAgent.host = { host }
+        Task { [enhanceAgent] in
+            _ = try? await host.refresh()
+            await MainActor.run { NotificationCenter.default.post(name: EnhanceAgent.changed, object: enhanceAgent) }
+        }
         let session = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "daemon", id: "mba"), id: "intake"), id: "term-e1")
         let run = { (n: String, at: Double, note: String) in
             EnhanceAgent.Run(worker: Worker(id: "wk-" + n, runtime: "orca", terminal: "term-" + n, startedAt: ago(at)),
