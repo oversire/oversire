@@ -48,6 +48,15 @@ final class IOLogTests: XCTestCase {
         XCTAssertEqual(l.all.map(\.level), [.ok, .ok])
     }
 
+    func testALease409IsAnAnswer() throws {
+        let l = Lines()
+        IOLog(sink: l).request(request("POST", "http://mbp:7690/v1/leases/automations"), status: 409, ms: 4,
+                               body: Data(#"{"name":"automations","holder":"app-1","epoch":1}"#.utf8))
+        let e = try XCTUnwrap(l.all.first)
+        XCTAssertEqual(e.level, .ok)
+        XCTAssertEqual(e.verbose, true)
+    }
+
     func testALongErrorBodyIsShort() throws {
         let l = Lines()
         IOLog(sink: l).request(request("GET", "https://api.plane.so/x"), status: 502, ms: 1, body: Data(String(repeating: "a\n", count: 900).utf8))

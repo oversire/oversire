@@ -27,6 +27,31 @@ final class MachineRuntimeCallerTests: XCTestCase {
         for _ in 0..<200 where !f() { try? await Task.sleep(nanoseconds: 5_000_000) }
     }
 
+    // MARK: GroupSync
+
+    /// An apply before the first load of the group must not make this app the solo owner (OVERSIRE-329: mba summarized at launch).
+    @MainActor
+    func testTheLeaseWaitsForTheFirstLoadOfTheGroup() async throws {
+        let g = Group(id: "g", name: "My machines", home: "mbp", version: 1,
+                      members: [GroupMember(machine: "mbp", host: "mbp", addrs: [], port: 7690, roles: ["serve"], joinedAt: t0)], devices: [])
+        let d = FakeDaemon(machine: "mbp", group: g)
+        let h = hub(d)
+        h.read = true
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("group-sync-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = LocalStore(dir: dir)
+        let desk = RunnerDesk(store: store, hub: RelayAnswers { RelayAPI(base: "http://relay", token: nil) }, http: d)
+        let sync = GroupSync(hub: h, writes: StoreWrites(store: store), desk: desk, http: d)
+        sync.apply()
+        await sync.owner.refresh()
+        XCTAssertFalse(sync.owner.mayAct, "the group is not loaded yet")
+        XCTAssertNotEqual(sync.owner.role, AutomationRole.solo)
+
+        sync.reread()
+        for _ in 0..<200 where sync.owner.role == AutomationRole.paused("") { try await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(sync.owner.role, AutomationRole.paused("mbp"), "the group has a home, and this test has no link to it")
+    }
+
     // MARK: MachineHub
 
     func testOneRuntimeForEachMachine() {

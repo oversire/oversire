@@ -12,7 +12,9 @@ struct IOLog {
     func request(_ r: URLRequest, status: Int?, ms: Int, body: Data? = nil, error: String? = nil) {
         let method = r.httpMethod ?? "GET"
         let path = r.url.map { $0.path.isEmpty ? "/" : $0.path } ?? "?"
-        let failed = error != nil || (status ?? 0) >= 400
+        // A lease 409 names the other holder. It is an answer, not a fault, and it comes every 30 s.
+        let held = status == 409 && path.hasPrefix("/v1/leases/")
+        let failed = !held && (error != nil || (status ?? 0) >= 400)
         var msg = [method, path, status.map(String.init)].compactMap { $0 }.joined(separator: " ")
         if let id = r.value(forHTTPHeaderField: DaemonClient.requestID) { msg += " id=\(id)" }
         if let error {
@@ -22,7 +24,7 @@ struct IOLog {
         }
         let host = r.url.map { u in (u.host ?? "") + (u.port.map { ":\($0)" } ?? "") }
         var e = LogEntry(level: failed ? .warn : .ok, area: .net, job: "HTTP", host: host, message: msg, ms: ms)
-        e.verbose = !failed && method == "GET"
+        e.verbose = held || (!failed && method == "GET")
         sink.write(e)
     }
 
