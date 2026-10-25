@@ -212,7 +212,9 @@ final class AgentIndex: NSObject {
     }
 
     private func tick(first: Bool = false) {
-        let busy = agents.values.contains { $0.phase == .working || $0.phase == .waiting || $0.phase == .starting }
+        let live = { (a: AgentSession) in a.phase == .working || a.phase == .waiting || a.phase == .starting }
+        // An Enhance session has no item key here, so its cards count too.
+        let busy = agents.values.contains(where: live) || cards.contains { $0.agents.contains { $0.key != nil && live($0) } }
         // 1 s less, so a late tick does not skip a cycle.
         if first || visible() || now().timeIntervalSince(lastPoll) >= (busy ? 15 : 60) - 1 { poll() }
         timer = schedule(15) { [weak self] in self?.tick() }
@@ -502,7 +504,7 @@ final class AgentIndex: NSObject {
     static let keyRE = try! NSRegularExpression(pattern: "^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 
-    // Item key → the most urgent agent. Agents of closed terminals drop out.
+    // Item key → the most urgent agent. Agents of closed terminals drop out. An Enhance session is not the agent of its item.
     // A done agent older than a day stays only while its item is open: Session done does not mean the item is done.
     static func index(_ cards: [Workspace], launches: [String: PendingLaunch], links: [String: AgentLink] = [:],
                       open: (String) -> Bool = { _ in false }, now: Date) -> [String: AgentSession] {
@@ -522,7 +524,7 @@ final class AgentIndex: NSObject {
                 name = String(name[r])
                 named = true
             }
-            for g in c.agents {
+            for g in c.agents where g.key?.hasPrefix(EnhanceAgent.keyPrefix) != true {
                 let key: String
                 if named { key = name }
                 else if let k = g.paneKey.flatMap({ byPane[$0] }) { key = k }

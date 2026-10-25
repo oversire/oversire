@@ -1,7 +1,7 @@
 import Foundation
 import OverSireCore
 
-/// The result that an Enhance worker sends in the body of its `worker_done`.
+/// The result of an Enhance session: a fenced block with the info string `oversire-result` in its last message.
 public struct EnhanceResult: Codable, Equatable, Sendable {
     public enum Verdict: String, Codable, Sendable, CaseIterable {
         case clear, vague, duplicate, reproduced
@@ -71,6 +71,32 @@ public struct EnhanceResult: Codable, Equatable, Sendable {
             end = close.lowerBound
         }
         return nil
+    }
+
+    public static let fence = "oversire-result"
+
+    /// The JSON of the last `oversire-result` block in the message. nil: no block, or no result in it.
+    public static func parse(lastMessage text: String) -> EnhanceResult? {
+        var body: [String]?
+        var open: String?
+        var last: String?
+        for line in text.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if let ticks = open {
+                if t.hasPrefix(ticks), t.allSatisfy({ $0 == "`" }) {
+                    if let b = body { last = b.joined(separator: "\n") }
+                    open = nil
+                    body = nil
+                } else {
+                    body?.append(line)
+                }
+            } else if t.hasPrefix("```") {
+                let ticks = String(t.prefix { $0 == "`" })
+                open = ticks
+                body = t.dropFirst(ticks.count).trimmingCharacters(in: .whitespaces) == fence ? [] : nil
+            }
+        }
+        return last.flatMap(result)
     }
 
     private static func result(_ raw: String) -> EnhanceResult? {

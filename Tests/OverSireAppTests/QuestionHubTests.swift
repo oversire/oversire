@@ -67,13 +67,15 @@ final class QuestionHubTests: XCTestCase {
         XCTAssertEqual(NeedsYou.questions(h).first?.route, .intake("OVERSIRE"))
     }
 
-    func testEnhanceWorkerHasNoTurnCard() {
+    // An Enhance session has no coordinator: a question in its last message is a card too.
+    func testEnhanceSessionShowsItsTurnQuestion() {
         let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "w1"), id: "term-3")
         let h = hub()
         h.seed([QuestionBoard.Entry(question: question(s, "t", origin: .session, via: .turn), state: .open, firstSeen: t0),
                 QuestionBoard.Entry(question: question(s, "f", origin: .session, via: .form), state: .open, firstSeen: t0)],
                keys: [:], intake: [s: item])
-        XCTAssertEqual(h.open.map(\.question.via), [.form])
+        XCTAssertEqual(Set(h.open.map(\.question.via)), [.turn, .form])
+        XCTAssertTrue(h.open.allSatisfy { h.origin($0.question).isIntake })
     }
 
     func testPermissionRowsComeUnderTheQuestions() {

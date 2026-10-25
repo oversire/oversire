@@ -127,7 +127,7 @@ final class IntakeListPage: Page {
             actions.append(ActionButton("Snooze  H") { [weak self] in self?.triage(pk, item, .snooze(until: Date().addingTimeInterval(86400))) })
         }
         actions.forEach { ($0 as? NSButton)?.controlSize = .small }
-        let pill = agent.state(.intake(item)).flatMap { EnhanceAgent.pill($0) }.map { Pill($0.tone, text: $0.text) }
+        let pill = agent.pill(.intake(item)).map { Pill($0.tone, text: $0.text) }
         let r = FeedLine(e, layout: FeedLine.intakeLayout, badge: pill) { [weak self] in self?.go(detail) }
         r.hoverViews = actions
         r.onKey = { [weak self] c in

@@ -121,7 +121,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         w.onError = { log.error("\($0)") }
         return w
     }()
-    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions)
+    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
     lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()

@@ -14,7 +14,7 @@ final class EnhancePromptTests: XCTestCase {
         let bare = EnhancePrompt.render("", EnhancePrompt.input(key: "K-1", title: "T", url: "u", body: ""))
         XCTAssertFalse(bare.contains("Project vision"))
         XCTAssertFalse(bare.contains("{{"))
-        XCTAssertTrue(bare.contains("3. If the code cannot tell you a fact, ask the user. Ask at most 4 questions in one round. You can ask more rounds.\n4. "),
+        XCTAssertTrue(bare.contains("3. If the code cannot tell you a fact, ask the user with the AskUserQuestion tool. Ask at most 4 questions in one round. You can ask more rounds.\n4. "),
                       "no ask line, no empty line")
         XCTAssertTrue(bare.hasSuffix("(no description)"))
     }
@@ -65,6 +65,44 @@ final class EnhancePromptTests: XCTestCase {
         XCTAssertNil(EnhanceResult.parse("I could not finish. {\"verdict\": \"clear\", \"description\": "))
         XCTAssertNil(EnhanceResult.parse(#"{"verdict":"maybe"}"#), "an unknown verdict is no result")
         XCTAssertNil(EnhanceResult.parse("Plain text only."))
+    }
+
+    func testResultBlockOfTheLastMessage() throws {
+        let msg = """
+            I read the sync code.
+
+            ```swift
+            let x = 1
+            ```
+
+            ```oversire-result
+            {"verdict":"vague","description":"## Goal\\nSync.","priority":"high"}
+            ```
+            """
+        let r = try XCTUnwrap(EnhanceResult.parse(lastMessage: msg))
+        XCTAssertEqual(r.verdict, .vague)
+        XCTAssertEqual(r.description, "## Goal\nSync.")
+        XCTAssertEqual(r.priority, "high")
+    }
+
+    func testLastResultBlockWins() throws {
+        let msg = """
+            ```oversire-result
+            {"verdict":"vague","description":"first"}
+            ```
+            Then I found more.
+            ````oversire-result
+            {"verdict":"clear","description":"second"}
+            ````
+            """
+        XCTAssertEqual(EnhanceResult.parse(lastMessage: msg)?.description, "second")
+    }
+
+    func testNoResultBlockGivesNoResult() {
+        XCTAssertNil(EnhanceResult.parse(lastMessage: #"{"verdict":"clear","description":"bare"}"#), "a bare object is not a block")
+        XCTAssertNil(EnhanceResult.parse(lastMessage: "```json\n{\"verdict\":\"clear\"}\n```"), "another info string")
+        XCTAssertNil(EnhanceResult.parse(lastMessage: "```oversire-result\n{\"verdict\":\"clear\"\n```"), "bad JSON")
+        XCTAssertNil(EnhanceResult.parse(lastMessage: "```oversire-result\n{\"verdict\":\"clear\"}"), "no closing fence")
     }
 
     func testOriginalNoteIsKept() {

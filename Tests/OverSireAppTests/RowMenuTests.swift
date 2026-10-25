@@ -57,8 +57,8 @@ final class RowMenuTests: XCTestCase {
         XCTAssertEqual(m.command("Copy branch name"), .copy("sling-7/fix-the-sync"))
     }
 
-    func testItemMenuEnhanceNeedsWorkers() {
-        let m = RowMenu.item(item(), snap: snap, stream: nil, local: ProjectLocalSettings(), caps: all.union([.workers]))
+    func testItemMenuEnhanceNeedsSessionHistory() {
+        let m = RowMenu.item(item(), snap: snap, stream: nil, local: ProjectLocalSettings(), caps: all.union([.sessionHistory]))
         XCTAssertEqual(m.titles.last, "Enhance")
         XCTAssertEqual(m.command("Enhance"), .enhance(key: "SLING-7"))
         XCTAssertNil(RowCommand.enhance(key: "SLING-7").action(key: { $0 }), "a UI command")

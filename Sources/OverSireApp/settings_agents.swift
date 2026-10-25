@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireAI
 import OverSireCore
 import RuntimeDaemon
 
@@ -193,8 +194,13 @@ extension SettingsPage {
             self.reload()
         }
         let v = NSStackView(v: [], spacing: 8)
+        // Before OVERSIRE-318 the agent sent its result to a coordinator.
+        if !AGENTS.intakePrompt.contains(EnhanceResult.fence) {
+            v.addFull(NSTextField.text("This prompt uses the old worker flow. Reset it: OverSire now reads the result from an \(EnhanceResult.fence) block.",
+                                       size: 12, color: Palette.bad, lines: 2))
+        }
         v.addFull(scroll)
-        v.addFull(NSStackView(h: [NSTextField.text("{{key}}, {{title}}, {{url}} and {{text}} take the values of the item. {{#if vision}}…{{/if}} and {{#if ask}}…{{/if}} show only with a value.",
+        v.addFull(NSStackView(h: [NSTextField.text("{{kind}}, {{key}}, {{title}}, {{url}} and {{text}} take the values of the item. {{#if vision}}…{{/if}} shows only with a value.",
                                                    size: 11.5, color: Palette.dim, lines: 2), Spacer(), reset, save], spacing: 8))
         return Padded(v)
     }

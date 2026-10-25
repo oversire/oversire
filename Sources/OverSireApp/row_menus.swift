@@ -114,7 +114,7 @@ enum RowMenu {
             out.append(.action("Start session in Orca…", .startSession(key: item.key)))
             out.append(.action("Refine…", .refine(key: item.key)))
         }
-        if caps.contains(.workers) { out.append(.action("Enhance", .enhance(key: item.key))) }
+        if caps.contains(.sessionHistory) { out.append(.action("Enhance", .enhance(key: item.key))) }
         if let pr = stream?.prs.first { out.append(.action("Open pull request", .openURL(pr.pr.url))) }
         if let r = stream?.runs.first { out.append(.action("Open latest run", .open(.run(repo: r.repo, id: r.run.id)))) }
         return out.tidy
@@ -216,9 +216,9 @@ final class RowCommander {
         self.go = go
     }
 
-    /// `.workers`: Enhance can start.
+    /// `.sessionHistory`: Enhance can start.
     var caps: Set<Capability> {
-        Set([.rerun, .rerunJob, .cancel, .logs, .changeActions, .sessionInput, .reveal].filter(data.has)).union(data.enhanceAgent.available ? [.workers] : [])
+        Set([.rerun, .rerunJob, .cancel, .logs, .changeActions, .sessionInput, .reveal].filter(data.has)).union(data.enhanceAgent.available ? [.sessionHistory] : [])
     }
 
     func items(_ entries: [MenuEntry], anchor: NSView?) -> [NSMenuItem] {

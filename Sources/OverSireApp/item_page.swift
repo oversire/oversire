@@ -705,7 +705,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
     }
 
-    // The questions of an Enhance worker show in its card.
+    // The questions of an Enhance session show in its card.
     private func questionRows() -> [PageRow] {
         let enhancing = enhanceTarget.flatMap { data.enhanceAgent.state($0)?.run?.session }
         let entries = data.questions.entries(key: key).filter { $0.question.session != enhancing }

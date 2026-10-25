@@ -15,7 +15,7 @@ final class QuestionHub {
     private let writes: StoreWrites
     private let lock = NSLock()
     private var refs: [SessionRef: String] = [:]          // Orca session → item key
-    private var intake: [SessionRef: ItemRef] = [:]       // Enhance worker → intake item
+    private var intake: [SessionRef: ItemRef] = [:]       // Enhance session → its item
     private var drafts: [QuestionID: QuestionDraft] = [:]
     private var seeded: [QuestionBoard.Entry]?
     private var notified: Set<QuestionID> = []
@@ -72,11 +72,8 @@ final class QuestionHub {
 
     // MARK: Reads
 
-    /// An Enhance worker has its own cards, so a turn question of it does not show.
     var entries: [QuestionBoard.Entry] {
-        let intake = lock.withLock { self.intake }
-        return (seeded ?? board.map { Array($0.entries.values) } ?? [])
-            .filter { $0.question.via != .turn || intake[$0.question.session] == nil }
+        (seeded ?? board.map { Array($0.entries.values) } ?? [])
             .sorted { $0.question.askedAt < $1.question.askedAt }
     }
 
@@ -85,7 +82,7 @@ final class QuestionHub {
         origin(q).item?.key ?? lock.withLock { refs[q.session] }
     }
 
-    /// The origin of the question. A question of an Enhance worker is about its intake item.
+    /// The origin of the question. A question of an Enhance session is about its item.
     func origin(_ q: SessionQuestion) -> SessionQuestion.Origin {
         lock.withLock { intake[q.session] }.map { .intake($0) } ?? q.origin
     }
@@ -201,7 +198,7 @@ final class QuestionHub {
 
     // MARK: Sessions
 
-    /// The board asks the worker of an Enhance run, and its questions show in the intake row.
+    /// The board asks the session of an Enhance run, and its questions show in its Enhance card.
     func track(intake s: SessionRef, item: ItemRef) {
         lock.withLock { intake[s] = item }
         board?.poke()

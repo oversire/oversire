@@ -31,7 +31,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
-    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions)
+    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
     lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: UIShots.tmp + "/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
@@ -357,7 +357,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             QuestionBoard.Entry(question: q("m1", [store, tests], .askReply, 3), state: .open, firstSeen: ago(3)),
             QuestionBoard.Entry(question: q("f2", [store], .form, 41), state: .open, firstSeen: ago(41)),
             QuestionBoard.Entry(question: q("m3", [store], .askReply, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
-            QuestionBoard.Entry(question: q("e1", [UIShots.enhanceAsk, tests], .askReply, 2), state: .open, firstSeen: ago(2)),
+            QuestionBoard.Entry(question: q("e1", [UIShots.enhanceAsk, tests], .form, 2), state: .open, firstSeen: ago(2)),
         ], keys: [runner: "OVERSIRE-137", s("m1"): UIShots.sessionKey, s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"],
            intake: [s("e1"): UIShots.intakeRef])
         seedEnhance(ago)
@@ -369,28 +369,29 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                          why: "Both paths write labels.", kind: .single,
                                          options: [.init(label: "Plane → Trebi"), .init(label: "Trebi → Plane")], allowsOther: true)
 
-    /// A daemon that answers only the runtime list: Orca with workers. The Enhance buttons then show.
-    struct Workers: HTTPTransport {
+    /// A daemon that answers only the runtime list: Orca with session history. The Enhance buttons then show.
+    struct Runtimes: HTTPTransport {
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             guard request.url?.path == "/v1/runtimes" else { throw URLError(.cannotConnectToHost) }
-            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, capabilities: ["workers"])])
+            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, capabilities: ["sessionHistory"])])
             return (try JSONEncoder().encode(page), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }
     }
 
     /// The first intake rows of the shot get the Enhance states in this order.
     private func seedEnhance(_ ago: @escaping (Double) -> Date) {
-        let host = LocalMachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: Workers()))
+        let host = LocalMachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: Runtimes()))
         AGENTS.enhanceVague = false
         enhanceAgent.host = { host }
         Task { [enhanceAgent] in
             _ = try? await host.refresh()
             await MainActor.run { NotificationCenter.default.post(name: EnhanceAgent.changed, object: enhanceAgent) }
         }
-        let session = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "daemon", id: "mba"), id: "intake"), id: "term-e1")
+        let account = ENV.machines?.sessions?.account ?? AccountID(provider: .daemon, id: "mba")
+        let session = SessionRef(workspace: WorkspaceRef(account: account, id: "w-e1"), id: "term-e1")
         let run = { (n: String, at: Double, note: String) in
-            EnhanceAgent.Run(worker: Worker(id: "wk-" + n, runtime: "orca", terminal: "term-" + n, startedAt: ago(at)),
-                            session: n == "e1" ? session : nil, item: UIShots.intakeRef, original: note, since: ago(at))
+            EnhanceAgent.Run(key: "enhance:TREBI-" + n, session: n == "e1" ? session : nil, pane: "tab-" + n, item: UIShots.intakeRef,
+                             original: note, since: ago(at), seen: true)
         }
         var asking = run("e1", 6, "labels get lost on sync")
         asking.askedAt = ago(2)
@@ -434,8 +435,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         enhanceAgent.sample = { item in
             if case .item(let ref) = item {
                 guard UIShots.enhanceTicket, ref.key == "FRITZ-17" else { return nil }
-                return .ready(ticket, EnhanceAgent.Run(worker: Worker(id: "wk-t", runtime: "orca", startedAt: ago(9)), session: nil, item: ref,
-                                                      original: "icon is gray after a fail", since: ago(9)))
+                return .ready(ticket, EnhanceAgent.Run(key: "enhance:" + ref.key, session: nil, item: ref, original: "icon is gray after a fail",
+                                                      since: ago(9), seen: true))
             }
             if order[item.id] == nil { order[item.id] = order.count }
             return order[item.id].flatMap { $0 < states.count ? states[$0] : nil }

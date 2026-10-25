@@ -3,6 +3,7 @@ import OverSireCore
 
 /// The runtime routes of a FakeDaemon: runtimes, repos, workspaces, files, reveal, direct work orders and workers.
 /// The default values are the ones of the contract fixtures. A start makes a workspace with one terminal and one session.
+/// A start with a key gives the live session of the key, as the daemon does.
 public final class FakeDaemonRuntimes: @unchecked Sendable {
     private let lock = NSLock()
     private var _runtimes: [DaemonRuntime] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.223",
@@ -14,6 +15,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
     private var _states: [String: DaemonOrderState] = [:]
     private var _reads: [String: Int] = [:]
     private var _screen: [String: [String]] = [:]
+    private var _history: [String: String] = [:]
     private var _files: [[WorkspaceFile]] = []
     private var _reveals: [SessionRef] = []
     private var _workers: [String: (worker: Worker, state: WorkerState)] = [:]
@@ -38,6 +40,8 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
     public var workerCalls: [String] { with { _workerCalls } }
     /// The screen lines of a terminal for sessionRead.
     public func screen(_ terminal: String, _ lines: [String]) { with { _screen[terminal] = lines } }
+    /// The text of the last turn that sessionHistory gives for a terminal.
+    public func history(_ terminal: String, _ text: String) { with { _history[terminal] = text } }
     /// The state that GET /v1/workers/{id} gives from now on.
     public func worker(_ id: String, _ state: WorkerState) { with { _workers[id]?.state = state } }
     /// Orders with this op fail with the text.
@@ -142,6 +146,10 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
         let gone = DaemonOrderState(state: .failed, result: WorkOrderResult(error: "terminal_not_found"))
         switch o.order {
         case .start(let r):
+            if let k = r.key, let s = sessions.first(where: { $0.key == k }), let ws = s.workspace {
+                let ref = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: o.runtime, id: "local"), id: ws), id: s.terminal ?? s.id)
+                return DaemonOrderState(state: .done, result: WorkOrderResult(session: ref, paneKey: s.id))
+            }
             made += 1
             let name = r.workspaceName ?? "session-\(made)"
             let path = r.inPlace == true ? r.repo : r.repo + "-wt/" + name
@@ -157,7 +165,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
             }
             sessions.append(DaemonSession(id: term.session!, machine: machine, runtime: o.runtime.rawValue, harness: r.agent.rawValue, workspace: ws,
                                           terminal: term.id, cwd: path, state: .working, prompt: r.prompt, stateSince: o.createdAt,
-                                          updatedAt: o.createdAt, sources: ["orca"]))
+                                          updatedAt: o.createdAt, sources: ["orca"], key: r.key))
             let ref = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: o.runtime, id: "local"), id: ws), id: term.id)
             return DaemonOrderState(state: .done, result: WorkOrderResult(session: ref, paneKey: term.session, turnStarted: !r.prompt.isEmpty))
         case .send(let s, _, _, _):
@@ -175,7 +183,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
         case .history(let s, _):
             guard terminal(s) != nil else { return gone }
             let d = SessionDigest(harness: .claude, sessionId: "7f3c2a10", source: .orcaTerminal, turns: 1,
-                                  last: [SessionDigest.LastTurn(prompt: "Say hello.", text: "Hello.", tools: 0)])
+                                  last: [SessionDigest.LastTurn(prompt: "Say hello.", text: _history[s.id] ?? "Hello.", tools: 0)])
             return DaemonOrderState(state: .done, result: WorkOrderResult(digest: d))
         }
     }
