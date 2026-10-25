@@ -83,13 +83,14 @@ final class SnapSender {
     func send(_ b: SnapBasket, agent: Bool) async throws -> Result {
         let (p, t) = try target(b)
         // Check the agent side before the item exists, so a missing root does not leave a half ticket.
-        var launch: (AgentTerminal, String, String)?
+        var launch: (AgentTerminal, String, AgentLaunch)?
         if agent {
             guard let r = root(b.project), !r.isEmpty else { throw SnapSendError.noRoot(p.key ?? b.project) }
             guard let term = terminal() else { throw SnapSendError.noRuntime }
             let cfg = PROJECTS_CFG.runtime
-            let cmd: String
-            do { cmd = try cfg.command(for: cfg.agent).resolve(name: "snap-" + b.project.lowercased(), key: b.project, title: SnapTicket.title(b)) } catch {
+            let name = "snap-" + b.project.lowercased(), title = SnapTicket.title(b)
+            var cmd = cfg.launch(cfg.agent, name: name, key: b.project, title: title)
+            do { cmd.command = try cfg.command(for: cfg.agent).resolve(name: name, key: b.project, title: title) } catch {
                 throw SnapSendError.badCommand(String(describing: error))
             }
             launch = (term, r, cmd)
@@ -103,8 +104,7 @@ final class SnapSender {
             "key": made.item.key, "item": made.item.id, "intake": made.intake.id, "count": "\(b.shots.count)",
             "workspace": p.account.id, "project": p.key ?? b.project, "dir": store.outDir(b.id).path + "/download",
         ]).replacingOccurrences(of: "\n", with: " ")
-        let s = try await term.openTerminal(path: path, title: "snap-" + made.item.key, agent: AgentName(rawValue: PROJECTS_CFG.runtime.agent),
-                                         command: cmd, prompt: prompt)
+        let s = try await term.openTerminal(path: path, title: "snap-" + made.item.key, launch: cmd, prompt: prompt)
         try? await term.show(s)
         result.session = s
         return result

@@ -79,20 +79,11 @@ struct SessionStartMenu {
     func agents(_ item: Item, snap: ProjectSnapshot, at anchor: NSView, header: Bool = true) -> NSMenu {
         let menu = NSMenu()
         if header { menu.addItem(withTitle: "Start in Orca with", action: nil, keyEquivalent: "").isEnabled = false }
-        let d = PROJECTS_CFG.launch(for: item).agent
-        for a in PROJECTS_CFG.runtime.startAgents {
-            let mi = MenuAction(a) { [weak anchor] in
-                guard let anchor else { return }
-                self.start(item, snap: snap, at: anchor, agent: a == d ? nil : a)
-            }.item
-            if a == d {
-                mi.state = .on
-                mi.attributedTitle = NSAttributedString(string: a + "  default")
-            }
-            menu.addItem(mi)
+        let d = PROJECTS_CFG.defaultAgent(item.key)
+        AgentMenu.build(into: menu, picked: nil, standard: d) { [weak anchor] a in
+            guard let anchor else { return }
+            self.start(item, snap: snap, at: anchor, agent: a == d ? nil : a)
         }
-        menu.addItem(.separator())
-        menu.addItem(MenuAction("Change the default…") { (NSApp.delegate as? GHActionsBar)?.open(.settings(.agents)) }.item)
         return menu
     }
 

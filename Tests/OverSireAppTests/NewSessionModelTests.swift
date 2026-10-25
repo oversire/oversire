@@ -123,7 +123,7 @@ final class NewSessionModelTests: XCTestCase {
         XCTAssertEqual(m.button, "Create item")
         XCTAssertFalse(m.picksAgent)
         m.mode = .session
-        XCTAssertEqual(m.button, "Start claude")
+        XCTAssertEqual(m.button, "Start session")
         XCTAssertEqual(m.blocker, "Choose an Orca workspace folder for FRITZ.")
     }
 

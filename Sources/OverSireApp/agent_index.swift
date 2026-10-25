@@ -285,23 +285,25 @@ final class AgentIndex: NSObject {
 
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
     func start(_ item: Item, root: String, agent: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
-        let (agent, prompt, command) = PROJECTS_CFG.launch(for: item, agent: agent)
-        launch(key: item.key, note: item.url, root: root, agent: agent, prompt: prompt, command: command, startKey: StartKey.work(item.key), done: done)
+        let (agent, prompt) = PROJECTS_CFG.launch(for: item, agent: agent)
+        launch(key: item.key, note: item.url, root: root, agent: agent, prompt: prompt, startKey: StartKey.work(item.key), done: done)
     }
 
     /// Opens a session that the key tracks. `inPlace`: a new terminal in the folder `root`, no worktree.
     /// `startKey`: the daemon gives the live session of this key back in place of a new one.
-    func launch(key: String, note: String?, root: String, agent: String, prompt: String, command: String?, title: String? = nil,
+    func launch(key: String, note: String?, root: String, agent: AgentLaunch, prompt: String, title: String? = nil,
                 inPlace: Bool = false, startKey: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let name = key
         let key = key.uppercased()
         guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
         launches[key] = PendingLaunch(at: now())
-        agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
+        agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent.cli), repo: (root as NSString).lastPathComponent, prompt: prompt,
+                                   profile: agent.profile, model: agent.model, effort: agent.effort)
         publish()
         Task { [weak self] in
-            let req = LaunchRequest(repo: root, name: name, note: note, agent: AgentName(rawValue: agent), prompt: prompt,
-                                    command: command, title: title, inPlace: inPlace ? true : nil, key: startKey)
+            var req = LaunchRequest(repo: root, name: name, note: note, agent: AgentName(rawValue: agent.cli), prompt: prompt,
+                                    title: title, inPlace: inPlace ? true : nil, key: startKey)
+            req.apply(agent)
             let r = await Result(awaiting: { try await rt.launch(req) })
             DispatchQueue.main.async {
                 guard let self else { return }

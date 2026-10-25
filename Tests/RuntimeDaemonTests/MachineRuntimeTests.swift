@@ -172,6 +172,31 @@ final class MachineRuntimeTests: XCTestCase {
         guard case .read(_, 5, true) = d.runtime.orders.last!.order else { return XCTFail() }
     }
 
+    func testALaunchSendsModelEffortAndProfile() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        try await rt.refresh()
+        _ = try await rt.launch(LaunchRequest(repo: repo, name: "TOWERTAIL-9", agent: .claude, prompt: "Go",
+                                              command: "claude -n TOWERTAIL-9", model: "claude-opus-5-5", effort: "max", profile: "claude-max"))
+        let o = try XCTUnwrap(d.runtime.orders.first)
+        guard case .start(let r) = o.order else { return XCTFail("\(o.order)") }
+        XCTAssertEqual([r.agent.rawValue, r.model, r.effort, r.profile], ["claude", "claude-opus-5-5", "max", "claude-max"])
+    }
+
+    func testModelsReadTheAgentRoute() async throws {
+        let d = FakeDaemon()
+        d.models["claude"] = try contract(AgentModels.self, "agent-models", "claude")
+        let rt = Self.remote(d, token: nil)
+        let m = try await rt.models(agent: "claude")
+        XCTAssertEqual(m.source, "wire")
+        XCTAssertFalse(m.models.isEmpty)
+        XCTAssertEqual(d.calls, ["GET /v1/agents/claude/models"])
+        do {
+            _ = try await rt.models(agent: "nope")
+            XCTFail("an unknown agent is a 404")
+        } catch {}
+    }
+
     func testAFailedOrderThrowsItsError() async throws {
         let d = FakeDaemon()
         let rt = local(d)

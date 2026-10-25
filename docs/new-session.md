@@ -9,9 +9,21 @@ The New session panel starts a coding agent in Orca from one place. Select a pro
 3. Type the prompt. ↩ adds a new line. Click the mic or press ⌘D to speak.
 4. Paste or drop screenshots and files, or click the paperclip (⌘O). Click a thumbnail to see it in Quick Look.
 5. Select or clear **Create intake item in KEY**. The panel keeps the last value.
-6. Press ⌘↩ or ⌃↩. OverSire opens a new Orca terminal in the Orca workspace of the project, starts the default agent and sends the prompt.
+6. Optional: click the agent chip at the bottom left, for example **claude-max · Opus 5.5 · Max**, and pick another agent. The pick applies to this start only.
+7. Press ⌘↩ or ⌃↩. OverSire opens a new Orca terminal in the Orca workspace of the project, starts the agent and sends the prompt.
 
 A toast at the bottom right tells the result. It has the links **Show in Orca** and **New session**.
+
+## Agents
+
+An agent is a name, a base CLI, a command, a model and an effort. Examples: `claude`, `claude-max` (Opus 5.5 · Max), `claude-fast` (Sonnet 5.5 · Low). Make them in Settings › Agents and queue › Agents with **Duplicate** or **Add an agent**.
+
+- The chip menu lists the agents under each base CLI, with the model and the effort. **default** marks the default agent, or the agent of the project.
+- The model list comes from the daemon of the sessions machine (`GET /v1/agents/{agent}/models`). When the daemon cannot list, the list comes from this Mac and the chip shows a warning mark. The tooltip tells why.
+- **Auto** adds no flag: the CLI uses its own default. A CLI with no effort level (opencode, gemini, cursor) shows no effort.
+- Orca gets the model and the effort as flags on the command. The `oversire` runtime gets them as fields. When the command has `--model` or `--effort` already, the command wins.
+- An agent with no base CLI is "terminal only". Only a terminal runtime (Orca) can start it.
+- The Session tab of an item shows the agent, the model and the effort of a session that OverSire started.
 
 ## The two routes
 
@@ -36,7 +48,7 @@ The route with intake off sends the files to the daemon of the sessions machine.
 ## Settings
 
 - Settings › General › Quick capture and snap: the shortcut, **Create intake item by default** and **File limit without intake**.
-- Settings › Agents › Agent commands: the agent command, and the two prompt templates **New session prompt (intake)** and **New session prompt (files)**.
+- Settings › Agents and queue › Agents: the agent command, and the two prompt templates **New session prompt (intake)** and **New session prompt (files)**.
 
 Placeholders of the intake template: `{text}` the prompt, `{key}` item key, `{item}` item id, `{intake}` intake id, `{workspace}`, `{project}`. With no files, the template lines that hold `{item}` drop. Placeholders of the files template: `{text}` and `{paths}`, one path on each line. A placeholder in the typed prompt stays as it is.
 

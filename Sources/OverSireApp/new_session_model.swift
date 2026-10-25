@@ -12,6 +12,7 @@ struct NewSessionModel: Equatable {
         var store: String       // ProjectRef.storeKey
         var root: String?       // the Orca workspace folder
         var states: [StatusOption] = []
+        var agent: String? = nil    // the agent of the project; nil: the default agent
     }
 
     enum Mode: String, Codable, CaseIterable {
@@ -70,7 +71,8 @@ struct NewSessionModel: Equatable {
     var priority = "none"
     var phase = Phase.edit
     var maxBytes: Int
-    var agent: String
+    var defaultAgent: String
+    var picked: String?         // an agent for this start only
     var intakeOff: Set<String> = []   // store keys of projects with the intake off
 
     init(choices: [Choice], cfg: SessionConfig, agent: String) {
@@ -80,8 +82,17 @@ struct NewSessionModel: Equatable {
         intake = cfg.intake
         mode = cfg.mode
         maxBytes = cfg.maxBytes
-        self.agent = agent
+        defaultAgent = agent
     }
+
+    /// The agent of the project, else the default agent. The chip menu marks it "default".
+    var standard: String { selection?.agent ?? defaultAgent }
+
+    /// The agent that Start uses: the pick, else the standard agent.
+    var agent: String { picked ?? standard }
+
+    /// The pick applies to this start only. A pick of the standard agent follows the project again.
+    mutating func pickAgent(_ a: String) { picked = a == standard ? nil : a }
 
     /// Key prefix first, then name prefix, then the rest that holds the query in the key, name or folder name.
     var matches: [Choice] {
@@ -141,7 +152,7 @@ struct NewSessionModel: Equatable {
 
     var button: String {
         switch mode {
-        case .session: return "Start \(agent)"
+        case .session: return "Start session"
         case .intake: return "Create intake"
         case .item: return "Create item"
         }

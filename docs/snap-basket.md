@@ -74,7 +74,7 @@ The title is `Snap basket · N shots · <first note>`. The description has one s
 
 ## The snap prompt
 
-Change the prompt in Settings › Agents and queue › Agent commands › Snap basket prompt. **Reset** sets the default. The placeholders:
+Change the prompt in Settings › Agents and queue › Agents › Snap basket prompt. **Reset** sets the default. The placeholders:
 
 | Placeholder | Value |
 |---|---|
@@ -86,7 +86,7 @@ Change the prompt in Settings › Agents and queue › Agent commands › Snap b
 | `{project}` | the project key |
 | `{dir}` | the download folder for the images |
 
-The agent mode uses the command of the project agent (Settings › Agents and queue › Agent commands). The project needs an Orca workspace: start any item of the project once.
+The agent mode uses the command of the project agent (Settings › Agents and queue › Agents). The project needs an Orca workspace: start any item of the project once.
 
 ## Failures
 

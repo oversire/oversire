@@ -93,7 +93,8 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
             let repo = w.repo ?? ""
             let agents = (byWorkspace[w.id] ?? []).filter { $0.runtime == w.runtime }.map { s in
                 AgentSession(phase: Self.phase(s), since: s.stateSince, card: w.id, paneKey: s.id, agent: AgentName(rawValue: s.harness),
-                             repo: repo, prompt: s.prompt, message: s.lastMessage, key: s.key, startedAt: s.startedAt)
+                             repo: repo, prompt: s.prompt, message: s.lastMessage, key: s.key, startedAt: s.startedAt,
+                             profile: s.profile, model: s.model, effort: s.effort)
             }
             return Workspace(id: w.id, repo: repo, path: w.path, name: w.name ?? "", comment: w.comment, liveTerminals: w.liveTerminals,
                              lastActivity: w.lastActivity, agents: agents, kind: Self.kind(w.kind), branch: w.branch ?? "")
@@ -154,6 +155,9 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
 
     /// The daemon record of a session: its folder and the session id of its harness.
     public func session(id: String) async throws -> DaemonSession { try await client.session(id: id) }
+
+    /// The models of an agent CLI on this machine.
+    public func models(agent: String) async throws -> AgentModels { try await client.models(agent: agent) }
 
     // MARK: HostFileWriting
 

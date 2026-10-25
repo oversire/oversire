@@ -16,9 +16,13 @@ public struct AgentSession: Hashable, Sendable {
     public var message: String?     // the error of a failed start, else the last agent reply
     public var key: String?         // the start key of the session, for example enhance:K-1
     public var startedAt: Date?     // the start of the session; `since` is the start of the phase
+    public var profile: String?     // the agent of an OverSire start, for example claude-max
+    public var model: String?
+    public var effort: String?
 
     public init(phase: Phase, since: Date, card: String? = nil, paneKey: String? = nil, agent: AgentName = .claude,
-                repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil, startedAt: Date? = nil) {
+                repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil, startedAt: Date? = nil,
+                profile: String? = nil, model: String? = nil, effort: String? = nil) {
         self.phase = phase
         self.since = since
         self.card = card
@@ -29,6 +33,9 @@ public struct AgentSession: Hashable, Sendable {
         self.message = message
         self.key = key
         self.startedAt = startedAt
+        self.profile = profile
+        self.model = model
+        self.effort = effort
     }
 
     /// The session waits, or its turn ended with a question.

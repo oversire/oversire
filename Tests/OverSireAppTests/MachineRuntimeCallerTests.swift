@@ -91,7 +91,7 @@ final class MachineRuntimeCallerTests: XCTestCase {
         h.use([mba, mbp])
         let local = try XCTUnwrap(h.runtime("mba"))
         try await local.refresh()
-        let s = try await local.openTerminal(path: repo, title: "OVERSIRE-9", agent: .claude, command: "claude", prompt: "Go")
+        let s = try await local.openTerminal(path: repo, title: "OVERSIRE-9", launch: AgentLaunch(profile: "claude", cli: "claude", command: "claude"), prompt: "Go")
         XCTAssertEqual(s.workspace.account, AccountID(provider: .daemon, id: "mba"))
         guard case .start(let r)? = d.runtime.orders.last?.order else { return XCTFail("no start order") }
         XCTAssertEqual(r.inPlace, true)
@@ -111,7 +111,7 @@ final class MachineRuntimeCallerTests: XCTestCase {
         h.use([mba, mbp])
         let local = try XCTUnwrap(h.runtime("mba"))
         try await local.refresh()
-        _ = try await local.openTerminal(path: repo, title: "OVERSIRE-9", agent: .claude, command: "claude", prompt: "Go")
+        _ = try await local.openTerminal(path: repo, title: "OVERSIRE-9", launch: AgentLaunch(profile: "claude", cli: "claude", command: "claude"), prompt: "Go")
 
         let index = AgentIndex(writes: nil)
         index.runtime = { local }

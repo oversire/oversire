@@ -59,16 +59,17 @@ struct MachineActions {
                 }
             },
             remote("order.start", "Start on machine", "Starts an agent session for the item on another machine of the group. `repo` is the repo path on that machine.",
-                   .outward, ["key": ItemActions.key, "repo": ("string", "The repo path on the machine."), "agent": ("string", "The agent CLI. Empty: the project default."),
+                   .outward, ["key": ItemActions.key, "repo": ("string", "The repo path on the machine."), "agent": ("string", "The agent name. Empty: the project default."),
                               "prompt": ("string", "Empty: the project prompt of the item.")], required: ["key", "repo"]) { a, c, link in
                 guard let link else { return .notAllowed("The machine has no link.") }
                 guard let repo = a.string("repo"), !repo.isEmpty else { return .notAllowed("Give the repo path on \(link.machine).") }
-                let found: (ItemRef, (agent: String, prompt: String, command: String?))? = await MainActor.run {
+                let found: (ItemRef, (agent: AgentLaunch, prompt: String))? = await MainActor.run {
                     guard let k = a.string("key"), let f = (NSApp.delegate as? AppData)?.projectStore.item(key: k), let ref = f.item.ref(in: f.snap.summary.ref) else { return nil }
                     return (ref, PROJECTS_CFG.launch(for: f.item, agent: a.string("agent").flatMap { $0.isEmpty ? nil : $0 }))
                 }
                 guard let (ref, l) = found else { return .notAllowed("No loaded item \(a.string("key") ?? "").") }
-                let launch = LaunchRequest(repo: repo, item: ref, agent: AgentName(rawValue: l.agent), prompt: a.string("prompt").flatMap { $0.isEmpty ? nil : $0 } ?? l.prompt)
+                var launch = LaunchRequest(repo: repo, item: ref, agent: AgentName(rawValue: l.agent.cli), prompt: a.string("prompt").flatMap { $0.isEmpty ? nil : $0 } ?? l.prompt)
+                launch.apply(AgentLaunch(profile: l.agent.profile, cli: l.agent.cli, model: l.agent.model, effort: l.agent.effort))
                 let o = try await RUNNER_DESK.send(WorkOrderDraft(runtime: "oversire", runner: link.machine, order: .start(launch)), on: link)
                 return .ok(summary: "Order \(o.id) starts \(ref.key) on \(link.machine). Read it with order.get.", data: .object(["id": .string(o.id)]))
             },

@@ -137,6 +137,13 @@ public final class DaemonClient: Sendable {
 
     public func repos() async throws -> DaemonReposPage { try await runtimeGet("/v1/repos") }
 
+    /// The models of an agent CLI on the machine. The first call can start the CLI, so it takes more time. 404: an unknown agent.
+    public func models(agent: String) async throws -> AgentModels {
+        var r = request("/v1/agents/\(Self.escape(agent))/models")
+        r.timeoutInterval = 40
+        return try Self.decode(try await send(r))
+    }
+
     public func workspaces() async throws -> DaemonWorkspacesPage { try await runtimeGet("/v1/workspaces") }
 
     /// The daemon asks each runtime. Orca under load, or with many workspaces, takes more than the default timeout.

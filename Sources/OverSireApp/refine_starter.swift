@@ -74,8 +74,8 @@ struct RefineStarter {
         var rt = cfg.runtime
         if let a = cfg.local(summary.identifier).agent, !a.isEmpty { rt.agent = a }
         let name = "refine-" + t.key.lowercased()
-        let command: String
-        do { command = try rt.command(for: rt.agent).resolve(name: name, key: t.key, title: t.title) } catch {
+        var launch = rt.launch(rt.agent, name: name, key: t.key, title: t.title)
+        do { launch.command = try rt.command(for: rt.agent).resolve(name: name, key: t.key, title: t.title) } catch {
             done(SessionStartError.badCommand(String(describing: error)).errorDescription)
             return
         }
@@ -96,7 +96,7 @@ struct RefineStarter {
                let list = try? await reader.attachments(of: ref) { files = !list.isEmpty }
             let prompt = Self.prompt(t, project: summary.ref, runtime: rt, files: files)
             DispatchQueue.main.async {
-                agents.launch(key: t.key, note: note, root: root, agent: rt.agent, prompt: prompt, command: command, title: name, inPlace: true, startKey: startKey) { r in
+                agents.launch(key: t.key, note: note, root: root, agent: launch, prompt: prompt, title: name, inPlace: true, startKey: startKey) { r in
                     if case .failure(let e) = r { done(e.message) } else { done(nil) }
                 }
             }

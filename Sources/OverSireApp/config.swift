@@ -293,14 +293,18 @@ struct ProjectsConfig: Codable {
 
     // The agent, the prompt and the resolved start command for an item. The project settings come first, then the app defaults.
     /// `agent` starts this one time with another agent. The default does not change.
-    func launch(for item: Item, agent: String? = nil) -> (agent: String, prompt: String, command: String?) {
+    func launch(for item: Item, agent: String? = nil) -> (agent: AgentLaunch, prompt: String) {
         let l = local(item.key.split(separator: "-").dropLast().joined(separator: "-"))
         var r = runtime
-        if let a = l.agent, !a.isEmpty { r.agent = a }
-        if let agent { r.agent = agent }
         if let p = l.prompt, !p.isEmpty { r.prompt = p }
-        let command = try? r.command(for: r.agent).resolve(name: item.key, key: item.key, title: item.title)
-        return (r.agent, SessionPrompt.withSubItemsRule(r.prompt(for: item)), command)
+        let a = agent ?? defaultAgent(item.key)
+        return (r.launch(a, name: item.key, key: item.key, title: item.title), SessionPrompt.withSubItemsRule(r.prompt(for: item)))
+    }
+
+    /// The agent of the project of a key ("ENG-4" or "ENG"), else the default agent.
+    func defaultAgent(_ key: String) -> String {
+        let project = key.contains("-") ? key.split(separator: "-").dropLast().joined(separator: "-") : key
+        return local(project).agent.flatMap { $0.isEmpty ? nil : $0 } ?? runtime.agent
     }
 
     // The Orca root of a project. `orca.roots` (by "slug/uuid") stays a mirror, because older code reads it.
@@ -520,14 +524,86 @@ struct SnapConfig: Codable, Equatable {
 
 // The agent settings of each runtime. `commands` holds only the changed start commands:
 // key "intake" for the intake agent, else an agent name.
+/// One agent: a base CLI with a model and an effort. The key in `RuntimeConfig.profiles` is the agent name.
+struct AgentProfile: Codable, Equatable {
+    var cli: String?        // a Harness raw value; nil: terminal only
+    var model = ""          // empty: Auto, the default of the CLI
+    var effort = ""         // empty: Auto
+
+    static let efforts = ["", "low", "medium", "high", "max"]
+    /// The CLIs with no effort flag.
+    static let noEffort: Set<String> = ["opencode", "opencode2", "gemini", "cursor"]
+
+    var hasEffort: Bool { cli.map { !Self.noEffort.contains($0) } ?? false }
+
+    static func effortName(_ e: String) -> String { e.isEmpty ? "Auto" : e.prefix(1).uppercased() + e.dropFirst() }
+
+    static let modelFlags = ["--model", "-m"]
+    static let effortFlags = ["--effort", "--thinking", "--reasoning-effort", "model_reasoning_effort"]
+
+    /// The words of a template that set the model or the effort. The command wins over the fields.
+    static func sets(_ flags: [String], in template: String) -> Bool {
+        template.split(whereSeparator: \.isWhitespace).contains { w in
+            let bare = w.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            return flags.contains { w == $0 || w.hasPrefix($0 + "=") || bare.hasPrefix($0 + "=") }
+        }
+    }
+
+    /// The flags that the daemon adds to the command in a terminal. The same rules as agent-wire ModelArgs.
+    func flags(for c: LaunchCommand) -> [String] {
+        guard let cli else { return [] }
+        var out: [String] = []
+        if !model.isEmpty, !Self.sets(Self.modelFlags, in: c.template) {
+            switch cli {
+            case "claude", "pi", "copilot", "gemini", "cursor": out += ["--model", model]
+            case "codex": out += ["-m", model]
+            default: break
+            }
+        }
+        if hasEffort, !effort.isEmpty, !Self.sets(Self.effortFlags, in: c.template) {
+            switch cli {
+            case "claude", "pi", "copilot": out += ["--effort", effort]
+            case "codex": out += ["-c", "model_reasoning_effort=" + (effort == "max" ? "xhigh" : effort)]
+            default: break
+            }
+        }
+        return out
+    }
+}
+
+/// What one start sends: the agent, its base CLI, the model, the effort and the resolved command.
+struct AgentLaunch: Equatable {
+    var profile: String     // the agent name
+    var cli: String         // the base CLI, or the program of a terminal-only agent
+    var model: String?
+    var effort: String?
+    var command: String?
+
+    /// Only the terminal runtime can start an agent with no base CLI.
+    var terminalOnly: Bool { RuntimeConfig.baseCLI(cli) == nil }
+}
+
+extension LaunchRequest {
+    mutating func apply(_ l: AgentLaunch) {
+        agent = AgentName(rawValue: l.cli)
+        model = l.model
+        effort = l.effort
+        profile = l.profile
+        if let c = l.command { command = c }
+    }
+}
+
 struct RuntimeConfig: Codable, Equatable {
     static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
     static let intakeKey = "intake"
     static let knownAgents = ["claude", "codex", "opencode"]
+    /// The CLIs that an agent can have as its base, in menu order.
+    static let baseCLIs = Harness.allBuiltIn.filter { ![.opencode2, .fake, .native].contains($0) }.map(\.rawValue)
 
     var agent = "claude"
     var prompt = RuntimeConfig.defaultPrompt
     var commands: [String: String] = [:]
+    var profiles: [String: AgentProfile] = [:]
     var snapPrompt = SnapTicket.defaultPrompt   // the prompt of a sent snap basket
     var sessionIntakePrompt = SessionPrompt.intakeDefault
     var sessionFilesPrompt = SessionPrompt.filesDefault
@@ -540,18 +616,63 @@ struct RuntimeConfig: Codable, Equatable {
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? RuntimeConfig.defaultPrompt
         commands = try c.decodeIfPresent([String: String].self, forKey: .commands) ?? [:]
+        profiles = try c.decodeIfPresent([String: AgentProfile].self, forKey: .profiles) ?? [:]
         snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
         sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
         refinePrompt = try c.decodeIfPresent(String.self, forKey: .refinePrompt) ?? SessionPrompt.refineDefault
     }
 
-    func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: agent)) }
+    /// The Harness name of a CLI name or a program path, else nil.
+    static func baseCLI(_ program: String) -> String? {
+        let p = (program as NSString).lastPathComponent
+        let name = p == Harness.cursor.binaryName ? Harness.cursor.rawValue : p
+        return baseCLIs.contains(name) ? name : nil
+    }
+
+    /// A built-in CLI is its own agent with Auto values. An agent from before OVERSIRE-317 has no profile:
+    /// the first word of its command gives the base CLI. The first edit saves the profile.
+    func profile(_ agent: String) -> AgentProfile {
+        profiles[agent] ?? AgentProfile(cli: Self.baseCLI(agent) ?? Self.baseCLI(command(for: agent).program))
+    }
+
+    /// A built-in CLI at Auto values removes the entry. An added agent keeps its entry.
+    mutating func setProfile(_ agent: String, _ p: AgentProfile) {
+        profiles[agent] = Self.baseCLI(agent) == agent && p == AgentProfile(cli: agent) ? nil : p
+    }
+
+    /// Duplicate: the new agent gets the command, the model and the effort of `source`.
+    mutating func duplicate(_ source: String, as name: String) {
+        commands[name] = command(for: source).template
+        profiles[name] = profile(source)
+    }
+
+    /// Add: the new agent starts with the default command of its CLI. A nil CLI gives a terminal-only agent.
+    mutating func add(_ name: String, cli: String?) {
+        commands[name] = cli.map { LaunchCommand.defaultFor(AgentName(rawValue: $0)).template } ?? name
+        profiles[name] = AgentProfile(cli: cli)
+    }
+
+    mutating func remove(_ name: String) {
+        commands[name] = nil
+        profiles[name] = nil
+    }
+
+    /// The agent with its resolved command. A bad template gives a nil command, as before.
+    func launch(_ agent: String, name: String, key: String, title: String) -> AgentLaunch {
+        let p = profile(agent)
+        let c = command(for: agent)
+        return AgentLaunch(profile: agent, cli: p.cli ?? c.program, model: p.cli == nil || p.model.isEmpty ? nil : p.model,
+                           effort: p.hasEffort && !p.effort.isEmpty ? p.effort : nil,
+                           command: try? c.resolve(name: name, key: key, title: title))
+    }
+
+    func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: profiles[agent]?.cli ?? agent)) }
 
     var intakeCommand: LaunchCommand { saved(Self.intakeKey) ?? .intakeDefault }
 
     func defaultCommand(_ key: String) -> LaunchCommand {
-        key == Self.intakeKey ? .intakeDefault : .defaultFor(AgentName(rawValue: key))
+        key == Self.intakeKey ? .intakeDefault : .defaultFor(AgentName(rawValue: profiles[key]?.cli ?? key))
     }
 
     // Saves a template. A template at its default removes the entry, except for an added agent: its entry is the agent.
@@ -563,15 +684,28 @@ struct RuntimeConfig: Codable, Equatable {
 
     /// The agents of the Start and New menus: the CLIs of AgentBinder, then the added agents.
     var startAgents: [String] {
-        var out = Harness.allBuiltIn.filter { ![.opencode2, .fake, .native].contains($0) }.map(\.rawValue)
+        var out = Self.baseCLIs
         for a in agents where !out.contains(a) { out.append(a) }
         return out
+    }
+
+    /// The start menu groups: one for each CLI with more agents, and for claude and codex. The other agents go last, under nil.
+    var agentGroups: [(cli: String?, agents: [String])] {
+        let all = startAgents
+        var groups: [(cli: String?, agents: [String])] = []
+        var rest: [String] = []
+        for cli in Self.baseCLIs {
+            let list = all.filter { profile($0).cli == cli }
+            if list.count > 1 || ["claude", "codex"].contains(cli) { groups.append((cli, list)) } else { rest += list }
+        }
+        rest += all.filter { profile($0).cli == nil }
+        return rest.isEmpty ? groups : groups + [(nil, rest)]
     }
 
     // The known agents, then the added agents and the default agent.
     var agents: [String] {
         var out = Self.knownAgents
-        for k in (Array(commands.keys) + [agent]).sorted() where k != Self.intakeKey && !out.contains(k) { out.append(k) }
+        for k in (Array(commands.keys) + Array(profiles.keys) + [agent]).sorted() where k != Self.intakeKey && !out.contains(k) { out.append(k) }
         return out
     }
 

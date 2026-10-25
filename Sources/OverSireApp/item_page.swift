@@ -751,7 +751,17 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func terminalHead(_ a: AgentSession, status s: ItemStatus?) -> [NSView] {
-        [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu"), RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()]
+        [StatusPill.or(s), Chiplet(a.agent.rawValue, symbol: "cpu")] + Self.profileTag(a) + [RelativeTimeLabel({ a.since }, size: 12, format: { "since " + $0 }), Spacer()]
+    }
+
+    /// "claude-max · Opus 5.5 · Max", only for a session that OverSire started with an agent.
+    static func profileTag(_ a: AgentSession) -> [NSView] {
+        guard let p = a.profile, !p.isEmpty else { return [] }
+        let model = a.model.map { AgentModelBook.shared.name($0, cli: a.agent.rawValue) } ?? "Auto"
+        let text = ([p, model] + (a.effort.map { [AgentProfile.effortName($0)] } ?? [])).joined(separator: " · ")
+        let c = Chiplet(text, color: Palette.acc)
+        c.setAccessibilityLabel("Agent \(p), model \(model)" + (a.effort.map { ", effort \(AgentProfile.effortName($0))" } ?? ""))
+        return [c]
     }
 
     private func replyRowIfOpen(_ a: AgentSession) -> NSView? { a.phase != .done && a.phase != .failed ? replyRow() : nil }
@@ -765,8 +775,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
     /// The agent and the place of a live card: "claude", "Orca · this Mac".
     private func liveChips(_ a: AgentSession, chat: Bool) -> [NSView] {
         let place = data.agentIndex.place
-        return chat ? [Chiplet("\(a.agent.rawValue) · agent-wire"), Chiplet("OverSire runner · \(place)")]
-                    : [Chiplet(a.agent.rawValue), Chiplet("Orca · \(place)")]
+        return (chat ? [Chiplet("\(a.agent.rawValue) · agent-wire"), Chiplet("OverSire runner · \(place)")]
+                     : [Chiplet(a.agent.rawValue), Chiplet("Orca · \(place)")]) + Self.profileTag(a)
     }
 
     private func terminalCard(session id: String, request: URLRequest) -> LiveTerminalCard {

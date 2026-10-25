@@ -112,7 +112,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     /// True in a `--uishots` run. Pages then keep view choices in memory, not in the user defaults.
     static var shooting = false
     static let cloud = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLOUD"].map { $0 == "1" }
-    // OVERSIRE_UISHOTS_COMMANDS=1: Settings › Agents and queue shows one custom start command and one bad draft.
+    // OVERSIRE_UISHOTS_COMMANDS=1: Settings › Agents and queue shows the open Agents card: custom agents, one custom command and one bad draft.
     static let commands = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_COMMANDS"] == "1"
     // OVERSIRE_UISHOTS_PLANNER=1: a vision, relations, areas, a queue lane and a plan change in the OVERSIRE project.
     static let planner = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_PLANNER"] == "1"
@@ -224,7 +224,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         for (i, r) in rows.enumerated() {
             let (key, phase, since, live, same, ticking, shells, message) = r
             let card = "uishots-card-\(i)"
-            let a = AgentSession(phase: phase, since: ago(since), card: card, paneKey: "p\(i)", repo: "oversire", message: message)
+            var a = AgentSession(phase: phase, since: ago(since), card: card, paneKey: "p\(i)", repo: "oversire", message: message)
+            if UIShots.commands, key == UIShots.sessionKey { (a.profile, a.model, a.effort) = ("claude-max", "claude-opus-5-5", "max") }
             var w = SessionWatch(at: ago(same))
             w.fingerprint = "fp-\(key)"
             w.counter = ticking ? "41m 12s · ↓ 88.1k tokens" : nil
@@ -722,6 +723,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         if UIShots.commands {
             PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]
             AgentCommandsCard.drafts = ["codex": "codex --full-auto; echo done"]
+            Self.seedAgents()
+            SettingsPage.commandsOpen = true
         }
         useSampleMachines()
         agentIndex.poll()
@@ -830,6 +833,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("session:") {
                         self.sessionWindow?.orderOut(nil)
                         self.sessionWindow = UIShots.sessionSample(String(p.dropFirst(8)), shooting: w)
+                        if p == "session:agentmenu", let root = self.sessionWindow?.contentView,
+                           let chip = UIShots.find(root, { $0.accessibilityLabel()?.hasPrefix("Agent ") == true }) {
+                            let menu = NSMenu()
+                            AgentMenu.build(into: menu, picked: "claude-max", standard: "claude") { _ in }
+                            self.shootMenu(menu, under: chip, name: "\(theme.rawValue)-agentmenu")
+                        }
                     } else if p.hasPrefix("startmenu:"), let found = self.projectStore.item(key: String(p.dropFirst(10))),
                               let more = w.window?.contentView.flatMap({ UIShots.find($0) { $0.accessibilityLabel() == "Start in Orca with" } }) {
                         // startmenu:<KEY>: the agent list of the item page split button.
@@ -976,7 +985,29 @@ extension UIShots {
 // MARK: New session samples
 
 extension UIShots {
-    /// session:<frame>: the New panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast, intake, intakeoff, item, itemtoast.
+    /// Three claude agents, codex at Medium and one terminal-only agent. The model lists come with no daemon call.
+    static func seedAgents() {
+        var r = PROJECTS_CFG.runtime
+        r.setProfile("claude", AgentProfile(cli: "claude", model: "claude-opus-5-5", effort: "high"))
+        r.duplicate("claude", as: "claude-max")
+        r.setProfile("claude-max", AgentProfile(cli: "claude", model: "claude-opus-5-5", effort: "max"))
+        r.add("claude-fast", cli: "claude")
+        r.setProfile("claude-fast", AgentProfile(cli: "claude", model: "claude-sonnet-5-5", effort: "low"))
+        r.setProfile("codex", AgentProfile(cli: "codex", model: "gpt-5.5", effort: "medium"))
+        r.add("gemini-work", cli: nil)
+        PROJECTS_CFG.runtime = r
+        var lists: [String: AgentModelBook.Entry] = [:]
+        for cli in RuntimeConfig.baseCLIs { lists[cli] = .init(models: [], warning: nil) }
+        lists["claude"] = .init(models: [AgentModel(id: "claude-opus-5-5", name: "Opus 5.5", isDefault: true),
+                                         AgentModel(id: "claude-sonnet-5-5", name: "Sonnet 5.5"),
+                                         AgentModel(id: "claude-haiku-5-5", name: "Haiku 5.5")], warning: nil)
+        lists["codex"] = .init(models: [AgentModel(id: "gpt-5.5", name: "gpt-5.5"), AgentModel(id: "gpt-5.5-mini", name: "gpt-5.5-mini")],
+                               warning: "mbp cannot list the models: the daemon is older than 0.9. The list is from this Mac.")
+        AgentModelBook.shared.seed(lists)
+    }
+
+    /// session:<frame>: the New panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast, intake, intakeoff, item, itemtoast,
+    /// agent, agentmenu, agentwarn, agentterm (the agent chip).
     static func sessionSample(_ frame: String, shooting w: AppWindow) -> NSWindow? {
         let c = NewSessionController(projects: { [] })
         let choices = [NewSessionModel.Choice(key: "OVERSIRE", name: "OverSire", store: "plane:ocral/OVERSIRE", root: NSHomeDirectory() + "/Projects/oversire"),
@@ -991,6 +1022,11 @@ extension UIShots {
         cfg.mode = frame.hasPrefix("intake") ? .intake : frame == "item" ? .item : .session
         cfg.intake = frame != "direct"
         var m = NewSessionModel(choices: choices, cfg: cfg, agent: "claude")
+        if ["agent", "agentmenu", "agentwarn", "agentterm"].contains(frame) {
+            if !UIShots.commands { seedAgents() }
+            m.text = "The runs page is out of date after a re-run."
+            m.pickAgent(frame == "agentwarn" ? "codex" : frame == "agentterm" ? "gemini-work" : "claude-max")
+        }
         if frame == "toast" {
             let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: .daemon, id: "mba"), id: "path:/x"), id: "t1")
             let item = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"), id: "i1", key: "OVERSIRE-153", url: URL(string: "https://app.plane.so")!)

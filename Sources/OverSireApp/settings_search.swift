@@ -150,7 +150,7 @@ struct SettingsIndex {
         Entry("Wait after the item is finished", .worktrees, "cleanup delay"),
         Entry("Only worktrees that OverSire started", .worktrees, "cleanup orca"),
         Entry("Run the repo archive hooks", .worktrees, "cleanup orca run-hooks"),
-        Entry("Agent commands", .sessions, "command line start"),
+        Entry("Agents", .sessions, "agent command model effort duplicate command line start"),
         Entry("Snap basket prompt", .sessions, "template screenshot"),
         Entry("New session prompt", .sessions, "template intake files paths"),
         Entry("Auto start", .queue, "next item"),

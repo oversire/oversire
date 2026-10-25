@@ -177,7 +177,7 @@ struct StatusCard {
     // Agent and repo, branch, PR, CI and the Plane write-back.
     private func chips() -> NSView {
         var chips: [NSView] = []
-        if let a = stream?.agent ?? data.agentIndex.agent(key.uppercased()) { chips.append(Chiplet("\(a.agent.rawValue)\(a.repo.isEmpty ? "" : " · " + a.repo)", symbol: "cpu")) }
+        if let a = stream?.agent ?? data.agentIndex.agent(key.uppercased()) { chips.append(Chiplet("\(a.agent.rawValue)\(a.repo.isEmpty ? "" : " · " + a.repo)", symbol: "cpu")); chips += ItemPage.profileTag(a) }
         let branch = stream?.branches.first
         chips.append(Chiplet(branch ?? "No branch", symbol: "arrow.triangle.branch", mono: branch != nil))
         if let p = stream?.prs.first {

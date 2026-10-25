@@ -29,6 +29,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _joined: JoinResult?
     private var _update: DaemonUpdate?
     private var _leases: [String: Lease] = [:]
+    private var _models: [String: AgentModels] = [:]
     private var sockets: [FakeDaemonSocket] = []
 
     /// The credential that a call must carry. nil: no check (loopback).
@@ -75,6 +76,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     public var update: DaemonUpdate? { get { with { _update } } set { with { _update = newValue } } }
     /// The leases of /v1/leases/{name}, as on a home daemon. The lease routes answer 409 when this daemon is not home.
     public var leases: [String: Lease] { get { with { _leases } } set { with { _leases = newValue } } }
+    /// GET /v1/agents/{agent}/models, by agent. A missing agent gives 404.
+    public var models: [String: AgentModels] { get { with { _models } } set { with { _models = newValue } } }
     /// The time of the lease routes.
     public var now: @Sendable () -> Date = Date.init
     /// POST /v1/group/requests/{id}/approve and deny calls.
@@ -230,6 +233,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
             return (200, Data(#"{"ok":true}"#.utf8))
         case (_, let p) where p.count == 3 && p[1] == "leases":
             return try lease(method, p[2], url: url, body: body)
+        case ("GET", let p) where p.count == 4 && p[1] == "agents" && p[3] == "models": return try _models[p[2]].map(ok) ?? missing
         case ("GET", ["v1", "hooks", "install"]): return try ok(_hooks)
         case (let m, ["v1", "hooks", "install"]) where m == "POST" || m == "DELETE":
             let d = try body.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: [String]] } ?? [:]

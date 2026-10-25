@@ -10,11 +10,13 @@ final class SnapSendTests: XCTestCase {
     private final class Terminal: AgentTerminal, @unchecked Sendable {
         var opened: [(path: String, title: String, command: String, prompt: String)] = []
         var agents: [AgentName] = []
+        var launches: [AgentLaunch] = []
         var revealed: [SessionRef] = []
 
-        func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
-            opened.append((path, title, command, prompt))
-            agents.append(agent)
+        func openTerminal(path: String, title: String, launch: AgentLaunch, prompt: String) async throws -> SessionRef {
+            opened.append((path, title, launch.command ?? "", prompt))
+            agents.append(AgentName(rawValue: launch.cli))
+            launches.append(launch)
             return SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:" + path), id: "t1")
         }
 

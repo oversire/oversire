@@ -91,6 +91,9 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: self, queue: nil) { [weak self] _ in
             if self?.placing == false { self?.remember() }
         }
+        NotificationCenter.default.addObserver(forName: AgentModelBook.changed, object: nil, queue: .main) { [weak self] _ in
+            if self?.model.picksAgent == true { self?.refresh() }
+        }
 
         let header = NSStackView(h: [Glyph("circle.grid.3x3.fill", color: Palette.dim, size: 9, label: "Drag to move"),
                                      NSTextField.text("New", size: 14, weight: .semibold), buildModes(), Spacer(),
@@ -394,19 +397,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
 
     private func buildFooter() -> NSView {
         var lead: [NSView] = []
-        if model.picksAgent {
-            let pop = NSPopUpButton()
-            pop.controlSize = .small
-            pop.addItems(withTitles: PROJECTS_CFG.runtime.startAgents)
-            if pop.indexOfItem(withTitle: model.agent) < 0 { pop.addItem(withTitle: model.agent) }
-            pop.selectItem(withTitle: model.agent)
-            pop.isEnabled = !model.isStarting
-            pop.target = self
-            pop.action = #selector(agentPicked)
-            pop.setAccessibilityLabel("Agent")
-            pop.toolTip = "Agent"
-            lead = [pop, NSTextField.text("default: Settings › Agents", size: 11, color: Palette.dim)]
-        }
+        if model.picksAgent { lead = [agentChip()] }
         let cancel = ActionButton("Cancel") { [weak self] in self?.dismiss() }
         let title: String
         if case .starting(let label) = model.phase { title = label } else { title = "\(model.button)  ⌘↩" }
@@ -511,9 +502,27 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         if m == .session && firstResponder === titleField.currentEditor() { makeFirstResponder(promptView) }
     }
 
-    @objc private func agentPicked(_ sender: NSPopUpButton) {
-        model.agent = sender.titleOfSelectedItem ?? model.agent
-        refresh()
+    /// "claude-max · Opus 5.5 · Max ⌄". A click opens the agent menu. A warning mark tells that the model can fail.
+    private func agentChip() -> NSView {
+        let book = AgentModelBook.shared, a = model.agent, p = PROJECTS_CFG.runtime.profile(a)
+        if let c = p.cli, !p.model.isEmpty { book.load(c) }
+        let warn = book.warning(p)
+        let chip = ActionButton((warn == nil ? "" : "△ ") + book.label(a, p) + "  ⌄")
+        chip.isEnabled = !model.isStarting
+        chip.onClick = { [weak self, weak chip] in
+            guard let self, let chip else { return }
+            let menu = NSMenu()
+            AgentMenu.build(into: menu, picked: self.model.agent, standard: self.model.standard) { [weak self] a in
+                self?.model.pickAgent(a)
+                self?.refresh()
+            }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: chip.bounds.height + 2), in: chip)
+        }
+        chip.toolTip = warn ?? (p.cli == nil ? "No base CLI. Only a terminal runtime (Orca) can start it." : "The agent of this start. Settings › Agents has the default.")
+        let effort = p.hasEffort ? ", effort \(AgentProfile.effortName(p.effort))" : ""
+        chip.setAccessibilityLabel("Agent \(a), model \(p.cli == nil ? "terminal only" : p.model.isEmpty ? "Auto" : book.name(p.model, cli: p.cli!))\(effort)")
+        if let warn { chip.setAccessibilityHelp(warn) }
+        return chip
     }
 
     @objc private func fieldPicked() {
@@ -797,7 +806,7 @@ final class NewSessionController {
 
     func choices() -> [NewSessionModel.Choice] {
         projects().map { NewSessionModel.Choice(key: $0.identifier, name: $0.title, store: $0.ref.storeKey, root: PROJECTS_CFG.orcaRoot($0),
-                                                states: states($0.ref.storeKey)) }
+                                                states: states($0.ref.storeKey), agent: PROJECTS_CFG.local($0.identifier).agent.flatMap { $0.isEmpty ? nil : $0 }) }
     }
 
     private func chooseRoot(_ store: String) {

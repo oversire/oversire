@@ -211,11 +211,11 @@ final class SessionStarter {
         guard let path = root(r.project), !path.isEmpty else { throw SessionStartError.noRoot(key) }
         guard let term = terminal() else { throw SessionStartError.noRuntime }
         let cfg = PROJECTS_CFG.runtime
-        let agent = r.agent ?? cfg.agent
+        let agent = r.agent ?? PROJECTS_CFG.defaultAgent(key)
         let name = NewSessionModel.termName(agent: agent, text: r.text)
         let title = NewSessionModel.title(r.text)
-        let cmd: String
-        do { cmd = try cfg.command(for: agent).resolve(name: name, key: key, title: title) } catch {
+        var launch = cfg.launch(agent, name: name, key: key, title: title)
+        do { launch.command = try cfg.command(for: agent).resolve(name: name, key: key, title: title) } catch {
             throw SessionStartError.badCommand(String(describing: error))
         }
         var intake: (any IntakeTracker)?
@@ -259,7 +259,7 @@ final class SessionStarter {
             prompt = r.text
         }
         progress("Opening terminal…")
-        let s = try await term.openTerminal(path: path, title: name, agent: AgentName(rawValue: agent), command: cmd, prompt: prompt)
+        let s = try await term.openTerminal(path: path, title: name, launch: launch, prompt: prompt)
         try? await term.show(s)
         return Result(session: s, item: item, paths: paths, missing: missing, terminal: name)
     }

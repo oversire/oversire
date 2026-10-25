@@ -43,18 +43,18 @@ extension SettingsPage {
         promptRow.addArrangedSubview(NSTextField.text("Prompt", size: 13, weight: .medium))
         promptRow.addFull(prompt)
         promptRow.addArrangedSubview(NSTextField.text("Placeholders: {url} {key} {KEY} {title}. Keep {url} first.", size: 11.5, color: Palette.dim))
-        let n = r.commands.count
+        let n = Set(r.commands.keys).union(r.profiles.keys).subtracting([RuntimeConfig.intakeKey]).count
         let open = Self.commandsOpen
         let edit = ActionButton(open ? "Done" : "Edit") { [weak self] in
             Self.commandsOpen.toggle()
             self?.reload()
         }
-        edit.setAccessibilityLabel(open ? "Close the agent commands" : "Edit the agent commands")
+        edit.setAccessibilityLabel(open ? "Close the agents" : "Edit the agents")
         b.addFull(section(.sessions, [
             FieldRow("Default agent", note: "A project can choose another.", agent),
             promptRow,
-            Row([TwoLine("Agent commands", "\(n == 0 ? "Default commands" : n == 1 ? "1 custom command" : "\(n) custom commands") · used by the queue and intake"),
-                 Spacer(), edit], height: 52, label: "Agent commands"),
+            Row([TwoLine("Agents", "\(n == 0 ? "Default agents" : n == 1 ? "1 custom agent" : "\(n) custom agents") · command, model and effort · used by ▶, the queue and intake"),
+                 Spacer(), edit], height: 52, label: "Agents"),
         ]))
         if open { b.addFull(AgentCommandsCard(examples: commandExamples, usedBy: commandUsers)) }
     }

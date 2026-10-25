@@ -7,11 +7,13 @@ final class SessionStarterTests: XCTestCase {
     private final class Terminal: AgentTerminal, @unchecked Sendable {
         var opened: [(path: String, title: String, command: String, prompt: String)] = []
         var agents: [AgentName] = []
+        var launches: [AgentLaunch] = []
         var revealed: [SessionRef] = []
 
-        func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
-            opened.append((path, title, command, prompt))
-            agents.append(agent)
+        func openTerminal(path: String, title: String, launch: AgentLaunch, prompt: String) async throws -> SessionRef {
+            opened.append((path, title, launch.command ?? "", prompt))
+            agents.append(AgentName(rawValue: launch.cli))
+            launches.append(launch)
             return SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: "path:" + path), id: "t1")
         }
 
@@ -137,6 +139,20 @@ final class SessionStarterTests: XCTestCase {
         let made = try await tracker.intake(tracker.project)
         XCTAssertTrue(made.isEmpty, "no tracker call")
         XCTAssertEqual(steps, ["Sending 2 files…", "Opening terminal…"])
+    }
+
+    func testAPickedAgentSendsItsCLIModelAndEffort() async throws {
+        let saved = PROJECTS_CFG.runtime
+        defer { PROJECTS_CFG.runtime = saved }
+        PROJECTS_CFG.runtime.add("claude-max", cli: "claude")
+        PROJECTS_CFG.runtime.setProfile("claude-max", AgentProfile(cli: "claude", model: "claude-opus-5-5", effort: "max"))
+        var r = request("Fix the sync", intake: false)
+        r.agent = "claude-max"
+        _ = try await start(r)
+        XCTAssertEqual(term.launches, [AgentLaunch(profile: "claude-max", cli: "claude", model: "claude-opus-5-5", effort: "max",
+                                                   command: term.launches.first?.command)])
+        XCTAssertEqual(term.opened[0].title, "claude-max-fix-the-sync")
+        XCTAssertEqual(term.agents, [.claude])
     }
 
     func testDirectWithNoFilesSendsTheText() async throws {

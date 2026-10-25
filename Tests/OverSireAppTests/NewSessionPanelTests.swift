@@ -60,7 +60,7 @@ final class NewSessionPanelTests: XCTestCase {
         XCTAssertEqual(p.model.selected, "ocral/s")
         XCTAssertFalse(p.model.listOpen)
         XCTAssertNotNil(buttons(p).first { $0.title == "Choose folder…" }, "SLING has no Orca workspace")
-        XCTAssertEqual(buttons(p).first { $0.title.hasPrefix("Start claude") }?.isEnabled, false)
+        XCTAssertEqual(buttons(p).first { $0.title.hasPrefix("Start session") }?.isEnabled, false)
     }
 
     func testFilesShowAndRemove() {
@@ -71,7 +71,7 @@ final class NewSessionPanelTests: XCTestCase {
         XCTAssertNotNil(remove)
         remove?.performClick(nil)
         XCTAssertEqual(p.model.files.map(\.name), ["a.png"])
-        XCTAssertEqual(buttons(p).first { $0.title.hasPrefix("Start claude") }?.isEnabled, true, "a file alone can start")
+        XCTAssertEqual(buttons(p).first { $0.title.hasPrefix("Start session") }?.isEnabled, true, "a file alone can start")
     }
 
     func testHostFileErrorOffersIntake() {

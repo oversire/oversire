@@ -465,12 +465,12 @@ func runSelfTest() {
         d.runtime.commands["claude"] = "claude -n {name} --dangerously-skip-permissions"
         let l = d.launch(for: Item(id: "u-2", key: "FRITZ-8", title: "x", url: "u", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
                                    author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false))
-        check(l.agent == "claude" && l.command == "claude -n FRITZ-8 --dangerously-skip-permissions", "launch resolves the command")
+        check(l.agent.profile == "claude" && l.agent.command == "claude -n FRITZ-8 --dangerously-skip-permissions", "launch resolves the command")
         check(l.prompt.hasSuffix(SessionPrompt.subItemsRule), "launch prompt has the sub-items rule")
         let once = d.launch(for: Item(id: "u-2", key: "FRITZ-8", title: "x", url: "u", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
                                       author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false),
                             agent: "codex")
-        check(once.agent == "codex" && once.command?.hasPrefix("codex") == true && d.runtime.agent == "claude", "start with: one start, the default stays")
+        check(once.agent.profile == "codex" && once.agent.command?.hasPrefix("codex") == true && d.runtime.agent == "claude", "start with: one start, the default stays")
         check(d.runtime.startAgents == ["claude", "codex", "opencode", "pi", "copilot", "cursor", "gemini", "gemini-work"],
               "start menu agents \(d.runtime.startAgents)")
     } else { check(false, "runtime config decode") }

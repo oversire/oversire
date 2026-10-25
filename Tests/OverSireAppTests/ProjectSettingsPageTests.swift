@@ -76,13 +76,13 @@ final class ProjectSettingsPageTests: XCTestCase {
 
     func testProjectAgentAndPrompt() {
         var cfg = ProjectsConfig()
-        XCTAssertEqual(cfg.launch(for: item("SLING-7")).agent, cfg.runtime.agent)
+        XCTAssertEqual(cfg.launch(for: item("SLING-7")).agent.profile, cfg.runtime.agent)
         var l = ProjectLocalSettings()
         l.agent = "codex"
         l.prompt = "fix {KEY}"
         cfg.setLocal("SLING", l)
         let r = cfg.launch(for: item("SLING-7"))
-        XCTAssertEqual(r.agent, "codex")
+        XCTAssertEqual(r.agent.profile, "codex")
         XCTAssertEqual(r.prompt, "fix SLING-7\n\n" + SessionPrompt.subItemsRule)
         XCTAssertEqual(cfg.launch(for: item("OTHER-1")).prompt, SessionPrompt.withSubItemsRule(cfg.runtime.prompt(for: item("OTHER-1"))))
     }

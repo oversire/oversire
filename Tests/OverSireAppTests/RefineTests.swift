@@ -109,6 +109,17 @@ final class RefineTests: XCTestCase {
         XCTAssertEqual(r.note, item.url)
     }
 
+    func testRefineSendsTheModelOfTheDefaultAgent() async throws {
+        let ref = try await fake.create(ItemDraft(title: "Fix the sync", bodyMarkdown: ""), in: fake.project)
+        let item = try await fake.detail(ref).item
+        cfg.runtime.setProfile("claude", AgentProfile(cli: "claude", model: "claude-opus-5-5", effort: "high"))
+        let r = try await start(.item(item))
+        XCTAssertEqual(r.agent, .claude)
+        XCTAssertEqual(r.profile, "claude")
+        XCTAssertEqual(r.model, "claude-opus-5-5")
+        XCTAssertEqual(r.effort, "high")
+    }
+
     func testRefinePromptDecodesAndKeepsAnEdit() throws {
         let old = try JSONDecoder().decode(RuntimeConfig.self, from: Data("{}".utf8))
         XCTAssertEqual(old.refinePrompt, SessionPrompt.refineDefault)

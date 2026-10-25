@@ -170,8 +170,10 @@ extension PlaneTracker: HTMLBodies {
 extension MachineRuntime: SessionStreaming {}
 
 extension MachineRuntime: AgentTerminal {
-    func openTerminal(path: String, title: String, agent: AgentName, command: String, prompt: String) async throws -> SessionRef {
-        let l = try await launch(LaunchRequest(repo: path, agent: agent, prompt: prompt, command: command, title: title, inPlace: true))
+    func openTerminal(path: String, title: String, launch a: AgentLaunch, prompt: String) async throws -> SessionRef {
+        var r = LaunchRequest(repo: path, agent: AgentName(rawValue: a.cli), prompt: prompt, title: title, inPlace: true)
+        r.apply(a)
+        let l = try await launch(r)
         return SessionRef(workspace: WorkspaceRef(account: account, id: l.card), id: l.handle)
     }
 
