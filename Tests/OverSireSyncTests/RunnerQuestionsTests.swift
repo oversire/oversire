@@ -87,11 +87,26 @@ final class RunnerQuestionsTests: XCTestCase {
 
     func testChangesFollowTheStore() async throws {
         let (ch, hub) = try await Self.channel([])
-        var it = ch.changes!.makeAsyncIterator()
+        let changes = ch.changes!
         try await hub.store.put(Pin(id: "x", subject: .item(Self.item), at: Self.t0))
-        try await hub.store.put(Self.record("s-1"))
-        let got: Void? = await it.next()
-        XCTAssertNotNil(got)
+        // The channel subscribes to the store in a task. A put before that is lost, so put again until a change comes.
+        let got = await withTaskGroup(of: Bool.self) { g in
+            g.addTask {
+                var it = changes.makeAsyncIterator()
+                return await it.next() != nil
+            }
+            g.addTask {
+                for _ in 0..<200 where !Task.isCancelled {
+                    try? await hub.store.put(Self.record("s-1"))
+                    try? await Task.sleep(nanoseconds: 10_000_000)
+                }
+                return false
+            }
+            let first = await g.next() ?? false
+            g.cancelAll()
+            return first
+        }
+        XCTAssertTrue(got)
     }
 
     func testConformance() async {
