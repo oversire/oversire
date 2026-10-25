@@ -20,6 +20,8 @@ protocol MemberListing: Tracker { func memberNames() async -> [String: String] }
 protocol SelfAssigning: Tracker { func assignMe(_ i: ItemRef) async throws }
 protocol StatusTimeline: Tracker { func timeline(_ i: ItemRef, statuses: [StatusOption], current: String?) async throws -> [ActivityEntry] }
 protocol IntakeKeying: Tracker { func intakeSequences(_ p: ProjectRef) async throws -> [String: Int] }
+/// All pending intake bodies in one listing. Work item id → detail.
+protocol IntakeListing: Tracker { func intakeDetails(_ p: ProjectRef) async throws -> [String: IntakeDetail] }
 /// A tracker whose Markdown names uploaded files by id.
 protocol AssetLinking: AssetResolving { func assetIds(in markdown: String) -> Set<String> }
 

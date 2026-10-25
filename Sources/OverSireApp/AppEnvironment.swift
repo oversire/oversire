@@ -157,7 +157,7 @@ extension AppEnvironment: RepoAccounts {}
 
 // ─── Optional features of the adapters ───────────────────────────────────────
 
-extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, LabelIdReading {}
+extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeListing, LabelIdReading {}
 
 extension PlaneTracker: IntakePage {
     func intakeURL(_ p: ProjectRef) -> String { "\(workspace.webURL)/\(workspace.slug)/projects/\(p.id)/intake" }

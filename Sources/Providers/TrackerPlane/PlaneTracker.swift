@@ -381,6 +381,22 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         return out
     }
 
+    /// Work item id → detail, for the pending intake items. A row with no description_html is left out: read it with intakeDetail.
+    public func intakeDetails(_ p: ProjectRef) async throws -> [String: IntakeDetail] {
+        let names = await memberNames()
+        let q = [URLQueryItem(name: "fields", value: "issue,status,issue_detail")]
+        let rows = try await api.list("\(ws)/projects/\(p.id)/intake-issues/", query: q, max: 2000).filter { PlaneAPI.int($0["status"]) == -2 }
+        // The listing gives label ids.
+        let labelNames = rows.isEmpty ? [:] : Dictionary(((try? await labels(p)) ?? []).map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        var out: [String: IntakeDetail] = [:]
+        for r in rows {
+            guard let id = PlaneAPI.id(r["issue"]), let d = r["issue_detail"] as? [String: Any], let html = d["description_html"] as? String else { continue }
+            out[id] = IntakeDetail(sequence: d["sequence_id"] as? Int, body: PlaneMarkup.markdown(fromHTML: html) { names[$0] },
+                                   labels: (d["labels"] as? [String] ?? []).compactMap { labelNames[$0] })
+        }
+        return out
+    }
+
     // MARK: Timeline
 
     public func timeline(_ i: ItemRef) async throws -> [ActivityEntry] {

@@ -83,6 +83,12 @@ actor GroomJournal {
         try? await store.put(r)
     }
 
+    /// The projects with a Groom to undo.
+    func projects() async -> [String] {
+        await load()
+        return records.values.filter { $0.entries.contains { $0.writtenAt != nil } }.map(\.id)
+    }
+
     func last(_ projectKey: String) async -> Record? {
         await load()
         return records[projectKey].flatMap { $0.entries.contains { $0.writtenAt != nil } ? $0 : nil }

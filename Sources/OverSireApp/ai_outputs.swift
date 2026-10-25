@@ -12,6 +12,7 @@ final class AIOutputBook {
         case ciDigest = "ci-digest"
         case sessionStatus = "session-status"
         case enhanceWritten = "enhance-written"   // not an AI job: Enhance wrote the review of the subject
+        case groomReview = "groom-review"         // the Groom result of a project, until Apply or Discard
     }
 
     private let writes: StoreWrites

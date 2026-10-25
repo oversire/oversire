@@ -123,6 +123,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return w
     }()
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
+    lazy var groomAgent: GroomAgent = {
+        let g = GroomAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, queue: queue, enhance: enhanceAgent,
+                           journal: GroomJournal(store: STORE_WRITES.files ?? STORE_WRITES.store))
+        g.areas = { [unowned self] in self.areas.areas(key: $0) }
+        return g
+    }()
     lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
@@ -923,6 +929,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         ciAssist.outputs = aiOutputs
         statusJob.outputs = aiOutputs
         enhanceAgent.outputs = aiOutputs
+        groomAgent.outputs = aiOutputs
         guard let o = automations else { return }
         NotificationCenter.default.addObserver(forName: AutomationOwner.changed, object: o, queue: .main) { [weak self] _ in
             log.info("Automations: \(String(describing: o.role), privacy: .public)")

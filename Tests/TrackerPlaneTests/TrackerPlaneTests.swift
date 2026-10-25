@@ -229,6 +229,21 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(rel?["issues"] as? [String], ["i7"])
     }
 
+    // One listing gives all pending bodies, for Groom. A row with no description_html is left out.
+    func testIntakeDetailsListsThePendingBodies() async throws {
+        http.on("GET", "\(ws)/projects/P1/intake-issues/", #"""
+            {"results":[{"issue":"w1","status":-2,"issue_detail":{"sequence_id":12,"description_html":"<p><strong>Two</strong> shots</p>","labels":["l1"]}},
+                        {"issue":"w2","status":1,"issue_detail":{"sequence_id":13,"description_html":"<p>Accepted</p>","labels":[]}},
+                        {"issue":"w3","status":-2,"issue_detail":{"sequence_id":14}}],"next_page_results":false}
+            """#)
+        http.on("GET", "\(ws)/projects/P1/labels/", ##"[{"id":"l1","name":"bug","color":"#EF4444"}]"##)
+        let d = try await plane.intakeDetails(project)
+        XCTAssertEqual(d.keys.sorted(), ["w1"])
+        XCTAssertEqual(d["w1"]?.body, "**Two** shots")
+        XCTAssertEqual(d["w1"]?.sequence, 12)
+        XCTAssertEqual(d["w1"]?.labels, ["bug"])
+    }
+
     func testErrorsMapToProviderErrors() async {
         for (status, want) in [(401, ProviderError.unauthorized), (403, .forbidden), (404, .notFound)] {
             http.on("GET", "\(ws)/projects/P1/labels/", status: status, "{}")

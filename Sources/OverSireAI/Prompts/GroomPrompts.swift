@@ -245,6 +245,7 @@ public enum GroomInput {
 
     public struct TooMany: Error, Equatable, CustomStringConvertible {
         public let count: Int
+        public init(count: Int) { self.count = count }
         public var description: String {
             "One Groom run holds at most \(GroomInput.limit) items. The scope has \(count). Select Intake only or a label to stay under \(GroomInput.limit) items."
         }

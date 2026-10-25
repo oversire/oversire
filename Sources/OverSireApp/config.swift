@@ -61,6 +61,7 @@ struct AgentsConfig: Codable, Equatable {
     var intakePrompt = AgentsConfig.defaultIntakePrompt
     var intakeScratch = false           // Enhance works in a scratch worktree, not in main
     var enhanceVague = true             // start Enhance for a new intake item with a short note
+    var groomPrompt = GroomPrompt.template
     var writeBack = WriteBackConfig()
     var cleanup = CleanupConfig()
 
@@ -83,6 +84,7 @@ struct AgentsConfig: Codable, Equatable {
             ?? AgentsConfig.defaultIntakePrompt
         intakeScratch = try c.decodeIfPresent(Bool.self, forKey: .intakeScratch) ?? false
         enhanceVague = try c.decodeIfPresent(Bool.self, forKey: .enhanceVague) ?? true
+        groomPrompt = try c.decodeIfPresent(String.self, forKey: .groomPrompt) ?? GroomPrompt.template
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()
         cleanup = try c.decodeIfPresent(CleanupConfig.self, forKey: .cleanup) ?? CleanupConfig()
     }

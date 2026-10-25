@@ -32,6 +32,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
+    lazy var groomAgent = GroomAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, queue: queue,
+                                     enhance: enhanceAgent, journal: GroomJournal(store: writes.store))
     lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: UIShots.tmp + "/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
