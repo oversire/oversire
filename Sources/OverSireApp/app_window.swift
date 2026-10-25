@@ -19,7 +19,7 @@ protocol AppData: AnyObject {
     var suggestions: SuggestionBook { get }
     var planner: PlannerBook { get }
     var statusJob: StatusJob { get }
-    var intakeAgent: IntakeAgent { get }
+    var enhanceAgent: EnhanceAgent { get }
     var sessions: SessionNotes { get }
     var questions: QuestionHub { get }
     var ciAssist: CIAssist { get }

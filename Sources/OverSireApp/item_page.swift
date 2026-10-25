@@ -86,7 +86,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override var watches: DataDomains {
-        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config]
+        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config, .intake]
         switch tab {
         case .overview: d.formUnion([.relations, .planner, .runs, .prs])
         case .session, .activity: d.formUnion([.runs, .prs])
@@ -207,7 +207,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let cleanup = data.cleaner.lines(item.key, data: data)
         return PageRow("head", item, snap.summary, snap.statusOptions, prog.done, prog.total, snap.openSubItems(of: item.id),
                        snap.canCloseParent(item), data.questions.count(key: key), saving, data.queue.contains(key),
-                       Self.sig(cleanup, data.statusJob.item(key))) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
+                       Self.sig(cleanup, data.statusJob.item(key)), canEnhance) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
+    }
+
+    private var enhanceTarget: EnhanceTarget? {
+        data.projectStore.item(key: key).flatMap { $0.item.ref(in: $0.snap.summary.ref) }.map { .item($0) }
+    }
+
+    private var canEnhance: Bool {
+        guard let t = enhanceTarget else { return false }
+        return data.enhanceAgent.available && data.enhanceAgent.state(t) == nil
     }
 
     private func head(snap: ProjectSnapshot, item: Item, cleanup: [CleanupLine]) -> NSView {
@@ -260,6 +269,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 SessionStartMenu(self.data).agents(item, snap: snap, at: b).popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
             }
             actions.append(NSStackView(h: [b, more], spacing: 1))
+        }
+        if canEnhance, let t = enhanceTarget {
+            let b = ActionButton("Enhance", symbol: "sparkles") { [weak self] in self?.data.enhanceAgent.start(projectKey: snap.summary.ref.storeKey, target: t) }
+            b.toolTip = "A read-only agent reads the code and writes a better description"
+            actions.append(b)
         }
         actions += [
             ActionButton("Copy link", symbol: "link") { [weak self] in
@@ -412,6 +426,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 self.summaryPanel(item, body: body, summary: summary, busy: busy, linked: linked)
             })
         }
+        if let r = enhanceRow(pk: pk) { rows.append(r) }
         rows += questionRows()
         rows.append(statusRow(stream: stream))
         if let r = cleanupRow(item) { rows.append(r) }
@@ -653,8 +668,20 @@ final class ItemPage: Page, NSTextFieldDelegate {
     // MARK: Session
 
     // The question cards of the item. Overview and Session both show them; one tab builds at a time.
+    private func enhanceRow(pk: String) -> PageRow? {
+        guard let t = enhanceTarget, let state = data.enhanceAgent.state(t) else { return nil }
+        return PageRow("enhance", Self.sig(state)) { [unowned self] in
+            EnhancePanel(state, projectKey: pk, target: t, agent: self.data.enhanceAgent, questions: self.data.questions) { [weak self] err in
+                self?.note = err.map { (.bad, $0) }
+                self?.reload()
+            }
+        }
+    }
+
+    // The questions of an Enhance worker show in its card.
     private func questionRows() -> [PageRow] {
-        let entries = data.questions.entries(key: key)
+        let enhancing = enhanceTarget.flatMap { data.enhanceAgent.state($0)?.run?.session }
+        let entries = data.questions.entries(key: key).filter { $0.question.session != enhancing }
         questionCards = questionCards.filter { id, _ in entries.contains { $0.question.id == id } }
         return entries.map { e in
             PageRow("q-\(e.question.id)", e) { [unowned self] in

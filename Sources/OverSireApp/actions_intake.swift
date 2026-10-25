@@ -29,7 +29,7 @@ struct IntakeActions {
                         done(.notAllowed("\(a.string("project") ?? "The project") has no intake.")); return
                     }
                     guard !items.isEmpty else { done(.ok(summary: "The intake of \(snap.summary.identifier) is empty.")); return }
-                    items.forEach { d.intakeAgent.start(projectKey: snap.summary.ref.storeKey, item: $0) }
+                    items.forEach { d.enhanceAgent.start(projectKey: snap.summary.ref.storeKey, target: .intake($0)) }
                     done(.ok(summary: "The AI worker starts for \(items.count) intake item\(items.count == 1 ? "" : "s")."))
                 }
             },

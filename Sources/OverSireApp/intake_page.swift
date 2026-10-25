@@ -38,11 +38,11 @@ final class IntakeListPage: Page {
 
         commands.intercept = { [weak self] c in
             guard let self, case .triage(let id) = c else { return false }
-            if let (pk, item) = all.first(where: { $0.id == id })?.intake { self.data.intakeAgent.start(projectKey: pk, item: item) }
+            if let (pk, item) = all.first(where: { $0.id == id })?.intake { self.data.enhanceAgent.start(projectKey: pk, target: .intake(item)) }
             return true
         }
-        let agent = data.intakeAgent
-        let open = shown.compactMap(\.intake).filter { agent.state($0.item) == nil }
+        let agent = data.enhanceAgent
+        let open = shown.compactMap(\.intake).filter { agent.state(.intake($0.item)) == nil }
         let canEnhance = agent.available && !open.isEmpty
         let today = IntakeListPage.addedToday(all)
         let caption = "\(all.count) items wait for triage" + (today > 0 ? " · +\(today) today" : "")
@@ -51,7 +51,7 @@ final class IntakeListPage: Page {
                 var actions: [NSView] = []
                 if canEnhance {
                     let b = ActionButton("Enhance all", symbol: "sparkles", style: .primary) {
-                        open.forEach { agent.start(projectKey: $0.projectKey, item: $0.item) }
+                        open.forEach { agent.start(projectKey: $0.projectKey, target: .intake($0.item)) }
                         self?.reload()
                     }
                     b.setAccessibilityLabel("Enhance all \(open.count) items")
@@ -78,7 +78,7 @@ final class IntakeListPage: Page {
             })
         }
         var rows = PageRow.limited(shown, more: more, reload: { [weak self] in self?.reload() }) { [weak self] e in
-            let state = e.intake.flatMap { agent.state($0.item) }.map { String(describing: $0) }
+            let state = e.intake.flatMap { agent.state(.intake($0.item)) }.map { String(describing: $0) }
             return PageRow(e.id, e.rowHash, state, e.intake.map { self?.busy.contains($0.item.id) ?? false }, agent.available) {
                 self?.row(e) ?? NSView()
             }
@@ -94,13 +94,13 @@ final class IntakeListPage: Page {
 
     private func row(_ e: FeedEntry) -> NSView {
         guard let (pk, item) = e.intake else { return NSView() }
-        let agent = data.intakeAgent
+        let agent = data.enhanceAgent
         var actions: [NSView] = []
         if busy.contains(item.id) {
             actions.append(Spinner())
         } else {
-            if agent.available && agent.state(item) == nil {
-                actions.append(ActionButton("Enhance", symbol: "sparkles", style: .primary) { agent.start(projectKey: pk, item: item) })
+            if agent.available && agent.state(.intake(item)) == nil {
+                actions.append(ActionButton("Enhance", symbol: "sparkles", style: .primary) { agent.start(projectKey: pk, target: .intake(item)) })
             }
             actions.append(ActionButton("Accept  1") { [weak self] in self?.triage(pk, item, .accept) })
             actions.append(ActionButton("Accept and queue  Q") { [weak self] in self?.queue(pk, item) })
@@ -109,7 +109,7 @@ final class IntakeListPage: Page {
             actions.append(ActionButton("Snooze  H") { [weak self] in self?.triage(pk, item, .snooze(until: Date().addingTimeInterval(86400))) })
         }
         actions.forEach { ($0 as? NSButton)?.controlSize = .small }
-        let pill = agent.state(item).flatMap { IntakeAgent.pill($0) }.map { Pill($0.tone, text: $0.text) }
+        let pill = agent.state(.intake(item)).flatMap { EnhanceAgent.pill($0) }.map { Pill($0.tone, text: $0.text) }
         let r = FeedLine(e, layout: FeedLine.intakeLayout, badge: pill) { IntakeWindow.show(projectKey: pk, workItemId: item.workItemId) }
         r.hoverViews = actions
         r.onKey = { [weak self] c in
@@ -123,10 +123,10 @@ final class IntakeListPage: Page {
             }
             return true
         }
-        let canTriage = agent.available && agent.state(item) == nil
+        let canTriage = agent.available && agent.state(.intake(item)) == nil
         commands.attach(r) { _ in RowMenu.activity(e, projectKey: nil, canTriage: canTriage) }
-        guard let state = agent.state(item) else { return r }
-        let panel = IntakePanel(state, projectKey: pk, item: item, agent: agent, questions: data.questions) { [weak self] err in
+        guard let state = agent.state(.intake(item)) else { return r }
+        let panel = EnhancePanel(state, projectKey: pk, target: .intake(item), agent: agent, questions: data.questions) { [weak self] err in
             self?.note = err
             self?.reload()
         }
@@ -142,7 +142,7 @@ final class IntakeListPage: Page {
     private func queue(_ pk: String, _ item: IntakeItem) {
         busy.insert(item.id)
         reload()
-        data.intakeAgent.apply(projectKey: pk, item: item, accept: true, queue: true) { [weak self] err in
+        data.enhanceAgent.apply(projectKey: pk, item: item, accept: true, queue: true) { [weak self] err in
             guard let self else { return }
             self.busy.remove(item.id)
             self.note = err

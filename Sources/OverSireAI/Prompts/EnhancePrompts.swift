@@ -102,8 +102,22 @@ public enum EnhancePrompt {
     /// The user template of enhance.md. The user can change it in Settings.
     public static var template: String { PromptTemplate.all[.enhance]?.userTemplate ?? "" }
 
-    public static func input(key: String, title: String, url: String, body: String, vision: String? = nil) -> AIInput {
-        var context = ["key": key, "title": title, "url": url]
+    /// What the worker enhances. The raw value fills `{{kind}}`.
+    public enum Kind: String, Sendable {
+        case intake = "a new intake item"
+        case ticket = "a tracker item"
+    }
+
+    /// The first line of version 1. A saved template with it gets `{{kind}}`.
+    static let oldOpening = "You enhance a new intake item."
+
+    /// A template that the user saved before version 2, with `{{kind}}` in place of the intake words.
+    public static func migrate(_ saved: String) -> String {
+        saved.replacingOccurrences(of: oldOpening, with: "You enhance {{kind}}.")
+    }
+
+    public static func input(kind: Kind = .intake, key: String, title: String, url: String, body: String, vision: String? = nil) -> AIInput {
+        var context = ["kind": kind.rawValue, "key": key, "title": title, "url": url]
         if let vision, !vision.isEmpty { context["vision"] = vision }
         return AIInput(text: body.isEmpty ? "(no description)" : String(body.prefix(6000)), context: context)
     }

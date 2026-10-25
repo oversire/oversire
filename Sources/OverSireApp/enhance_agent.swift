@@ -2,10 +2,10 @@ import Cocoa
 import OverSireCore
 import OverSireAI
 
-// ─── Intake agent (Enhance) ──────────────────────────────────────────────────
-// A read-only worker on the sessions machine reads the code for a new intake item, asks the user what the code cannot tell
-// (the native AskUserQuestion form, shown with QuestionCard), and sends a new description in its `worker_done`. The user then
-// checks the properties to write, and accepts the item in the same step.
+// ─── Enhance ─────────────────────────────────────────────────────────────────
+// A read-only worker on the sessions machine reads the code for an intake item or a ticket, asks the user what the code cannot
+// tell (the native AskUserQuestion form, shown with QuestionCard), and sends a new description in its `worker_done`. The user then
+// checks the properties to write. An intake item can be accepted in the same step.
 
 /// The calls of a runtime that runs an Enhance worker.
 typealias EnhanceHost = WorkerSupervising
@@ -13,8 +13,24 @@ typealias EnhanceHost = WorkerSupervising
 /// A tracker with a web page for the intake of a project.
 protocol IntakePage: Tracker { func intakeURL(_ p: ProjectRef) -> String }
 
-final class IntakeAgent {
-    static let changed = Notification.Name("IntakeAgentChanged")
+/// What Enhance improves: a new intake item, or a ticket of the project.
+enum EnhanceTarget: Hashable {
+    case intake(IntakeItem)
+    case item(ItemRef)
+
+    /// The key of the state. The prefix keeps an item id apart from an intake id.
+    var id: String {
+        switch self {
+        case .intake(let i): return i.id
+        case .item(let r): return "item:" + r.id
+        }
+    }
+
+    var isTicket: Bool { if case .item = self { return true } else { return false } }
+}
+
+final class EnhanceAgent {
+    static let changed = Notification.Name("EnhanceAgentChanged")
     /// The most work time of one run. The time that a question waits does not count.
     static let timeout: TimeInterval = 1800
 
@@ -51,8 +67,8 @@ final class IntakeAgent {
         case description, priority, label(String), relation(String)
     }
 
-    private(set) var states: [String: State] = [:]     // intake id → state
-    private(set) var picks: [String: Set<Pick>] = [:]  // intake id → the unchecked properties
+    private(set) var states: [String: State] = [:]     // target id → state
+    private(set) var picks: [String: Set<Pick>] = [:]  // target id → the unchecked properties
     private var timer: Timer?
     private var autoTried: Set<String> = []
     private let store: ProjectStore
@@ -60,8 +76,8 @@ final class IntakeAgent {
     private let questions: QuestionHub
     var host: () -> (any EnhanceHost)? = { ENV.runtime as? any EnhanceHost }
     var now: () -> Date = { Date() }
-    /// For `--uishots`: a state for an item that has none.
-    var sample: ((IntakeItem) -> State?)?
+    /// For `--uishots`: a state for a target that has none.
+    var sample: ((EnhanceTarget) -> State?)?
 
     init(store: ProjectStore, memory: ProjectMemory, questions: QuestionHub) {
         self.store = store
@@ -71,10 +87,10 @@ final class IntakeAgent {
 
     var available: Bool { AI_CFG.intakeAgent && host()?.capabilities.contains(.workers) == true }
 
-    func state(_ item: IntakeItem) -> State? { states[item.id] ?? sample?(item) }
+    func state(_ t: EnhanceTarget) -> State? { states[t.id] ?? sample?(t) }
 
-    func spec(key: String, title: String, url: String, body: String, vision: String?) -> String {
-        EnhancePrompt.render(AGENTS.intakePrompt, EnhancePrompt.input(key: key, title: title, url: url, body: body, vision: vision))
+    func spec(_ kind: EnhancePrompt.Kind, key: String, title: String, url: String, body: String, vision: String?) -> String {
+        EnhancePrompt.render(AGENTS.intakePrompt, EnhancePrompt.input(kind: kind, key: key, title: title, url: url, body: body, vision: vision))
     }
 
     /// A short body with no steps. Quick triage starts Enhance for it when the setting is on.
@@ -91,7 +107,7 @@ final class IntakeAgent {
                 autoTried.insert(item.id)
                 guard now().timeIntervalSince(item.createdAt) < 86400 else { continue }
                 store.intakeDetail(projectKey: pk, item: item) { [weak self] r in
-                    if case .success(let d) = r, IntakeAgent.vague(d.body) { self?.start(projectKey: pk, item: item) }
+                    if case .success(let d) = r, EnhanceAgent.vague(d.body) { self?.start(projectKey: pk, target: .intake(item)) }
                 }
                 room -= 1
             }
@@ -99,34 +115,44 @@ final class IntakeAgent {
     }
 
     // Starts the worker in the Orca workspace of the project.
-    func start(projectKey: String, item: IntakeItem) {
+    func start(projectKey: String, target: EnhanceTarget) {
         guard let snap = store.snapshots[projectKey] else { return }
         guard let root = PROJECTS_CFG.orca.roots[projectKey], !root.isEmpty else {
-            set(item.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once.", kept: nil))
+            set(target.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once.", kept: nil))
             return
         }
-        guard let rt = host() else { set(item.id, .failed("Install the OverSire daemon in Settings › Machines.", kept: nil)); return }
-        let url = (ENV.tracker(snap.summary.ref.workspace) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
-        set(item.id, .starting)
-        store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
-            guard let self else { return }
-            let detail = try? r.get()
-            let body = detail?.body ?? ""
-            let key = (self.store.intakeKeys[item.workItemId] ?? detail?.sequence).map { "\(snap.summary.identifier)-\($0)" } ?? snap.summary.identifier
-            let ref = ItemRef(project: snap.summary.ref, id: item.workItemId, key: key, url: URL(string: url) ?? URL(fileURLWithPath: "/"))
-            let vision = self.memory.vision(of: snap.summary.ref)?.text
-            let path = AGENTS.intakeScratch ? root + "/.wt/enhance-" + key.lowercased() : root
-            Task {
-                if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
-                let spec = self.spec(key: key, title: item.name, url: url, body: body, vision: vision)
-                let r = await Result(awaiting: { try await rt.startWorker(WorkerStart(spec: spec, title: "Enhance " + key, path: path, agent: "claude")) })
-                DispatchQueue.main.async {
-                    switch r {
-                    case .success(let w):
-                        let s = w.terminal.map { SessionRef(workspace: WorkspaceRef(account: rt.account, id: "intake"), id: $0) }
-                        self.begin(item.id, Run(worker: w, session: s, item: ref, original: body, since: self.now()))
-                    case .failure(let e): self.set(item.id, .failed(e.message, kept: nil))
-                    }
+        guard host() != nil else { set(target.id, .failed("Install the OverSire daemon in Settings › Machines.", kept: nil)); return }
+        set(target.id, .starting)
+        switch target {
+        case .intake(let item):
+            let url = (ENV.tracker(snap.summary.ref.workspace) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
+            store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
+                guard let self else { return }
+                let detail = try? r.get()
+                let key = (self.store.intakeKeys[item.workItemId] ?? detail?.sequence).map { "\(snap.summary.identifier)-\($0)" } ?? snap.summary.identifier
+                let ref = ItemRef(project: snap.summary.ref, id: item.workItemId, key: key, url: URL(string: url) ?? URL(fileURLWithPath: "/"))
+                self.launch(target, .intake, ref: ref, title: item.name, url: url, body: detail?.body ?? "", root: root)
+            }
+        case .item(let ref):
+            let item = store.item(key: ref.key)?.item
+            launch(target, .ticket, ref: ref, title: item?.title ?? ref.key, url: ref.url.absoluteString, body: item?.body ?? "", root: root)
+        }
+    }
+
+    private func launch(_ target: EnhanceTarget, _ kind: EnhancePrompt.Kind, ref: ItemRef, title: String, url: String, body: String, root: String) {
+        guard let rt = host() else { set(target.id, .failed("Install the OverSire daemon in Settings › Machines.", kept: nil)); return }
+        let vision = memory.vision(of: ref.project)?.text
+        let path = AGENTS.intakeScratch ? root + "/.wt/enhance-" + ref.key.lowercased() : root
+        let spec = spec(kind, key: ref.key, title: title, url: url, body: body, vision: vision)
+        Task {
+            if AGENTS.intakeScratch { try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) }
+            let r = await Result(awaiting: { try await rt.startWorker(WorkerStart(spec: spec, title: "Enhance " + ref.key, path: path, agent: "claude")) })
+            DispatchQueue.main.async {
+                switch r {
+                case .success(let w):
+                    let s = w.terminal.map { SessionRef(workspace: WorkspaceRef(account: rt.account, id: "intake"), id: $0) }
+                    self.begin(target.id, Run(worker: w, session: s, item: ref, original: body, since: self.now()))
+                case .failure(let e): self.set(target.id, .failed(e.message, kept: nil))
                 }
             }
         }
@@ -207,15 +233,15 @@ final class IntakeAgent {
 
     // MARK: Review
 
-    func isChecked(_ item: IntakeItem, _ p: Pick) -> Bool { !(picks[item.id] ?? []).contains(p) }
+    func isChecked(_ t: EnhanceTarget, _ p: Pick) -> Bool { !(picks[t.id] ?? []).contains(p) }
 
-    func toggle(_ item: IntakeItem, _ p: Pick) {
-        if picks[item.id, default: []].remove(p) == nil { picks[item.id, default: []].insert(p) }
+    func toggle(_ t: EnhanceTarget, _ p: Pick) {
+        if picks[t.id, default: []].remove(p) == nil { picks[t.id, default: []].insert(p) }
     }
 
     /// The checked properties as one edit. Label names and relation keys that the project does not know drop,
-    /// and so does a relation that makes a cycle in `graph`.
-    func edit(_ item: IntakeItem, _ result: EnhanceResult, run: Run, labels: [StatusOption], keep: [String], items: [String: ItemRef],
+    /// and so does a relation that makes a cycle in `graph`. A ticket has no duplicate action: its duplicate is a "relates to".
+    func edit(_ item: EnhanceTarget, _ result: EnhanceResult, run: Run, labels: [StatusOption], keep: [String], items: [String: ItemRef],
               graph: BlockGraph = BlockGraph()) -> IntakeEdit {
         var graph = graph
         var patch = ItemPatch()
@@ -226,7 +252,8 @@ final class IntakeAgent {
         }
         if !add.isEmpty { patch.labels = keep + add.filter { !keep.contains($0) } }
         let relations = result.relations.filter { isChecked(item, .relation($0.key)) }.compactMap { r -> ItemRelation? in
-            guard let kind = r.relationKind, let ref = items[r.key.uppercased()] else { return nil }
+            let kind = r.relationKind ?? (item.isTicket && r.kind == "duplicate" ? .relatesTo : nil)
+            guard let kind, let ref = items[r.key.uppercased()] else { return nil }
             let rel = ItemRelation(kind: kind, item: ref)
             return graph.add(run.item.key, rel) ? rel : nil
         }
@@ -241,20 +268,21 @@ final class IntakeAgent {
         return e
     }
 
-    /// The checked duplicate, else nil.
-    func duplicate(_ item: IntakeItem, _ result: EnhanceResult, items: [String: ItemRef]) -> ItemRef? {
-        guard let d = result.duplicateOf, isChecked(item, .relation(d.key)) else { return nil }
+    /// The checked duplicate of an intake item, else nil.
+    func duplicate(_ item: EnhanceTarget, _ result: EnhanceResult, items: [String: ItemRef]) -> ItemRef? {
+        guard !item.isTicket, let d = result.duplicateOf, isChecked(item, .relation(d.key)) else { return nil }
         return items[d.key.uppercased()]
     }
 
     // Writes the checked properties. With `accept`, also accepts the item, or marks it as a duplicate when that is checked.
     // With `queue`, also adds the start label, so the item joins the lane of its project. It needs no Enhance run.
     func apply(projectKey: String, item: IntakeItem, accept: Bool, queue: Bool = false, done: @escaping (_ error: String?) -> Void) {
+        let target = EnhanceTarget.intake(item)
         var ready: (EnhanceResult, Run)?
         if case .ready(let result, let run) = states[item.id] { ready = (result, run) }
         guard ready != nil || queue, let snap = store.snapshots[projectKey],
               let tracker = ENV.tracker(snap.summary.ref.workspace) else { done("The project is not loaded."); return }
-        let known = Dictionary(snap.items.compactMap { $0.ref(in: snap.summary.ref) }.map { ($0.key.uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        let known = Self.known(snap)
         let graph = BlockGraph(store.relations.byKey)
         let startLabel = AGENTS.startLabel
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
@@ -263,8 +291,8 @@ final class IntakeAgent {
                 let labeler = tracker as? any LabelManaging
                 var labels = (try? await labeler?.labels(snap.summary.ref)) ?? []
                 let keep = (try? r.get())?.labels.compactMap { n in labels.first { $0.name == n }?.id } ?? []
-                var edit = ready.map { self.edit(item, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph) } ?? IntakeEdit()
-                let dup = ready.flatMap { self.duplicate(item, $0.0, items: known) }
+                var edit = ready.map { self.edit(target, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph) } ?? IntakeEdit()
+                let dup = ready.flatMap { self.duplicate(target, $0.0, items: known) }
                 if queue, dup == nil, !startLabel.isEmpty {
                     var id = labels.first { $0.name.caseInsensitiveCompare(startLabel) == .orderedSame }?.id
                     if id == nil, let made = try? await labeler?.createLabel(startLabel, color: "#3B82F6", in: snap.summary.ref) {
@@ -294,9 +322,46 @@ final class IntakeAgent {
         }
     }
 
+    /// Writes the checked properties to a ticket at once: one update, then the relations.
+    func apply(ticket ref: ItemRef, done: @escaping (_ error: String?) -> Void) {
+        let target = EnhanceTarget.item(ref)
+        guard case .ready(let result, let run) = states[target.id], let (_, snap, item) = store.item(key: ref.key),
+              let tracker = store.tracker(of: snap.summary.ref) else { done("The item is not loaded."); return }
+        let known = Self.known(snap)
+        let graph = BlockGraph(store.relations.byKey)
+        Task {
+            let labels = (try? await (tracker as? any LabelManaging)?.labels(snap.summary.ref)) ?? []
+            let keep = item.labels.compactMap { n in labels.first { $0.name == n }?.id }
+            let edit = self.edit(target, result, run: run, labels: labels, keep: keep, items: known, graph: graph)
+            await MainActor.run { self.write(edit, to: item.id, target: target, run: run, done: done) }
+        }
+    }
+
+    private func write(_ edit: IntakeEdit, to id: String, target: EnhanceTarget, run: Run, done: @escaping (String?) -> Void) {
+        let ended = {
+            if let rt = self.host() { Task { try? await rt.releaseWorker(run.worker) } }
+            self.set(target.id, .applied(accepted: false))
+            done(nil)
+        }
+        let relate = {
+            guard !edit.relations.isEmpty else { ended(); return }
+            self.store.relate(itemId: id, RelationPatch(add: edit.relations)) { ok in
+                ok ? ended() : done(self.store.lastError ?? "Plane did not take the relations.")
+            }
+        }
+        guard edit.patch != ItemPatch() else { relate(); return }
+        store.update(itemId: id, edit.patch, failure: "Could not write the changes") { ok in
+            ok ? relate() : done(self.store.lastError ?? "Plane did not take the changes.")
+        }
+    }
+
+    private static func known(_ snap: ProjectSnapshot) -> [String: ItemRef] {
+        Dictionary(snap.items.compactMap { $0.ref(in: snap.summary.ref) }.map { ($0.key.uppercased(), $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
     var canReveal: Bool { host() is any Revealing }
 
-    func reveal(_ item: IntakeItem) {
+    func reveal(_ item: EnhanceTarget) {
         guard let s = state(item)?.run?.session, let rt = host() else { return }
         Task {
             guard let r = rt as? any Revealing, case .failure(let e) = await Result(awaiting: { try await r.reveal(s) }) else { return }
@@ -304,7 +369,7 @@ final class IntakeAgent {
         }
     }
 
-    func discard(_ item: IntakeItem) {
+    func discard(_ item: EnhanceTarget) {
         if let run = states[item.id]?.run, let rt = host() {
             if let s = run.session { questions.untrack(intake: s) }
             let ready = states[item.id]?.isReady == true
@@ -312,12 +377,12 @@ final class IntakeAgent {
         }
         states[item.id] = nil
         picks[item.id] = nil
-        NotificationCenter.default.post(name: IntakeAgent.changed, object: self)
+        NotificationCenter.default.post(name: EnhanceAgent.changed, object: self)
     }
 
     private func set(_ id: String, _ s: State) {
         states[id] = s
-        NotificationCenter.default.post(name: IntakeAgent.changed, object: self)
+        NotificationCenter.default.post(name: EnhanceAgent.changed, object: self)
     }
 
     // MARK: Words
@@ -338,31 +403,31 @@ final class IntakeAgent {
     }
 }
 
-extension IntakeAgent.State {
+extension EnhanceAgent.State {
     var isReady: Bool { if case .ready = self { return true } else { return false } }
 }
 
-// The card under an intake line: progress, the questions, the review with checkboxes, and the actions.
-final class IntakePanel: Card {
-    private let agent: IntakeAgent
-    private let item: IntakeItem
-    private var picks: [IntakeAgent.Pick] = []
+// The card under an intake line or on an item page: progress, the questions, the review with checkboxes, and the actions.
+final class EnhancePanel: Card {
+    private let agent: EnhanceAgent
+    private let item: EnhanceTarget
+    private var picks: [EnhanceAgent.Pick] = []
 
-    init(_ state: IntakeAgent.State, projectKey: String, item: IntakeItem, agent: IntakeAgent, questions: QuestionHub,
+    init(_ state: EnhanceAgent.State, projectKey: String, target item: EnhanceTarget, agent: EnhanceAgent, questions: QuestionHub,
          after: @escaping (String?) -> Void) {
         self.agent = agent
         self.item = item
         super.init(title: nil, padding: 12, spacing: 8, fill: Palette.raise)
         var head: [NSView] = [Glyph("sparkles", color: Palette.acc, size: 13), NSTextField.text("Enhance", size: 12.5, weight: .semibold),
-                              Chiplet("Runs on: \(IntakePanel.place(agent))", mono: false),
+                              Chiplet("Runs on: \(EnhancePanel.place(agent))", mono: false),
                               Chiplet(AGENTS.intakeScratch ? "scratch worktree" : "main checkout", mono: true), Chiplet("read-only")]
-        if let p = IntakeAgent.pill(state) { head.append(Pill(p.tone, text: p.text)) }
+        if let p = EnhanceAgent.pill(state) { head.append(Pill(p.tone, text: p.text)) }
         add(NSStackView(h: head, spacing: 6))
         // Only a worker on this Mac opens in the runtime UI.
         let open: [NSView] = agent.canReveal ? [ActionButton("Open in Orca ↗") { agent.reveal(item) }] : []
         switch state {
         case .starting:
-            add(NSTextField.text("OverSire starts a worker on \(IntakePanel.place(agent)).", size: 12, color: Palette.mut))
+            add(NSTextField.text("OverSire starts a worker on \(EnhancePanel.place(agent)).", size: 12, color: Palette.mut))
         case .enhancing:
             add(NSTextField.text("The agent reads the code and the related items. It asks here when the code cannot tell.", size: 12, color: Palette.mut, lines: 2))
             add(NSStackView(h: open + [ActionButton("Stop") { agent.discard(item) }], spacing: 6))
@@ -371,28 +436,33 @@ final class IntakePanel: Card {
             add(NSStackView(h: open + [ActionButton("Stop") { agent.discard(item) }], spacing: 6))
         case .ready(let res, let run):
             review(res, run)
-            add(NSStackView(h: [
-                ActionButton("Accept", style: .primary) { agent.apply(projectKey: projectKey, item: item, accept: true, done: after) },
-                ActionButton("Accept and queue") { agent.apply(projectKey: projectKey, item: item, accept: true, queue: true, done: after) },
-                ActionButton("Write to the item") { agent.apply(projectKey: projectKey, item: item, accept: false, done: after) },
-            ] + open + [ActionButton("Discard") { agent.discard(item) }], spacing: 6))
+            let acts: [NSView]
+            switch item {
+            case .intake(let i):
+                acts = [ActionButton("Accept", style: .primary) { agent.apply(projectKey: projectKey, item: i, accept: true, done: after) },
+                        ActionButton("Accept and queue") { agent.apply(projectKey: projectKey, item: i, accept: true, queue: true, done: after) },
+                        ActionButton("Write to the item") { agent.apply(projectKey: projectKey, item: i, accept: false, done: after) }]
+            case .item(let ref):
+                acts = [ActionButton("Apply to \(ref.key)", style: .primary) { agent.apply(ticket: ref, done: after) }]
+            }
+            add(NSStackView(h: acts + open + [ActionButton("Discard") { agent.discard(item) }], spacing: 6))
         case .applied:
             add(NSTextField.text("OverSire wrote the checked changes. The original text is in the section \"Original note\".", size: 12, color: Palette.mut, lines: 2))
         case .failed(let msg, let kept):
             add(NSTextField.text(msg, size: 12, color: Palette.mut, lines: 3))
             if let kept, !kept.isEmpty { add(TermView(lines: kept.components(separatedBy: "\n"), height: 96)) }
-            add(NSStackView(h: [ActionButton("Try again") { agent.start(projectKey: projectKey, item: item) },
+            add(NSStackView(h: [ActionButton("Try again") { agent.start(projectKey: projectKey, target: item) },
                                 ActionButton("Dismiss") { agent.discard(item) }], spacing: 6))
         }
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    static func place(_ agent: IntakeAgent) -> String {
+    static func place(_ agent: EnhanceAgent) -> String {
         guard let rt = agent.host() else { return "no machine" }
         return rt is any Revealing ? "this Mac" : rt.account.id
     }
 
-    private func review(_ res: EnhanceResult, _ run: IntakeAgent.Run) {
+    private func review(_ res: EnhanceResult, _ run: EnhanceAgent.Run) {
         for f in res.findings.prefix(res.verdict == .offVision ? 1 : 6) {
             add(NSStackView(h: [NSTextField.text("•", color: Palette.dim), NSTextField.text(f, size: 12.5, lines: 3)], spacing: 6, align: .top))
         }
@@ -408,7 +478,8 @@ final class IntakePanel: Card {
         if let p = res.priority { boxes.append(check(.priority, "Priority: \(p.capitalized)")) }
         boxes += res.labels.map { check(.label($0), "Label: \($0)") }
         boxes += res.relations.map { r in
-            let word = ["blocked_by": "Blocked by", "blocks": "Blocks", "duplicate": "Duplicate of", "relates_to": "Relates to"][r.kind] ?? r.kind
+            let dup = item.isTicket ? "Relates to (duplicate)" : "Duplicate of"
+            let word = ["blocked_by": "Blocked by", "blocks": "Blocks", "duplicate": dup, "relates_to": "Relates to"][r.kind] ?? r.kind
             return check(.relation(r.key), "\(word) \(r.key)" + (r.reason.isEmpty ? "" : " · \(r.reason)"))
         }
         add(NSStackView(v: boxes, spacing: 4))
@@ -422,7 +493,7 @@ final class IntakePanel: Card {
         return box
     }
 
-    private func check(_ p: IntakeAgent.Pick, _ title: String) -> NSButton {
+    private func check(_ p: EnhanceAgent.Pick, _ title: String) -> NSButton {
         let b = NSButton(checkboxWithTitle: title, target: self, action: #selector(flip(_:)))
         b.state = agent.isChecked(item, p) ? .on : .off
         b.tag = picks.count

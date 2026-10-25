@@ -19,6 +19,19 @@ final class EnhancePromptTests: XCTestCase {
         XCTAssertTrue(bare.hasSuffix("(no description)"))
     }
 
+    func testTicketKindAndOldTemplate() {
+        let ticket = EnhancePrompt.render(EnhancePrompt.template, EnhancePrompt.input(kind: .ticket, key: "K-1", title: "T", url: "u", body: "b"))
+        XCTAssertTrue(ticket.hasPrefix("You enhance a tracker item. Do not change files."), ticket)
+        XCTAssertFalse(ticket.contains("intake"))
+
+        let saved = "You enhance a new intake item. Do not change files. Be short.\n{{text}}"
+        let migrated = EnhancePrompt.migrate(saved)
+        XCTAssertEqual(migrated, "You enhance {{kind}}. Do not change files. Be short.\n{{text}}")
+        XCTAssertEqual(EnhancePrompt.migrate(migrated), migrated)
+        XCTAssertTrue(EnhancePrompt.render(migrated, EnhancePrompt.input(kind: .ticket, key: "K-1", title: "T", url: "u", body: "b"))
+            .hasPrefix("You enhance a tracker item."))
+    }
+
     func testEachVerdictParses() throws {
         for v in EnhanceResult.Verdict.allCases {
             let r = try XCTUnwrap(EnhanceResult.parse(#"{"verdict":"\#(v.rawValue)","description":"d"}"#), v.rawValue)

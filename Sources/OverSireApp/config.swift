@@ -79,7 +79,8 @@ struct AgentsConfig: Codable, Equatable {
         quietMinutes = try c.decodeIfPresent(Double.self, forKey: .quietMinutes) ?? 10
         questionNotice = try c.decodeIfPresent(QuestionNotice.self, forKey: .questionNotice) ?? .later
         // A prompt of the old screen check has {KEY} fields. Enhance needs its own.
-        intakePrompt = try c.decodeIfPresent(String.self, forKey: .intakePrompt).flatMap { $0.contains("{KEY}") ? nil : $0 } ?? AgentsConfig.defaultIntakePrompt
+        intakePrompt = try c.decodeIfPresent(String.self, forKey: .intakePrompt).flatMap { $0.contains("{KEY}") ? nil : EnhancePrompt.migrate($0) }
+            ?? AgentsConfig.defaultIntakePrompt
         intakeScratch = try c.decodeIfPresent(Bool.self, forKey: .intakeScratch) ?? false
         enhanceVague = try c.decodeIfPresent(Bool.self, forKey: .enhanceVague) ?? true
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()

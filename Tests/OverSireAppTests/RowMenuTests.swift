@@ -51,7 +51,15 @@ final class RowMenuTests: XCTestCase {
         let m = RowMenu.item(item(assignees: ["ada"]), snap: s, stream: nil, local: ProjectLocalSettings(), caps: [])
         XCTAssertFalse(m.titles.contains("Assign to me"))
         XCTAssertFalse(m.titles.contains("Start session in Orca…"))
+        XCTAssertFalse(m.titles.contains("Enhance"))
         XCTAssertEqual(m.command("Copy branch name"), .copy("sling-7/fix-the-sync"))
+    }
+
+    func testItemMenuEnhanceNeedsWorkers() {
+        let m = RowMenu.item(item(), snap: snap, stream: nil, local: ProjectLocalSettings(), caps: all.union([.workers]))
+        XCTAssertEqual(m.titles.last, "Enhance")
+        XCTAssertEqual(m.command("Enhance"), .enhance(key: "SLING-7"))
+        XCTAssertNil(RowCommand.enhance(key: "SLING-7").action(key: { $0 }), "a UI command")
     }
 
     func testFailedRunMenu() {

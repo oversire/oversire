@@ -30,7 +30,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
-    lazy var intakeAgent = IntakeAgent(store: projectStore, memory: memory, questions: questions)
+    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions)
     lazy var sessions = SessionNotes(path: UIShots.tmp + "/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
@@ -132,6 +132,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let sampleLogs = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOGS"] == "1"
     // OVERSIRE_UISHOTS_FAILED=1, with OVERSIRE_UISHOTS_SESSIONS=1: a new session of FRITZ-17 did not start.
     static let failedStart = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FAILED"] == "1"
+    // OVERSIRE_UISHOTS_ENHANCE=1: the item page of FRITZ-17 has an Enhance result to apply.
+    static let enhanceTicket = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENHANCE"] == "1"
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()
@@ -365,7 +367,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     private func seedEnhance(_ ago: @escaping (Double) -> Date) {
         let session = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "daemon", id: "mba"), id: "intake"), id: "term-e1")
         let run = { (n: String, at: Double, note: String) in
-            IntakeAgent.Run(worker: Worker(id: "wk-" + n, runtime: "orca", terminal: "term-" + n, startedAt: ago(at)),
+            EnhanceAgent.Run(worker: Worker(id: "wk-" + n, runtime: "orca", terminal: "term-" + n, startedAt: ago(at)),
                             session: n == "e1" ? session : nil, item: UIShots.intakeRef, original: note, since: ago(at))
         }
         var asking = run("e1", 6, "labels get lost on sync")
@@ -386,7 +388,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             relations: [.init(kind: "blocked_by", key: "TREBI-466", reason: "the new label API"),
                         .init(kind: "relates_to", key: "TREBI-402", reason: "the same mapper")],
             findings: ["The mapper reads one page of 10 labels.", "The user said: Plane to Trebi."])
-        let states: [IntakeAgent.State] = [
+        let states: [EnhanceAgent.State] = [
             .asking(asking, n: 2),
             .enhancing(run("e2", 2, "")),
             .ready(enhanced, run("e3", 14, note)),
@@ -395,8 +397,24 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                    run("e5", 40, "crash on start")),
             .failed("The agent sent no result that OverSire can read. Its text is below.", kept: "I read the sync code.\nI could not finish the JSON."),
         ]
+        let ticket = EnhanceResult(verdict: .reproduced, description: """
+            ## Problem
+            The menu bar icon stays gray after a CI run fails, until the next poll.
+
+            ## Steps
+            1. Push a commit that fails a test.
+            2. Wait for the run to end.
+            3. The icon is gray for up to 60 seconds.
+            """, priority: "medium", labels: ["bug"],
+            relations: [.init(kind: "relates_to", key: "FRITZ-12", reason: "the same poll timer")],
+            findings: ["The status light reads the last poll, not the run event.", "I reproduced it with the fake CI."])
         var order: [String: Int] = [:]
-        intakeAgent.sample = { item in
+        enhanceAgent.sample = { item in
+            if case .item(let ref) = item {
+                guard UIShots.enhanceTicket, ref.key == "FRITZ-17" else { return nil }
+                return .ready(ticket, EnhanceAgent.Run(worker: Worker(id: "wk-t", runtime: "orca", startedAt: ago(9)), session: nil, item: ref,
+                                                      original: "icon is gray after a fail", since: ago(9)))
+            }
             if order[item.id] == nil { order[item.id] = order.count }
             return order[item.id].flatMap { $0 < states.count ? states[$0] : nil }
         }

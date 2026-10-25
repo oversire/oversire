@@ -12,6 +12,7 @@ enum RowCommand: Equatable {
     case priority(itemId: String, priorityId: String)
     case assignMe(itemId: String)
     case startSession(key: String)
+    case enhance(key: String)
     case run(repo: String, runId: String, RunAction)
     case ignoreFailure(repo: String, runId: String, Bool)
     case copyJobLog(repo: String, jobId: String)
@@ -48,7 +49,7 @@ enum RowCommand: Equatable {
         case .revealCard(let card): return ("session.reveal", ["card": .string(card)])
         case .refreshProject(let k): return ("project.refresh", ["project": .string(k)])
         case .open, .openURL, .copy, .finder, .terminal, .copyJobLog, .explain, .sendInput, .triage, .onlyProject,
-             .useTrackerIcon, .hideProject, .removeWorktree:
+             .useTrackerIcon, .hideProject, .removeWorktree, .enhance:
             return nil
         }
     }
@@ -110,6 +111,7 @@ enum RowMenu {
         } else if caps.contains(.sessionInput) {
             out.append(.action("Start session in Orca…", .startSession(key: item.key)))
         }
+        if caps.contains(.workers) { out.append(.action("Enhance", .enhance(key: item.key))) }
         if let pr = stream?.prs.first { out.append(.action("Open pull request", .openURL(pr.pr.url))) }
         if let r = stream?.runs.first { out.append(.action("Open latest run", .open(.run(repo: r.repo, id: r.run.id)))) }
         return out.tidy
@@ -210,7 +212,10 @@ final class RowCommander {
         self.go = go
     }
 
-    var caps: Set<Capability> { Set([.rerun, .rerunJob, .cancel, .logs, .changeActions, .sessionInput, .reveal].filter(data.has)) }
+    /// `.workers`: Enhance can start.
+    var caps: Set<Capability> {
+        Set([.rerun, .rerunJob, .cancel, .logs, .changeActions, .sessionInput, .reveal].filter(data.has)).union(data.enhanceAgent.available ? [.workers] : [])
+    }
 
     func items(_ entries: [MenuEntry], anchor: NSView?) -> [NSMenuItem] {
         entries.map { e in
@@ -241,6 +246,12 @@ final class RowCommander {
         if case .startSession(let key) = c {
             guard let found = store.item(key: key), let anchor else { return }
             SessionStartMenu(data).start(found.item, snap: found.snap, at: anchor)
+            return
+        }
+        if case .enhance(let key) = c {
+            guard let found = store.item(key: key), let ref = found.item.ref(in: found.snap.summary.ref) else { return }
+            data.enhanceAgent.start(projectKey: found.key, target: .item(ref))
+            go(.item(found.item.key, .overview))
             return
         }
         if let (id, args) = c.action(key: { store.item($0)?.item.key }) {

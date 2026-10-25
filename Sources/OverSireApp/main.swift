@@ -121,7 +121,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         w.onError = { log.error("\($0)") }
         return w
     }()
-    lazy var intakeAgent = IntakeAgent(store: projectStore, memory: memory, questions: questions)
+    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions)
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
@@ -312,7 +312,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         let sources: [(Notification.Name, DataDomains)] = [
-            (WorkQueue.changed, .queue), (WorkStats.changed, .stats), (StatusJob.changed, .summaries), (IntakeAgent.changed, .intake),
+            (WorkQueue.changed, .queue), (WorkStats.changed, .stats), (StatusJob.changed, .summaries), (EnhanceAgent.changed, .intake),
             (SessionNotes.changed, .agents), (CIAssist.changed, .runs), (ItemAreaBook.changed, .planner), (SuggestionBook.changed, .planner),
             (PlannerBook.changed, .planner), (ItemSummaries.changed, .summaries),
         ]
@@ -322,7 +322,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             }
         }
         NotificationCenter.default.addObserver(forName: ProjectStore.changed, object: projectStore, queue: .main) { [weak self] _ in
-            self?.intakeAgent.autoStart()
+            self?.enhanceAgent.autoStart()
         }
         queue.areaBook = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.areas : nil }
         queue.planner = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.planner : nil }

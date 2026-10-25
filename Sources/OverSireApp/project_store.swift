@@ -257,6 +257,8 @@ final class ProjectStore {
         }
     }
 
+    func tracker(of p: ProjectRef) -> (any Tracker)? { trackers.tracker(p.workspace) }
+
     func update(itemId: String, _ patch: ItemPatch, failure: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: failure, done: done) { c, ref in
             try await c.update(ref, patch)
