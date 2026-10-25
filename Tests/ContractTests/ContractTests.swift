@@ -55,6 +55,7 @@ final class ContractTests: XCTestCase {
         "session-digest": roundTrip(SessionDigest.self),
         "daemon-session": roundTrip(DaemonSession.self),
         "daemon-sessions-page": roundTrip(DaemonSessionsPage.self),
+        "agent-models": roundTrip(AgentModels.self),
         "daemon-question": roundTrip(DaemonQuestion.self),
         "daemon-questions-page": roundTrip(DaemonQuestionsPage.self),
         "daemon-answer-result": roundTrip(DaemonAnswerResult.self),

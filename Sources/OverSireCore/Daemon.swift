@@ -44,11 +44,15 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
     public var updatedAt: Date
     public var sources: [String]        // hook, orca, wire
     public var key: String?             // the start key of the order that made the session
+    public var model: String?           // LaunchRequest.model; nil for a session that OverSire did not start
+    public var effort: String?
+    public var profile: String?         // the OverSire agent name
 
     public init(id: String, machine: MachineName, runtime: String, harness: String, workspace: String? = nil,
                 terminal: String? = nil, harnessSession: String? = nil, cwd: String, repo: String? = nil, branch: String? = nil,
                 state: State, reason: Reason? = nil, question: QuestionID? = nil, prompt: String? = nil,
-                lastMessage: String? = nil, stateSince: Date, startedAt: Date? = nil, updatedAt: Date, sources: [String], key: String? = nil) {
+                lastMessage: String? = nil, stateSince: Date, startedAt: Date? = nil, updatedAt: Date, sources: [String], key: String? = nil,
+                model: String? = nil, effort: String? = nil, profile: String? = nil) {
         self.id = id
         self.machine = machine
         self.runtime = runtime
@@ -69,6 +73,39 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.sources = sources
         self.key = key
+        self.model = model
+        self.effort = effort
+        self.profile = profile
+    }
+}
+
+/// One model of an agent CLI. The fields match ModelInfo of AgentBinder and agent-wire.
+public struct AgentModel: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String?
+    public var description: String?
+    public var isDefault: Bool
+
+    public init(id: String, name: String? = nil, description: String? = nil, isDefault: Bool = false) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.isDefault = isDefault
+    }
+}
+
+/// GET /v1/agents/{agent}/models: the models of one CLI on the machine.
+public struct AgentModels: Codable, Hashable, Sendable {
+    public var agent: String
+    public var models: [AgentModel]
+    public var source: String           // wire, or none when the CLI cannot list
+    public var reason: String?          // why the list is empty
+
+    public init(agent: String, models: [AgentModel], source: String, reason: String? = nil) {
+        self.agent = agent
+        self.models = models
+        self.source = source
+        self.reason = reason
     }
 }
 

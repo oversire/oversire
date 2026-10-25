@@ -177,10 +177,14 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
     public var baseBranch: String?
     public var inPlace: Bool?            // true: a new terminal in the folder `repo`, no workspace
     public var key: String?              // the start key: one live session for each key, for example enhance:K-1
+    public var model: String?            // the vendor model id; nil: the CLI default
+    public var effort: String?           // low, medium, high, max; nil: the CLI default
+    public var profile: String?          // the OverSire agent name, display only; agent stays the base CLI
 
     public init(repo: String, item: ItemRef? = nil, name: String? = nil, note: String? = nil, branch: String? = nil,
                 agent: AgentName, prompt: String, environment: String? = nil, command: String? = nil, title: String? = nil,
-                baseBranch: String? = nil, inPlace: Bool? = nil, key: String? = nil) {
+                baseBranch: String? = nil, inPlace: Bool? = nil, key: String? = nil,
+                model: String? = nil, effort: String? = nil, profile: String? = nil) {
         self.repo = repo
         self.item = item
         self.name = name
@@ -194,6 +198,9 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
         self.baseBranch = baseBranch
         self.inPlace = inPlace
         self.key = key
+        self.model = model
+        self.effort = effort
+        self.profile = profile
     }
 
     public var workspaceName: String? { name ?? item?.key }
