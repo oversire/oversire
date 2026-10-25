@@ -1,5 +1,6 @@
 import OverSireCore
 import XCTest
+import OverSireTestKit
 @testable import OverSireApp
 
 final class ActivityTests: XCTestCase {
@@ -73,5 +74,68 @@ final class ActivityTests: XCTestCase {
         let items = [entry("1", project: "A", at: now.addingTimeInterval(-60)), entry("2", project: "A", at: now.addingTimeInterval(-3599)),
                      entry("3", project: "A", at: now.addingTimeInterval(-3601))]
         XCTAssertEqual(IntakeListPage.addedToday(items, now: now, calendar: utc), 2, "midnight is the boundary")
+    }
+
+    // MARK: Removed items
+
+    private let ref = ProjectRef(account: AccountID(provider: ProviderID(rawValue: "plane"), id: "ocral"), id: "p1", key: "OVERSIRE")
+
+    private func plane(_ id: String, key: String) -> Item {
+        Item(id: id, key: key, title: "Title of \(key)", url: "https://app.plane.so/ocral/browse/\(key)/", statusOptionId: nil, fields: [:],
+             assignees: [], labels: [], author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil,
+             mentionsMe: false)
+    }
+
+    private func snap(_ items: [Item]) -> ProjectSnapshot {
+        ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "OVERSIRE", title: "OverSire", url: "", closed: false),
+                        statusOptions: [], items: items, fetchedAt: Date())
+    }
+
+    @MainActor
+    func testOldEntryGetsTheKeyFromItsLink() throws {
+        let d = TestAppData()
+        let old = ActivityEntry.make(projectKey: "gone/p9", itemId: "u-36", change: .removed, actor: nil,
+                                     url: "https://app.plane.so/ocral/browse/OVERSIRE-36/", at: Date())
+        XCTAssertNil(old.itemKey)
+        try (String(decoding: JSONEncoder().encode(old), as: UTF8.self) + "\n").write(toFile: d.tmp + "/activity.jsonl", atomically: true, encoding: .utf8)
+        let e = try XCTUnwrap(ActivityFeed.entries(d).first)
+        XCTAssertEqual(e.itemKey, "OVERSIRE-36")
+        XCTAssertEqual(e.projectKey, "OVERSIRE")
+        XCTAssertFalse(e.title.contains("A removed item"))
+    }
+
+    @MainActor
+    func testARemovedItemKeepsItsTitle() throws {
+        let d = TestAppData()
+        d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1"), plane("u-2", key: "OVERSIRE-2")]))
+        d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1")]))
+        let saved = try XCTUnwrap(d.projectStore.activity(limit: 10, project: nil).first)
+        XCTAssertEqual(saved.itemKey, "OVERSIRE-2")
+        XCTAssertEqual(saved.title, "Title of OVERSIRE-2")
+        let e = try XCTUnwrap(ActivityFeed.entries(d).first)
+        XCTAssertEqual(e.title, "Title of OVERSIRE-2")
+        XCTAssertEqual(e.itemKey, "OVERSIRE-2")
+        XCTAssertEqual(e.projectKey, "OVERSIRE")
+        XCTAssertTrue(FeedLine(e) {}.accessibilityLabel()?.hasPrefix("OVERSIRE-2 Plane: ") == true)
+    }
+
+    @MainActor
+    func testNoRemovedEntryWhenTheItemStillExists() async throws {
+        let fake = FakeTracker()
+        let there = try await fake.create(ItemDraft(title: "Still there"), in: fake.project)
+        let kept = Item(id: there.id, key: "FAKE-1", title: "Still there", url: "https://tracker.fake/FAKE-1", statusOptionId: nil, fields: [:], assignees: [], labels: [],
+                        author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
+        let gone = Item(id: "no-such-id", key: "FAKE-99", title: "Gone", url: "https://tracker.fake/FAKE-99", statusOptionId: nil, fields: [:], assignees: [], labels: [],
+                        author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
+        let summary = ProjectSummary(ref: fake.project, identifier: "FAKE", title: "Fake", url: "", closed: false)
+        let before = ProjectSnapshot(summary: summary, statusOptions: [], items: [kept, gone], fetchedAt: Date())
+        let after = ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date())
+        let still = await ProjectStore.stillThere(fake, before, after)
+        XCTAssertEqual(still, [there.id], "only the item that Plane does not find counts as removed")
+
+        let d = TestAppData()
+        d.projectStore.absorb(before)
+        d.projectStore.absorb(after, kept: still)
+        XCTAssertEqual(d.projectStore.activity(limit: 10, project: nil).map(\.itemKey), ["FAKE-99"])
     }
 }

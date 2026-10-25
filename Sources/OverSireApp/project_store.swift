@@ -118,6 +118,7 @@ final class ProjectStore {
         Task { [weak self] in
             guard let self = self else { return }
             var fresh: [ProjectSnapshot] = []
+            var kept: [String: Set<String>] = [:]
             var error: String?
             var errors: [String: String] = [:]
             for (n, (p, client, previous)) in jobs.enumerated() {
@@ -138,6 +139,7 @@ final class ProjectStore {
                 switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
                 case .success(let s):
                     fresh.append(s)
+                    kept[p.ref.storeKey] = await ProjectStore.stillThere(client, previous, s)
                     line(.ok, "\(s.items.count) items")
                 case .failure(let e):
                     error = "\(p.ref.workspace): " + e.message
@@ -158,7 +160,7 @@ final class ProjectStore {
                                          uniquingKeysWith: { a, _ in a })
                     changed.formUnion(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
                     let before = self.snapshots[key].map(ProjectStore.digest)
-                    self.absorb(snap)
+                    self.absorb(snap, kept: kept[key] ?? [])
                     if before != self.snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
                 }
                 self.save()
@@ -593,10 +595,26 @@ final class ProjectStore {
         publish(DataChange(.projects, origin: .user))
     }
 
-    private func absorb(_ snap: ProjectSnapshot) {
+    /// The items that left the snapshot but still exist in the tracker. They only fell out of the item limit.
+    /// Only a "not found" reply counts as removed; at most 20 checks for each poll.
+    static func stillThere(_ client: Tracker, _ old: ProjectSnapshot?, _ new: ProjectSnapshot) async -> Set<String> {
+        guard let old else { return [] }
+        let ids = Set(new.items.map(\.id))
+        var out = Set<String>()
+        for (n, item) in old.items.filter({ !ids.contains($0.id) }).enumerated() {
+            guard n < 20, let ref = item.ref(in: new.summary.ref) else { out.insert(item.id); continue }
+            do { _ = try await client.detail(ref); out.insert(item.id) } catch ProviderError.notFound {} catch { out.insert(item.id) }
+        }
+        return out
+    }
+
+    func absorb(_ snap: ProjectSnapshot, kept: Set<String> = []) {
         let key = snap.summary.ref.storeKey
         let old = snapshots[key]
-        let changes = ProjectStore.diff(old, snap)
+        let changes = ProjectStore.diff(old, snap).filter { c in
+            if case .removed = c.1 { return !kept.contains(c.itemId) }
+            return true
+        }
         let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
@@ -614,7 +632,7 @@ final class ProjectStore {
             default: actor = item?.updatedBy
             }
             let e = ActivityEntry.make(projectKey: key, itemId: pair.itemId, change: pair.1, actor: actor,
-                                       url: item?.url ?? snap.summary.url, at: at)
+                                       url: item?.url ?? snap.summary.url, at: at, itemKey: item?.key, title: item?.title)
             // Changes made in OverSire or by me are not news.
             if suppressNotify.contains(pair.itemId) || (me != nil && actor?.lowercased() == me) { own.insert(e.id) }
             return e

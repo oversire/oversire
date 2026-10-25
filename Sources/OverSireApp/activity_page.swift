@@ -76,12 +76,14 @@ enum ActivityFeed {
         var out: [FeedEntry] = []
         for e in store.activity(limit: 200, project: nil) {
             let found = store.item(e.itemId)
-            let key = found?.item.key ?? ""
+            let key = found?.item.key ?? e.itemKey ?? ActivityEntry.key(inURL: e.url)
             let source: FeedEntry.Source = { if case .mention = e.change { return .mention }; return .plane }()
-            let title = found.map { "\($0.item.key) \($0.item.title)" } ?? "A removed item"
-            out.append(FeedEntry(id: "plane|" + e.id, source: source, title: title, body: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at,
-                                     route: key.isEmpty ? nil : .item(key, .activity), url: e.url, activityId: e.id,
-                                     itemKey: found?.item.key, itemURL: found?.item.url, groupKey: "\(e.projectKey)|\(e.itemId)"))
+            let title = found?.item.title ?? e.title ?? (key.map { "\($0) (not in OverSire now)" } ?? "An item not in OverSire now")
+            var f = FeedEntry(id: "plane|" + e.id, source: source, title: title, body: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at,
+                              route: found == nil ? nil : key.map { .item($0, .activity) }, url: e.url, activityId: e.id,
+                              itemKey: key, itemURL: found?.item.url ?? (key == nil ? nil : e.url), groupKey: "\(e.projectKey)|\(e.itemId)")
+            f.projectKey = store.snapshots[e.projectKey]?.summary.identifier.uppercased() ?? key.map { String($0[..<($0.lastIndex(of: "-") ?? $0.endIndex)]) }
+            out.append(f)
         }
         out = grouped(out)
         let day = Date().addingTimeInterval(-86400)
@@ -109,7 +111,7 @@ enum ActivityFeed {
                                      route: .item(c.key, .session), itemKey: c.key))
         }
         let resolver = ProjectResolver(PROJECTS_CFG)
-        for i in out.indices {
+        for i in out.indices where out[i].projectKey == nil {
             if let k = out[i].itemKey, let found = store.item(key: k) {
                 out[i].projectKey = found.snap.summary.identifier.uppercased()
             } else if case .run(let repo, _) = out[i].route {
@@ -159,8 +161,10 @@ enum ActivityFeed {
 
 // A feed line. Intake lines show the item ID in place of the source and take the triage keys 1, Q, 2, 3 and H.
 final class FeedLine: TableRow {
-    static let layout = ColumnLayout(id: "activity", columns: [
+    static let layout = ColumnLayout(id: "activity-2", columns: [
         TableColumn(id: "source", title: "Source", width: 64, min: 48),
+        TableColumn(id: "key", title: "ID", width: 104, min: 60, optional: true),
+        TableColumn(id: "project", title: "Project", width: 84, min: 50, optional: true),
         TableColumn(id: "title", title: "What", width: 300, min: 160, flexible: true),
         TableColumn(id: "when", title: "When", width: 56, min: 40, optional: true),
     ])
@@ -177,10 +181,12 @@ final class FeedLine: TableRow {
         let cells: [String: NSView] = [
             "source": Chiplet(e.source.rawValue, color: e.source.color),
             "id": Chiplet(e.shownID, color: e.intakeKey == nil ? Palette.dim : Palette.intake),
+            "key": e.itemKey.map { NSTextField.text($0, size: 11.5, color: Palette.dim, mono: true) } ?? NSTextField.text("—", color: Palette.dim),
+            "project": NSTextField.text(e.projectKey?.lowercased() ?? "—", size: 12, color: Palette.mut),
             "title": badge.map { NSStackView(h: [title, $0], spacing: 8) } ?? title,
             "when": RelativeTimeLabel(e.at),
         ]
-        super.init(layout, cells: cells, height: 48, label: "\(e.intakeKey.map { $0 + " " } ?? "")\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
+        super.init(layout, cells: cells, height: 48, label: "\((e.intakeKey ?? e.itemKey).map { $0 + " " } ?? "")\(e.source.rawValue): \(e.title). \(e.body)", onClick: onClick)
     }
     required init?(coder: NSCoder) { fatalError() }
 

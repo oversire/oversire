@@ -473,9 +473,14 @@ public struct ActivityEntry: Codable, Hashable, Sendable {
     public let url: String
     public let at: Date
     public var unread: Bool
+    // Kept at write time, so a removed item keeps its name.
+    public var itemKey: String?
+    public var title: String?
 
     public init(id: String, projectKey: String, itemId: String, change: ItemChange, actor: String?,
-                text: String, url: String, at: Date, unread: Bool) {
+                text: String, url: String, at: Date, unread: Bool, itemKey: String? = nil, title: String? = nil) {
+        self.itemKey = itemKey
+        self.title = title
         self.id = id
         self.projectKey = projectKey
         self.itemId = itemId
@@ -487,10 +492,17 @@ public struct ActivityEntry: Codable, Hashable, Sendable {
         self.unread = unread
     }
 
-    public static func make(projectKey: String, itemId: String, change: ItemChange, actor: String?, url: String, at: Date) -> ActivityEntry {
+    public static func make(projectKey: String, itemId: String, change: ItemChange, actor: String?, url: String, at: Date,
+                            itemKey: String? = nil, title: String? = nil) -> ActivityEntry {
         let id = "\(projectKey)|\(itemId)|\(change.text)|\(Int(at.timeIntervalSince1970))"
         return ActivityEntry(id: id, projectKey: projectKey, itemId: itemId, change: change,
-                             actor: actor, text: change.text, url: url, at: at, unread: true)
+                             actor: actor, text: change.text, url: url, at: at, unread: true, itemKey: itemKey, title: title)
+    }
+
+    /// The item key from a tracker link such as `…/browse/SLING-7/`, for entries saved without a key.
+    public static func key(inURL url: String) -> String? {
+        guard let r = url.range(of: "/browse/[A-Za-z][A-Za-z0-9]*-[0-9]+", options: .regularExpression) else { return nil }
+        return String(url[r].dropFirst("/browse/".count)).uppercased()
     }
 }
 

@@ -446,6 +446,11 @@ class Row: Box {
         copyLink = url
         hoverViews = RowActions.item(url: url, key: key, tracker: tracker)
     }
+    // Copy link and Open in GitHub on hover, and the link key.
+    func runActions(url: String, name: String) {
+        copyLink = url
+        hoverViews = RowActions.run(url: url, name: name)
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard window?.firstResponder === self, event.charactersIgnoringModifiers?.lowercased() == "c" else { return super.performKeyEquivalent(with: event) }
@@ -2024,6 +2029,14 @@ enum RowActions {
         [IconButton("link", label: "Copy link of \(key)", tip: "Copy link (⇧⌘C)", copy: url),
          IconButton("number", label: "Copy ID \(key)", tip: "Copy ID (⌘C)", copy: key),
          IconButton("arrow.up.right.square", label: "Open \(key) in \(tracker)", tip: "Open in \(tracker)") {
+             if let u = URL(string: url) { NSWorkspace.shared.open(u) }
+         }]
+    }
+
+    // Copy link, Open in GitHub.
+    static func run(url: String, name: String) -> [NSView] {
+        [IconButton("link", label: "Copy link of \(name)", tip: "Copy link (⇧⌘C)", copy: url),
+         IconButton("arrow.up.right.square", label: "Open \(name) in GitHub", tip: "Open in GitHub") {
              if let u = URL(string: url) { NSWorkspace.shared.open(u) }
          }]
     }

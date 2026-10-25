@@ -108,7 +108,7 @@ final class GlanceVC: NSViewController {
     // MARK: Tabs
 
     private func now(_ needs: [NeedsYou]) {
-        section("Needs you", count: needs.count, needs.prefix(5).map { n in NeedsYouRow(n, data: data, commands: commands) { [weak self] in self?.open($0) } },
+        section("Needs you", count: needs.count, needs.prefix(5).map { n in needsRow(n) },
                 more: needs.count > 5 ? ("\(needs.count - 5) more on Home", .home) : nil, empty: "Nothing waits for you.")
         let running = data.grouped.flatMap { g in g.1.filter { $0.status != "completed" }.map { (g.0, $0) } }
             .sorted { ($0.1.createdAt) > ($1.1.createdAt) }
@@ -142,6 +142,7 @@ final class GlanceVC: NSViewController {
             let row = Row([Glyph(tone), TwoLine(e.item.title, sub)], height: 40,
                           label: "\(e.item.title), \(sub)") { [weak self] in self?.open(.item(e.item.key, .overview)) }
             row.toolTip = st.map(\.tip)
+            row.itemActions(url: e.item.url, key: e.item.key)
             return row
         }, more: ordered.count > 5 ? ("All my items", .work(.items)) : nil, empty: data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")
 
@@ -180,7 +181,11 @@ final class GlanceVC: NSViewController {
             row.stack.addArrangedSubview(Spacer())
             row.stack.addArrangedSubview(RunClock(r, total: r.estimatedTotal(history: history)))
         }
-        if let key = link?.key, data.agentIndex.agent(key)?.card != nil { row.stack.addArrangedSubview(orcaButton(key)) }
+        row.runActions(url: r.url, name: "\(r.workflowName ?? r.name) #\(r.number)")
+        if let key = link?.key, data.agentIndex.agent(key)?.card != nil {
+            row.stack.addArrangedSubview(orcaButton(key))
+            row.hoverViews.append(orcaButton(key))
+        }
         commands.attach(row) { RowMenu.run(repo: repo, run: r, linkedKey: link?.key, ignored: IGNORED.contains(r), caps: $0) }
         return row
     }
@@ -194,7 +199,24 @@ final class GlanceVC: NSViewController {
         let row = Row([Glyph(tone), TwoLine(title, sub)], height: 40,
                       label: "\(tone.word): \(title), \(sub)") { [weak self] in self?.open(.item(key, .overview)) }
         row.toolTip = st.map(\.tip)
-        if a.card != nil { row.stack.addArrangedSubview(orcaButton(key)) }
+        if let url = data.projectStore.item(key: key)?.item.url { row.itemActions(url: url, key: key) }
+        if a.card != nil {
+            row.stack.addArrangedSubview(orcaButton(key))
+            row.hoverViews.append(orcaButton(key))
+        }
+        return row
+    }
+
+    // The link buttons go before the action and Snooze of the row.
+    private func needsRow(_ n: NeedsYou) -> NSView {
+        let row = NeedsYouRow(n, data: data, commands: commands) { [weak self] in self?.open($0) }
+        let actions = row.hoverViews
+        if case .run(let repo, let id) = n.route, let r = data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) {
+            row.runActions(url: r.url, name: "\(r.workflowName ?? r.name) #\(r.number)")
+        } else if let url = data.projectStore.item(key: n.key)?.item.url {
+            row.itemActions(url: url, key: n.key)
+        }
+        if row.hoverViews != actions { row.hoverViews += actions }
         return row
     }
 
