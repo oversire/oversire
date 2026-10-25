@@ -8,12 +8,11 @@ final class AgentsPage: Page {
     private var allWorktrees = false
     override var fillsHeight: Bool { true }
     private var expanded: Set<String> = UIShots.sessions ? ["uishots-card-3"] : []     // card ids with the status open
-    private let table = ColumnLayout(id: "worktrees-4", columns: [
+    private let table = ColumnLayout(id: "worktrees-5", columns: [
         TableColumn(id: "worktree", title: "Worktree", width: 290, min: 140),
         TableColumn(id: "state", title: "State", width: 150, min: 60),
         TableColumn(id: "status", title: "Status", width: 360, min: 120, flexible: true),
         TableColumn(id: "terms", title: "Terms", width: 44, min: 36, optional: true),
-        TableColumn(id: "ci", title: "CI", width: 30, min: 24, optional: true),
     ])
 
     override var watches: DataDomains { [.agents, .projects, .runs, .questions, .summaries, .config] }
@@ -219,7 +218,6 @@ final class AgentsPage: Page {
         }
         let status = live ? key.flatMap { job.status($0) } : nil
         let reading = live && key.map { job.reading.contains($0.uppercased()) } == true
-        let ci: NSView = key.flatMap { data.workstreams.stream($0)?.ci }.map { Glyph($0) as NSView } ?? NSTextField.text("—", color: Palette.dim)
 
         let title = key.flatMap { data.projectStore.item(key: $0)?.2.title }
         let name = title.map { NSTextField.text($0, size: 12.5) } ?? NSTextField.text(c.name, size: 12.5, mono: true)
@@ -273,8 +271,8 @@ final class AgentsPage: Page {
         let statusCell = TwoLine(head, subView: meta.isEmpty ? nil : sub, titleSize: 12.5, weight: .regular, titleColor: headColor)
         statusCell.toolTip = head
         let cells: [String: NSView] = [
-            "worktree": worktree, "state": agent, "status": statusCell,
-            "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut), "ci": ci,
+            "worktree": worktree, "state": CIRunningMark.after(agent, stream: key.flatMap { data.workstreams.stream($0) }) ?? agent, "status": statusCell,
+            "terms": NSTextField.text("\(c.liveTerminals)", size: 12, color: Palette.mut),
         ]
         // Each row keeps the refresh slot, so that the columns align.
         let canRead = live && key.map { !data.projectStore.isDone(key: $0) } == true

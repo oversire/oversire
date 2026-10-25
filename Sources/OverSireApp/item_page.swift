@@ -24,7 +24,7 @@ final class MenuChip: Chiplet {
 // The page of one work item: its summary, status, session, sub-items and activity.
 final class ItemPage: Page, NSTextFieldDelegate {
     override var fillsHeight: Bool { tab == .subitems }
-    private let subTable = ColumnLayout(id: "subitems", columns: ItemLine.columns())
+    private let subTable = ColumnLayout(id: "subitems-2", columns: ItemLine.columns())
     private enum Source: String, CaseIterable { case all = "All", plane = "Plane", github = "GitHub", orca = "Orca", oversire = "OverSire" }
 
     private let markdown = MarkdownView(width: 600)

@@ -77,6 +77,8 @@ struct Workstream {
         return .ok
     }
 
+    var ciRunning: Bool { ci?.word == Tone.running.word }
+
     var branches: [String] {
         var seen = Set<String>()
         return checkouts.map(\.branch).filter { !$0.isEmpty && seen.insert($0).inserted }

@@ -1,7 +1,7 @@
 import Cocoa
 import OverSireCore
 
-// One item in a page list: status, key, title, sub-items, agent, CI, priority, assignee, time.
+// One item in a page list: status, key, title, sub-items, agent (with a spinner while CI runs), priority, assignee, time.
 final class ItemLine: TableRow {
     static func columns(keyWidth: CGFloat = 104) -> [TableColumn] {
         [TableColumn(id: "status", title: "", width: 16, min: 16),
@@ -9,7 +9,6 @@ final class ItemLine: TableRow {
          TableColumn(id: "title", title: "Title", width: 200, min: 160, flexible: true),
          TableColumn(id: "sub", title: "Sub", width: 52, min: 36, optional: true),
          TableColumn(id: "session", title: "Status", width: 132, min: 60, optional: true),
-         TableColumn(id: "ci", title: "CI", width: 56, min: 36, optional: true),
          TableColumn(id: "priority", title: "Priority", width: 72, min: 50, optional: true),
          TableColumn(id: "who", title: "Who", width: 34, min: 24, optional: true),
          TableColumn(id: "updated", title: "Updated", width: 60, min: 44, optional: true)]
@@ -30,8 +29,7 @@ final class ItemLine: TableRow {
             cells["sub"] = NSStackView(h: [ProgressRing(done: prog.done, started: snap.started(of: item.id), total: prog.total).sized(14),
                                            NSTextField.text("\(prog.done)/\(prog.total)", size: 11.5, color: Palette.dim)], spacing: 4)
         }
-        cells["session"] = finish ?? StatusPill.or(status)
-        if let ci = stream?.ci { cells["ci"] = Chiplet("CI", symbol: ci.symbol, color: ci.color) }
+        cells["session"] = CIRunningMark.after(finish ?? StatusPill.or(status), stream: stream)
         if let p = item.fields["Priority"], p != "None" { cells["priority"] = Chiplet(p) }
         if let who = item.assignees.first { cells["who"] = Avatar(who) }
         let parts = [finish?.accessibilityLabel() ?? opt?.name, status?.label, stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
@@ -63,6 +61,19 @@ final class ItemLine: TableRow {
         let prog = snap.progress(of: item.id)
         return PageRow.hash([item, snap.option(item.statusOptionId), prog.done, snap.started(of: item.id), prog.total, status?.label, status?.tone.word, status?.tip,
                              stream?.ci?.word, snap.isDoneWithOpenSubItems(item), snap.openSubItems(of: item.id), cleanup.map(\.kind.noun)])
+    }
+}
+
+// A small spinner after a status while CI runs for the item. A passed or failed run has no mark.
+enum CIRunningMark {
+    static let label = "CI is running"
+
+    static func after(_ view: NSView?, stream: Workstream?) -> NSView? {
+        guard stream?.ciRunning == true else { return view }
+        let s = Spinner(size: .mini)
+        s.toolTip = label
+        s.setAccessibilityLabel(label)
+        return NSStackView(h: [view, s].compactMap { $0 }, spacing: 5)
     }
 }
 
@@ -170,7 +181,7 @@ final class ProjectPage: Page {
     private var onlyMine = false
     private var showDone = false
     private var showSubItems = false
-    private let table = ColumnLayout(id: "project", columns: ItemLine.columns())
+    private let table = ColumnLayout(id: "project-items-2", columns: ItemLine.columns())
     private var more: [String: MoreRows] = [:]   // by status option id
     override var buildsLater: Bool { true }
 

@@ -5,7 +5,7 @@ import OverSireCore
 final class WorkPage: Page {
     typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
     typealias Lane = (priority: String, entries: [Entry])
-    private let table = ColumnLayout(id: "mine", columns: ItemLine.columns(keyWidth: 120))
+    private let table = ColumnLayout(id: "mine-2", columns: ItemLine.columns(keyWidth: 120))
     private var more: [String: MoreRows] = [:]
     override var buildsLater: Bool { true }
     override var fillsHeight: Bool { true }
