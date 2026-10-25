@@ -52,6 +52,25 @@ final class MachineRuntimeCallerTests: XCTestCase {
         XCTAssertEqual(sync.owner.role, AutomationRole.paused("mbp"), "the group has a home, and this test has no link to it")
     }
 
+    func testALoadBeforeTheDaemonsAnswerIsNotSolo() async throws {
+        let g = Group(id: "g", name: "My machines", home: "mbp", version: 1,
+                      members: [GroupMember(machine: "mbp", host: "mbp", addrs: [], port: 7690, roles: ["serve"], joinedAt: t0)], devices: [])
+        let d = FakeDaemon(machine: "mbp", group: g)
+        let h = hub(d)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("group-sync-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = LocalStore(dir: dir)
+        let desk = RunnerDesk(store: store, hub: RelayAnswers { RelayAPI(base: "http://relay", token: nil) }, http: d)
+        let sync = GroupSync(hub: h, writes: StoreWrites(store: store), desk: desk, http: d)
+        sync.refresh()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        h.read = true
+        sync.apply()
+        await sync.owner.refresh()
+        XCTAssertNotEqual(sync.owner.role, AutomationRole.solo, "the load came before the first read of the daemons")
+        XCTAssertFalse(sync.owner.mayAct)
+    }
+
     // MARK: MachineHub
 
     func testOneRuntimeForEachMachine() {

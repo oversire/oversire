@@ -24,7 +24,7 @@ final class GroupSync {
     private let leases: LeaseDirectory
     private let http: any HTTPTransport
     private var group: Group?
-    // apply() can run before the first load ends. Until then the group is not known, so the lease must not say solo.
+    // True when the group came after the first read of the daemons. Before it, nil does not mean solo.
     private var loaded = false
     private var runtimes: [String: [ProviderID]] = [:]
     private var reading: Set<String> = []
@@ -62,10 +62,12 @@ final class GroupSync {
         let machines = hub.machines
         Task { [weak self] in
             if again { await machines.refresh() }
+            // refreshed first: a group read after it is the group of the daemons.
+            let read = await machines.refreshed
             let g = await machines.group
             await MainActor.run {
                 self?.group = g
-                self?.loaded = true
+                self?.loaded = read
                 self?.apply()
             }
         }
@@ -75,7 +77,7 @@ final class GroupSync {
     var live: [MachineLink] { hub.links.filter { hub.isLive($0.machine) } }
 
     func apply() {
-        if leases.update(read: hub.read && loaded, group: group, links: hub.links, live: live.map(\.machine)) {
+        if leases.update(read: loaded, group: group, links: hub.links, live: live.map(\.machine)) {
             Task { [owner] in await owner.refresh() }
         }
         writes.use(storeHome(group: group, cloud: cloud, links: live))
