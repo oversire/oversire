@@ -157,6 +157,7 @@ final class AgentCommandsCard: NSStackView {
             if let p = Self.problem(n) { return AlertConfirm.tell("OverSire cannot make \(n)", info: p, in: self?.window) }
             PROJECTS_CFG.runtime.duplicate(key, as: n)
             saveConfig()
+            self?.window?.makeFirstResponder(nil)
             Self.changed()
         }
     }
@@ -166,6 +167,7 @@ final class AgentCommandsCard: NSStackView {
         PROJECTS_CFG.runtime.profiles = [:]
         Self.drafts = [:]
         saveConfig()
+        window?.makeFirstResponder(nil)
         Self.changed()
     }
 
@@ -173,6 +175,7 @@ final class AgentCommandsCard: NSStackView {
         PROJECTS_CFG.runtime.remove(key)
         Self.drafts[key] = nil
         saveConfig()
+        window?.makeFirstResponder(nil)
         Self.changed()
     }
 
