@@ -231,6 +231,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.showJoinRequest(r.request)
             }
         }
+        // Before the first reloadList: projectStore.track publishes the cached items at once, and each tick asks the gates.
+        startAutomations()
         machineHub.start()
         DaemonSetup.shared.offerUpdateOnce()
         relay.start()
@@ -315,7 +317,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             if let o = self?.automations { Task { await o.release() } }
         }
-        startAutomations()
         NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
             self?.reloadList(DataChange(.questions, origin: .event))
             self?.updateIcon()
