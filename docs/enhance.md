@@ -36,4 +36,4 @@ Enhance needs a daemon with the capability `sessionKey` (OVERSIRE-318). With an 
 
 ## The prompt
 
-`Contract/prompts/enhance.md` holds the default prompt. Settings › Agents can change it. A saved prompt from before version 3 asks for the old worker flow: the settings page then tells you to reset it.
+`Contract/prompts/enhance.md` holds the default prompt. Settings › Agents can change it. A saved prompt from before version 3 asks for the old worker flow. OverSire replaces it with the default. A saved prompt with no `oversire-result` block gets a warning on the settings page.

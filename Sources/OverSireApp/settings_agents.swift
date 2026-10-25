@@ -194,9 +194,8 @@ extension SettingsPage {
             self.reload()
         }
         let v = NSStackView(v: [], spacing: 8)
-        // Before OVERSIRE-318 the agent sent its result to a coordinator.
         if !AGENTS.intakePrompt.contains(EnhanceResult.fence) {
-            v.addFull(NSTextField.text("This prompt uses the old worker flow. Reset it: OverSire now reads the result from an \(EnhanceResult.fence) block.",
+            v.addFull(NSTextField.text("This prompt has no \(EnhanceResult.fence) block. OverSire reads the result from it. Reset the prompt or add the block.",
                                        size: 12, color: Palette.bad, lines: 2))
         }
         v.addFull(scroll)

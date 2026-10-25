@@ -32,6 +32,12 @@ final class EnhancePromptTests: XCTestCase {
             .hasPrefix("You enhance a tracker item."))
     }
 
+    func testWorkerTemplateBecomesTheDefault() {
+        let saved = "You enhance a new intake item. Do not change files.\n5. Then send worker_done with the outcome succeeded.\n{{text}}"
+        XCTAssertEqual(EnhancePrompt.migrate(saved), EnhancePrompt.template)
+        XCTAssertTrue(EnhancePrompt.template.contains(EnhanceResult.fence))
+    }
+
     func testEachVerdictParses() throws {
         for v in EnhanceResult.Verdict.allCases {
             let r = try XCTUnwrap(EnhanceResult.parse(#"{"verdict":"\#(v.rawValue)","description":"d"}"#), v.rawValue)

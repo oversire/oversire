@@ -138,8 +138,10 @@ public enum EnhancePrompt {
     static let oldOpening = "You enhance a new intake item."
 
     /// A template that the user saved before version 2, with `{{kind}}` in place of the intake words.
+    /// A template before version 3 asks for `worker_done`, which no daemon gets now (OVERSIRE-318). It becomes the default.
     public static func migrate(_ saved: String) -> String {
-        saved.replacingOccurrences(of: oldOpening, with: "You enhance {{kind}}.")
+        if saved.contains("worker_done") { return template }
+        return saved.replacingOccurrences(of: oldOpening, with: "You enhance {{kind}}.")
     }
 
     public static func input(kind: Kind = .intake, key: String, title: String, url: String, body: String, vision: String? = nil) -> AIInput {
