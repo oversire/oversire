@@ -51,6 +51,7 @@ final class ContractTests: XCTestCase {
         "area-claim": roundTrip(AreaClaim.self),
         "area-candidates": roundTrip(AreaCandidates.self),
         "changed-paths": roundTrip(ChangedPaths.self),
+        "ai-output": roundTrip(AIOutput.self),
         "session-digest": roundTrip(SessionDigest.self),
         "daemon-session": roundTrip(DaemonSession.self),
         "daemon-sessions-page": roundTrip(DaemonSessionsPage.self),

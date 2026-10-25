@@ -13,7 +13,7 @@ public actor SyncedStore: Store {
     public static let collections: [any StoreRecord.Type] = [
         QueueLane.self, QueueTrigger.self, IgnoredFailure.self, Pin.self, Snooze.self, Note.self, AgentLink.self,
         MemoryEntry.self, AIJob.self, Suggestion.self, ItemAreas.self, PlannerSettings.self, AreaCatalog.self, AreaCandidates.self,
-        ChangedPaths.self,
+        ChangedPaths.self, AIOutput.self,
     ]
     /// The collections that only the hub writes. They come down and never go up.
     public static let hubOnly: [any StoreRecord.Type] = [BillingState.self, WorkOrder.self, RunnerState.self, RunnerSession.self, AreaClaim.self]

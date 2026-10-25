@@ -154,6 +154,9 @@ final class StatusJob {
     var ai: () -> AIClient? = { AIClient.current }
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
+    /// The statuses that the Macs of the user share. The ticks, holds and snoozes stay on each Mac.
+    var outputs: AIOutputBook? { didSet { attach() } }
+    private var outputsObserver: NSObjectProtocol?
 
     init(path: String, agents: AgentIndex, queue: WorkQueue) {
         self.path = path
@@ -331,7 +334,36 @@ final class StatusJob {
             queue.release(s.key)
         }
         statuses.insert(s, at: 0)
+        if s.byAI { outputs?.put(.sessionStatus, s.key, hash: s.message ?? "", s, at: s.at, keep: 200) }
         save()
+    }
+
+    // At the first start the newest local status of each key goes to the store. Then the file is a cache only.
+    private func attach() {
+        outputsObserver.map(NotificationCenter.default.removeObserver)
+        guard let outputs else { return }
+        var pushed = Set<String>()
+        for s in statuses where s.byAI && !pushed.contains(s.key) && !outputs.contains(.sessionStatus, s.key) {
+            pushed.insert(s.key)
+            outputs.put(.sessionStatus, s.key, hash: s.message ?? "", s, at: s.at, keep: 200)
+        }
+        outputsObserver = NotificationCenter.default.addObserver(forName: AIOutputBook.changed, object: outputs, queue: .main) { [weak self] _ in self?.absorb() }
+        absorb()
+    }
+
+    // A newer shared status of a key goes first.
+    private func absorb() {
+        guard let outputs else { return }
+        var changed = false
+        for r in outputs.all(.sessionStatus, as: SessionStatus.self) where (status(r.subject)?.at ?? .distantPast) < r.value.at
+            && !statuses.contains(where: { $0.id == r.value.id }) {
+            statuses.insert(r.value, at: 0)
+            changed = true
+        }
+        guard changed else { return }
+        statuses.sort { $0.at > $1.at }
+        save()
+        self.changed()
     }
 
     // MARK: Actions

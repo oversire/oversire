@@ -88,6 +88,9 @@ final class ItemSummaries {
     private let ai: () -> AIClient?
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
+    /// The summaries that the Macs of the user share. The owner writes them, the other apps read them.
+    var outputs: AIOutputBook? { didSet { attach() } }
+    private var outputsObserver: NSObjectProtocol?
 
     init(path: String, ai: @escaping () -> AIClient? = { AIClient.current }) {
         self.path = path
@@ -120,7 +123,12 @@ final class ItemSummaries {
             self.busy.remove(k)
             switch r {
             case .success(let t):
-                if let s = ItemSummary.parse(t, hash: hash) { self.cache[k] = s; self.save(); return }
+                if let s = ItemSummary.parse(t, hash: hash) {
+                    self.cache[k] = s
+                    self.outputs?.put(.itemSummary, k, hash: hash, s, at: s.at, keep: ItemSummaries.keep)
+                    self.save()
+                    return
+                }
                 self.errors[k] = "The AI reply had no summary."
             case .failure(let e):
                 self.errors[k] = e.message
@@ -142,6 +150,26 @@ final class ItemSummaries {
         guard let next = due.max(by: { $0.item.activityAt < $1.item.activityAt })?.item else { return }
         tried[next.key.uppercased()] = ItemSummary.hash((next.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
         summarize(next)
+    }
+
+    // At the first start the local file goes to the store. Then the file is a cache only.
+    private func attach() {
+        outputsObserver.map(NotificationCenter.default.removeObserver)
+        guard let outputs else { return }
+        for (k, s) in cache where !outputs.contains(.itemSummary, k) { outputs.put(.itemSummary, k, hash: s.hash, s, at: s.at, keep: ItemSummaries.keep) }
+        outputsObserver = NotificationCenter.default.addObserver(forName: AIOutputBook.changed, object: outputs, queue: .main) { [weak self] _ in self?.absorb() }
+        absorb()
+    }
+
+    // A newer shared summary replaces the local one.
+    private func absorb() {
+        guard let outputs else { return }
+        var changed = false
+        for r in outputs.all(.itemSummary, as: ItemSummary.self) where (cache[r.subject]?.at ?? .distantPast) < r.value.at {
+            cache[r.subject] = r.value
+            changed = true
+        }
+        if changed { save() }
     }
 
     /// For `--uishots`: a summary without the AI.

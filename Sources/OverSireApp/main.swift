@@ -132,6 +132,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return h
     }()
     lazy var itemSummaries = ItemSummaries(path: ITEM_SUMMARIES_PATH)
+    lazy var aiOutputs = AIOutputBook(writes: STORE_WRITES)
     lazy var stats = WorkStats(path: WORK_STATS_PATH)
     lazy var appWindow: AppWindow = {
         AppWindow(data: self)
@@ -916,6 +917,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         ciAssist.mayAct = may
         itemSummaries.mayAct = may
         statusJob.mayAct = may
+        itemSummaries.outputs = aiOutputs
+        ciAssist.outputs = aiOutputs
+        statusJob.outputs = aiOutputs
         guard let o = automations else { return }
         NotificationCenter.default.addObserver(forName: AutomationOwner.changed, object: o, queue: .main) { [weak self] _ in
             log.info("Automations: \(String(describing: o.role), privacy: .public)")

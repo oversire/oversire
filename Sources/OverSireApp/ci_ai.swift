@@ -39,6 +39,10 @@ final class CIAssist {
     private let q = DispatchQueue(label: "com.oversire.app.ci-assist", qos: .utility)
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
+    /// The explanations and the digest that the Macs of the user share.
+    var outputs: AIOutputBook? { didSet { attach() } }
+    private var outputsObserver: NSObjectProtocol?
+    private static let digestSubject = "today"
 
     init(path: String, ai: @escaping () -> AIClient? = { AIClient.current }, changedFiles: @escaping (String, String) -> [String] = CIAssist.ghFiles) {
         self.path = path
@@ -148,7 +152,12 @@ final class CIAssist {
                 self.busy.remove(k)
                 switch result {
                 case .success(let t):
-                    if let e = CIAssist.parseExplanation(t) { self.state.explanations[k] = e; self.trim(); self.save() } else {
+                    if let e = CIAssist.parseExplanation(t) {
+                        self.state.explanations[k] = e
+                        self.outputs?.put(.ciExplanation, k, hash: k, e, at: e.at, keep: 100)
+                        self.trim()
+                        self.save()
+                    } else {
                         self.errors[k] = "The AI reply had no cause."
                         self.publish()
                     }
@@ -204,12 +213,51 @@ final class CIAssist {
     func makeDigest(facts: [String]) {
         let today = CIAssist.day()
         state.digest = Digest(day: today, facts: facts, summary: nil)
+        shareDigest()
         save()
         guard let ai = ai() else { return }
         ai.run(.digest, CIPrompts.digestInput(facts: facts), id: "digest:\(today)") { [weak self] r in
             guard let self, case .success(let t) = r, self.state.digest?.day == today else { return }
             self.state.digest?.summary = t.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.shareDigest()
             self.save()
+        }
+    }
+
+    private func shareDigest() {
+        guard let d = state.digest else { return }
+        outputs?.put(.ciDigest, Self.digestSubject, hash: d.day, d, at: Date(), keep: 1)
+    }
+
+    // MARK: Shared results
+
+    // At the first start the local explanations go to the store. Then the file is a cache only.
+    private func attach() {
+        outputsObserver.map(NotificationCenter.default.removeObserver)
+        guard let outputs else { return }
+        for (k, e) in state.explanations where !outputs.contains(.ciExplanation, k) { outputs.put(.ciExplanation, k, hash: k, e, at: e.at, keep: 100) }
+        outputsObserver = NotificationCenter.default.addObserver(forName: AIOutputBook.changed, object: outputs, queue: .main) { [weak self] _ in self?.absorb() }
+        absorb()
+    }
+
+    // A newer shared explanation replaces the local one. The digest of a newer day replaces the local one; a dismiss stays on this Mac.
+    private func absorb() {
+        guard let outputs else { return }
+        var changed = false
+        for r in outputs.all(.ciExplanation, as: RunExplanation.self) where (state.explanations[r.subject]?.at ?? .distantPast) < r.value.at {
+            state.explanations[r.subject] = r.value
+            changed = true
+        }
+        if let d = outputs.all(.ciDigest, as: Digest.self).first?.value {
+            let mine = state.digest
+            if mine.map({ $0.day < d.day }) ?? true || mine?.day == d.day && mine?.summary == nil && mine?.facts.isEmpty == false && d.summary != nil {
+                state.digest = d
+                changed = true
+            }
+        }
+        if changed {
+            trim()
+            save()
         }
     }
 
