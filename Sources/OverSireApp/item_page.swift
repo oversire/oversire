@@ -519,7 +519,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 let chips = linked.map { key in Chiplet(key, symbol: "link") { [weak self] in self?.go(.item(key, .overview)) } as NSView }
                 c.add(NSStackView(h: [NSTextField.text("Linked:", size: 12, color: Palette.dim), Wrap(chips), Spacer()], spacing: 6))
             }
-            c.add(NSTextField.text("From the description of \(body.count.formatted()) characters", size: 11.5, color: Palette.dim))
+            c.add(NSTextField.text("From the description of \(body.count.formatted()) characters · \(summary.length.formatted()) characters",
+                                   size: 11.5, color: Palette.dim))
         } else if busy {
             c.add(NSTextField.text("The AI reads \(body.count.formatted()) characters. You can leave this page. The summary goes into the cache.",
                                    size: 12.5, color: Palette.dim, lines: 2))

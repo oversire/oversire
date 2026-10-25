@@ -5,16 +5,41 @@ import OverSireAI
 
 // An AI summary of an item description. `hash` is the hash of the description that the AI read.
 struct ItemSummary: Codable, Equatable {
+    static let version = 2
+    static let maxLength = 500
+    static let maxGist = 160
+
     var gist: String
     var points: [String] = []
     var open: [String] = []
     var hash: String
     var at = Date()
+    var version = 1
+
+    init(gist: String, points: [String] = [], open: [String] = [], hash: String, at: Date = Date(), version: Int = ItemSummary.version) {
+        (self.gist, self.points, self.open, self.hash, self.at, self.version) = (gist, points, open, hash, at, version)
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        gist = try c.decode(String.self, forKey: .gist)
+        points = try c.decodeIfPresent([String].self, forKey: .points) ?? []
+        open = try c.decodeIfPresent([String].self, forKey: .open) ?? []
+        hash = try c.decode(String.self, forKey: .hash)
+        at = try c.decodeIfPresent(Date.self, forKey: .at) ?? Date()
+        version = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+    }
+
+    // The visible text: gist, points and open questions.
+    var length: Int { ([gist] + points + open).reduce(0) { $0 + $1.count } }
+
+    // A summary from an old prompt, or one over the limit, gets a refresh.
+    var isOld: Bool { version < ItemSummary.version || length > ItemSummary.maxLength }
 
     var markdown: String {
         var out = gist + "\n"
         if !points.isEmpty { out += "\n" + points.map { "- \($0)" }.joined(separator: "\n") + "\n" }
-        if !open.isEmpty { out += "\n**Open**\n\n" + open.map { "- \($0)" }.joined(separator: "\n") + "\n" }
+        if !open.isEmpty { out += "\n**Open:** " + open.joined(separator: " · ") + "\n" }
         return out
     }
 
@@ -27,9 +52,24 @@ struct ItemSummary: Codable, Equatable {
               let gist = (o["gist"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !gist.isEmpty else { return nil }
         func list(_ k: String, _ n: Int) -> [String] {
             (o[k] as? [Any] ?? []).compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty && $0.lowercased() != "none" }.prefix(n).map { String($0.prefix(400)) }
+                .filter { !$0.isEmpty && $0.lowercased() != "none" }.prefix(n).map { $0 }
         }
-        return ItemSummary(gist: String(gist.prefix(500)), points: list("points", 6), open: list("open", 3), hash: hash)
+        var s = ItemSummary(gist: clip(gist, maxGist), points: list("points", 3), open: list("open", 2), hash: hash)
+        while s.length > maxLength, !s.open.isEmpty { s.open.removeLast() }
+        while s.length > maxLength, !s.points.isEmpty { s.points.removeLast() }
+        return s
+    }
+
+    // Cuts the text at the last sentence end, else the last word end, and adds "…".
+    static func clip(_ text: String, _ n: Int) -> String {
+        guard text.count > n else { return text }
+        let head = String(text.prefix(n - 1))
+        if let end = head.indices.last(where: { i in ".!?".contains(head[i]) && (head.index(after: i) == head.endIndex || head[head.index(after: i)] == " ") }),
+           head.distance(from: head.startIndex, to: end) > n / 3 {
+            return String(head[...end])
+        }
+        let word = head.range(of: " ", options: .backwards).map { String(head[..<$0.lowerBound]) } ?? head
+        return word.trimmingCharacters(in: CharacterSet(charactersIn: " ,;:-")) + "…"
     }
 }
 
@@ -62,7 +102,7 @@ final class ItemSummaries {
     // The description changed after the summary.
     func isStale(_ key: String, body: String) -> Bool {
         guard let s = summary(key) else { return false }
-        return s.hash != ItemSummary.hash(body)
+        return s.hash != ItemSummary.hash(body) || s.isOld
     }
 
     func summarize(_ item: Item) {
@@ -95,7 +135,7 @@ final class ItemSummaries {
             let body = (e.item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard e.open, ItemSummaries.offers(body), now.timeIntervalSince(e.item.activityAt) < ItemSummaries.recent else { return false }
             let k = e.item.key.uppercased(), h = ItemSummary.hash(body)
-            return cache[k]?.hash != h && tried[k] != h
+            return (cache[k]?.hash != h || cache[k]?.isOld == true) && tried[k] != h
         }
         guard let next = due.max(by: { $0.item.activityAt < $1.item.activityAt })?.item else { return }
         tried[next.key.uppercased()] = ItemSummary.hash((next.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines))

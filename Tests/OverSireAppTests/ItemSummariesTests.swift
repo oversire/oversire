@@ -62,4 +62,47 @@ final class ItemSummariesTests: XCTestCase {
         sums.tick(changed, now: now)
         XCTAssertEqual(engine.tasks.count, 2, "one try for each description")
     }
+
+    func testParseOfALongReplyFitsTheLimitWithWholeSentences() throws {
+        let line = "The daemon polls once and logs hint events for each Mac of the group."
+        let o: [String: Any] = ["gist": String(repeating: "A long gist sentence. ", count: 12), "points": (1...6).map { "\(line) \($0)" },
+                                "open": ["Which adapter option is best for the home daemon of the user?", "How does the daemon get a Plane token?", "A third."]]
+        let reply = String(decoding: try JSONSerialization.data(withJSONObject: o), as: UTF8.self)
+        let s = try XCTUnwrap(ItemSummary.parse(reply, hash: "h"))
+        XCTAssertLessThanOrEqual(s.length, ItemSummary.maxLength)
+        XCTAssertLessThanOrEqual(s.gist.count, ItemSummary.maxGist)
+        XCTAssertTrue(s.gist.hasSuffix("."), "the gist ends at a sentence end: \(s.gist)")
+        XCTAssertLessThanOrEqual(s.points.count, 3)
+        XCTAssertLessThanOrEqual(s.open.count, 2)
+        XCTAssertTrue(s.points.allSatisfy { $0.hasPrefix(line) }, "no line is cut")
+        XCTAssertEqual(s.version, ItemSummary.version)
+    }
+
+    func testParseOfAShortReplyKeepsAllOfIt() throws {
+        let s = try XCTUnwrap(ItemSummary.parse(#"{"gist":"Fix the menu.","points":["Phase 1.","Use a lease."],"open":["Which token?"]}"#, hash: "h"))
+        XCTAssertEqual(s.gist, "Fix the menu.")
+        XCTAssertEqual(s.points, ["Phase 1.", "Use a lease."])
+        XCTAssertEqual(s.open, ["Which token?"])
+        XCTAssertTrue(s.markdown.contains("**Open:** Which token?"))
+    }
+
+    func testAGistWithNoSentenceEndIsCutAtAWord() {
+        let g = ItemSummary.clip(String(repeating: "word ", count: 60), ItemSummary.maxGist)
+        XCTAssertLessThanOrEqual(g.count, ItemSummary.maxGist)
+        XCTAssertTrue(g.hasSuffix("word…"))
+    }
+
+    func testACachedVersionOneSummaryIsStale() throws {
+        let body = String(repeating: "A long description. ", count: 100).trimmingCharacters(in: .whitespaces)
+        let old = #"{"A-1":{"gist":"Old.","points":[],"open":[],"hash":"\#(ItemSummary.hash(body))","at":0}}"#
+        try Data(old.utf8).write(to: dir.appendingPathComponent("old.json"))
+        let cached = ItemSummaries(path: dir.path + "/old.json") { [unowned self] in AIClient(cfg: AIConfig(), router: AIRouter(engines: [self.engine])) }
+        XCTAssertEqual(cached.summary("A-1")?.version, 1)
+        XCTAssertTrue(cached.isStale("A-1", body: body))
+        sums = cached
+        sums.tick([(item("A-1", body: body, days: 1), true)], now: now)
+        settle()
+        XCTAssertEqual(engine.tasks.count, 1, "the page refreshes an old summary once")
+        XCTAssertFalse(sums.isStale("A-1", body: body))
+    }
 }
