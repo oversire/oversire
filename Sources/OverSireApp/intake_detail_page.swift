@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 
 extension ProjectStore {
     /// The detail page of an intake item, or the Intake list of the project. `id`: the intake id or the work item id.
@@ -210,10 +211,7 @@ final class IntakeDetailPage: Page {
 
     private func refineButton(item: IntakeItem, key: String, session: Bool, snap: ProjectSnapshot) -> NSView {
         if session {
-            return ActionButton("Open session", symbol: "terminal") { [weak self] in
-                guard let self else { return }
-                self.data.actions.click("session.reveal", ["key": .string(key)], in: self.view.window)
-            }
+            return ActionButton("Open session", symbol: "terminal") { [weak self] in self?.openTerminal(key) }
         }
         let b = ActionButton(refining ? "Starting…" : "Refine", symbol: "bubble.left.and.bubble.right") { [weak self] in
             guard let self else { return }
@@ -295,12 +293,25 @@ final class IntakeDetailPage: Page {
         let last = agents.watch(key)?.recap ?? a.message
         let folder = starter.root(snap.summary) ?? a.repo
         return PageRow("refine", a, last, agents.place, folder) { [unowned self] in
-            let card = RefineCard(key: key, session: a, place: agents.place, folder: folder, last: last) { [weak self] in
-                guard let self else { return }
-                self.data.actions.click("session.reveal", ["key": .string(key)], in: self.view.window)
-            }
+            let card = RefineCard(key: key, session: a, place: agents.place, folder: folder, last: last) { [weak self] in self?.openTerminal(key) }
             card.onWork = { [weak self] in self?.go(.work(.items)) }
             return card
+        }
+    }
+
+    // The live terminal of the session in its own window. Orca shows it only when the daemon gives no stream and the session is on this Mac.
+    private func openTerminal(_ key: String) {
+        let agents = data.agentIndex
+        agents.stream(key) { [weak self] t in
+            guard let self else { return }
+            if let t, t.view == .terminal, let id = agents.agent(key)?.paneKey {
+                LiveTerminalWindow.show(sessionID: id, title: "\(key) terminal",
+                                        stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets()), runtime: "Orca", place: agents.place)
+            } else if agents.canReveal {
+                self.data.actions.click("session.reveal", ["key": .string(key)], in: self.view.window)
+            } else {
+                AlertConfirm.tell("OverSire cannot open the terminal", info: "The daemon on \(agents.place) gives no live view of \(key).", in: self.view.window)
+            }
         }
     }
 
