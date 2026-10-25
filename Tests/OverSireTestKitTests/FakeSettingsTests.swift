@@ -37,6 +37,7 @@ final class FakeSettingsTests: XCTestCase {
                                          "RelationManaging needs the capability relations",
                                          "IntakeTriaging needs the capability intake",
                                          "IntakeCreating needs the capability intakeCreate",
-                                         "AttachmentUploading needs the capability attachments"])
+                                         "AttachmentUploading needs the capability attachments",
+                                         "AttachmentReading needs the capability attachmentsRead"])
     }
 }
