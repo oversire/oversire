@@ -2,6 +2,8 @@
 
 Enhance gives an intake item or a ticket a better description. A coding agent reads the code and the related items, asks you what the code cannot tell, and writes a new description. You check what goes to Plane.
 
+To clean up the full list first (merge, close, fold), use Groom. See [groom.md](groom.md).
+
 ## Flow
 
 1. Click **Enhance** on an intake row, in the intake detail, or on the item page. "Enhance vague items" (Settings › Agents) starts it for a new intake item with a short note.
