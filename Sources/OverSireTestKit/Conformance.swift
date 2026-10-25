@@ -49,6 +49,7 @@ public enum ProviderConformance {
         (.intake, "IntakeTriaging", { $0 is any IntakeTriaging }),
         (.intakeCreate, "IntakeCreating", { $0 is any IntakeCreating }),
         (.attachments, "AttachmentUploading", { $0 is any AttachmentUploading }),
+        (.attachmentsRead, "AttachmentReading", { $0 is any AttachmentReading }),
         (.timeline, "TimelineReading", { $0 is any TimelineReading }),
         (.labels, "LabelManaging", { $0 is any LabelManaging }),
         (.links, "LinkManaging", { $0 is any LinkManaging }),

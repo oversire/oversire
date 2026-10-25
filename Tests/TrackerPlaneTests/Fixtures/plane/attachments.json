@@ -1,0 +1,50 @@
+{
+  "data": [
+    {
+      "asset_url": "/api/assets/v2/workspaces/ocral/projects/9ba476d7-ad30-44cf-b9ef-3fa1e42ed926/issues/d8138b63-f32b-46e6-a2fc-53df92b8833c/attachments/3033dfe9-9db9-47f5-ab83-aea7967495b5/",
+      "attributes": {
+        "name": "pasted-8.png",
+        "size": 129295,
+        "type": "image/png"
+      },
+      "content_type": "image/png",
+      "created_at": "2026-10-24T13:21:37.529013Z",
+      "created_by_id": "6008c025-3b03-4263-89fc-62f1153bfa27",
+      "external_id": null,
+      "external_source": null,
+      "id": "3033dfe9-9db9-47f5-ab83-aea7967495b5",
+      "is_uploaded": true,
+      "name": "pasted-8.png",
+      "size": 129295,
+      "updated_at": "2026-10-24T13:21:38.036923Z",
+      "updated_by_id": "6008c025-3b03-4263-89fc-62f1153bfa27",
+      "work_item_id": "d8138b63-f32b-46e6-a2fc-53df92b8833c"
+    },
+    {
+      "asset_url": "/api/assets/v2/workspaces/ocral/projects/9ba476d7-ad30-44cf-b9ef-3fa1e42ed926/issues/d8138b63-f32b-46e6-a2fc-53df92b8833c/attachments/426e36cc-227d-4e6a-a761-8defcfcb2dc2/",
+      "attributes": {
+        "name": "pasted-7.png",
+        "size": 147450,
+        "type": "image/png"
+      },
+      "content_type": "image/png",
+      "created_at": "2026-10-24T13:21:36.784021Z",
+      "created_by_id": "6008c025-3b03-4263-89fc-62f1153bfa27",
+      "external_id": null,
+      "external_source": null,
+      "id": "426e36cc-227d-4e6a-a761-8defcfcb2dc2",
+      "is_uploaded": true,
+      "name": "pasted-7.png",
+      "size": 147450,
+      "updated_at": "2026-10-24T13:21:37.284937Z",
+      "updated_by_id": "6008c025-3b03-4263-89fc-62f1153bfa27",
+      "work_item_id": "d8138b63-f32b-46e6-a2fc-53df92b8833c"
+    }
+  ],
+  "next": null,
+  "pagination": {
+    "style": "offset"
+  },
+  "previous": null,
+  "total_count": 2
+}

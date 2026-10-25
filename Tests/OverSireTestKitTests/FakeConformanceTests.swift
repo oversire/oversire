@@ -31,6 +31,18 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertTrue(rt.passed, rt.description)
     }
 
+    func testFakeTrackerListsItsUploads() async throws {
+        let t = FakeTracker()
+        let ref = try await t.create(ItemDraft(title: "Shots"), in: t.project)
+        _ = try await t.attach(AttachmentUpload(name: "a.png", mimeType: "image/png", data: Data([1, 2])), to: ref)
+        _ = try await t.attach(AttachmentUpload(name: "b.pdf", mimeType: "application/pdf", data: Data([3])), to: ref)
+        let list = try await t.attachments(of: ref)
+        XCTAssertEqual(list.map(\.name), ["a.png", "b.pdf"])
+        XCTAssertEqual(list.map(\.isImage), [true, false])
+        let r = await TrackerConformance.attachments(t, item: ref)
+        XCTAssertTrue(r.passed, r.description)
+    }
+
     func testFakesPassTheirLayerSuites() async {
         let tracker = await TrackerConformance.run { FakeTracker() }
         XCTAssertTrue(tracker.passed, tracker.description)

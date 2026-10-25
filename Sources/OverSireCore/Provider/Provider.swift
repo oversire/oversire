@@ -26,6 +26,7 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let intake: Capability = "intake"
     public static let intakeCreate: Capability = "intakeCreate"
     public static let attachments: Capability = "attachments"
+    public static let attachmentsRead: Capability = "attachmentsRead"
     public static let timeline: Capability = "timeline"
     public static let labels: Capability = "labels"
     public static let links: Capability = "links"

@@ -145,6 +145,7 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.timeline` | `TimelineReading` |
 | `.labels` | `LabelManaging` |
 | `.links` | `LinkManaging` |
+| `.attachmentsRead` | `AttachmentReading` |
 | `.assets` | `AssetResolving` |
 | `.webhooks` | `WebhookManaging` |
 | `.logs` | `LogReading` |

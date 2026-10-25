@@ -750,6 +750,32 @@ public protocol AttachmentUploading: Tracker {
     func attach(_ f: AttachmentUpload, to i: ItemRef) async throws -> String
 }
 
+/// A file that is uploaded to an item.
+public struct ItemAttachment: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var size: Int           // bytes
+    public var mimeType: String
+    public var createdAt: Date
+
+    public init(id: String, name: String, size: Int, mimeType: String, createdAt: Date) {
+        self.id = id
+        self.name = name
+        self.size = size
+        self.mimeType = mimeType
+        self.createdAt = createdAt
+    }
+
+    public var isImage: Bool { mimeType.hasPrefix("image/") }
+}
+
+public protocol AttachmentReading: Tracker {
+    /// The uploaded files of the item, oldest first.
+    func attachments(of i: ItemRef) async throws -> [ItemAttachment]
+    /// A signed download link. It expires.
+    func attachmentURL(_ a: ItemAttachment, of i: ItemRef) async throws -> URL
+}
+
 public protocol TimelineReading: Tracker {
     func timeline(_ i: ItemRef) async throws -> [ActivityEntry]
 }

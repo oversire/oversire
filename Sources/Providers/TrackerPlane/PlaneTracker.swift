@@ -2,12 +2,12 @@ import Foundation
 import OverSireCore
 
 /// The Plane adapter. One instance for each workspace, because a token works only in its own workspace.
-public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, TimelineReading, LabelManaging, LinkManaging, ItemIndexing,
+public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, AttachmentReading, TimelineReading, LabelManaging, LinkManaging, ItemIndexing,
     RelationManaging, AssetResolving, WebhookManaging, ItemSearching, @unchecked Sendable {
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch] }
+    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
@@ -575,6 +575,25 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, T
         _ = try await api.send("PATCH", path + "\(id)/", body: ["is_uploaded": true])
         return id
     }
+
+    public func attachments(of i: ItemRef) async throws -> [ItemAttachment] {
+        let path = "/api/v2/workspaces/\(workspace.slug)/projects/\(i.project.id)/work-items/\(i.id)/attachments/"
+        let obj = try await api.send("GET", path, query: [URLQueryItem(name: "per_page", value: "100")])
+        let rows = ((obj as? [String: Any])?["data"] as? [[String: Any]])
+            ?? ((obj as? [String: Any])?["results"] as? [[String: Any]]) ?? (obj as? [[String: Any]]) ?? []
+        return rows.compactMap { r -> ItemAttachment? in
+            let attrs = r["attributes"] as? [String: Any] ?? [:]
+            guard r["is_uploaded"] as? Bool != false, let id = PlaneAPI.id(r["id"]),
+                  let name = r["name"] as? String ?? attrs["name"] as? String else { return nil }
+            return ItemAttachment(id: id, name: name, size: PlaneAPI.int(r["size"]) ?? PlaneAPI.int(attrs["size"]) ?? 0,
+                                  mimeType: r["content_type"] as? String ?? attrs["type"] as? String ?? "application/octet-stream",
+                                  createdAt: parseISO(r["created_at"] as? String) ?? .distantPast)
+        }
+        .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// The asset route also signs an attachment id.
+    public func attachmentURL(_ a: ItemAttachment, of i: ItemRef) async throws -> URL { try await assetURL(a.id) }
 
     /// A signed download link for an uploaded file. It is good for one hour.
     public func assetURL(_ id: String) async throws -> URL {

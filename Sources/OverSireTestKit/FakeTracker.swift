@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory tracker with one project "FAKE" and four statuses.
-public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, @unchecked Sendable {
+public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -22,11 +22,12 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     /// The `update` actions, in order.
     public var intakeEdits: [IntakeEdit] { base.lockedValue { edits } }
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
+    private var uploadTimes: [Date] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
     public init(account: String = "fake",
-                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments]) {
+                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]
@@ -183,8 +184,25 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
                 throw ProviderError.transport("upload of \(f.name) failed")
             }
             uploadList.append((i, f))
+            uploadTimes.append(base.now())
             return "a\(uploadList.count)"
         }
+    }
+
+    public func attachments(of i: ItemRef) async throws -> [ItemAttachment] {
+        guard capabilities.contains(.attachmentsRead) else { throw ProviderError.unsupported(.attachmentsRead) }
+        return base.lockedValue {
+            uploadList.indices.filter { uploadList[$0].item.id == i.id }.map { n in
+                let f = uploadList[n].file
+                return ItemAttachment(id: "a\(n + 1)", name: f.name, size: f.data.count, mimeType: f.mimeType, createdAt: uploadTimes[n])
+            }
+        }
+    }
+
+    public func attachmentURL(_ a: ItemAttachment, of i: ItemRef) async throws -> URL {
+        guard capabilities.contains(.attachmentsRead) else { throw ProviderError.unsupported(.attachmentsRead) }
+        guard try await attachments(of: i).contains(where: { $0.id == a.id }) else { throw ProviderError.notFound }
+        return URL(string: "https://tracker.fake/files/\(a.id)")!
     }
 
     /// The uploads, oldest first.

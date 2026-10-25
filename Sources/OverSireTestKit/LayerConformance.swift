@@ -46,6 +46,7 @@ public enum TrackerConformance {
         }
         r.merge(await settings(t, project: p))
         r.merge(await relations(t, item: ref, project: p))
+        r.merge(await attachments(t, item: ref))
         r.merge(await intakeAndAttachments(t, project: p))
         return r
     }
@@ -66,6 +67,20 @@ public enum TrackerConformance {
             }
         }
         _ = await r.step("delete the intake item", { try await maker.triage(made.intake, in: p, .delete) })
+        return r
+    }
+
+    /// Lists the files of an item and asks for the link of the first one. Read only.
+    public static func attachments(_ t: any Tracker, item ref: ItemRef) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let rd = t as? any AttachmentReading, t.capabilities.contains(.attachmentsRead),
+              let list = await r.step("attachments", { try await rd.attachments(of: ref) }) else { return r }
+        r.expect(Set(list.map(\.id)).count == list.count, "attachments gives one id more than one time")
+        r.expect(list.allSatisfy { !$0.name.isEmpty && $0.size >= 0 && !$0.mimeType.isEmpty }, "an attachment has no name, size or type")
+        r.expect(list.map(\.createdAt) == list.map(\.createdAt).sorted(), "attachments are not oldest first")
+        if let a = list.first, let u = await r.step("attachmentURL", { try await rd.attachmentURL(a, of: ref) }) {
+            r.expect(u.scheme == "https" || u.isFileURL, "the link of \(a.name) is \(u)")
+        }
         return r
     }
 
