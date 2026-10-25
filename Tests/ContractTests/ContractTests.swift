@@ -83,6 +83,8 @@ final class ContractTests: XCTestCase {
         "stream-client-frame": roundTrip(StreamClientFrame.self),
         "stream-daemon-frame": roundTrip(StreamDaemonFrame.self),
         "session-turn": roundTrip(SessionTurn.self),
+        "lease-request": roundTrip(LeaseRequest.self),
+        "lease": roundTrip(Lease.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.

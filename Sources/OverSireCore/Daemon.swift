@@ -437,3 +437,35 @@ public struct DaemonOrderState: Codable, Hashable, Sendable {
         self.result = result
     }
 }
+
+/// The body of POST /v1/leases/{name} on the home daemon.
+public struct LeaseRequest: Codable, Hashable, Sendable {
+    public var holder: String          // the store device id of the app
+    public var holderName: String
+    public var ttlSeconds: Int         // 30 to 600
+    public var take: Bool              // take the lease also when another holder has it
+
+    public init(holder: String, holderName: String, ttlSeconds: Int, take: Bool = false) {
+        self.holder = holder
+        self.holderName = holderName
+        self.ttlSeconds = ttlSeconds
+        self.take = take
+    }
+}
+
+/// A named lease on the home daemon. The epoch increases at each new holder.
+public struct Lease: Codable, Hashable, Sendable {
+    public var name: String
+    public var holder: String
+    public var holderName: String
+    public var epoch: Int
+    public var until: Date
+
+    public init(name: String, holder: String, holderName: String, epoch: Int, until: Date) {
+        self.name = name
+        self.holder = holder
+        self.holderName = holderName
+        self.epoch = epoch
+        self.until = until
+    }
+}
