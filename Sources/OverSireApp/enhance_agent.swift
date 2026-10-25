@@ -112,7 +112,10 @@ final class EnhanceAgent {
 
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
+    /// The Enhance buttons show. With an old daemon they show too, and a start tells the user to update it.
     var available: Bool { AI_CFG.intakeAgent && host()?.capabilities.contains(.sessionHistory) == true }
+    /// The daemon keeps one session for each start key. A daemon before OVERSIRE-318 does not.
+    var ready: Bool { available && host()?.capabilities.contains(.sessionKey) == true }
 
     func state(_ t: EnhanceTarget) -> State? { states[t.id] ?? sample?(t) }
 
@@ -136,7 +139,7 @@ final class EnhanceAgent {
 
     /// Starts Enhance for the new vague items of the last day, at most two at a time.
     func autoStart() {
-        guard AGENTS.enhanceVague, available else { return }
+        guard AGENTS.enhanceVague, ready else { return }
         var room = 2 - states.values.filter { $0 == .starting || $0.run != nil && !$0.isReady }.count
         for (pk, snap) in store.snapshots {
             for item in snap.intake ?? [] where room > 0 && states[item.id] == nil && !autoTried.contains(item.id) {
@@ -152,12 +155,13 @@ final class EnhanceAgent {
 
     // Starts the session in the Orca workspace of the project. A run that failed stops its old session first.
     func start(projectKey: String, target: EnhanceTarget) {
+        guard let rt = host() else { set(target.id, .failed("Install the OverSire daemon in Settings › Machines.", kept: nil)); return }
+        guard ready else { set(target.id, .failed("Update the daemon on \(rt.account.id) to use Enhance.", kept: nil)); return }
         guard let snap = store.snapshots[projectKey] else { return }
         guard let root = PROJECTS_CFG.orca.roots[projectKey], !root.isEmpty else {
             set(target.id, .failed("Choose an Orca workspace for \(snap.summary.identifier) first: start any item of the project once.", kept: nil))
             return
         }
-        guard host() != nil else { set(target.id, .failed("Install the OverSire daemon in Settings › Machines.", kept: nil)); return }
         set(target.id, .starting)
         prepare(projectKey, target) { [weak self] s in
             guard let self else { return }
@@ -325,7 +329,7 @@ final class EnhanceAgent {
 
     // A restart, or a run of the other app: the daemon has an Enhance session that this app does not follow.
     private func recover(_ live: [AgentSession]) {
-        guard !live.isEmpty, let rt = host(), available else { return }
+        guard !live.isEmpty, let rt = host(), ready else { return }
         let known = Set(held.values.compactMap(\.pane)).union(dropped).union(recovering)
         for a in live where a.phase != .failed {
             guard let pane = a.paneKey, let key = a.key, let card = a.card, !known.contains(pane),

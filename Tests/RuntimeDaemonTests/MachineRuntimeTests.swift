@@ -72,7 +72,7 @@ final class MachineRuntimeTests: XCTestCase {
         let rt = local(d)
         XCTAssertEqual(rt.capabilities, [.questions], "no read of /v1/runtimes yet")
         try await rt.refresh()
-        XCTAssertEqual(rt.capabilities, [.questions, .sessionInput, .sessionTail, .sessionHistory, .hostFiles, .reveal, .removeWorkspace, .workers])
+        XCTAssertEqual(rt.capabilities, [.questions, .sessionInput, .sessionTail, .sessionHistory, .hostFiles, .reveal, .removeWorkspace, .sessionKey])
 
         d.runtime.runtimes = try contract(DaemonRuntimesPage.self, "daemon-runtimes-page", "orca-down").runtimes
         try await rt.refresh()
@@ -224,27 +224,6 @@ final class MachineRuntimeTests: XCTestCase {
         XCTAssertEqual(paths, ["/Users/ada/.oversire/files/0000000000000001/shot-1.png"])
         XCTAssertEqual(progress, [[0, 3], [3, 3]])
         XCTAssertEqual(d.runtime.files.first?.first?.data, Data("abc".utf8))
-    }
-
-    // MARK: Workers
-
-    func testAWorkerLife() async throws {
-        let d = FakeDaemon()
-        let rt = local(d)
-        let w = try await rt.startWorker(WorkerStart(spec: "Enhance it", title: "Enhance TOWERTAIL-9", path: repo, agent: "claude"))
-        XCTAssertEqual([w.id, w.terminal], ["wk-1", "term_w1"])
-        let running = try await rt.workerState(w)
-        XCTAssertEqual(running.state, .running)
-        d.runtime.worker(w.id, WorkerState(state: .done, outcome: "succeeded", body: #"{"verdict":"clear"}"#))
-        let done = try await rt.workerState(w)
-        XCTAssertEqual(done.body, #"{"verdict":"clear"}"#)
-        try await rt.stopWorker(w)
-        try await rt.releaseWorker(w)
-        XCTAssertEqual(d.runtime.workerCalls, ["start", "stop wk-1", "release wk-1"])
-        do {
-            _ = try await rt.workerState(w)
-            XCTFail("no error")
-        } catch ProviderError.notFound {}
     }
 
     // MARK: Poll

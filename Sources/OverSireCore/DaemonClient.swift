@@ -168,22 +168,6 @@ public final class DaemonClient: Sendable {
         return resp.statusCode == 202 ? nil : try Self.decode(try Self.check(data, resp))
     }
 
-    public func startWorker(_ w: WorkerStart) async throws -> Worker {
-        var r = try json("POST", "/v1/workers", w)
-        r.timeoutInterval = 200
-        return try Self.decode(try await send(r))
-    }
-
-    public func worker(id: String) async throws -> WorkerState { try await get("/v1/workers/\(Self.escape(id))") }
-
-    public func stopWorker(id: String) async throws {
-        _ = try await send(try json("POST", "/v1/workers/\(Self.escape(id))/stop", Optional<[String: String]>.none))
-    }
-
-    public func releaseWorker(id: String) async throws {
-        _ = try await send(try json("DELETE", "/v1/workers/\(Self.escape(id))", Optional<[String: String]>.none))
-    }
-
     /// The WebSocket of the live view of a session (session-stream.json). The socket stays open for a long time.
     public func streamRequest(session id: String) -> URLRequest {
         var r = request("/v1/sessions/\(Self.escape(id))/stream")

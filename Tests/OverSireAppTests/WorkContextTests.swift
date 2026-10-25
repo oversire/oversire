@@ -69,7 +69,7 @@ final class WorkContextTests: XCTestCase {
         d.agentIndex.seed("SLING-1", AgentSession(phase: .working, since: t0, card: "w1", paneKey: "w1:1", repo: "o/r", message: "Tests run."))
         let q = SessionQuestion(id: QuestionID(rawValue: "fake:q1"), session: session, origin: .session,
                                 items: [QuestionItem(id: "q1", text: "Drop the old rows?", kind: .single, options: [.init(label: "Yes"), .init(label: "No")])],
-                                via: .askReply, askedAt: t0)
+                                via: .form, askedAt: t0)
         d.questions.seed([QuestionBoard.Entry(question: q, state: .open, firstSeen: t0)], keys: [session: "SLING-1"])
         d.workstreams.rebuild(store: d.projectStore, agents: d.agentIndex, runs: d.grouped, prs: d.prGrouped)
         return d

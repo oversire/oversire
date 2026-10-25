@@ -108,6 +108,17 @@ final class EnhanceAgentTests: XCTestCase {
 
     private func host(_ r: Rig) -> LocalMachineRuntime { r.host }
 
+    func testOldDaemonAsksForAnUpdate() async throws {
+        let d = FakeDaemon()
+        d.runtime.runtimes = d.runtime.runtimes.map { var rt = $0; rt.capabilities.removeAll { $0 == "sessionKey" }; return rt }
+        let r = try await make(d)
+        XCTAssertTrue(r.agent.available, "the buttons show")
+        XCTAssertFalse(r.agent.ready)
+        r.agent.start(projectKey: "plane:ocral/OVERSIRE", target: .intake(item))
+        XCTAssertEqual(r.agent.states[item.id], .failed("Update the daemon on mba to use Enhance.", kept: nil))
+        XCTAssertTrue(d.runtime.orders.isEmpty, "no start")
+    }
+
     func testRunMovesFromEnhancingToAskingToReady() async throws {
         let r = try await make()
         let run = try await launch(r)

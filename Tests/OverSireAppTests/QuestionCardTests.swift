@@ -9,7 +9,7 @@ final class QuestionCardTests: XCTestCase {
     private let multi = QuestionItem(id: "q2", text: "Which tests?", kind: .multi, options: [.init(label: "Unit"), .init(label: "uishots"), .init(label: "Live")])
 
     @MainActor
-    private func card(_ items: [QuestionItem], via: SessionQuestion.Via = .askReply, sent: ((QuestionAnswer) -> Void)? = nil) -> QuestionCard {
+    private func card(_ items: [QuestionItem], via: SessionQuestion.Via = .form, sent: ((QuestionAnswer) -> Void)? = nil) -> QuestionCard {
         let q = SessionQuestion(id: "orca:local:m1", session: session, origin: .session, items: items, via: via, askedAt: Date())
         var a = QuestionCard.Actions()
         if let sent { a.send = sent }

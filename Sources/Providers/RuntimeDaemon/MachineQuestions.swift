@@ -44,7 +44,7 @@ extension MachineRuntime: QuestionChannel {
         case .form: via = .form
         case .permission: via = .permission
         case .turn: via = .turn
-        case .askReply: via = .askReply
+        case .askReply: via = .askReply   // a daemon before OVERSIRE-322
         case .waiting: via = .waiting
         }
         return SessionQuestion(id: questionID(q.id), session: session, origin: .session, round: 1, items: q.items,

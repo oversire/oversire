@@ -143,7 +143,7 @@ final class MachineRuntimeCallerTests: XCTestCase {
         func question(_ machine: String) -> SessionQuestion {
             let s = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: .daemon, id: machine), id: "w1"), id: "term_1")
             return SessionQuestion(id: QuestionID(rawValue: "\(machine):q1"), session: s, origin: .session,
-                                   items: [QuestionItem(id: "q1", text: "Go?", kind: .single, options: [.init(label: "Yes")])], via: .askReply, askedAt: t0)
+                                   items: [QuestionItem(id: "q1", text: "Go?", kind: .single, options: [.init(label: "Yes")])], via: .form, askedAt: t0)
         }
         XCTAssertEqual(questions.place(question("mba")), QuestionPlace(runtime: "OverSire daemon", host: "this Mac", app: "Orca"))
         XCTAssertEqual(questions.place(question("mbp")), QuestionPlace(runtime: "OverSire daemon", host: "remote: mbp", local: false))

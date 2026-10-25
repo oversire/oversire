@@ -354,9 +354,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                          askedAt: ago(1), expiresAt: Date().addingTimeInterval(240))
         questions.seed([
             QuestionBoard.Entry(question: permission, state: .open, firstSeen: ago(1)),
-            QuestionBoard.Entry(question: q("m1", [store, tests], .askReply, 3), state: .open, firstSeen: ago(3)),
+            QuestionBoard.Entry(question: q("m1", [store, tests], .form, 3), state: .open, firstSeen: ago(3)),
             QuestionBoard.Entry(question: q("f2", [store], .form, 41), state: .open, firstSeen: ago(41)),
-            QuestionBoard.Entry(question: q("m3", [store], .askReply, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
+            QuestionBoard.Entry(question: q("m3", [store], .form, 9), state: .answeredElsewhere(answer, at: ago(2)), firstSeen: ago(9)),
             QuestionBoard.Entry(question: q("e1", [UIShots.enhanceAsk, tests], .form, 2), state: .open, firstSeen: ago(2)),
         ], keys: [runner: "OVERSIRE-137", s("m1"): UIShots.sessionKey, s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"],
            intake: [s("e1"): UIShots.intakeRef])
@@ -373,7 +373,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     struct Runtimes: HTTPTransport {
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             guard request.url?.path == "/v1/runtimes" else { throw URLError(.cannotConnectToHost) }
-            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, capabilities: ["sessionHistory"])])
+            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, capabilities: ["sessionHistory", "sessionKey"])])
             return (try JSONEncoder().encode(page), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }
     }
@@ -1278,7 +1278,7 @@ extension UIShots {
                   here, acts, nil)],
             ]
         } else if set == "closed" {
-            let two = q("m1", [store, tests], .askReply, 6, work)
+            let two = q("m1", [store, tests], .form, 6, work)
             cards = [
                 [(e(two, .answeredHere(answer, at: ago(1))), here, acts, nil),
                  (e(two, .answeredElsewhere(answer, at: ago(2))), here, acts, nil),
@@ -1294,11 +1294,11 @@ extension UIShots {
             var failed = e(q("m4", [free], .runnerInput, 3, work), .open)
             failed.error = "the runner is offline"
             cards = [
-                [(e(q("m1", [store, tests], .askReply, 4, work), .open), here, acts, { c in c.pick(0, of: "q1"); c.pick(1, of: "q2") }),
-                 (e(q("m2", [free], .askReply, 2, work), .sending), here, acts, { c in c.write("Ask about questions", in: "q1") }),
+                [(e(q("m1", [store, tests], .form, 4, work), .open), here, acts, { c in c.pick(0, of: "q1"); c.pick(1, of: "q2") }),
+                 (e(q("m2", [free], .form, 2, work), .sending), here, acts, { c in c.write("Ask about questions", in: "q1") }),
                  (failed, runner, acts, nil)],
                 [(e(q("f1", [store, tests], .form, 52, work), .open), here, acts, nil),
-                 (e(SessionQuestion(id: "daemon:studio:m5", session: session, origin: .intake(item("TREBI-471")), round: 2, items: [tests], via: .askReply,
+                 (e(SessionQuestion(id: "daemon:studio:m5", session: session, origin: .intake(item("TREBI-471")), round: 2, items: [tests], via: .form,
                                     askedAt: ago(1)), .open), remote, enhance, nil)],
             ]
         }

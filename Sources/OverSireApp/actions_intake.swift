@@ -26,7 +26,7 @@ struct IntakeActions {
                    extra: ["body": ("string", "The new description, in Markdown."), "priority": ("string", "The priority: urgent, high, medium, low or none.")]) { a in
                 .update(IntakeEdit(patch: ItemPatch(priority: a.string("priority"), bodyMarkdown: a.string("body"))))
             },
-            ActionSpec(id: "intake.triageAll", title: "Triage all with AI", help: "Starts the AI Enhance worker for each pending intake item of a project.", kind: .change,
+            ActionSpec(id: "intake.triageAll", title: "Triage all with AI", help: "Starts an Enhance session for each pending intake item of a project.", kind: .change,
                        input: ActionSpec.args(["project": ItemActions.project], required: ["project"]), capability: .intake) { [link] a in
                 await link.run { d, done in
                     guard let snap = d.projectStore.snapshot(a.string("project") ?? ""), let items = snap.intake else {
@@ -34,7 +34,7 @@ struct IntakeActions {
                     }
                     guard !items.isEmpty else { done(.ok(summary: "The intake of \(snap.summary.identifier) is empty.")); return }
                     items.forEach { d.enhanceAgent.start(projectKey: snap.summary.ref.storeKey, target: .intake($0)) }
-                    done(.ok(summary: "The AI worker starts for \(items.count) intake item\(items.count == 1 ? "" : "s")."))
+                    done(.ok(summary: "Enhance starts for \(items.count) intake item\(items.count == 1 ? "" : "s")."))
                 }
             },
         ]
@@ -68,7 +68,7 @@ struct IntakeActions {
 }
 
 extension IntakeAction {
-    /// The catalog action of a triage. nil for an edit with relations or other fields: only the AI worker writes one.
+    /// The catalog action of a triage. nil for an edit with relations or other fields: only Enhance writes one.
     func action(project: String, id: String) -> (id: String, args: [String: JSONValue])? {
         var args: [String: JSONValue] = ["project": .string(project), "id": .string(id)]
         switch self {

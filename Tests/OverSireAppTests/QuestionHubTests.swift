@@ -14,7 +14,7 @@ final class QuestionHubTests: XCTestCase {
         return QuestionHub(agents: AgentIndex(writes: nil), writes: StoreWrites(store: LocalStore(dir: dir)))
     }
 
-    private func question(_ session: SessionRef, _ id: String, origin: SessionQuestion.Origin, via: SessionQuestion.Via = .askReply,
+    private func question(_ session: SessionRef, _ id: String, origin: SessionQuestion.Origin, via: SessionQuestion.Via = .form,
                           count: Int = 1) -> SessionQuestion {
         let items = (1...count).map { QuestionItem(id: "q\($0)", text: "Which schema \($0)?", kind: .single, options: [.init(label: "A")]) }
         return SessionQuestion(id: QuestionID(rawValue: "fake:\(id)"), session: session, origin: origin, items: items, via: via, askedAt: t0)

@@ -1,14 +1,14 @@
 import Foundation
 import OverSireCore
 
-/// The runtime routes of a FakeDaemon: runtimes, repos, workspaces, files, reveal, direct work orders and workers.
+/// The runtime routes of a FakeDaemon: runtimes, repos, workspaces, files, reveal and direct work orders.
 /// The default values are the ones of the contract fixtures. A start makes a workspace with one terminal and one session.
 /// A start with a key gives the live session of the key, as the daemon does.
 public final class FakeDaemonRuntimes: @unchecked Sendable {
     private let lock = NSLock()
     private var _runtimes: [DaemonRuntime] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.223",
                                                             capabilities: ["sessionInput", "sessionTail", "sessionHistory", "hostFiles",
-                                                                           "workspaces", "reveal", "removeWorkspace", "workers"])]
+                                                                           "workspaces", "reveal", "removeWorkspace", "sessionKey"])]
     private var _repos: [DaemonRepo] = [DaemonRepo(id: "r-towertail", runtime: "orca", name: "towertail", path: "/Users/ada/Projects/towertail", folder: false)]
     private var _workspaces: [DaemonWorkspace] = []
     private var _orders: [WorkOrder] = []
@@ -18,8 +18,6 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
     private var _history: [String: String] = [:]
     private var _files: [[WorkspaceFile]] = []
     private var _reveals: [SessionRef] = []
-    private var _workers: [String: (worker: Worker, state: WorkerState)] = [:]
-    private var _workerCalls: [String] = []
     private var _fail: [SessionOrder.Op: String] = [:]
     private var made = 0
 
@@ -36,14 +34,10 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
     public var files: [[WorkspaceFile]] { with { _files } }
     /// The sessions of POST /v1/reveal.
     public var reveals: [SessionRef] { with { _reveals } }
-    /// "start", "stop <id>", "release <id>" of the worker routes.
-    public var workerCalls: [String] { with { _workerCalls } }
     /// The screen lines of a terminal for sessionRead.
     public func screen(_ terminal: String, _ lines: [String]) { with { _screen[terminal] = lines } }
     /// The text of the last turn that sessionHistory gives for a terminal.
     public func history(_ terminal: String, _ text: String) { with { _history[terminal] = text } }
-    /// The state that GET /v1/workers/{id} gives from now on.
-    public func worker(_ id: String, _ state: WorkerState) { with { _workers[id]?.state = state } }
     /// Orders with this op fail with the text.
     public func fail(_ op: SessionOrder.Op, _ error: String?) { with { _fail[op] = error } }
 
@@ -110,26 +104,6 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                 // The first read gives acked: the order runs.
                 _reads[p[2], default: 0] += 1
                 return try ok(_reads[p[2]] == 1 ? DaemonOrderState(state: .acked) : st)
-            case ("POST", ["v1", "workers"]):
-                let s = try Self.decoder.decode(WorkerStart.self, from: body ?? Data())
-                made += 1
-                let w = Worker(id: "wk-\(made)", runtime: s.runtime ?? "orca", title: s.title, path: s.path, agent: s.agent,
-                               terminal: "term_w\(made)", startedAt: Date(timeIntervalSince1970: 1_792_400_000))
-                _workers[w.id] = (w, WorkerState(state: .running))
-                _workerCalls.append("start")
-                return try ok(w)
-            case ("GET", let p) where p.count == 3 && p[1] == "workers":
-                guard let w = _workers[p[2]] else { return error(404, "no such worker") }
-                return try ok(w.state)
-            case ("POST", let p) where p.count == 4 && p[1] == "workers" && p[3] == "stop":
-                guard _workers[p[2]] != nil else { return error(404, "no such worker") }
-                _workers[p[2]]?.state = WorkerState(state: .ended, reason: "stopped")
-                _workerCalls.append("stop \(p[2])")
-                return (204, Data())
-            case ("DELETE", let p) where p.count == 3 && p[1] == "workers":
-                guard _workers.removeValue(forKey: p[2]) != nil else { return error(404, "no such worker") }
-                _workerCalls.append("release \(p[2])")
-                return (204, Data())
             default: return nil
             }
         }

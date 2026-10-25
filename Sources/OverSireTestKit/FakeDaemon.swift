@@ -32,7 +32,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
 
     /// The credential that a call must carry. nil: no check (loopback).
     public let token: String?
-    /// The runtime routes: runtimes, workspaces, files, orders and workers.
+    /// The runtime routes: runtimes, workspaces, files and orders.
     public let runtime = FakeDaemonRuntimes()
 
     public init(info: DaemonInfo, group: Group? = nil, token: String? = nil) {

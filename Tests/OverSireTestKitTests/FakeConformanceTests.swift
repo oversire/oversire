@@ -91,7 +91,7 @@ final class FakeConformanceTests: XCTestCase {
     func testFakeQuestionChannelPassesItsSuite() async {
         let r = await QuestionChannelConformance.run(sessions: [FakeQuestionChannel().session("s1")]) {
             let ch = FakeQuestionChannel()
-            for (id, via) in [("1", SessionQuestion.Via.askReply), ("2", .form)] {
+            for (id, via) in [("1", SessionQuestion.Via.turn), ("2", .form)] {
                 ch.ask(SessionQuestion(id: QuestionID(rawValue: "fake:\(id)"), session: ch.session("s1"), origin: .session,
                                        items: [QuestionItem(id: "q1", text: "Which?", kind: .multi, options: [.init(label: "A")])],
                                        via: via, askedAt: Date(timeIntervalSince1970: 1)))

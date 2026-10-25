@@ -49,7 +49,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let removeWorkspace: Capability = "removeWorkspace"
     public static let sessionHistory: Capability = "sessionHistory"
     public static let questions: Capability = "questions"
-    public static let workers: Capability = "workers"
+    /// A start with a key gives the live session of the key (OVERSIRE-318). Enhance needs it.
+    public static let sessionKey: Capability = "sessionKey"
     public static let cloudDispatch: Capability = "cloudDispatch"
     public static let projectSettings: Capability = "projectSettings"
     public static let projectSettingsEdit: Capability = "projectSettingsEdit"

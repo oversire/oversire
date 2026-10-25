@@ -25,7 +25,7 @@ final class QuestionBoardTests: XCTestCase {
     let item = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"),
                        id: "i1", key: "OVERSIRE-1", url: URL(string: "https://plane.example/OVERSIRE-1")!)
 
-    func question(_ ch: FakeQuestionChannel, _ id: String, session: String = "s1", via: SessionQuestion.Via = .askReply,
+    func question(_ ch: FakeQuestionChannel, _ id: String, session: String = "s1", via: SessionQuestion.Via = .form,
                   expiresAt: Date? = nil) -> SessionQuestion {
         SessionQuestion(id: QuestionID(rawValue: "fake:\(id)"), session: ch.session(session), origin: .work(item),
                         items: [QuestionItem(id: "q1", text: "Which schema?", kind: .single,
@@ -97,7 +97,7 @@ final class QuestionBoardTests: XCTestCase {
         XCTAssertEqual(b.entries[QuestionID(rawValue: "fake:tool")]?.state, .open)
 
         let other = SessionQuestion(id: QuestionID(rawValue: "fake:later"), session: ch.session("s1"), origin: .work(item),
-                                    items: old.items, via: .askReply, askedAt: t0.addingTimeInterval(60))
+                                    items: old.items, via: .form, askedAt: t0.addingTimeInterval(60))
         ch.answerOutside(QuestionID(rawValue: "fake:tool"), answer(old))
         ch.ask(other)
         await b.refresh()

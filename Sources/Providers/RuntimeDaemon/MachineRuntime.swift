@@ -8,7 +8,7 @@ extension ProviderID {
 /// The agent runtimes of one machine, through its oversire daemon. The account id is the machine name.
 /// The daemon talks to the runtimes of its machine. This adapter talks only to the daemon.
 /// The capabilities come from GET /v1/runtimes: call `refresh()` or `probe()` first.
-public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, WorkspaceRemoving, SessionHistoryReading, WorkerSupervising,
+public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, WorkspaceRemoving, SessionHistoryReading,
                              @unchecked Sendable {
     /// The runtime of a workspace that the adapter did not see in a listing.
     public static let defaultRuntime = "orca"
@@ -49,7 +49,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     public var capabilities: Set<Capability> {
         var caps: Set<Capability> = [.questions]
         for r in runtimes where r.reachable { caps.formUnion(r.capabilities.map(Capability.init(rawValue:))) }
-        let parts: Set<Capability> = [.sessionInput, .sessionTail, .sessionHistory, .hostFiles, .removeWorkspace, .workers, .questions, .sessionStream]
+        let parts: Set<Capability> = [.sessionInput, .sessionTail, .sessionHistory, .hostFiles, .removeWorkspace, .sessionKey, .questions, .sessionStream]
         return caps.intersection(reveals ? parts.union([.reveal]) : parts)
     }
 
@@ -212,13 +212,6 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         }
         return d
     }
-
-    // MARK: WorkerSupervising
-
-    public func startWorker(_ w: WorkerStart) async throws -> Worker { try await client.startWorker(w) }
-    public func workerState(_ w: Worker) async throws -> WorkerState { try await client.worker(id: w.id) }
-    public func stopWorker(_ w: Worker) async throws { try await client.stopWorker(id: w.id) }
-    public func releaseWorker(_ w: Worker) async throws { try await client.releaseWorker(id: w.id) }
 
     // MARK: Work orders
 

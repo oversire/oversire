@@ -66,7 +66,6 @@ public enum ProviderConformance {
         (.removeWorkspace, "WorkspaceRemoving", { $0 is any WorkspaceRemoving }),
         (.sessionHistory, "SessionHistoryReading", { $0 is any SessionHistoryReading }),
         (.questions, "QuestionChannel", { $0 is any QuestionChannel }),
-        (.workers, "WorkerSupervising", { $0 is any WorkerSupervising }),
         (.projectSettings, "ProjectSettingsReading", { $0 is any ProjectSettingsReading }),
         (.projectSettingsEdit, "ProjectSettingsEditing", { $0 is any ProjectSettingsEditing }),
         (.itemSearch, "ItemSearching", { $0 is any ItemSearching }),

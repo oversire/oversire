@@ -121,14 +121,14 @@ public struct EnhanceResult: Codable, Equatable, Sendable {
     }
 }
 
-/// The spec of an Enhance worker. Contract/prompts/enhance.md holds the default template.
+/// The prompt of an Enhance session. Contract/prompts/enhance.md holds the default template.
 public enum EnhancePrompt {
     public static let originalHeading = "## Original note"
 
     /// The user template of enhance.md. The user can change it in Settings.
     public static var template: String { PromptTemplate.all[.enhance]?.userTemplate ?? "" }
 
-    /// What the worker enhances. The raw value fills `{{kind}}`.
+    /// What the session enhances. The raw value fills `{{kind}}`.
     public enum Kind: String, Sendable {
         case intake = "a new intake item"
         case ticket = "a tracker item"
