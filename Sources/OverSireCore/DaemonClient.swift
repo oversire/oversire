@@ -179,6 +179,26 @@ public final class DaemonClient: Sendable {
         return r
     }
 
+    // MARK: Leases (member routes on the home daemon)
+
+    /// 409 with a Lease: another holder has it. 409 with error and home: throws StoreNotHome.
+    public func acquire(_ name: String, _ r: LeaseRequest) async throws -> LeaseResult {
+        let (data, resp) = try await exchange(try json("POST", "/v1/leases/\(Self.escape(name))", r))
+        if resp.statusCode == 409 {
+            if let l = try? Self.decode(data) as Lease { return .other(l) }
+            struct Body: Decodable { let error: String?; let home: String? }
+            let b = try? JSONDecoder().decode(Body.self, from: data)
+            throw StoreNotHome(home: b?.home, message: b?.error ?? "This machine is not home")
+        }
+        return .held(try Self.decode(try Self.check(data, resp)))
+    }
+
+    public func release(_ name: String, holder: String) async throws {
+        var c = URLComponents()
+        c.queryItems = [URLQueryItem(name: "holder", value: holder)]
+        _ = try await send(try json("DELETE", "/v1/leases/\(Self.escape(name))\(c.percentEncodedQuery.map { "?" + $0 } ?? "")", Optional<[String: String]>.none))
+    }
+
     // Question ids hold ":" and other characters that a path segment must escape.
     package static func escape(_ id: String) -> String {
         var allowed = CharacterSet.urlPathAllowed

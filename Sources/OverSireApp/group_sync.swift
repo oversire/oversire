@@ -19,6 +19,9 @@ final class GroupSync {
     let hub: MachineHub
     let writes: StoreWrites
     let desk: RunnerDesk
+    /// The app that runs the automatic actions (OVERSIRE-319).
+    let owner: AutomationOwner
+    private let leases: LeaseDirectory
     private let http: any HTTPTransport
     private var group: Group?
     private var runtimes: [String: [ProviderID]] = [:]
@@ -35,6 +38,9 @@ final class GroupSync {
         self.writes = writes
         self.desk = desk
         self.http = http
+        let leases = LeaseDirectory(http: http)
+        self.leases = leases
+        owner = AutomationOwner(home: { leases.home($0) }, device: AppEnvironment.appDevice, name: { leases.selfName })
         writes.group = { [weak self] in self?.group?.id }
         writes.rehome = { [weak self] e in await MainActor.run { self?.rehome(e) } }
         observer = NotificationCenter.default.addObserver(forName: MachineHub.changed, object: hub, queue: .main) { [weak self] _ in
@@ -66,6 +72,9 @@ final class GroupSync {
     var live: [MachineLink] { hub.links.filter { hub.isLive($0.machine) } }
 
     func apply() {
+        if leases.update(read: hub.read, group: group, links: hub.links, live: live.map(\.machine)) {
+            Task { [owner] in await owner.refresh() }
+        }
         writes.use(storeHome(group: group, cloud: cloud, links: live))
         desk.update(choice)
         readRuntimes()
@@ -78,7 +87,13 @@ final class GroupSync {
     }
 
     /// A text frame of the WebSocket of a machine: the ack, result and session frames of the direct orders.
-    func frame(_ text: String, from machine: String) { desk.received(text, from: machine) }
+    func frame(_ text: String, from machine: String) {
+        if case .lease? = DaemonFrame.parse(text) {
+            Task { [owner] in await owner.refresh() }
+            return
+        }
+        desk.received(text, from: machine)
+    }
 
     /// The old home answered 409. The named home, when it is live. The group is read again in all cases.
     func rehome(_ e: StoreNotHome) -> StoreReplica? {
@@ -103,6 +118,48 @@ final class GroupSync {
                     self.desk.update(self.choice)
                 }
             }
+        }
+    }
+}
+
+/// The home of the automations lease: the home member of the group, also when the group has a cloud. Any thread.
+final class LeaseDirectory: @unchecked Sendable {
+    private let lock = NSLock()
+    private let http: any HTTPTransport
+    private var read = false
+    private var group: Group?
+    private var links: [MachineLink] = []
+    private var live: Set<String> = []
+
+    init(http: any HTTPTransport) { self.http = http }
+
+    /// True when the home or its link changed, or it went live.
+    func update(read: Bool, group: Group?, links: [MachineLink], live: [String]) -> Bool {
+        lock.withLock {
+            let before = (self.read, self.group?.home, self.homeLink, self.live.contains(self.group?.home.rawValue ?? ""))
+            self.read = read
+            self.group = group
+            self.links = links
+            self.live = Set(live)
+            return before != (read, group?.home, homeLink, self.live.contains(group?.home.rawValue ?? ""))
+        }
+    }
+
+    private var homeLink: MachineLink? { links.first { $0.machine == group?.home.rawValue } }
+
+    /// The machine name of this Mac: its daemon, else the host name, as a join of the app sends it.
+    var selfName: String {
+        lock.withLock { links.first(where: \.local)?.machine } ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
+    }
+
+    /// Before the first read of the group, the automations wait. hint: the home that a 409 named.
+    func home(_ hint: String?) -> LeaseHome {
+        lock.withLock {
+            guard read else { return .unreachable("") }
+            guard let group else { return .none }
+            let m = hint ?? group.home.rawValue
+            guard let l = links.first(where: { $0.machine == m }) else { return .unreachable(m) }
+            return .member(m, l.client(http: http))
         }
     }
 }

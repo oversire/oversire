@@ -28,6 +28,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _asked: JoinPending?
     private var _joined: JoinResult?
     private var _update: DaemonUpdate?
+    private var _leases: [String: Lease] = [:]
     private var sockets: [FakeDaemonSocket] = []
 
     /// The credential that a call must carry. nil: no check (loopback).
@@ -72,6 +73,10 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     public var joined: JoinResult? { get { with { _joined } } set { with { _joined = newValue } } }
     /// The answer of POST /v1/update. nil: 404, as from a CLI before 0.2.2.
     public var update: DaemonUpdate? { get { with { _update } } set { with { _update = newValue } } }
+    /// The leases of /v1/leases/{name}, as on a home daemon. The lease routes answer 409 when this daemon is not home.
+    public var leases: [String: Lease] { get { with { _leases } } set { with { _leases = newValue } } }
+    /// The time of the lease routes.
+    public var now: @Sendable () -> Date = Date.init
     /// POST /v1/group/requests/{id}/approve and deny calls.
     public var decisions: [(id: String, approve: Bool)] { with { _decisions } }
     /// The body of each call, as a JSON object.
@@ -223,6 +228,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
             g.members.removeAll { $0.machine.rawValue == p[3] }
             _group = g
             return (200, Data(#"{"ok":true}"#.utf8))
+        case (_, let p) where p.count == 3 && p[1] == "leases":
+            return try lease(method, p[2], url: url, body: body)
         case ("GET", ["v1", "hooks", "install"]): return try ok(_hooks)
         case (let m, ["v1", "hooks", "install"]) where m == "POST" || m == "DELETE":
             let d = try body.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: [String]] } ?? [:]
@@ -240,6 +247,35 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
             if let body, let d = try JSONSerialization.jsonObject(with: body) as? [String: Int], let seq = d["seq"] { _acks.append(seq) }
             return (200, Data(#"{"ok":true}"#.utf8))
         default: return try runtime.route(method, parts, body: body, machine: _info.machine, sessions: &_sessions) ?? missing
+        }
+    }
+
+    // Runs under the lock. The rules of cli/lease: a renew keeps the epoch, a new holder increases it.
+    private func lease(_ method: String, _ name: String, url: URL, body: Data?) throws -> (Int, Data) {
+        guard let g = _group else { return (409, Data(#"{"error":"this machine has no group"}"#.utf8)) }
+        guard g.home == _info.machine else {
+            return (409, try JSONSerialization.data(withJSONObject: ["error": "\(g.home.rawValue) is home", "home": g.home.rawValue]))
+        }
+        let t = now()
+        let cur = _leases[name]
+        switch method {
+        case "POST":
+            let r = try Self.decoder.decode(LeaseRequest.self, from: body ?? Data())
+            if let cur, cur.holder != r.holder, cur.until > t, !r.take { return (409, try Self.encoder.encode(cur)) }
+            let epoch = (cur?.epoch ?? 0) + (cur?.holder == r.holder ? 0 : 1)
+            let l = Lease(name: name, holder: r.holder, holderName: r.holderName, epoch: epoch, until: t.addingTimeInterval(TimeInterval(r.ttlSeconds)))
+            _leases[name] = l
+            return try ok(l)
+        case "DELETE":
+            let holder = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "holder" }?.value
+            guard var cur, cur.until > t else { return (204, Data()) }
+            guard cur.holder == holder else { return (403, Data(#"{"error":"the caller does not hold the lease"}"#.utf8)) }
+            cur.until = t
+            _leases[name] = cur
+            return (204, Data())
+        default:
+            guard let cur, cur.until > t else { return missing }
+            return try ok(cur)
         }
     }
 }

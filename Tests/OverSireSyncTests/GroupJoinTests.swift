@@ -9,6 +9,11 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertEqual(result, .joinResult(JoinResultFrame(host: "100.97.81.23:7690", request: "r-1", status: .denied)))
         XCTAssertNil(DaemonFrame.parse(#"{"type":"poke"}"#))
         XCTAssertNil(DaemonFrame.parse("pong"))
+        guard case .lease(let l)? = DaemonFrame.parse(#"{"type":"lease","lease":{"name":"automations","holder":"dev-1","holderName":"mbp","epoch":2,"until":"2026-10-24T22:30:00Z"}}"#) else {
+            return XCTFail("no lease frame")
+        }
+        XCTAssertEqual(l.holderName, "mbp")
+        XCTAssertEqual(l.epoch, 2)
     }
 
     func testReasonUsesTheErrorOfTheBody() {

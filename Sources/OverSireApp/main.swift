@@ -307,7 +307,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.agentIndex.didWake()
             self?.questions.didWake()
             self?.machineHub.refresh()
+            if let o = self?.automations { Task { await o.refresh() } }
         }
+        // A Mac that sleeps gives the automations to the other Macs.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            if let o = self?.automations { Task { await o.release() } }
+        }
+        startAutomations()
         NotificationCenter.default.addObserver(forName: QuestionHub.changed, object: questions, queue: .main) { [weak self] _ in
             self?.reloadList(DataChange(.questions, origin: .event))
             self?.updateIcon()
@@ -895,6 +901,37 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 done?()
             }
         }
+    }
+
+    /// The app that runs the automatic actions. Each gate asks it first.
+    var automations: AutomationOwner? { relay.group?.owner }
+
+    private func startAutomations() {
+        let may: () -> Bool = { [weak self] in self?.automations?.mayAct ?? true }
+        queue.mayAct = may
+        enhanceAgent.mayAct = may
+        cleaner.mayAct = may
+        writeBack.mayAct = may
+        sessions.mayAct = may
+        ciAssist.mayAct = may
+        itemSummaries.mayAct = may
+        statusJob.mayAct = may
+        guard let o = automations else { return }
+        NotificationCenter.default.addObserver(forName: AutomationOwner.changed, object: o, queue: .main) { [weak self] _ in
+            log.info("Automations: \(String(describing: o.role), privacy: .public)")
+            self?.reloadList(DataChange(.connection, origin: .event))
+        }
+        o.start()
+    }
+
+    func applicationWillTerminate(_ note: Notification) {
+        guard let o = automations else { return }
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            await o.release()
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 1)
     }
 
     // The popover PRs tab lists review requests only.

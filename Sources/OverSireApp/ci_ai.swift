@@ -37,6 +37,8 @@ final class CIAssist {
     private let ai: () -> AIClient?
     private let changedFiles: (_ repo: String, _ sha: String) -> [String]
     private let q = DispatchQueue(label: "com.oversire.app.ci-assist", qos: .utility)
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
 
     init(path: String, ai: @escaping () -> AIClient? = { AIClient.current }, changedFiles: @escaping (String, String) -> [String] = CIAssist.ghFiles) {
         self.path = path
@@ -101,7 +103,7 @@ final class CIAssist {
 
     // A new failure of a flaky workflow gets one re-run before the alert. True: re-run it now, do not alert.
     func shouldRetry(repo: String, _ r: Run, watched: Bool) -> Bool {
-        guard AI_CFG.flaky, r.isFailure, !watched, (r.attempt ?? 1) == 1,
+        guard AI_CFG.flaky, mayAct(), r.isFailure, !watched, (r.attempt ?? 1) == 1,
               isFlaky(repo: repo, r), !state.retried.contains(r.url) else { return false }
         state.retried = Array((state.retried + [r.url]).suffix(200))
         save()
@@ -195,7 +197,7 @@ final class CIAssist {
 
     // Due once a day after the set hour.
     func digestDue(now: Date = Date()) -> Bool {
-        guard AI_CFG.digest, Calendar.current.component(.hour, from: now) >= AI_CFG.digestHour else { return false }
+        guard AI_CFG.digest, mayAct(), Calendar.current.component(.hour, from: now) >= AI_CFG.digestHour else { return false }
         return state.digest?.day != CIAssist.day(now)
     }
 

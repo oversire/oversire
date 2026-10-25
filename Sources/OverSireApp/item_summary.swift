@@ -86,6 +86,8 @@ final class ItemSummaries {
     private var tried: [String: String] = [:]     // key → the hash of the last automatic try
     private let path: String
     private let ai: () -> AIClient?
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
 
     init(path: String, ai: @escaping () -> AIClient? = { AIClient.current }) {
         self.path = path
@@ -130,7 +132,7 @@ final class ItemSummaries {
     /// Summarizes the newest due item: open, changed in the last 7 days, a long description without a summary of this text.
     /// One try for each description, so a failure does not repeat.
     func tick(_ items: [(item: Item, open: Bool)], now: Date = Date()) {
-        guard busy.isEmpty, hasEngine else { return }
+        guard busy.isEmpty, hasEngine, mayAct() else { return }
         let due = items.filter { e in
             let body = (e.item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard e.open, ItemSummaries.offers(body), now.timeIntervalSince(e.item.activityAt) < ItemSummaries.recent else { return false }

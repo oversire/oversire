@@ -98,6 +98,8 @@ final class Cleaner {
     var runtime: () -> (any WorkspaceRemoving)? = { ENV.runtime as? any WorkspaceRemoving }
     var branchHost: (String) -> (host: any BranchDeleting, ref: RepoRef)? = { REPO_CLIENT.branchHost($0) }
     var now: () -> Date = Date.init
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
 
     init(commands: any CommandRunner = ProcessRunner(), defaults: UserDefaults = .standard) {
         self.commands = commands
@@ -393,7 +395,7 @@ final class Cleaner {
     /// Runs auto-remove for each finished item. At most one try for each item in 10 minutes.
     func sweep(_ data: AppData) {
         let c = AGENTS.cleanup
-        guard c.auto else { return }
+        guard c.auto, mayAct() else { return }
         for (k, _) in pending(data) where !running.contains(k) {
             if let t = autoTried[k], now().timeIntervalSince(t) < 600 { continue }
             let l = autoLines(k, data: data, config: c)

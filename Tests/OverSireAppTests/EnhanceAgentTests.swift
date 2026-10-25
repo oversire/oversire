@@ -108,6 +108,22 @@ final class EnhanceAgentTests: XCTestCase {
 
     private func host(_ r: Rig) -> LocalMachineRuntime { r.host }
 
+    func testAutoStartAsksTheOwner() async throws {
+        let r = try await make()
+        let saved = (AI_CFG.intakeAgent, AGENTS.enhanceVague)
+        defer { (AI_CFG.intakeAgent, AGENTS.enhanceVague) = saved }
+        AI_CFG.intakeAgent = true
+        AGENTS.enhanceVague = true
+        let asked = await MainActor.run { () -> Int in
+            var n = 0
+            r.agent.mayAct = { n += 1; return false }
+            r.agent.autoStart()
+            return n
+        }
+        XCTAssertEqual(asked, 1)
+        XCTAssertTrue(r.daemon.runtime.orders.isEmpty)
+    }
+
     func testOldDaemonAsksForAnUpdate() async throws {
         let d = FakeDaemon()
         d.runtime.runtimes = d.runtime.runtimes.map { var rt = $0; rt.capabilities.removeAll { $0 == "sessionKey" }; return rt }

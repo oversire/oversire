@@ -97,6 +97,8 @@ final class EnhanceAgent {
     private let agents: AgentIndex
     var host: () -> (any EnhanceHost)? = { ENV.runtime as? any EnhanceHost }
     var now: () -> Date = { Date() }
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
     /// For `--uishots`: a state for a target that has none.
     var sample: ((EnhanceTarget) -> State?)?
 
@@ -139,7 +141,7 @@ final class EnhanceAgent {
 
     /// Starts Enhance for the new vague items of the last day, at most two at a time.
     func autoStart() {
-        guard AGENTS.enhanceVague, ready else { return }
+        guard AGENTS.enhanceVague, ready, mayAct() else { return }
         var room = 2 - states.values.filter { $0 == .starting || $0.run != nil && !$0.isReady }.count
         for (pk, snap) in store.snapshots {
             for item in snap.intake ?? [] where room > 0 && states[item.id] == nil && !autoTried.contains(item.id) {

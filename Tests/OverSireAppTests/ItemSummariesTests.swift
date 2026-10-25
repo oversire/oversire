@@ -48,6 +48,18 @@ final class ItemSummariesTests: XCTestCase {
         XCTAssertEqual(engine.tasks.count, 2, "no call for a done, an old or a short item")
     }
 
+    func testNoCallWhenAnotherAppOwnsTheAutomations() {
+        let items = [(item("A-1", body: String(repeating: "A long description. ", count: 100), days: 1), true)]
+        sums.mayAct = { false }
+        sums.tick(items, now: now)
+        XCTAssertTrue(sums.busy.isEmpty)
+        XCTAssertEqual(engine.tasks.count, 0)
+        sums.mayAct = { true }
+        sums.tick(items, now: now)
+        settle()
+        XCTAssertEqual(engine.tasks.count, 1)
+    }
+
     func testANewDescriptionGetsANewSummaryAndAFailureDoesNotRepeat() {
         let long = String(repeating: "A long description. ", count: 100)
         sums.tick([(item("A-1", body: long, days: 1), true)], now: now)

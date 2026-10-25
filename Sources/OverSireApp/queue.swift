@@ -162,6 +162,8 @@ final class WorkQueue {
     /// The area book with a cloud account, else nil.
     var areaBook: () -> ItemAreaBook? = { nil }
     var planner: () -> PlannerBook? = { nil }
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
 
     init(writes: StoreWrites, store: ProjectStore, agents: AgentIndex) {
         self.writes = writes
@@ -287,7 +289,7 @@ final class WorkQueue {
     func tick(workstreams: WorkstreamIndex) {
         absorbTriggers()
         store.relations.load(lanes.flatMap { $0.entries.map(\.key) })
-        guard AGENTS.autoStart, agents.ready != nil else { return }
+        guard AGENTS.autoStart, agents.ready != nil, mayAct() else { return }
         let world = world(workstreams: workstreams)
         for lane in lanes {
             if let e = lane.pick(state: states[lane.project], world: world).entry { start(e.key, project: lane.project) }

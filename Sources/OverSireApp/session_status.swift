@@ -152,6 +152,8 @@ final class StatusJob {
     private var world: (workstreams: WorkstreamIndex, store: ProjectStore)?
     var now: () -> Date = Date.init
     var ai: () -> AIClient? = { AIClient.current }
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
 
     init(path: String, agents: AgentIndex, queue: WorkQueue) {
         self.path = path
@@ -218,6 +220,7 @@ final class StatusJob {
     /// Reads each session that is due: once at a turn end, then after N min with the same screen.
     func tick(workstreams: WorkstreamIndex, store: ProjectStore) {
         world = (workstreams, store)
+        guard mayAct() else { return }
         for (key, a) in agents.agents where !reading.contains(key) {
             guard let st = agents.state(key), st != .closed, !store.isDone(key: key), let w = agents.watch(key) else { continue }
             let mark = w.fingerprint + "|" + a.messageHash

@@ -31,6 +31,8 @@ final class SessionNotes {
     private let agents: AgentIndex
     private let store: ProjectStore
     private let writeBack: PlaneWriteBack
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
     private let q = DispatchQueue(label: "com.oversire.app.sessions", qos: .utility)
     var projectsDir = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects")
 
@@ -190,7 +192,7 @@ final class SessionNotes {
     func tick() {
         let now = agents.agents.mapValues(\.phase)
         defer { phases = now }
-        guard AI_CFG.sessionSummary, AGENTS.writeBack.enabled, AGENTS.writeBack.sessionComment else { return }
+        guard AI_CFG.sessionSummary, AGENTS.writeBack.enabled, AGENTS.writeBack.sessionComment, mayAct() else { return }
         for (k, p) in now where p == .done {
             guard let old = phases[k], old == .working || old == .waiting else { continue }
             summarize(k) { [weak self] s in

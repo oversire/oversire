@@ -46,6 +46,8 @@ public struct JoinResultFrame: Codable, Hashable, Sendable {
 public enum DaemonFrame: Hashable, Sendable {
     case joinRequest(JoinRequestFrame)
     case joinResult(JoinResultFrame)
+    /// The home daemon has a new holder of the lease, or the holder released it.
+    case lease(Lease)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -55,6 +57,9 @@ public enum DaemonFrame: Hashable, Sendable {
         switch head.type {
         case "joinRequest": return (try? DaemonClient.decode(data) as JoinRequestFrame).map(DaemonFrame.joinRequest)
         case "joinResult": return (try? DaemonClient.decode(data) as JoinResultFrame).map(DaemonFrame.joinResult)
+        case "lease":
+            struct Frame: Decodable { let lease: Lease }
+            return (try? DaemonClient.decode(data) as Frame).map { .lease($0.lease) }
         default: return nil
         }
     }

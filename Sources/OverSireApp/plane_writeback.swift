@@ -66,6 +66,8 @@ final class PlaneWriteBack {
     private let store: ProjectStore
     private let trackers: TrackerDirectory
     var onError: ((String) -> Void)?
+    /// False when another app owns the automations (AutomationOwner).
+    var mayAct: () -> Bool = { true }
 
     init(path: String, store: ProjectStore, trackers: TrackerDirectory) {
         self.path = path
@@ -101,7 +103,7 @@ final class PlaneWriteBack {
     // Writes what changed. At most one write per item each 2 minutes.
     func sync(_ streams: [Workstream]) {
         let cfg = AGENTS.writeBack
-        guard cfg.enabled else { return }
+        guard cfg.enabled, mayAct() else { return }
         for s in streams where s.agent != nil {
             guard let item = s.item, let pk = s.projectKey, let snap = store.snapshots[pk], !inFlight.contains(s.key),
                   -(lastWrite[s.key] ?? .distantPast).timeIntervalSinceNow > 120,

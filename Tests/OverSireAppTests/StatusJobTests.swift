@@ -108,6 +108,18 @@ final class StatusJobTests: XCTestCase {
         return store
     }
 
+    func testNoReadWhenAnotherAppOwnsTheAutomations() {
+        seed(.done, message: "The page is merged.")
+        job.mayAct = { false }
+        tick()
+        XCTAssertTrue(job.reading.isEmpty)
+        XCTAssertEqual(engine.tasks.count, 0)
+        job.mayAct = { true }
+        tick()
+        settle()
+        XCTAssertEqual(engine.tasks.count, 1)
+    }
+
     func testIdleWaitsForTheQuietMinutes() {
         seed(.working, message: nil, same: 4 * 60)
         tick()
