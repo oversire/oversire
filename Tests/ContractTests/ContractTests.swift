@@ -44,6 +44,7 @@ final class ContractTests: XCTestCase {
         "ai-endpoint": roundTrip(AIEndpoint.self),
         "ai-route": roundTrip(AIRoute.self),
         "item-relation": roundTrip(ItemRelation.self),
+        "groom-result": roundTrip(GroomResult.self),
         "relation-patch": roundTrip(RelationPatch.self),
         "item-areas": roundTrip(ItemAreas.self),
         "planner-settings": roundTrip(PlannerSettings.self),
@@ -91,12 +92,12 @@ final class ContractTests: XCTestCase {
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
     // jobs.json and suggestion.json are 2: the job kind and the proposal type sequence became plan.
-    // daemon.json is 2: the worker types went away (OVERSIRE-322).
+    // daemon.json is 2: the worker types went away (OVERSIRE-322). actions.json is 2: the relation kind duplicate (OVERSIRE-336).
     static let versions: [String: Int] = [
-        "refs.json": 1, "provider-event.json": 1, "actions.json": 1, "ai-task.json": 1, "account.json": 1,
+        "refs.json": 1, "provider-event.json": 1, "actions.json": 2, "ai-task.json": 1, "account.json": 1,
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
-        "assistant.json": 1, "session-stream.json": 1,
+        "assistant.json": 1, "session-stream.json": 1, "groom.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {

@@ -530,7 +530,8 @@ final class AgentIndex: NSObject {
                 name = String(name[r])
                 named = true
             }
-            for g in c.agents where g.key?.hasPrefix(EnhanceAgent.keyPrefix) != true {
+            // Enhance and Groom sessions are not the work agent of an item.
+            for g in c.agents where g.key?.hasPrefix(EnhanceAgent.keyPrefix) != true && g.key?.hasPrefix(StartKey.groomPrefix) != true {
                 let key: String
                 if let k = StartKey.refineItem(g.key) {
                     if tracked(k) { continue }

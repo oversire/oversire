@@ -85,6 +85,7 @@ public enum TrackerConformance {
     }
 
     /// Adds one blockedBy relation from `item` to a second new item, reads it from both sides, then removes it.
+    /// Then the same with a duplicate relation, which both sides list as duplicate.
     public static func relations(_ t: any Tracker, item ref: ItemRef, project p: ProjectRef) async -> ConformanceReport {
         var r = ConformanceReport()
         guard let rm = t as? any RelationManaging, t.capabilities.contains(.relations) else { return r }
@@ -101,6 +102,20 @@ public enum TrackerConformance {
         _ = await r.step("relations remove", { try await rm.apply(RelationPatch(remove: [rel]), to: ref) })
         if let list = await r.step("relations after remove", { try await rm.relations(of: ref) }) {
             r.expect(!list.contains { $0.item.id == other.id }, "remove did not remove the blocker")
+        }
+        guard let dup = await r.step("create duplicate", { try await t.create(ItemDraft(title: "Conformance duplicate"), in: p) })
+        else { return r }
+        let same = ItemRelation(kind: .duplicate, item: dup)
+        _ = await r.step("duplicate add", { try await rm.apply(RelationPatch(add: [same]), to: ref) })
+        if let list = await r.step("relations with the duplicate", { try await rm.relations(of: ref) }) {
+            r.expect(list.contains { $0.kind == .duplicate && $0.item.id == dup.id }, "relations does not list the duplicate")
+        }
+        if let back = await r.step("relations of the duplicate", { try await rm.relations(of: dup) }) {
+            r.expect(back.contains { $0.kind == .duplicate && $0.item.id == ref.id }, "the duplicate does not list \(ref.key)")
+        }
+        _ = await r.step("duplicate remove", { try await rm.apply(RelationPatch(remove: [same]), to: ref) })
+        if let list = await r.step("relations after the duplicate remove", { try await rm.relations(of: ref) }) {
+            r.expect(!list.contains { $0.item.id == dup.id }, "remove did not remove the duplicate")
         }
         return r
     }

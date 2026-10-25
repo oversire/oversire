@@ -94,7 +94,7 @@ final class PlaneRelationsTests: XCTestCase {
         let item = ref(plane, "a", "OVERSIRE-1")
         http.on("GET", "\(ws)/projects/\(pid)/work-items/a/relations/", #"{"blocked_by":["x"],"duplicate":["d"],"start_after":["s"]}"#)
         let rels = try await plane.relations(of: item)
-        XCTAssertTrue(rels.isEmpty, "x has no answer (404), duplicate and start_after drop")
+        XCTAssertTrue(rels.isEmpty, "x and d have no answer (404), start_after drops")
     }
 
     func testApplyBodies() async throws {
@@ -112,6 +112,25 @@ final class PlaneRelationsTests: XCTestCase {
         XCTAssertEqual(http.body("POST", path + "remove/")?["related_issue"] as? String, "c")
         let order = http.requests.map { $0.url?.path(percentEncoded: false) ?? "" }
         XCTAssertEqual(order, [path, path + "remove/"], "add before remove")
+    }
+
+    // The shape of a live GET of OVERSIRE-82 (2026-10-25): each Plane type is a list of item ids. Plane lists a duplicate on both items.
+    func testDuplicateReadsAndWrites() async throws {
+        let http = RecordedPlane()
+        let plane = PlaneTracker(workspace: PlaneWorkspace(slug: "ocral"), token: "tok", http: http)
+        let base = "\(ws)/projects/\(pid)/work-items/"
+        let a = ref(plane, "a", "OVERSIRE-402"), b = ref(plane, "b", "OVERSIRE-398")
+        http.on("GET", base + "a/relations/", #"{"blocked_by":[],"blocking":[],"duplicate":["b"],"finish_after":[],"finish_before":[],"relates_to":[],"start_after":[],"start_before":[]}"#)
+        http.on("GET", base + "b/", #"{"id":"b","sequence_id":398}"#)
+        let rels = try await plane.relations(of: a)
+        XCTAssertEqual(rels, [ItemRelation(kind: .duplicate, item: b)])
+
+        http.on("POST", base + "b/relations/", status: 201, "[]")
+        try await plane.apply(RelationPatch(add: [ItemRelation(kind: .duplicate, item: a)]), to: b)
+        let add = try XCTUnwrap(http.body("POST", base + "b/relations/"))
+        XCTAssertEqual(add["relation_type"] as? String, "duplicate")
+        XCTAssertEqual(add["issues"] as? [String], ["a"])
+        XCTAssertEqual(RelationKind.duplicate.inverse, .duplicate)
     }
 
     func testConformance() async {

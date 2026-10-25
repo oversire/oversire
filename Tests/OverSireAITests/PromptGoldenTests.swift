@@ -66,6 +66,9 @@ final class PromptGoldenTests: XCTestCase {
         ("failure-reason-no-files", .failureReason, CIPrompts.failureInput(workflow: "Release", number: 1, branch: "v1", sha: "12",
                                                                            commit: "Tag", job: "sign", files: [], errors: [], tail: [])),
         ("digest", .digest, CIPrompts.digestInput(facts: ["2 PRs wait for review", "CI on main is green"])),
+        ("groom", .groom, GroomPrompt.input(project: "OVERSIRE", file: "/tmp/oversire/groom/items.jsonl", scope: .all, staleDays: 14,
+                                            vision: "Small and native.", note: "142 items. Skipped: OVERSIRE-311.")),
+        ("groom-intake", .groom, GroomPrompt.input(project: "TREBI", file: "f.jsonl", scope: .intake, staleDays: 7)),
     ]
 
     func testPromptsMatchTheGolden() throws {

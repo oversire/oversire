@@ -113,4 +113,14 @@ final class StartKeyTests: XCTestCase {
         XCTAssertNil(accepted["OVERSIRE-317"])
         XCTAssertNil(StartKey.refineItem("work:OVERSIRE-317"))
     }
+
+    // OVERSIRE-336: one Groom session for each project. It is not the work agent of an item.
+    func testAGroomKeyNamesTheProject() {
+        XCTAssertEqual(StartKey.groom("oversire"), "groom:OVERSIRE")
+        let g = AgentSession(phase: .working, since: Date(), card: "root", paneKey: "tab-1:leaf-1",
+                             prompt: "https://app.plane.so/ocral/browse/OVERSIRE-12/", key: StartKey.groom("OVERSIRE"))
+        let c = Workspace(id: "root", repo: "oversire", path: "/Users/ada/Projects/oversire", name: "OVERSIRE-12", comment: nil,
+                          liveTerminals: 1, lastActivity: Date(), agents: [g], kind: .folder)
+        XCTAssertTrue(AgentIndex.index([c], launches: [:], now: Date()).isEmpty)
+    }
 }

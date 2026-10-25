@@ -445,8 +445,8 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
 
     // MARK: Relations
 
-    /// Plane type → OverSire kind. Plane also has duplicate and the start and finish dates; OverSire drops them.
-    static let relationKinds: [String: RelationKind] = ["blocked_by": .blockedBy, "blocking": .blocks, "relates_to": .relatesTo]
+    /// Plane type → OverSire kind. Plane also has the start and finish dates; OverSire drops them.
+    static let relationKinds: [String: RelationKind] = ["blocked_by": .blockedBy, "blocking": .blocks, "relates_to": .relatesTo, "duplicate": .duplicate]
 
     public func relations(of item: ItemRef) async throws -> [ItemRelation] {
         let o = try await api.send("GET", "\(ws)/projects/\(item.project.id)/work-items/\(item.id)/relations/") as? [String: Any] ?? [:]

@@ -8,7 +8,7 @@ Each side has its own types. Both sides run the same fixture files in their test
 - `schema/*.json`: JSON Schema, draft 2020-12.
   - `refs.json`: `ProviderID`, `AccountID`, `PersonRef`, the refs, `SubjectRef`.
   - `provider-event.json`: `ProviderEvent`, `EventSummary`.
-  - `actions.json`: `ActionKind`, `ItemPatch`, `ChangeAction`, `RunAction`, `LaunchRequest`.
+  - `actions.json`: `ActionKind`, `ItemPatch`, `ChangeAction`, `RunAction`, `LaunchRequest`, `RelationKind`, `ItemRelation`, `RelationPatch`. Version 2: the relation kind `duplicate`.
   - `ai-task.json`: `AITask`, `AIInput`, `AIResult`, `AIUsage`.
   - `account.json`: `AccountConfig`.
   - `store.json`: the store records, `QueueLaneState` and `StoreOp`. Version 2.
@@ -19,6 +19,7 @@ Each side has its own types. Both sides run the same fixture files in their test
   - `billing.json`: `UsageRow`, `LedgerEntry`, `BillingState`. Money is an integer in micro-USD.
   - `ai-endpoint.json`: `AIEndpoint`, `AIRoute`.
   - `assistant.json`: `AssistantThread`, `AssistantMessage`, `AssistantPart`, `ChatEvent`, `ToolSpec`, `ToolCall`, `ToolResult`, `Approval`.
+  - `groom.json`: `GroomResult`, `GroomProposal`. The result block of a Groom session. Only the app reads it.
 - `fixtures/<type>/<case>.json`: sample values. The folder name is the type.
 - `prompts/<taskKind>.md`: the prompt of each AI task kind. `prompts/README.md` has the format.
 
@@ -29,7 +30,7 @@ Swift: `swift test --filter ContractTests`. TypeScript: the contract test in `ov
 
 ## Version rule
 
-Each schema file has `"x-oversire-schema"`. It is 1 for all files except `store.json`, which is 2. The messages that cross the network
+Each schema file has `"x-oversire-schema"`. It is 1 for most files. `store.json`, `jobs.json`, `suggestion.json`, `daemon.json` and `actions.json` are 2. The messages that cross the network
 (`ProviderEvent`, `AITask`, `AIResult`) carry the same number in their `schema` field.
 
 - A new optional field is compatible. Keep the number.

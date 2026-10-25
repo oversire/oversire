@@ -609,6 +609,8 @@ public struct RelationKind: RawRepresentable, Hashable, Sendable, Codable, Expre
     public static let blockedBy: RelationKind = "blockedBy"
     public static let blocks: RelationKind = "blocks"
     public static let relatesTo: RelationKind = "relatesTo"
+    /// A duplicate B: A tells the same problem as B, and B stays.
+    public static let duplicate: RelationKind = "duplicate"
 
     /// The same relation, seen from the other item.
     public var inverse: RelationKind {

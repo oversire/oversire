@@ -5,6 +5,7 @@ public enum StartKey {
     public static let workPrefix = "work:"
     public static let enhancePrefix = "enhance:"
     public static let refinePrefix = "refine:"
+    public static let groomPrefix = "groom:"
 
     /// work:<ITEM-KEY>, for a queue start and the item Start.
     public static func work(_ item: String) -> String { workPrefix + item.uppercased() }
@@ -12,6 +13,8 @@ public enum StartKey {
     public static func enhance(_ item: String) -> String { enhancePrefix + item }
     /// refine:<ITEM-KEY>, for Refine on an intake item.
     public static func refine(_ item: String) -> String { refinePrefix + item.uppercased() }
+    /// groom:<PROJECT>, one Groom session for each project.
+    public static func groom(_ project: String) -> String { groomPrefix + project.uppercased() }
 
     /// The item key of a work key, else nil.
     public static func workItem(_ key: String?) -> String? {

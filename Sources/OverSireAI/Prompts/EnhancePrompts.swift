@@ -1,6 +1,49 @@
 import Foundation
 import OverSireCore
 
+/// Finds the result of a keyed agent session in its last message: Enhance and Groom.
+public enum ResultBlock {
+    public static let fence = "oversire-result"
+
+    /// The body of the last `oversire-result` block in the text. nil: no closed block.
+    public static func last(in text: String) -> String? {
+        var body: [String]?
+        var open: String?
+        var last: String?
+        for line in text.components(separatedBy: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if let ticks = open {
+                if t.hasPrefix(ticks), t.allSatisfy({ $0 == "`" }) {
+                    if let b = body { last = b.joined(separator: "\n") }
+                    open = nil
+                    body = nil
+                } else {
+                    body?.append(line)
+                }
+            } else if t.hasPrefix("```") {
+                let ticks = String(t.prefix { $0 == "`" })
+                open = ticks
+                body = t.dropFirst(ticks.count).trimmingCharacters(in: .whitespaces) == fence ? [] : nil
+            }
+        }
+        return last
+    }
+
+    /// The last JSON object in the text that `read` accepts. It tries each `{` before each `}`, from the end.
+    public static func lastObject<T>(in text: String, _ read: (String) -> T?) -> T? {
+        var end = text.endIndex
+        while let close = text.range(of: "}", options: .backwards, range: text.startIndex..<end) {
+            var start = close.lowerBound
+            while let open = text.range(of: "{", options: .backwards, range: text.startIndex..<start) {
+                if let r = read(String(text[open.lowerBound...close.lowerBound])) { return r }
+                start = open.lowerBound
+            }
+            end = close.lowerBound
+        }
+        return nil
+    }
+}
+
 /// The result of an Enhance session: a fenced block with the info string `oversire-result` in its last message.
 public struct EnhanceResult: Codable, Equatable, Sendable {
     public enum Verdict: String, Codable, Sendable, CaseIterable {
@@ -60,44 +103,12 @@ public struct EnhanceResult: Codable, Equatable, Sendable {
     public var duplicateOf: Relation? { relations.first { $0.kind == "duplicate" } }
 
     /// The last JSON object with a known verdict in the text. nil: the text has no result.
-    public static func parse(_ text: String) -> EnhanceResult? {
-        var end = text.endIndex
-        while let close = text.range(of: "}", options: .backwards, range: text.startIndex..<end) {
-            var start = close.lowerBound
-            while let open = text.range(of: "{", options: .backwards, range: text.startIndex..<start) {
-                if let r = result(String(text[open.lowerBound...close.lowerBound])) { return r }
-                start = open.lowerBound
-            }
-            end = close.lowerBound
-        }
-        return nil
-    }
+    public static func parse(_ text: String) -> EnhanceResult? { ResultBlock.lastObject(in: text, result) }
 
-    public static let fence = "oversire-result"
+    public static let fence = ResultBlock.fence
 
     /// The JSON of the last `oversire-result` block in the message. nil: no block, or no result in it.
-    public static func parse(lastMessage text: String) -> EnhanceResult? {
-        var body: [String]?
-        var open: String?
-        var last: String?
-        for line in text.components(separatedBy: "\n") {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if let ticks = open {
-                if t.hasPrefix(ticks), t.allSatisfy({ $0 == "`" }) {
-                    if let b = body { last = b.joined(separator: "\n") }
-                    open = nil
-                    body = nil
-                } else {
-                    body?.append(line)
-                }
-            } else if t.hasPrefix("```") {
-                let ticks = String(t.prefix { $0 == "`" })
-                open = ticks
-                body = t.dropFirst(ticks.count).trimmingCharacters(in: .whitespaces) == fence ? [] : nil
-            }
-        }
-        return last.flatMap(result)
-    }
+    public static func parse(lastMessage text: String) -> EnhanceResult? { ResultBlock.last(in: text).flatMap(result) }
 
     private static func result(_ raw: String) -> EnhanceResult? {
         guard raw.contains("\"verdict\""), let o = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
