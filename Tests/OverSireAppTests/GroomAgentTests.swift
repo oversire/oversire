@@ -15,7 +15,7 @@ final class GroomAgentTests: XCTestCase {
         func tracker(_ id: String) -> (any Tracker)? { id == fake.account.id ? fake : nil }
     }
 
-    private struct Rig {
+    struct Rig {
         let agent: GroomAgent
         let enhance: EnhanceAgent
         let daemon: FakeDaemon
@@ -24,6 +24,8 @@ final class GroomAgentTests: XCTestCase {
         let queue: WorkQueue
         let fake: FakeTracker
         let pk: String
+        let hub: QuestionHub
+        let snap: ProjectSnapshot
     }
 
     private var saved: (Bool, String?)!
@@ -36,7 +38,7 @@ final class GroomAgentTests: XCTestCase {
     }
 
     /// FAKE-1 to FAKE-3 are Todo, FAKE-4 is in progress, FAKE-5 is done, FAKE-6 and FAKE-7 wait in the intake.
-    private func make(_ daemon: FakeDaemon = FakeDaemon()) async throws -> Rig {
+    func make(_ daemon: FakeDaemon = FakeDaemon()) async throws -> Rig {
         let fake = FakeTracker()
         fake.addStatus(StatusOption(id: "s-cancel", name: "Cancelled", color: "#9CA3AF", group: "cancelled"))
         for n in 1...3 { _ = try await fake.create(ItemDraft(title: "Item \(n)", bodyMarkdown: "Body \(n)", labels: n == 1 ? ["bug"] : []), in: fake.project) }
@@ -73,7 +75,7 @@ final class GroomAgentTests: XCTestCase {
                                    journal: GroomJournal(store: writes.store))
             agent.host = { host }
             agent.outputs = AIOutputBook(writes: writes)
-            return Rig(agent: agent, enhance: enhance, daemon: daemon, host: host, agents: agents, queue: queue, fake: fake, pk: pk)
+            return Rig(agent: agent, enhance: enhance, daemon: daemon, host: host, agents: agents, queue: queue, fake: fake, pk: pk, hub: hub, snap: snap)
         }
     }
 

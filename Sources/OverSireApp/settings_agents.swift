@@ -7,6 +7,7 @@ import RuntimeDaemon
 extension SettingsPage {
     static var commandsOpen = false
     static var intakePromptOpen = false
+    static var groomPromptOpen = false
     static var areasOpen = false
     static let quietMinutes = [5, 10, 15, 30, 60]
 
@@ -149,12 +150,18 @@ extension SettingsPage {
             Self.intakePromptOpen.toggle()
             self?.reload()
         }
+        let groomOpen = Self.groomPromptOpen
+        let editGroom = ActionButton(groomOpen ? "Close Groom prompt" : "Edit Groom prompt") { [weak self] in
+            Self.groomPromptOpen.toggle()
+            self?.reload()
+        }
         var rows: [NSView] = [
             SwitchRow("Enhance vague items", note: "Start Enhance for a new intake item with a short note.", on: AGENTS.enhanceVague) { AGENTS.enhanceVague = $0 },
             SwitchRow("Enhance in a scratch worktree", note: ".wt/enhance-<key>, not the main checkout", on: AGENTS.intakeScratch,
-                      actions: [editPrompt]) { AGENTS.intakeScratch = $0 },
+                      actions: [editPrompt, editGroom]) { AGENTS.intakeScratch = $0 },
         ]
         if promptOpen { rows.append(intakePrompt()) }
+        if groomOpen { rows.append(groomPrompt()) }
         rows += plannerRows()
         b.addFull(section(.planner, rows))
         if Self.areasOpen, let pk = plannerKey { b.addFull(areasCard(pk)) }
@@ -166,41 +173,55 @@ extension SettingsPage {
     }
 
     private func intakePrompt() -> NSView {
-        if !promptDirty { promptView.string = AGENTS.intakePrompt }
-        promptView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        promptView.isRichText = false
-        promptView.textColor = Palette.fg
-        promptView.backgroundColor = Palette.raise
-        promptView.delegate = self
-        promptView.setAccessibilityLabel("Enhance prompt")
+        promptBox(promptView, "Enhance prompt", value: AGENTS.intakePrompt, initial: AgentsConfig.defaultIntakePrompt, dirty: promptDirty,
+                  help: "{{kind}}, {{key}}, {{title}}, {{url}} and {{text}} take the values of the item. {{#if vision}}…{{/if}} shows only with a value.") { [weak self] t in
+            AGENTS.intakePrompt = t
+            self?.promptDirty = false
+        }
+    }
+
+    private func groomPrompt() -> NSView {
+        promptBox(groomView, "Groom prompt", value: AGENTS.groomPrompt, initial: GroomPrompt.template, dirty: groomDirty,
+                  help: "{{project}}, {{file}}, {{scope}} and {{staleDays}} take the values of the run. {{text}} gives the item count and the skipped items. {{#if vision}}…{{/if}} shows only with a value.") { [weak self] t in
+            AGENTS.groomPrompt = t
+            self?.groomDirty = false
+        }
+    }
+
+    private func promptBox(_ view: NSTextView, _ label: String, value: String, initial: String, dirty: Bool, help: String,
+                           set: @escaping (String) -> Void) -> NSView {
+        if !dirty { view.string = value }
+        view.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        view.isRichText = false
+        view.textColor = Palette.fg
+        view.backgroundColor = Palette.raise
+        view.delegate = self
+        view.setAccessibilityLabel(label)
         let scroll = NSScrollView()
-        scroll.documentView = promptView
+        scroll.documentView = view
         scroll.hasVerticalScroller = true
-        promptView.autoresizingMask = [.width]
-        promptView.isVerticallyResizable = true
+        view.autoresizingMask = [.width]
+        view.isVerticallyResizable = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
         let reset = ActionButton("Reset") { [weak self] in
-            AGENTS.intakePrompt = AgentsConfig.defaultIntakePrompt
+            set(initial)
             saveConfig()
-            self?.promptDirty = false
             self?.reload()
         }
+        reset.setAccessibilityLabel("Reset the \(label.lowercased())")
         let save = ActionButton("Save", style: .primary) { [weak self] in
-            guard let self else { return }
-            AGENTS.intakePrompt = self.promptView.string
+            set(view.string)
             saveConfig()
-            self.promptDirty = false
-            self.reload()
+            self?.reload()
         }
         let v = NSStackView(v: [], spacing: 8)
-        if !AGENTS.intakePrompt.contains(EnhanceResult.fence) {
+        if !value.contains(EnhanceResult.fence) {
             v.addFull(NSTextField.text("This prompt has no \(EnhanceResult.fence) block. OverSire reads the result from it. Reset the prompt or add the block.",
                                        size: 12, color: Palette.bad, lines: 2))
         }
         v.addFull(scroll)
-        v.addFull(NSStackView(h: [NSTextField.text("{{kind}}, {{key}}, {{title}}, {{url}} and {{text}} take the values of the item. {{#if vision}}…{{/if}} shows only with a value.",
-                                                   size: 11.5, color: Palette.dim, lines: 2), Spacer(), reset, save], spacing: 8))
+        v.addFull(NSStackView(h: [NSTextField.text(help, size: 11.5, color: Palette.dim, lines: 2), Spacer(), reset, save], spacing: 8))
         return Padded(v)
     }
 

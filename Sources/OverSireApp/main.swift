@@ -328,7 +328,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         let sources: [(Notification.Name, DataDomains)] = [
-            (WorkQueue.changed, .queue), (WorkStats.changed, .stats), (StatusJob.changed, .summaries), (EnhanceAgent.changed, .intake),
+            (WorkQueue.changed, .queue), (WorkStats.changed, .stats), (StatusJob.changed, .summaries), (EnhanceAgent.changed, .intake), (GroomAgent.changed, .intake),
             (SessionNotes.changed, .agents), (CIAssist.changed, .runs), (ItemAreaBook.changed, .planner), (SuggestionBook.changed, .planner),
             (PlannerBook.changed, .planner), (ItemSummaries.changed, .summaries), (AttachmentBook.changed, .projects),
         ]

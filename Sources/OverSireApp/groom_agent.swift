@@ -112,7 +112,8 @@ final class GroomAgent {
     private(set) var states: [String: State] = [:]          // project key → state
     private(set) var selected: [String: Set<String>] = [:]  // project key → the checked proposal ids
     /// Projects with a Groom that Undo can put back.
-    private(set) var undoable: Set<String> = []
+    /// The projects with a journal. `--uishots` sets it.
+    var undoable: Set<String> = []
     /// The vague items that wait for an Enhance slot.
     private(set) var handoff: [String: [EnhanceTarget]] = [:]
     private var held: [String: Run] = [:]
@@ -409,7 +410,7 @@ final class GroomAgent {
     }
 
     private func ready(_ pk: String, _ review: Review, run: Run?) {
-        selected[pk] = Set(review.changes.filter { $0.confidence == .sure }.map(\.id))
+        preselect(pk, review)
         set(pk, .ready(review, run))
     }
 
@@ -463,6 +464,9 @@ final class GroomAgent {
     }
 
     // MARK: Review
+
+    /// For `--uishots`: the sure lines of a sample review start checked.
+    func preselect(_ pk: String, _ review: Review) { selected[pk] = Set(review.changes.filter { $0.confidence == .sure }.map(\.id)) }
 
     func isChecked(_ pk: String, _ p: GroomResult.Proposal) -> Bool { selected[pk]?.contains(p.id) == true }
 
@@ -645,11 +649,11 @@ final class GroomAgent {
     static func pill(_ s: State, now: Date = Date(), on machine: String? = nil) -> (tone: Tone, text: String)? {
         let word = "Grooming" + (machine.map { " on " + $0 } ?? "")
         switch s {
-        case .starting: return (.question, word)
-        case .grooming(let r): return (.question, word + " · \(max(1, Int(r.worked(now) / 60)))m")
+        case .starting: return (.groom, word)
+        case .grooming(let r): return (.groom, word + " · \(max(1, Int(r.worked(now) / 60)))m")
         case .asking(_, let n): return (.question, "\(n) question\(n == 1 ? "" : "s")")
-        case .ready(let r, _): return (.question, "Groomed · \(r.changes.count) change\(r.changes.count == 1 ? "" : "s")")
-        case .applying(_, let n, let of): return (.question, "Writing \(n) of \(of)")
+        case .ready(let r, _): return (.groom, "Groomed · \(r.changes.count) change\(r.changes.count == 1 ? "" : "s")")
+        case .applying(_, let n, let of): return (.groom, "Writing \(n) of \(of)")
         case .applied(_, let o):
             let all = o.written.count + o.failed.count
             return (o.failed.isEmpty ? .ok : .warning, "Written \(o.written.count) of \(all)")

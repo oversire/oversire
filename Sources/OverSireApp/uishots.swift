@@ -140,6 +140,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let intakeEdit = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_INTAKE"] == "edit"
     // OVERSIRE_UISHOTS_ENHANCE=1: the item page of FRITZ-17 has an Enhance result to apply.
     static let enhanceTicket = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENHANCE"] == "1"
+    // OVERSIRE_UISHOTS_GROOM=grooming, asking, ready, applied or failed: the TREBI project has a Groom run in that state.
+    // The path groom:sheet opens the start sheet of TREBI.
+    static let groom = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_GROOM"]
     // OVERSIRE_UISHOTS_FILES=folded or open: FRITZ-17 has four images and one PDF.
     static let files = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FILES"]
 
@@ -364,6 +367,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         ], keys: [runner: "OVERSIRE-137", s("m1"): UIShots.sessionKey, s("f2"): "OVERSIRE-140", s("m3"): "OVERSIRE-142"],
            intake: [s("e1"): UIShots.intakeRef])
         seedEnhance(ago)
+        seedGroom(ago)
     }
 
     static let intakeRef = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p-trebi", key: "TREBI"),
@@ -376,8 +380,74 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     struct Runtimes: HTTPTransport {
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
             guard request.url?.path == "/v1/runtimes" else { throw URLError(.cannotConnectToHost) }
-            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, capabilities: ["sessionHistory", "sessionKey"])])
+            let page = DaemonRuntimesPage(runtimes: [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true,
+                                                                   capabilities: ["sessionHistory", "sessionKey", "hostFiles"])])
             return (try JSONEncoder().encode(page), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private func seedGroom(_ ago: @escaping (Double) -> Date) {
+        let host = LocalMachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: Runtimes()))
+        groomAgent.host = { host }
+        Task { [groomAgent] in
+            _ = try? await host.refresh()
+            await MainActor.run { NotificationCenter.default.post(name: GroomAgent.changed, object: groomAgent) }
+        }
+        guard let frame = UIShots.groom else { return }
+        let account = ENV.machines?.sessions?.account ?? AccountID(provider: .daemon, id: "mba")
+        let session = SessionRef(workspace: WorkspaceRef(account: account, id: "w-g1"), id: "term-g1")
+        let project = UIShots.intakeRef.project
+        let names = ["TREBI-402": "Intake: row jumps when the Enhance pill appears", "TREBI-398": "enhance pill flickers on mba",
+                     "TREBI-329": "Intake list layout shifts while loading", "TREBI-288": "menu bar icon: add a red dot for failing runs",
+                     "TREBI-241": "Remote Orca environment picker", "TREBI-371": "Live session: terminal scrolls to top on resize",
+                     "TREBI-390": "Store: add the area field", "TREBI-356": "better insights", "TREBI-344": "Settings: Orca path field is not saved",
+                     "TREBI-351": "orca path resets after restart"]
+        var intake: [String: IntakeItem] = [:]
+        for (i, (k, n)) in names.sorted(by: { $0.key < $1.key }).enumerated() {
+            intake[k] = IntakeItem(id: "gi-\(i)", workItemId: "gw-\(i)", name: n, priority: nil, createdAt: ago(Double(i) * 1440), author: nil, source: nil)
+        }
+        typealias P = GroomResult.Proposal
+        let result = GroomResult(proposals: [
+            P(kind: .merge, keys: ["TREBI-402", "TREBI-398", "TREBI-329"], keep: "TREBI-402", title: "Intake row moves while it loads or when a pill appears",
+              reason: "All three come from FeedLine: the badge column has no fixed width. You picked TREBI-402.", confidence: .sure,
+              description: "## Problem\nAn intake row changes width when a pill shows or the list loads.\n\n## Done when\n1. The badge column has a fixed width."),
+            P(kind: .merge, keys: ["TREBI-344", "TREBI-351"], keep: "TREBI-344", reason: "Same field, same steps.", confidence: .maybe),
+            P(kind: .done, keys: ["TREBI-288"], reason: "The menu bar shows a red ring and a ✕ shape for a failing run. You said that is the same.",
+              evidence: ["a41f9c2", "PR #219", "status_item.swift:58"], confidence: .sure),
+            P(kind: .obsolete, keys: ["TREBI-241"], reason: "The app no longer talks to Orca. Each daemon drives its own Orca.", evidence: ["CLAUDE.md rule 8"], confidence: .sure),
+            P(kind: .fold, keys: ["TREBI-371"], parent: "TREBI-402", reason: "Part of the row layout work.", confidence: .sure),
+            P(kind: .relate, keys: ["TREBI-390"], relation: .init(kind: "blocked_by", key: "TREBI-402"), reason: "Both change FeedLine.", confidence: .maybe),
+            P(kind: .vague, keys: ["TREBI-356"], reason: "No steps and no result. Only the title.", confidence: .sure),
+        ], skipped: [], findings: [])
+        let keys = names.keys.sorted()
+        var run = GroomAgent.Run(key: StartKey.groom("TREBI"), session: session, pane: "tab-g1", project: project, keys: keys, intake: intake, open: 42,
+                                 scope: .all, skipped: ["TREBI-466", "TREBI-471"], since: ago(6), seen: true)
+        let review = GroomAgent.Review(result: result, keys: keys, intake: intake, open: 42, scope: .all, skipped: run.skipped, rounds: 2, worked: 14 * 60, at: ago(1))
+        let state: GroomAgent.State?
+        switch frame {
+        case "starting": state = .starting("Reading 42 items…")
+        case "grooming": state = .grooming(run)
+        case "asking":
+            run.askedAt = ago(1)
+            let ask = QuestionItem(id: "q1", header: "Merge", text: "Merge the 3 \"Intake row moves\" items into TREBI-329?",
+                                   why: "TREBI-402 has the clearest steps. TREBI-329 is the oldest.", kind: .single,
+                                   options: [.init(label: "Keep TREBI-329"), .init(label: "Keep TREBI-402"), .init(label: "Do not merge")], allowsOther: true)
+            questions.seed(questions.entries + [QuestionBoard.Entry(question: SessionQuestion(id: "daemon:mba:g1", session: session, origin: .intake(ItemRef(project: project, id: run.key, key: "TREBI", url: UIShots.intakeRef.url)),
+                                                                                                    items: [ask], via: .form, askedAt: ago(1)), state: .open, firstSeen: ago(1))],
+                           keys: [:], intake: [session: ItemRef(project: project, id: run.key, key: "TREBI", url: UIShots.intakeRef.url)])
+            state = .asking(run, n: 1)
+        case "ready": state = .ready(review, run)
+        case "applied":
+            let ids = review.changes.map(\.id)
+            state = .applied(review, GroomOutcome(written: Array(ids.dropLast()), failed: [ids.last!: "Plane said 403 for this project"], vague: ["TREBI-356"]))
+        case "failed": state = .failed("The agent sent no result that OverSire can read. Its text is below.", kept: "I read 42 items.\nI could not finish the JSON.")
+        default: state = nil
+        }
+        groomAgent.sample = { [projectStore, groomAgent] pk in
+            guard projectStore.snapshots[pk]?.summary.identifier.uppercased() == "TREBI" else { return nil }
+            if case .ready(let r, _)? = state, groomAgent.selected[pk] == nil { groomAgent.preselect(pk, r) }
+            if case .applied? = state { groomAgent.undoable.insert(pk) }
+            return state
         }
     }
 
@@ -868,6 +938,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         w.sidebar.live.set(LiveLineModel(state: state, lastBurst: state == .live ? Date() : nil, pollEvery: POLL_NORMAL))
                     } else if p == "popover" {
                         self.glance = self.popoverSample()
+                    } else if p == "groom:sheet", let win = w.window, let snap = self.projectStore.snapshot("TREBI") {
+                        let labels = Set(snap.items.flatMap(\.labels)).sorted()
+                        GroomSheet(agent: self.groomAgent, projectKey: snap.summary.ref.storeKey, identifier: snap.summary.identifier, labels: labels).present(over: win)
                     } else if p == "menuicon" {
                         self.glance = UIShots.menuIconSample()
                     } else if p == "kit" {
@@ -894,7 +967,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p.hasPrefix("assistant:") { steps += Array(repeating: {}, count: 4) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -941,7 +1014,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let panel: Int? = snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber
-        let popup: Int? = QueuePage.windowNumber ?? MachineSheets.windowNumber ?? CommandPalette.windowNumber
+        let popup: Int? = QueuePage.windowNumber ?? GroomSheet.windowNumber ?? MachineSheets.windowNumber ?? CommandPalette.windowNumber
         let tip: Int? = HoverSummary.windowNumber ?? ExplainPopover.windowNumber
         p.arguments = ["-x", "-o", "-l", "\(panel ?? popup ?? tip ?? num)", out]
         try? p.run()

@@ -148,7 +148,10 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     // MARK: Drawing
 
     private var inRuntime: Bool { !question.answerable }
-    private var askedWord: String { question.origin.isIntake ? "Enhance asks" : "The session asks" }
+    private var askedWord: String {
+        guard case .intake(let ref) = question.origin else { return "The session asks" }
+        return ref.id.hasPrefix(StartKey.groomPrefix) ? "Groom asks" : "Enhance asks"
+    }
 
     private func render() {
         body.clear()

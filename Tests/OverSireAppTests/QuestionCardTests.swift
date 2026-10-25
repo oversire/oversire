@@ -97,6 +97,20 @@ final class QuestionCardTests: XCTestCase {
         XCTAssertTrue(texts(QuestionCard(answered, place: place, checkedAt: nil, actions: .init())).contains("Session works"))
     }
 
+    @MainActor
+    func testIntakeCardNamesEnhanceOrGroom() {
+        func texts(_ v: NSView) -> [String] { ((v as? NSTextField).map { [$0.stringValue] } ?? []) + v.subviews.flatMap(texts) }
+        let project = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "TREBI")
+        func card(_ id: String) -> QuestionCard {
+            let q = SessionQuestion(id: "daemon:mba:m1", session: session, origin: .intake(ItemRef(project: project, id: id, key: "TREBI", url: URL(string: "https://app.plane.so")!)),
+                                    items: [single], via: .form, askedAt: Date())
+            return QuestionCard(QuestionBoard.Entry(question: q, state: .open, firstSeen: Date()), place: QuestionPlace(runtime: "OverSire daemon", host: "mba"),
+                                checkedAt: nil, actions: .init())
+        }
+        XCTAssertTrue(texts(card("i-1")).contains("Enhance asks"))
+        XCTAssertTrue(texts(card(StartKey.groom("TREBI"))).contains("Groom asks"))
+    }
+
     func testSpan() {
         XCTAssertEqual(QuestionCard.span(20), "now")
         XCTAssertEqual(QuestionCard.span(4 * 60), "4 min")

@@ -48,13 +48,19 @@ final class IntakeListPage: Page {
             return true
         }
         let agent = data.enhanceAgent
+        let groom = data.groomAgent
+        let groomKey = selected == 0 ? nil : tabs[selected].flatMap { data.projectStore.snapshot($0)?.summary.ref.storeKey }
+        // The All tab shows each Groom run. A project tab shows its own.
+        let grooms = data.projectStore.snapshots.keys.sorted().filter { pk in groom.state(pk) != nil && (groomKey == nil || groomKey == pk) }
         let open = shown.compactMap(\.intake).filter { agent.state(.intake($0.item)) == nil }
         let canEnhance = agent.available && !open.isEmpty
         let today = IntakeListPage.addedToday(all)
         let caption = "\(all.count) items wait for triage" + (today > 0 ? " · +\(today) today" : "")
         var top: [PageRow] = [
-            PageRow("header", caption, canEnhance ? open.count : -1) { [weak self] in
+            PageRow("header", caption, canEnhance ? open.count : -1, groom.available, groomKey, groomKey.flatMap { groom.pill($0)?.text },
+                    groomKey.map { groom.undoable.contains($0) } ?? false) { [weak self] in
                 var actions: [NSView] = []
+                if let self, groom.available { actions += self.groomActions(groomKey) }
                 if canEnhance {
                     let b = ActionButton("Enhance all", symbol: "sparkles", style: .primary) {
                         open.forEach { agent.start(projectKey: $0.projectKey, target: .intake($0.item)) }
@@ -72,6 +78,24 @@ final class IntakeListPage: Page {
             },
         ]
         if let note { top.append(PageRow("note", note) { Banner(.info, title: note) }) }
+        if groom.available && grooms.isEmpty {
+            top.append(PageRow("groom.hint", 0) {
+                NSStackView(h: [Glyph(Tone.groom.symbol, color: Palette.intake, size: 11), NSTextField.text(
+                    "Groom: an agent reads all open items of the project, merges the ones about the same problem, and closes the ones that are done or stale. "
+                        + "Run it before Enhance all.", size: 12, color: Palette.dim, lines: 2)], spacing: 6)
+            })
+        }
+        for pk in grooms {
+            guard let st = groom.state(pk), let snap = data.projectStore.snapshots[pk] else { continue }
+            let enhancing = st.isApplied ? (st.review?.vague.map { agent.find($0.keys.first ?? "").flatMap { agent.pill($0.target)?.text } ?? "" } ?? []) : []
+            top.append(PageRow("groom." + pk, String(describing: st), groom.selected[pk]?.sorted() ?? [], GroomPanel.filter[pk]?.rawValue,
+                               groom.undoable.contains(pk), groom.handoff[pk]?.count ?? 0, enhancing, groom.pill(pk)?.text) { [weak self] in
+                guard let self else { return NSView() }
+                return GroomPanel(st, projectKey: pk, identifier: snap.summary.identifier, agent: groom, enhance: agent, questions: self.data.questions,
+                                  title: { [weak self] in self?.title(of: $0, in: pk) },
+                                  retry: { [weak self] in self?.groomSheet(pk) }, undo: { [weak self] in self?.undoGroom(pk) })
+            })
+        }
         if !shown.isEmpty {
             top.append(PageRow("keys", 0) {
                 NSTextField.text("Keys on a focused line: 1 accept · Q accept and queue · 2 duplicate · 3 decline · H snooze one day. Tab moves between lines.",
@@ -96,6 +120,80 @@ final class IntakeListPage: Page {
         let table = shown.isEmpty ? nil : FeedLine.intakeLayout
         let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }
         return [PageSection("top", rows: top), PageSection("intake", rows: [list])]
+    }
+
+    // MARK: Groom
+
+    // "Groom…" before "Enhance all". On the All tab it asks for the project first.
+    private func groomActions(_ pk: String?) -> [NSView] {
+        let groom = data.groomAgent
+        var out: [NSView] = []
+        if let pk {
+            if groom.undoable.contains(pk), groom.state(pk)?.isApplied != true {
+                out.append(ActionButton("Undo last Groom", style: .link) { [weak self] in self?.undoGroom(pk) })
+            }
+            if let p = groom.pill(pk) { out.append(Pill(p.tone, text: p.text)) }
+            guard groom.state(pk) == nil || groom.state(pk)?.isApplied == true else { return out }
+        }
+        let b = ActionButton("Groom…", symbol: Tone.groom.symbol)
+        b.onClick = { [weak self, weak b] in
+            if let pk { self?.groomSheet(pk) } else if let b { self?.pickGroomProject(from: b) }
+        }
+        b.contentTintColor = Palette.intake
+        b.setAccessibilityLabel(pk.flatMap { data.projectStore.snapshots[$0] }.map { "Groom \($0.summary.identifier)" } ?? "Groom a project")
+        out.append(b)
+        return out
+    }
+
+    private func pickGroomProject(from b: NSView) {
+        let groom = data.groomAgent
+        let menu = NSMenu()
+        for snap in data.projectStore.snapshots.values.sorted(by: { $0.summary.identifier < $1.summary.identifier }) {
+            let pk = snap.summary.ref.storeKey
+            let busy = groom.state(pk).map { !$0.isApplied } ?? false
+            let item = NSMenuItem(title: "\(snap.summary.identifier) · \(snap.summary.title)", action: nil, keyEquivalent: "")
+            item.isEnabled = !busy
+            let t = ClosureTarget { [weak self] in self?.groomSheet(pk) }
+            item.target = t
+            item.action = #selector(ClosureTarget.fire)
+            item.representedObject = t
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: b.isFlipped ? b.bounds.height + 4 : -4), in: b)
+    }
+
+    func groomSheet(_ pk: String) {
+        guard let win = view.window, GroomSheet.open == nil, let snap = data.projectStore.snapshots[pk] else { return }
+        let labels = Set(snap.items.flatMap(\.labels)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        if case .applied = data.groomAgent.state(pk) { data.groomAgent.dismiss(pk) }
+        if case .failed = data.groomAgent.state(pk) { data.groomAgent.dismiss(pk) }
+        GroomSheet(agent: data.groomAgent, projectKey: pk, identifier: snap.summary.identifier, labels: labels).present(over: win)
+    }
+
+    private func undoGroom(_ pk: String) {
+        let groom = data.groomAgent
+        groom.undoCheck(pk) { [weak self] changed in
+            guard let self else { return }
+            var info = "Undo puts back the states, descriptions, parents and intake items that the last Groom changed. The comments stay."
+            if !changed.isEmpty {
+                info += " \(changed.count) item\(changed.count == 1 ? "" : "s") changed after Groom: \(changed.prefix(6).joined(separator: ", ")). Undo leaves them as they are."
+            }
+            AlertConfirm.ask("Undo the last Groom?", info: info, button: "Undo", in: self.view.window) {
+                groom.undo(pk) { [weak self] out in
+                    var text = "Undo put back \(out.undone.count) item\(out.undone.count == 1 ? "" : "s")."
+                    if !out.left.isEmpty { text += " \(out.left.count) changed after Groom and stay as they are." }
+                    if !out.failed.isEmpty { text += " \(out.failed.count) failed: " + out.failed.map { "\($0.key) \($0.value)" }.sorted().prefix(3).joined(separator: "; ") }
+                    self?.note = text
+                    self?.reload()
+                }
+            }
+        }
+    }
+
+    private func title(of key: String, in pk: String) -> String? {
+        let k = key.uppercased()
+        if let i = data.groomAgent.state(pk)?.review?.intake[k] { return i.name }
+        return data.projectStore.snapshots[pk]?.items.first(where: { $0.key.uppercased() == k })?.title
     }
 
     // Starts Refine, then opens the detail page: its Refine card shows the session.

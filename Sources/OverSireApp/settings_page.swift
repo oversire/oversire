@@ -47,6 +47,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private var branchTest = ""
     let promptView = NSTextView()
     var promptDirty = false
+    let groomView = NSTextView()
+    var groomDirty = false
     var plannerProject: String?
 
     private var page: Route.SettingsPage { if case .settings(let p, _, _) = route { return p }; return .general }
@@ -54,7 +56,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private var anchor: String? { if case .settings(_, _, let a) = route { return a }; return nil }
     var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
 
-    override var isEditing: Bool { super.isEditing || promptDirty }
+    override var isEditing: Bool { super.isEditing || promptDirty || groomDirty }
     override var watches: DataDomains { [.config, .connection] }
 
     override func build(_ col: NSStackView) {
@@ -239,7 +241,9 @@ final class SettingsPage: Page, NSTextFieldDelegate {
 }
 
 extension SettingsPage: NSTextViewDelegate {
-    func textDidChange(_ n: Notification) { promptDirty = true }
+    func textDidChange(_ n: Notification) {
+        if n.object as? NSTextView === groomView { groomDirty = true } else { promptDirty = true }
+    }
 }
 
 // An action target for controls that take a selector.
