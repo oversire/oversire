@@ -32,6 +32,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions)
+    lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: UIShots.tmp + "/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
@@ -135,6 +136,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let failedStart = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FAILED"] == "1"
     // OVERSIRE_UISHOTS_ENHANCE=1: the item page of FRITZ-17 has an Enhance result to apply.
     static let enhanceTicket = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENHANCE"] == "1"
+    // OVERSIRE_UISHOTS_FILES=folded or open: FRITZ-17 has four images and one PDF.
+    static let files = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FILES"]
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()
@@ -440,6 +443,35 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     /// The id of the blocked row that the Sessions shot opens.
     static var expandBlocked: String?
 
+    @MainActor private func seedFiles() {
+        guard let mode = UIShots.files, let found = projectStore.item(key: "FRITZ-17"),
+              let ref = found.item.ref(in: found.snap.summary.ref) else { return }
+        let book = attachments
+        book.dir = URL(fileURLWithPath: UIShots.tmp).appendingPathComponent("attachments")
+        let at = Date().addingTimeInterval(-3600)
+        let colors: [NSColor] = [.systemBlue, .systemOrange, .systemTeal, .systemPurple]
+        var files = colors.indices.map { n in
+            ItemAttachment(id: "shot-\(n + 1)", name: "pasted-\(n + 1).png", size: 120_000 + n * 41_000, mimeType: "image/png", createdAt: at)
+        }
+        files.append(ItemAttachment(id: "shot-pdf", name: "consent-flow.pdf", size: 312_000, mimeType: "application/pdf", createdAt: at))
+        // A window shape in each color, so the thumbnails look like screenshots.
+        for (a, c) in zip(files, colors) {
+            let img = NSImage(size: NSSize(width: 640, height: 400), flipped: false) { r in
+                c.withAlphaComponent(0.18).setFill(); r.fill()
+                NSColor.white.setFill(); NSBezierPath(roundedRect: r.insetBy(dx: 40, dy: 36), xRadius: 14, yRadius: 14).fill()
+                c.setFill(); NSBezierPath(roundedRect: NSRect(x: 70, y: 290, width: 220, height: 28), xRadius: 6, yRadius: 6).fill()
+                c.withAlphaComponent(0.35).setFill()
+                for y in stride(from: 90, through: 240, by: 40) { NSBezierPath(roundedRect: NSRect(x: 70, y: y, width: 500, height: 18), xRadius: 5, yRadius: 5).fill() }
+                return true
+            }
+            let u = book.path(a)
+            try? FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let tiff = img.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) { try? png.write(to: u) }
+        }
+        book.sample = { $0.id == ref.id ? files : nil }
+        if mode == "open" { book.toggle(ref) }
+    }
+
     private func seedPlanner() {
         guard UIShots.planner else { return }
         AI_CFG.queueOrder = false
@@ -700,6 +732,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedSummaries()
         seedSessions()
         seedCleanup()
+        MainActor.assumeIsolated { seedFiles() }
         // The seeded sessions join their items.
         workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
         // The heuristics only: a shot never calls the AI.

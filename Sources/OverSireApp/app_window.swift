@@ -20,6 +20,7 @@ protocol AppData: AnyObject {
     var planner: PlannerBook { get }
     var statusJob: StatusJob { get }
     var enhanceAgent: EnhanceAgent { get }
+    var attachments: AttachmentBook { get }
     var sessions: SessionNotes { get }
     var questions: QuestionHub { get }
     var ciAssist: CIAssist { get }

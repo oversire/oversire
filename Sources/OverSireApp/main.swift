@@ -122,6 +122,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return w
     }()
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions)
+    lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: SESSIONS_PATH, agents: agentIndex, store: projectStore, writeBack: writeBack)
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
@@ -314,7 +315,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let sources: [(Notification.Name, DataDomains)] = [
             (WorkQueue.changed, .queue), (WorkStats.changed, .stats), (StatusJob.changed, .summaries), (EnhanceAgent.changed, .intake),
             (SessionNotes.changed, .agents), (CIAssist.changed, .runs), (ItemAreaBook.changed, .planner), (SuggestionBook.changed, .planner),
-            (PlannerBook.changed, .planner), (ItemSummaries.changed, .summaries),
+            (PlannerBook.changed, .planner), (ItemSummaries.changed, .summaries), (AttachmentBook.changed, .projects),
         ]
         for (n, d) in sources {
             NotificationCenter.default.addObserver(forName: n, object: nil, queue: .main) { [weak self] _ in

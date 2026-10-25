@@ -434,6 +434,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             rows.append(PageRow("suggestion", item.key) { [unowned self] in self.suggestion(item) })
         }
         if let r = plannerRow(item) { rows.append(r) }
+        if let r = attachmentRow(snap: snap, item: item) { rows.append(r) }
         let open = descriptionOpen, hasSummary = summary != nil
         rows.append(PageRow("description", body, hasSummary, open, pk) { [unowned self] in
             self.descriptionCard(body, pk: pk, hasSummary: hasSummary, open: open)
@@ -454,6 +455,13 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     // The web view keeps its holder while the body stays the same.
+    // No row for an item with no files, or before the first list.
+    private func attachmentRow(snap: ProjectSnapshot, item: Item) -> PageRow? {
+        let book = data.attachments
+        guard let ref = item.ref(in: snap.summary.ref), let files = book.files(of: ref, changedAt: item.activityAt), !files.isEmpty else { return nil }
+        return PageRow("attachments", hash: PageRow.hash(AttachmentStrip.sig(files, of: ref, book: book))) { AttachmentStrip(files, of: ref, book: book) }
+    }
+
     private func descriptionCard(_ body: String, pk: String, hasSummary: Bool, open: Bool) -> NSView {
         let d = Card(title: "Description", trailing: body.isEmpty ? [] : [NSTextField.text("\(body.count.formatted()) characters", size: 12, color: Palette.dim)])
         if body.isEmpty {
