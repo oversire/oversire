@@ -67,6 +67,39 @@ final class Spinner: NSProgressIndicator {
     }
 }
 
+// A gray bar in place of text that loads.
+final class Skeleton: Box {
+    init(width: CGFloat, height: CGFloat = 10) {
+        super.init(fill: Palette.raise, border: nil, radius: height / 2)
+        widthAnchor.constraint(equalToConstant: width).isActive = true
+        heightAnchor.constraint(equalToConstant: height).isActive = true
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+// A view that builds its content again on each notification of one name and object.
+final class NotifiedView: NSStackView {
+    private var observer: Any?
+    private let make: () -> NSView
+
+    init(_ name: Notification.Name, object: AnyObject?, _ make: @escaping () -> NSView) {
+        self.make = make
+        super.init(frame: .zero)
+        orientation = .vertical
+        translatesAutoresizingMaskIntoConstraints = false
+        observer = NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in self?.render() }
+        render()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { observer.map(NotificationCenter.default.removeObserver) }
+
+    private func render() {
+        arrangedSubviews.forEach { $0.removeFromSuperview() }
+        addFull(make())
+    }
+}
+
 // A spinner and the step in words, for a card or a log that loads.
 final class InlineSpinner: NSStackView {
     init(_ text: String) {

@@ -548,3 +548,62 @@ final class MachineSheetKeyboardTests: XCTestCase {
         XCTAssertEqual(DialogSheet.clock(-3), "0:00")
     }
 }
+
+// MARK: Loading
+
+@MainActor
+final class MachinesLoadingTests: XCTestCase {
+    private func controller(_ d: FakeDaemon) -> MachinesController {
+        let c = MachinesController()
+        c.local = client(d)
+        c.installed = { true }
+        c.path = { "~/.local/bin/oversire" }
+        c.latest = { nil }
+        c.onPath = { true }
+        c.changed = {}
+        return c
+    }
+
+    private func loadingPosts(_ c: MachinesController, _ f: () async -> Void) async -> [Bool] {
+        var seen: [Bool] = []
+        let o = NotificationCenter.default.addObserver(forName: MachinesController.loadingChanged, object: c, queue: nil) { _ in
+            MainActor.assumeIsolated { seen.append(c.loading) }
+        }
+        await f()
+        NotificationCenter.default.removeObserver(o)
+        return seen
+    }
+
+    func testReadingUntilTheFirstReadEnds() async {
+        let c = controller(FakeDaemon(machine: "mba"))
+        XCTAssertTrue(c.reading, "no \"no daemon\" before the first read")
+        let posts = await loadingPosts(c) { await c.load() }
+        XCTAssertEqual(posts, [true, false])
+        XCTAssertFalse(c.reading)
+        XCTAssertEqual(c.model.state, .solo)
+        XCTAssertEqual(c.model.machines.map(\.name), ["mba"])
+    }
+
+    func testEmptyOnlyAfterTheFirstRead() async {
+        let d = FakeDaemon(machine: "mba")
+        d.online = false
+        let c = controller(d)
+        XCTAssertTrue(c.reading)
+        await c.load()
+        XCTAssertFalse(c.reading)
+        XCTAssertEqual(c.model.state, .noDaemon)
+    }
+
+    func testALaterReadKeepsTheList() async {
+        let d = FakeDaemon(machine: "mba")
+        let c = controller(d)
+        await c.load()
+        var during: [String] = []
+        let o = NotificationCenter.default.addObserver(forName: MachinesController.loadingChanged, object: c, queue: nil) { _ in
+            MainActor.assumeIsolated { if c.loading { during = c.model.machines.map(\.name) + (c.reading ? ["reading"] : []) } }
+        }
+        await c.load()
+        NotificationCenter.default.removeObserver(o)
+        XCTAssertEqual(during, ["mba"])
+    }
+}

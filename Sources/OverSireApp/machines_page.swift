@@ -282,9 +282,13 @@ final class MachinesController {
     var config: () -> MachinesConfig = { MACHINES }
     var changed: () -> Void = { ChangeBus.shared.post(DataChange(.connection, origin: .user)) }
 
+    static let loadingChanged = Notification.Name("MachinesLoading")
+
     private(set) var snapshot = MachinesSnapshot()
     private(set) var loadedAt: Date?
-    private(set) var loading = false
+    private(set) var loading = false { didSet { NotificationCenter.default.post(name: Self.loadingChanged, object: self) } }
+    /// True until the first read ends. The page shows rows that load, not "no daemon".
+    var reading: Bool { loadedAt == nil }
     /// The last error of an action. The page shows it once.
     var notice: String?
     /// The machines that run POST /v1/update now.
@@ -347,10 +351,10 @@ final class MachinesController {
         changed()
     }
 
-    /// For tests and `--uishots`.
-    func use(_ s: MachinesSnapshot) {
+    /// For tests and `--uishots`. loaded false: the first read did not end.
+    func use(_ s: MachinesSnapshot, loaded: Bool = true) {
         snapshot = s
-        loadedAt = Date()
+        loadedAt = loaded ? Date() : nil
     }
 
     /// op can give a warning for the page.
@@ -523,6 +527,7 @@ extension SettingsPage {
         if let n = c.notice {
             b.addFull(Banner(.warning, title: n, actions: [ActionButton("Dismiss") { [weak self] in c.notice = nil; self?.reload() }]))
         }
+        if c.reading { machineReading(b); return }
         if m.state == .noDaemon { machineSetup(b, m) }
         if m.state == .solo && !m.found.isEmpty { machineFound(b, m) }
         if m.state != .noDaemon || !m.machines.isEmpty { machineList(b, m) }
@@ -534,6 +539,25 @@ extension SettingsPage {
                 MachineSheets.consent(over: w) { c.consent($0) }
             }
         }
+    }
+
+    private static let runSessionsNote = "Work, Intake and cleanup use the agent sessions of this machine. Each machine gives its questions."
+
+    // The first read: gray rows, not the setup card, so the page does not say "no daemon" for a short time.
+    private func machineReading(_ b: NSStackView) {
+        let head = NSStackView(h: [Spinner(size: .mini), NSTextField.text("Reading the daemons…", size: 11.5, color: Palette.dim)], spacing: 6)
+        let v = NSStackView(v: [SectionTitle(SettingsAnchor.machines.title, action: head)], spacing: 6)
+        let card = ListCard()
+        for w: CGFloat in [110, 80] {
+            card.add(Row([Skeleton(width: 16, height: 16), NSStackView(v: [Skeleton(width: w), Skeleton(width: 150, height: 8)], spacing: 6),
+                          Spacer(), Skeleton(width: 64, height: 18)], height: 54, label: "Machine, loading"))
+        }
+        let pop = PopUp(["Loading…"], selected: 0, label: "Run sessions on") { _ in }
+        pop.isEnabled = false
+        card.add(Row([TwoLine("Run sessions on", Self.runSessionsNote, lines: 2), Spacer(), pop], height: 62, label: "Run sessions on, loading"))
+        v.addFull(card)
+        v.identifier = SettingsAnchor.machines.id
+        b.addFull(v)
     }
 
     private func machineSetup(_ b: NSStackView, _ m: MachinesModel) {
@@ -579,6 +603,14 @@ extension SettingsPage {
         let canEdit = m.daemon != nil
         var actions: [NSView] = [joinCodeButton(.link)]
         if canEdit { actions.append(ActionButton("Add machine…") { [weak self] in self?.addMachine() }) }
+        // A later read keeps the list and shows only this spinner.
+        actions.insert(NotifiedView(MachinesController.loadingChanged, object: c) {
+            guard c.loading else { return NSStackView(h: [], spacing: 0) }
+            let s = Spinner(size: .mini)
+            s.toolTip = "Reading the daemons…"
+            s.setAccessibilityLabel("Reading the daemons")
+            return s
+        }, at: 0)
         let v = NSStackView(v: [SectionTitle(m.title, action: NSStackView(h: actions, spacing: 10))], spacing: 6)
         if let text = m.mismatch {
             let all = ActionButton("Update all") { c.updateAll() }
@@ -634,8 +666,7 @@ extension SettingsPage {
             let pop = PopUp(titles + (picked == nil ? ["None"] : []), selected: picked ?? titles.count, label: "Run sessions on") { i in
                 if i < m.sessionChoices.count { c.setSessions(m.sessionChoices[i]) }
             }
-            card.add(Row([TwoLine("Run sessions on", "Work, Intake and cleanup use the agent sessions of this machine. Each machine gives its questions.",
-                                  lines: 2), Spacer(), pop], height: 62, label: "Run sessions on"))
+            card.add(Row([TwoLine("Run sessions on", Self.runSessionsNote, lines: 2), Spacer(), pop], height: 62, label: "Run sessions on"))
         }
         v.addFull(card)
         v.addFull(NSTextField.text("Home keeps the shared OverSire state. Use the row menu to make another machine home.",

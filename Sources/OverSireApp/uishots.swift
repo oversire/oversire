@@ -639,7 +639,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             AI_CFG.enabled = true
             AI_CFG.verified = AI_CFG.fingerprint(key: key)
         }
-        if ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENGINE"] == "cli" { Self.seedLocalCLI() }
+        // cli-half: the detection runs, and 3 CLIs have no result yet.
+        if let e = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENGINE"], e.hasPrefix("cli") { Self.seedLocalCLI(half: e == "cli-half") }
         if UIShots.sampleLogs { seedLogs() }
         if UIShots.overrides {
             PROJECTS_CFG.settings["TREBI", default: ProjectLocalSettings()].muted = true
@@ -762,6 +763,13 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                               let more = w.window?.contentView.flatMap({ UIShots.find($0) { $0.accessibilityLabel() == "Start in Orca with" } }) {
                         // startmenu:<KEY>: the agent list of the item page split button.
                         self.shootMenu(SessionStartMenu(self).agents(found.item, snap: found.snap, at: more), under: more, name: "\(theme.rawValue)-startmenu")
+                    } else if p.hasPrefix("resize:") {
+                        // resize:<w>x<h>: a window resize between two shots.
+                        let v = p.dropFirst(7).split(separator: "x").compactMap { Double($0) }
+                        if v.count == 2, let f = w.window?.frame { w.window?.setFrame(NSRect(x: f.minX, y: f.minY, width: v[0], height: v[1]), display: true) }
+                    } else if p == "reload" {
+                        // reload: a config change, as after a save.
+                        self.bus.post(.config())
                     } else if p == "pill" {
                         // pill: an update waits while the person scrolls.
                         w.gate.begin(.scroll)
@@ -1113,7 +1121,7 @@ extension UIShots {
         return g
     }
 
-    static func seedLocalCLI() {
+    static func seedLocalCLI(half: Bool = false) {
         AI_CFG.engine = .localCLI
         AI_CFG.cliHarness = "claude"
         AI_CFG.cliModel = "claude-haiku-5-5"
@@ -1125,16 +1133,18 @@ extension UIShots {
         let limits = Limits(plan: "max", windows: [LimitWindow(key: .fiveHour, minutes: 300, usedPercent: 18, resetsAt: five),
                                                    LimitWindow(key: .weekly, minutes: 10080, usedPercent: 41, resetsAt: week)])
         let bin = URL(fileURLWithPath: "/opt/homebrew/bin/x")
-        LocalCLI.shared.seed([
+        let all = [
             Detection(harness: .claude, path: bin, version: "2.3.1 (Claude Code)", supported: true, ready: true, auth: .ok, authDetail: "flarco@…"),
             Detection(harness: .codex, path: bin, version: "codex-cli 0.98.0", supported: true, ready: true, auth: .ok, authDetail: "ChatGPT Plus"),
             Detection(harness: .opencode, path: bin, version: "1.4.2", supported: true, ready: true, auth: .ok, authDetail: "2 providers"),
             Detection(harness: .gemini, path: bin, version: "0.21.0", supported: true, auth: .missing),
             Detection(harness: .cursor, detail: .notInstalled),
             Detection(harness: .copilot, detail: .notInstalled),
-        ], plans: ["claude": limits, "codex": Limits(plan: "plus")],
+        ]
+        let pending: [Harness] = half ? [.gemini, .cursor, .copilot] : []
+        LocalCLI.shared.seed(all.filter { !pending.contains($0.harness) }, plans: ["claude": limits, "codex": Limits(plan: "plus")],
            models: ["claude": [ModelInfo(id: "claude-haiku-5-5", name: "Haiku 5.5"), ModelInfo(id: "claude-sonnet-5-5", name: "Sonnet 5.5", isDefault: true)]],
-           limits: limits)
+           limits: limits, pending: pending)
     }
 }
 
@@ -1252,7 +1262,7 @@ extension UIShots {
 // MARK: Machines samples
 
 extension MachinesSnapshot {
-    static let scenes: Set<String> = ["machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine"]
+    static let scenes: Set<String> = ["machines-loading", "machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine"]
 
     /// mbp is this Mac. mba and devbox are members, or found on the tailnet when this Mac is alone.
     static func sample(_ scene: String, now: Date = Date()) -> MachinesSnapshot {
@@ -1311,7 +1321,7 @@ extension UIShots {
         c.frozen = true
         c.config = { MachinesConfig(sessions: "mbp", hooksConsent: true) }
         c.installed = { scene != "machines-empty" }
-        c.use(MachinesSnapshot.sample(scene))
+        c.use(MachinesSnapshot.sample(scene), loaded: scene != "machines-loading")
         w.router.go(.settings(.general))   // a fresh page, so the pane takes the new height
         w.router.go(.settings(.machines))
         let now = Date()

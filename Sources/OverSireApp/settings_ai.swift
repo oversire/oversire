@@ -108,11 +108,17 @@ extension SettingsPage {
     }
 
     // The CLIs on this Mac, the model, the effort, the plan limits, the fallback and a Test.
+    // The card builds again on each detection result, so the rows fill while the page is open.
     private func localCLI(_ b: NSStackView) {
         let cli = LocalCLI.shared
+        b.addFull(NotifiedView(LocalCLI.changed, object: cli) { [weak self] in self?.localCLICard() ?? NSView() })
         cli.detect()
+    }
+
+    private func localCLICard() -> NSView {
+        let cli = LocalCLI.shared
         let cfg = AI_CFG
-        if cfg.cliHarness.isEmpty, let first = cli.detections?.first(where: { $0.ready && Self.listed($0) }) {
+        if cfg.cliHarness.isEmpty, !cli.detecting, let first = cli.detections?.first(where: { $0.ready && Self.listed($0) }) {
             AI_CFG.cliHarness = first.harness.rawValue
             saveConfig()
         }
@@ -127,6 +133,14 @@ extension SettingsPage {
             "OverSire runs your coding agent CLI through AgentBinder. Each job runs with no tools, in an empty folder, and uses your own login and plan. "
                 + "The text goes only to the vendor of that CLI. A call takes 4 to 10 s in the background.",
             size: 12, color: Palette.mut, lines: 3), vertical: 8)]
+        if cli.detecting {
+            let p = cli.progress
+            let bar = UsageBar(Double(p.done) / Double(max(1, p.total)), color: Palette.acc)
+            bar.setAccessibilityElement(true)
+            bar.setAccessibilityLabel("Detecting, \(p.done) of \(p.total)")
+            rows.append(Row([Spinner(size: .mini), NSTextField.text("Detecting · \(p.done) of \(p.total)", size: 12, color: Palette.mut), Spacer(), bar],
+                            height: 30, label: "Detecting, \(p.done) of \(p.total)"))
+        }
         rows.append(cliTable(h, pick: { name in
             guard name != AI_CFG.cliHarness else { return }
             AI_CFG.cliHarness = name
@@ -166,7 +180,7 @@ extension SettingsPage {
         let again: NSView = cli.detecting ? InlineSpinner("Detecting…") : ActionButton("Detect again", symbol: "arrow.clockwise") { cli.detect(again: true) }
         rows.append(Row([TwoLine("Detection", "AgentBinder finds each CLI on PATH and reads its login. Press after you install or log in.", lines: 2),
                          Spacer(), again], height: 52, label: "Detection"))
-        b.addFull(section(.localCLI, rows))
+        return section(.localCLI, rows)
     }
 
     // The chat panel: its engine, what its tools may do without a question, Follow along, the shortcut and the history.
@@ -246,10 +260,7 @@ extension SettingsPage {
                         Spacer()], height: 28)
         Self.columns(head)
         v.addFull(head)
-        guard let all = LocalCLI.shared.detections else {
-            v.addFull(Padded(InlineSpinner("Looking for the CLIs on this Mac…"), vertical: 8))
-            return v
-        }
+        let all = LocalCLI.shared.detections ?? []
         for d in all where Self.listed(d) {
             let name = d.harness.rawValue
             let login = Self.login(d)
@@ -268,6 +279,16 @@ extension SettingsPage {
             } else {
                 row.alphaValue = 0.6
             }
+            v.addFull(row)
+        }
+        // A CLI with no result yet: its name, a spinner and gray bars.
+        for h in LocalCLI.shared.pending {
+            let row = Row([NSTextField.text(h.binaryName, size: 12.5, weight: .medium, color: Palette.dim, mono: true),
+                           NSStackView(h: [Skeleton(width: 40), Spacer()], spacing: 0),
+                           NSStackView(h: [Spinner(size: .mini), Skeleton(width: 120), Spacer()], spacing: 6),
+                           NSStackView(h: [Skeleton(width: 90), Spacer()], spacing: 0), Spacer()],
+                          height: 46, label: "\(h.binaryName), detecting")
+            Self.columns(row)
             v.addFull(row)
         }
         return v

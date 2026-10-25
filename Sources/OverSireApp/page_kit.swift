@@ -857,13 +857,7 @@ final class PageScroll: NSScrollView {
             next.setHuggingPriority(.init(1), for: .vertical)
         }
         build(next)
-        if fills {
-            // Takes the rest when the table is short. A view with hugging 1 and no fit (SidePane) wins over it.
-            let rest = NSView()
-            rest.setContentHuggingPriority(.init(2), for: .vertical)
-            rest.setContentCompressionResistancePriority(.init(1), for: .vertical)
-            next.addArrangedSubview(rest)
-        }
+        if fills { next.addArrangedSubview(PageScroll.rest()) }
         NSLayoutConstraint.deactivate(columnConstraints)
         column.removeFromSuperview()
         column = next
@@ -899,19 +893,23 @@ final class PageScroll: NSScrollView {
         column.distribution = fills ? .fill : base.distribution
         column.setHuggingPriority(fills ? .init(1) : base.hugging, for: .vertical)
         var rows = PageSection.flatten(sections)
-        if fills {
-            // Takes the rest when the table is short. A view with hugging 1 and no fit (SidePane) wins over it.
-            rows.append(PageRow("rest", hash: 0, full: false) {
-                let rest = NSView()
-                rest.translatesAutoresizingMaskIntoConstraints = false
-                rest.setContentHuggingPriority(.init(2), for: .vertical)
-                rest.setContentCompressionResistancePriority(.init(1), for: .vertical)
-                return rest
-            })
-        }
+        if fills { rows.append(PageRow("rest", hash: 0, full: false) { PageScroll.rest() }) }
         self.fills = fills
         fillHeight.forEach { $0.isActive = fills }
         return r.apply(rows)
+    }
+
+    // Takes the free height when the table is short. A view with no height of its own (SidePane) takes it first:
+    // with no wish of 0 here, both views have no height and the layout gives the free height to either one.
+    private static func rest() -> NSView {
+        let rest = NSView()
+        rest.translatesAutoresizingMaskIntoConstraints = false
+        rest.setContentHuggingPriority(.init(2), for: .vertical)
+        rest.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        let none = rest.heightAnchor.constraint(equalToConstant: 0)
+        none.priority = .init(3)
+        none.isActive = true
+        return rest
     }
 
     // The inner scroll views that keep their position over a rebuild. Their identifier names them.
