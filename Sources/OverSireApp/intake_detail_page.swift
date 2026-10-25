@@ -137,7 +137,7 @@ final class IntakeDetailPage: Page {
         var rows = [barRow(snap: snap, item: item, key: key), headRow(snap: snap, item: item, key: key)]
         if let note { rows.append(PageRow("note", "\(note.0.word)", note.1) { Banner(note.0, title: note.1) }) }
         if let r = enhanceRow(pk: pk, item: item) { rows.append(r) }
-        if let key, let r = refineRow(key) { rows.append(r) }
+        if let key, let r = refineRow(key, snap: snap) { rows.append(r) }
         rows.append(descriptionRow(pk: pk, item: item))
         if let r = attachmentRow(snap: snap, item: item, key: key) { rows.append(r) }
         return [PageSection("intake", rows: rows)]
@@ -184,17 +184,16 @@ final class IntakeDetailPage: Page {
             if canEnhance {
                 let b = ActionButton("Enhance", symbol: "sparkles") { [weak self] in self?.data.enhanceAgent.start(projectKey: snap.summary.ref.storeKey, target: .intake(item)) }
                 b.toolTip = "A read-only agent reads the code and writes a better description"
+                b.contentTintColor = Palette.intake
                 views.append(b)
             }
             if canRefine, let key { views.append(self.refineButton(item: item, key: key, session: session, snap: snap)) }
             let idle = self.busy == nil
-            let accept = ActionButton(self.busy == "accept" ? "Accepting…" : "Accept", symbol: "checkmark.circle.fill") { [weak self] in self?.triage(.accept) }
-            accept.contentTintColor = Palette.ok
+            let accept = ActionButton(self.busy == "accept" ? "Accepting…" : "Accept", symbol: "checkmark", style: .primary) { [weak self] in self?.triage(.accept) }
             accept.toolTip = "Accept: the item moves to the project's work items"
             let queue = ActionButton("Accept and queue") { [weak self] in self?.acceptAndQueue(item) }
             queue.toolTip = "Accept, then add the start label. Checked Enhance changes go with it."
-            let decline = ActionButton(self.busy == "decline" ? "Declining…" : "Decline", symbol: "xmark.circle.fill") { [weak self] in self?.decline() }
-            decline.contentTintColor = Palette.bad
+            let decline = ActionButton(self.busy == "decline" ? "Declining…" : "Decline", symbol: "xmark") { [weak self] in self?.decline() }
             decline.toolTip = "Decline: Plane closes the item"
             let more = ActionButton("", symbol: "ellipsis")
             more.toolTip = "More actions"
@@ -239,9 +238,8 @@ final class IntakeDetailPage: Page {
 
     private func headRow(snap: ProjectSnapshot, item: IntakeItem, key: String?) -> PageRow {
         let labels = details[item.workItemId]?.labels ?? []
-        return PageRow("head", item, key, labels, snap.summary.title) { [unowned self] in
-            let project = Chiplet(snap.summary.title, symbol: "folder", color: Palette.acc) { [weak self] in self?.go(.project(snap.summary.identifier)) }
-            var top: [NSView] = []
+        return PageRow("head", item, key, labels) { [unowned self] in
+            var chips: [NSView] = []
             if let key {
                 let copy = Chiplet(key, symbol: "doc.on.doc", color: Palette.dim, mono: true)
                 copy.toolTip = "Copy \(key)"
@@ -251,16 +249,14 @@ final class IntakeDetailPage: Page {
                     NSPasteboard.general.setString(key, forType: .string)
                     copy?.flash("Copied")
                 }
-                top.append(copy)
+                chips.append(copy)
             }
-            top += [project, Spacer()]
-            var chips: [NSView] = [Pill(.intake, text: "Pending"), self.priorityChip(snap: snap, item: item)]
+            chips += [Pill(Tone(symbol: "clock", color: Palette.warn, word: "Pending"), text: "Pending"), self.priorityChip(snap: snap, item: item)]
             chips += labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
             if let a = item.author { chips.append(Chiplet("From \(a)", symbol: "person")) }
-            chips.append(NSTextField.text(relativeTime(item.createdAt), size: 12, color: Palette.dim))
-            if let s = item.source { chips.append(NSTextField.text(s == "IN_APP" ? "In-app" : s.capitalized, size: 12, color: Palette.dim)) }
-            let v = NSStackView(v: [], spacing: 7)
-            v.addFull(NSStackView(h: top, spacing: 8))
+            chips.append(Chiplet(relativeTime(item.createdAt), symbol: "clock"))
+            if let s = item.source { chips.append(Chiplet(s == "IN_APP" ? "In-app" : s.capitalized)) }
+            let v = NSStackView(v: [], spacing: 8)
             v.addFull(NSTextField.text(item.name, size: 22, weight: .semibold, lines: 3))
             v.addFull(NSStackView(h: [Wrap(chips), Spacer()], spacing: 6))
             return v
@@ -269,13 +265,15 @@ final class IntakeDetailPage: Page {
 
     private func priorityChip(snap: ProjectSnapshot, item: IntakeItem) -> NSView {
         let cur = item.priority ?? "None"
-        return MenuChip(cur == "None" ? "No priority" : cur, symbol: "flag") { [weak self] in
+        let chip = MenuChip("Priority: \(cur.capitalized)", symbol: "flag") { [weak self] in
             StatusOption.priorities.map { p in
                 let a = MenuAction(p.name) { self?.update(item, ItemPatch(priority: p.id), what: "priority") }
                 a.item.state = p.name.caseInsensitiveCompare(cur) == .orderedSame ? .on : .off
                 return a
             }
         }
+        chip.setAccessibilityLabel("Priority: \(cur.capitalized). Change the priority")
+        return chip
     }
 
     // MARK: Enhance, Refine and files
@@ -290,15 +288,19 @@ final class IntakeDetailPage: Page {
         }
     }
 
-    private func refineRow(_ key: String) -> PageRow? {
+    private func refineRow(_ key: String, snap: ProjectSnapshot) -> PageRow? {
         let agents = data.agentIndex
-        guard let a = RefineStarter(agents).session(key) else { return nil }
+        let starter = RefineStarter(agents)
+        guard let a = starter.session(key) else { return nil }
         let last = agents.watch(key)?.recap ?? a.message
-        return PageRow("refine", a, last, agents.place) { [unowned self] in
-            RefineCard(key: key, session: a, place: agents.place, last: last) { [weak self] in
+        let folder = starter.root(snap.summary) ?? a.repo
+        return PageRow("refine", a, last, agents.place, folder) { [unowned self] in
+            let card = RefineCard(key: key, session: a, place: agents.place, folder: folder, last: last) { [weak self] in
                 guard let self else { return }
                 self.data.actions.click("session.reveal", ["key": .string(key)], in: self.view.window)
             }
+            card.onWork = { [weak self] in self?.go(.work(.items)) }
+            return card
         }
     }
 
@@ -323,17 +325,17 @@ final class IntakeDetailPage: Page {
 
     private func descriptionCard(_ item: IntakeItem, body: String?, shown: String?, editing: Bool, saving: Bool, mode: MarkdownView.Mode) -> NSView {
         var trailing: [NSView] = []
+        if let url = URL(string: intakeURL(item)) {
+            trailing.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square", style: .ghost) { NSWorkspace.shared.open(url) })
+        }
         if !editing {
             let seg = NSSegmentedControl(labels: ["Rendered", "Code"], trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
             seg.controlSize = .small
             seg.selectedSegment = mode.rawValue
             seg.setAccessibilityLabel("Description view")
-            let edit = ActionButton("Edit", symbol: "pencil") { [weak self] in self?.beginEdit(item) }
+            let edit = ActionButton("Edit", symbol: "pencil", style: .primary) { [weak self] in self?.beginEdit(item) }
             edit.isEnabled = body != nil && busy == nil
-            trailing = [seg, edit]
-        }
-        if let url = URL(string: intakeURL(item)) {
-            trailing.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square", style: .link) { NSWorkspace.shared.open(url) })
+            trailing += [seg, edit]
         }
         let c = Card(title: "Description", trailing: trailing)
         if let editor {
@@ -341,7 +343,7 @@ final class IntakeDetailPage: Page {
             c.add(editor)
             let save = ActionButton(saving ? "Saving…" : "Save", style: .primary) { [weak self] in self?.save(item) }
             save.isEnabled = !saving
-            let cancel = ActionButton("Cancel") { [weak self] in self?.cancelEdit() }
+            let cancel = ActionButton("Cancel", style: .ghost) { [weak self] in self?.cancelEdit() }
             c.add(NSStackView(h: [save, cancel, NSTextField.text("⌘S saves to Plane. Esc cancels. The body stays Markdown.", size: 12, color: Palette.dim), Spacer()],
                               spacing: 8))
             return c
@@ -402,15 +404,15 @@ final class IntakeDetailPage: Page {
 
     // Body and priority writes keep the item in the intake.
     func update(_ item: IntakeItem, _ patch: ItemPatch, what: String, then: (() -> Void)? = nil) {
-        guard let snap, busy == nil else { return }
+        guard let snap, busy == nil,
+              let (id, args) = IntakeAction.update(IntakeEdit(patch: patch)).action(project: snap.summary.ref.storeKey, id: item.id) else { return }
         busy = what
         note = nil
         reload()
-        let store = data.projectStore
-        store.triage(projectKey: snap.summary.ref.storeKey, item: item, action: .update(IntakeEdit(patch: patch))) { [weak self] ok in
+        data.actions.run(id, args) { [weak self] r in
             guard let self else { return }
             self.busy = nil
-            if ok { then?() } else { self.note = (.bad, store.lastError ?? "Plane did not save the \(what).") }
+            if case .ok = r { then?() } else { self.note = (.bad, r.summary) }
             self.reload()
         }
     }
@@ -543,20 +545,43 @@ final class IntakeDetailPage: Page {
 
 // The Refine session of an intake item: the machine, the state, the last turn and Open terminal.
 final class RefineCard: Card {
-    init(key: String, session a: AgentSession, place: String, last: String?, open: @escaping () -> Void) {
-        let tone = Tone(a.phase)
-        super.init(title: "Refine session", trailing: [ActionButton("Open terminal", symbol: "terminal", open)])
-        var line: [NSView] = [Glyph("bubble.left.and.bubble.right", color: Palette.acc, size: 12),
-                              NSTextField.text("Runs on: \(place)", size: 12.5, color: Palette.mut)]
-        if !a.repo.isEmpty { line.append(Chiplet(a.repo, symbol: "folder", mono: true)) }
-        line += [Pill(tone, text: a.label()), Spacer()]
-        add(NSStackView(h: line, spacing: 8))
+    var onWork: (() -> Void)?
+
+    init(key: String, session a: AgentSession, place: String, folder: String, last: String?, open: @escaping () -> Void) {
+        let tone = a.phase == .waiting ? Tone(symbol: "circle.fill", color: Palette.intake, word: "Waits for you") : Tone(a.phase)
+        let path = folder.hasPrefix("/") ? (folder as NSString).abbreviatingWithTildeInPath : folder
+        let more = ActionButton("", symbol: "ellipsis")
+        more.toolTip = "More actions"
+        more.setAccessibilityLabel("More actions")
+        var trailing: [NSView] = [Chiplet("Runs on: \(place)")]
+        if !path.isEmpty { trailing.append(Chiplet(path, mono: true)) }
+        trailing += [Pill(tone, text: a.phase == .waiting ? tone.word : a.label()), ActionButton("Open terminal", symbol: "terminal", style: .primary, open), more]
+        super.init(title: "Refine session", trailing: trailing)
+        more.onClick = { [weak self, weak more] in
+            guard let self, let more else { return }
+            let m = NSMenu()
+            m.autoenablesItems = false
+            let work = MenuAction("Show on the Work page") { [weak self] in self?.onWork?() }
+            let copy = MenuAction("Copy the folder path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(folder, forType: .string)
+            }
+            copy.item.isEnabled = !folder.isEmpty
+            [work, copy].forEach { m.addItem($0.item) }
+            self.menuActions = [work, copy]
+            m.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
+        }
         if let last = last?.trimmingCharacters(in: .whitespacesAndNewlines), !last.isEmpty {
-            add(NSTextField.text("Last turn: “\(last.prefix(400))”", size: 12.5, lines: 4))
+            let t = NSMutableAttributedString(string: "Last turn: ", attributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: Palette.fg])
+            t.append(NSAttributedString(string: "“\(last.prefix(400))”", attributes: [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: Palette.fg]))
+            let f = NSTextField.text("", size: 12.5, lines: 4)
+            f.attributedStringValue = t
+            add(f)
         }
         add(NSTextField.text("The agent asks questions and gives a plan or a preview. When you approve, it accepts \(key) (same ID), "
                              + "writes the refined description and adds sub-items. The page then becomes the item page.", size: 12, color: Palette.dim, lines: 3))
     }
+    private var menuActions: [MenuAction] = []
     required init?(coder: NSCoder) { fatalError() }
 }
 

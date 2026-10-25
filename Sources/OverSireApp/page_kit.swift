@@ -163,9 +163,9 @@ final class Glyph: NSImageView {
     }
 }
 
-// A button that runs a closure. Styles: plain (bordered), primary (accent fill), link (text).
+// A button that runs a closure. Styles: plain (bordered), primary (accent fill), link (accent text), ghost (muted text).
 final class ActionButton: NSButton {
-    enum Style { case plain, primary, link, danger }
+    enum Style { case plain, primary, link, ghost, danger }
     var onClick: (() -> Void)?
     var idle: (title: String, image: NSImage?, enabled: Bool)?   // set while busy
 
@@ -188,10 +188,11 @@ final class ActionButton: NSButton {
             if #available(macOS 14.0, *) {} else { contentTintColor = .white }
         case .danger:
             bezelStyle = .rounded; contentTintColor = Palette.bad
-        case .link:
+        case .link, .ghost:
+            let color = style == .link ? Palette.acc : Palette.mut
             isBordered = false
-            attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: Palette.acc, .font: NSFont.systemFont(ofSize: 12.5, weight: .medium)])
-            contentTintColor = Palette.acc
+            attributedTitle = NSAttributedString(string: title, attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 12.5, weight: .medium)])
+            contentTintColor = color
         }
         if title.isEmpty, let symbol { setAccessibilityLabel(symbol); toolTip = toolTip ?? symbol }
     }

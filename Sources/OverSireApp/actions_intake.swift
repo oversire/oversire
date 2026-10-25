@@ -22,6 +22,10 @@ struct IntakeActions {
                 nil
             },
             triage("intake.delete", "Delete", "Deletes an intake item and its work item. This cannot be undone.", .outward) { _ in .delete },
+            triage("intake.edit", "Edit", "Writes the description or the priority of an intake item. The item stays in the intake.", .change,
+                   extra: ["body": ("string", "The new description, in Markdown."), "priority": ("string", "The priority: urgent, high, medium, low or none.")]) { a in
+                .update(IntakeEdit(patch: ItemPatch(priority: a.string("priority"), bodyMarkdown: a.string("body"))))
+            },
             ActionSpec(id: "intake.triageAll", title: "Triage all with AI", help: "Starts the AI Enhance worker for each pending intake item of a project.", kind: .change,
                        input: ActionSpec.args(["project": ItemActions.project], required: ["project"]), capability: .intake) { [link] a in
                 await link.run { d, done in
@@ -64,7 +68,7 @@ struct IntakeActions {
 }
 
 extension IntakeAction {
-    /// The catalog action of a triage. nil for an edit: only the AI worker writes one.
+    /// The catalog action of a triage. nil for an edit with relations or other fields: only the AI worker writes one.
     func action(project: String, id: String) -> (id: String, args: [String: JSONValue])? {
         var args: [String: JSONValue] = ["project": .string(project), "id": .string(id)]
         switch self {
@@ -73,7 +77,11 @@ extension IntakeAction {
         case .delete: return ("intake.delete", args)
         case .snooze(let t): args["until"] = .string(ISO8601DateFormatter().string(from: t)); return ("intake.snooze", args)
         case .duplicate(let of): args["of"] = .string(of); return ("intake.merge", args)
-        case .update: return nil
+        case .update(let e):
+            guard e.relations.isEmpty, e.patch == ItemPatch(priority: e.patch.priority, bodyMarkdown: e.patch.bodyMarkdown) else { return nil }
+            if let b = e.patch.bodyMarkdown { args["body"] = .string(b) }
+            if let p = e.patch.priority { args["priority"] = .string(p) }
+            return ("intake.edit", args)
         }
     }
 }

@@ -121,7 +121,8 @@ final class ActionCatalogTests: XCTestCase {
     func testPageActionsMapToSpecs() {
         let catalog = TestAppData().actions
         let pr: [ChangeAction] = [.approve(nil), .approve("ok"), .requestChanges("fix"), .comment("hi"), .merge(.rebase), .close]
-        let intake: [IntakeAction] = [.accept, .decline, .delete, .snooze(until: Date()), .duplicate(of: "i9")]
+        let intake: [IntakeAction] = [.accept, .decline, .delete, .snooze(until: Date()), .duplicate(of: "i9"),
+                                      .update(IntakeEdit(patch: ItemPatch(priority: "high", bodyMarkdown: "## Body")))]
         let pairs = pr.map { $0.action(repo: "o/r", number: 3) } + intake.compactMap { $0.action(project: "k", id: "w1") }
         XCTAssertEqual(pairs.count, pr.count + intake.count)
         for (id, args) in pairs {
@@ -131,7 +132,8 @@ final class ActionCatalogTests: XCTestCase {
             XCTAssertTrue(Set(args.keys).isSubset(of: s.input["properties"]?.object?.keys ?? [:].keys), id)
         }
         XCTAssertEqual(ChangeAction.merge(.rebase).action(repo: "o/r", number: 3).args["method"], .string("rebase"))
-        XCTAssertNil(IntakeAction.update(IntakeEdit()).action(project: "k", id: "w1"))
+        XCTAssertEqual(IntakeAction.update(IntakeEdit(patch: ItemPatch(priority: "low"))).action(project: "k", id: "w1")?.args["priority"], .string("low"))
+        XCTAssertNil(IntakeAction.update(IntakeEdit(patch: ItemPatch(title: "x"))).action(project: "k", id: "w1"), "only the AI worker writes other fields")
     }
 
     func testDomainActionsRefuseUnknownTargets() async {

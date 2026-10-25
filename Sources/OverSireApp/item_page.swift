@@ -280,6 +280,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if canEnhance, let t = enhanceTarget {
             let b = ActionButton("Enhance", symbol: "sparkles") { [weak self] in self?.data.enhanceAgent.start(projectKey: snap.summary.ref.storeKey, target: t) }
             b.toolTip = "A read-only agent reads the code and writes a better description"
+            b.contentTintColor = Palette.intake
             actions.insert(b, at: 0)
         }
         actions += [
