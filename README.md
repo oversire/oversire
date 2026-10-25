@@ -302,6 +302,8 @@ A release build (from the [releases page](https://github.com/oversire/oversire/r
 
 The [oversire CLI](https://github.com/oversire/cli) runs a daemon on each machine with agents. The daemon owns the agent runtimes of its machine: it runs the local Orca, watches the agent sessions (agent hooks and Orca), finds their questions, and sends live events to the app on loopback or over Tailscale. The app talks only to the daemons, never to Orca. The machines of one user make one group ("My machines"). The app finds the members of the group, and no machine name must be typed. Without a daemon, the trackers, code hosts and CI still poll, and the app shows "Install the OverSire daemon to see agent sessions".
 
+With two or more Macs in the group, only one app runs the automatic actions: auto start, Enhance, cleanup, Plane write-back and the AI jobs. The home daemon gives a lease to that app. Settings › Machines › Automations shows which Mac runs them and has **Run them here**. See [docs/automations.md](docs/automations.md).
+
 | Free (self-hosted daemon) | Paid (cloud hub) |
 |---|---|
 | Live agent state on the LAN or Tailscale | Public webhook ingress (GitHub, Plane) |
