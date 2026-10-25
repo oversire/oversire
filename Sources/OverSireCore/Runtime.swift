@@ -14,9 +14,10 @@ public struct AgentSession: Hashable, Sendable {
     public var repo: String
     public var prompt: String?
     public var message: String?     // the error of a failed start, else the last agent reply
+    public var key: String?         // the start key of the session, for example enhance:K-1
 
     public init(phase: Phase, since: Date, card: String? = nil, paneKey: String? = nil, agent: AgentName = .claude,
-                repo: String = "", prompt: String? = nil, message: String? = nil) {
+                repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil) {
         self.phase = phase
         self.since = since
         self.card = card
@@ -25,6 +26,7 @@ public struct AgentSession: Hashable, Sendable {
         self.repo = repo
         self.prompt = prompt
         self.message = message
+        self.key = key
     }
 
     /// The session waits, or its turn ended with a question.
@@ -172,10 +174,11 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
     public var title: String?            // the terminal title
     public var baseBranch: String?
     public var inPlace: Bool?            // true: a new terminal in the folder `repo`, no workspace
+    public var key: String?              // the start key: one live session for each key, for example enhance:K-1
 
     public init(repo: String, item: ItemRef? = nil, name: String? = nil, note: String? = nil, branch: String? = nil,
                 agent: AgentName, prompt: String, environment: String? = nil, command: String? = nil, title: String? = nil,
-                baseBranch: String? = nil, inPlace: Bool? = nil) {
+                baseBranch: String? = nil, inPlace: Bool? = nil, key: String? = nil) {
         self.repo = repo
         self.item = item
         self.name = name
@@ -188,6 +191,7 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
         self.title = title
         self.baseBranch = baseBranch
         self.inPlace = inPlace
+        self.key = key
     }
 
     public var workspaceName: String? { name ?? item?.key }

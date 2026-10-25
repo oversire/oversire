@@ -42,11 +42,12 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
     public var stateSince: Date
     public var updatedAt: Date
     public var sources: [String]        // hook, orca, wire
+    public var key: String?             // the start key of the order that made the session
 
     public init(id: String, machine: MachineName, runtime: String, harness: String, workspace: String? = nil,
                 terminal: String? = nil, harnessSession: String? = nil, cwd: String, repo: String? = nil, branch: String? = nil,
                 state: State, reason: Reason? = nil, question: QuestionID? = nil, prompt: String? = nil,
-                lastMessage: String? = nil, stateSince: Date, updatedAt: Date, sources: [String]) {
+                lastMessage: String? = nil, stateSince: Date, updatedAt: Date, sources: [String], key: String? = nil) {
         self.id = id
         self.machine = machine
         self.runtime = runtime
@@ -65,6 +66,7 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
         self.stateSince = stateSince
         self.updatedAt = updatedAt
         self.sources = sources
+        self.key = key
     }
 }
 
