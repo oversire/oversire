@@ -284,12 +284,13 @@ final class AgentIndex: NSObject {
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
     func start(_ item: Item, root: String, agent: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let (agent, prompt, command) = PROJECTS_CFG.launch(for: item, agent: agent)
-        launch(key: item.key, note: item.url, root: root, agent: agent, prompt: prompt, command: command, done: done)
+        launch(key: item.key, note: item.url, root: root, agent: agent, prompt: prompt, command: command, startKey: StartKey.work(item.key), done: done)
     }
 
     /// Opens a session that the key tracks. `inPlace`: a new terminal in the folder `root`, no worktree.
+    /// `startKey`: the daemon gives the live session of this key back in place of a new one.
     func launch(key: String, note: String?, root: String, agent: String, prompt: String, command: String?, title: String? = nil,
-                inPlace: Bool = false, done: @escaping (Result<Launch, ProviderError>) -> Void) {
+                inPlace: Bool = false, startKey: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
         let name = key
         let key = key.uppercased()
         guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
@@ -298,7 +299,7 @@ final class AgentIndex: NSObject {
         publish()
         Task { [weak self] in
             let req = LaunchRequest(repo: root, name: name, note: note, agent: AgentName(rawValue: agent), prompt: prompt,
-                                    command: command, title: title, inPlace: inPlace ? true : nil)
+                                    command: command, title: title, inPlace: inPlace ? true : nil, key: startKey)
             let r = await Result(awaiting: { try await rt.launch(req) })
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -526,7 +527,8 @@ final class AgentIndex: NSObject {
             }
             for g in c.agents where g.key?.hasPrefix(EnhanceAgent.keyPrefix) != true {
                 let key: String
-                if named { key = name }
+                if let k = StartKey.workItem(g.key) { key = k }
+                else if named { key = name }
                 else if let k = g.paneKey.flatMap({ byPane[$0] }) { key = k }
                 else if let p = g.prompt, let m = browseRE.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)),
                         let r = Range(m.range(at: 1), in: p) { key = String(p[r]).uppercased() }

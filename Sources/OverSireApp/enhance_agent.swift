@@ -36,7 +36,7 @@ final class EnhanceAgent {
     static let timeout: TimeInterval = 1800
     /// A started session that the daemon does not list in this time failed.
     static let showTime: TimeInterval = 180
-    static let keyPrefix = "enhance:"
+    static let keyPrefix = StartKey.enhancePrefix
 
     struct Run: Equatable {
         var key: String                // the start key, for example enhance:K-1
@@ -127,10 +127,10 @@ final class EnhanceAgent {
 
     /// enhance:<KEY>. An intake item with no number yet uses its id.
     static func startKey(_ t: EnhanceTarget, ref: ItemRef) -> String {
-        if AgentIndex.keyRE.firstMatch(in: ref.key, range: NSRange(ref.key.startIndex..., in: ref.key)) != nil { return keyPrefix + ref.key }
+        if AgentIndex.keyRE.firstMatch(in: ref.key, range: NSRange(ref.key.startIndex..., in: ref.key)) != nil { return StartKey.enhance(ref.key) }
         switch t {
-        case .intake(let i): return keyPrefix + i.id
-        case .item(let r): return keyPrefix + r.id
+        case .intake(let i): return StartKey.enhance(i.id)
+        case .item(let r): return StartKey.enhance(r.id)
         }
     }
 
