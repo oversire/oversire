@@ -1033,7 +1033,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             if id.hasPrefix("intake:") {
                 if self.popover.isShown { self.popover.close() }
                 let parts = id.dropFirst("intake:".count).split(separator: "|").map(String.init)
-                if let key = parts.first { IntakeWindow.show(projectKey: key, workItemId: parts.count > 1 ? parts[1] : nil) }
+                if let key = parts.first { self.open(self.projectStore.intakeRoute(key, id: parts.count > 1 ? parts[1] : nil)) }
                 return
             }
             if id.hasPrefix(ApproveCenter.prefix) {

@@ -281,15 +281,22 @@ final class AgentIndex: NSObject {
 
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
     func start(_ item: Item, root: String, agent: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
-        let key = item.key.uppercased()
-        guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
         let (agent, prompt, command) = PROJECTS_CFG.launch(for: item, agent: agent)
+        launch(key: item.key, note: item.url, root: root, agent: agent, prompt: prompt, command: command, done: done)
+    }
+
+    /// Opens a session that the key tracks. `inPlace`: a new terminal in the folder `root`, no worktree.
+    func launch(key: String, note: String?, root: String, agent: String, prompt: String, command: String?, title: String? = nil,
+                inPlace: Bool = false, done: @escaping (Result<Launch, ProviderError>) -> Void) {
+        let name = key
+        let key = key.uppercased()
+        guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
         launches[key] = PendingLaunch(at: now())
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent), repo: (root as NSString).lastPathComponent, prompt: prompt)
         publish()
         Task { [weak self] in
-            let req = LaunchRequest(repo: root, name: item.key, note: item.url, agent: AgentName(rawValue: agent), prompt: prompt,
-                                    command: command)
+            let req = LaunchRequest(repo: root, name: name, note: note, agent: AgentName(rawValue: agent), prompt: prompt,
+                                    command: command, title: title, inPlace: inPlace ? true : nil)
             let r = await Result(awaiting: { try await rt.launch(req) })
             DispatchQueue.main.async {
                 guard let self else { return }

@@ -130,7 +130,7 @@ enum ActivityFeed {
                 var e = FeedEntry(id: "intake|" + i.id, source: .intake, title: i.name,
                                       body: [i.author.map { "by \($0)" }, i.priority, i.source?.replacingOccurrences(of: "_", with: " ").lowercased()]
                                         .compactMap { $0 }.joined(separator: " · "),
-                                      at: i.createdAt, route: nil, intake: (pk, i))
+                                      at: i.createdAt, route: .intakeItem(snap.summary.identifier.uppercased(), i.id), intake: (pk, i))
                 e.projectKey = snap.summary.identifier.uppercased()
                 e.intakeKey = store.intakeKeys[i.workItemId].map { "\(snap.summary.identifier)-\($0)" }
                 out.append(e)

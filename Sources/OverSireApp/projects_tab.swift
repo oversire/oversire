@@ -838,7 +838,7 @@ extension TabVC {
             }
             header.identifier = NSUserInterfaceItemIdentifier("project:" + key)
             header.onAdd = { [weak self] in self?.presentNewItem(target: key, prefill: nil) }
-            header.onIntake = { IntakeWindow.show(projectKey: key) }
+            header.onIntake = { (NSApp.delegate as? GHActionsBar)?.open(.intake(summary.identifier.uppercased())) }
             header.onDrag = { [weak self] phase, event in self?.dragProject(key, phase: phase, event: event) }
             rows.append(header)
             if folded { continue }

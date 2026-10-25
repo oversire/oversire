@@ -36,7 +36,8 @@ final class RowMenuTests: XCTestCase {
         local.branchTemplate = "{KEY}-{slug}"
         let m = RowMenu.item(item(), snap: snap, stream: nil, local: local, caps: all)
         XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Copy ID", "Copy link", "Copy ID and title", "Copy branch name",
-                                  "Status", "Assign to me", "Priority", "Start session in Orca…"])
+                                  "Status", "Assign to me", "Priority", "Start session in Orca…", "Refine…"])
+        XCTAssertEqual(m.command("Refine…"), .refine(key: "SLING-7"))
         XCTAssertEqual(m.command("Copy branch name"), .copy("SLING-7-fix-the-sync"))
         XCTAssertEqual(m.command("Copy ID and title"), .copy("SLING-7 Fix the sync"))
         guard case .submenu(_, let statuses) = m.first(where: { $0.title == "Status" }) else { return XCTFail("no status menu") }
@@ -51,6 +52,7 @@ final class RowMenuTests: XCTestCase {
         let m = RowMenu.item(item(assignees: ["ada"]), snap: s, stream: nil, local: ProjectLocalSettings(), caps: [])
         XCTAssertFalse(m.titles.contains("Assign to me"))
         XCTAssertFalse(m.titles.contains("Start session in Orca…"))
+        XCTAssertFalse(m.titles.contains("Refine…"))
         XCTAssertFalse(m.titles.contains("Enhance"))
         XCTAssertEqual(m.command("Copy branch name"), .copy("sling-7/fix-the-sync"))
     }

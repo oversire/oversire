@@ -279,6 +279,10 @@ class Page: NSViewController {
     // Pages that edit text return true, so a data change waits.
     var isEditing: Bool { view.window?.firstResponder is NSTextView }
 
+    /// Text that the user did not save. The window asks before it leaves the page.
+    var hasDraft: Bool { false }
+    func dropDraft() {}
+
     func go(_ r: Route) { router.go(r) }
     private(set) lazy var commands = RowCommander(data: data) { [weak self] in self?.go($0) }
 
@@ -368,6 +372,16 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         router.onChange = { [weak self] r in
             UILog.shown(r.title)
             self?.display(r)
+        }
+        router.holdLeave = { [weak self] _, proceed in
+            guard let page = self?.page, page.hasDraft else { return false }
+            AlertConfirm.show(.init(title: "Leave without saving?", info: "The page has text that is not saved. It goes when you leave.",
+                                    buttons: ["Leave", "Stay"], destructive: true), in: self?.window) {
+                guard $0.button == 0 else { return }
+                page.dropDraft()
+                proceed()
+            }
+            return true
         }
         busObservation = data.bus.observe { [weak self] c in self?.dataChanged(c) }
         gate.onHeldChange = { [weak self] on in
@@ -880,6 +894,7 @@ enum PageFactory {
         switch r {
         case .home: return HomePage(r, data: data, router: router)
         case .intake: return IntakeListPage(r, data: data, router: router)
+        case .intakeItem: return IntakeDetailPage(r, data: data, router: router)
         case .activity: return ActivityPage(r, data: data, router: router)
         case .work(.items): return WorkPage(r, data: data, router: router)
         case .work(.worktrees): return AgentsPage(r, data: data, router: router)

@@ -167,7 +167,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
             }
         }
         out += Self.intakeEntries(data.projectStore.snapshots, keys: data.projectStore.intakeKeys) { pk, id in
-            IntakeWindow.show(projectKey: pk, workItemId: id)
+            go(data.projectStore.intakeRoute(pk, id: id))()
         }
         for (repo, runs) in data.grouped {
             for r in runs.prefix(8) {

@@ -16,12 +16,15 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     private var shown: [SessionRef] = []
     private var written: [String: Data] = [:]
     private var histories: [String: SessionDigest] = [:]
+    private var requests: [LaunchRequest] = []
 
     public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory, .removeWorkspace]) {
         base = FakeProvider(id: "fake-runtime", account: account, capabilities: capabilities)
     }
 
     public var revealed: [SessionRef] { (try? base.locked { shown }) ?? [] }
+    /// Each launch request, oldest first.
+    public var launches: [LaunchRequest] { base.lockedValue { requests } }
     /// The host files by path.
     public var hostFiles: [String: Data] { base.lockedValue { written } }
 
@@ -82,6 +85,7 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     public func launch(_ r: LaunchRequest) async throws -> Launch {
         try base.locked {
             guard let name = r.workspaceName else { throw ProviderError.decoding("a launch needs a name or an item") }
+            requests.append(r)
             let card = cards.first(where: { $0.name == name })?.id ?? "w\(cards.count + 1)"
             if !cards.contains(where: { $0.id == card }) {
                 cards.append(Workspace(id: card, repo: r.repo, path: r.repo, name: name, comment: r.note, liveTerminals: 1,

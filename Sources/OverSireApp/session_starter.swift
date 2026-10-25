@@ -55,6 +55,19 @@ enum SessionPrompt {
     /// An edited template stays. The old default becomes the new one.
     static func migrate(intake t: String) -> String { t == intakeOld ? intakeDefault : t }
     static let filesDefault = "{text}\n\nAttached files:\n{paths}"
+    /// Refine on a work item (OVERSIRE-310): the talk of the intake prompt, with no accept step.
+    static let refineDefault = """
+        {text}
+
+        This is work item {key}. Do not implement it.
+        Refine the details with the user:
+        ask questions, and give a preview or a plan.
+        When the user approves, replace its description with the refined details
+          plane-cli wi update {key} -w {workspace} -p {project} --description-md <file>
+        and add sub-items if the work needs them. Do not make a new ticket.
+        Do not edit the OverSire block in the description.
+        Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
+        """
     /// The last paragraph of each item start. A Done parent with open sub-items is not finished (OVERSIRE-205).
     static let subItemsRule = "When you set the parent to Done, set each finished sub-item to Done too. "
         + "Leave a sub-item open only when it is not done, and say why in a comment."

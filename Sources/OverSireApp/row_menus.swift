@@ -12,6 +12,8 @@ enum RowCommand: Equatable {
     case priority(itemId: String, priorityId: String)
     case assignMe(itemId: String)
     case startSession(key: String)
+    case refine(key: String)
+    case refineIntake(entryId: String)
     case enhance(key: String)
     case run(repo: String, runId: String, RunAction)
     case ignoreFailure(repo: String, runId: String, Bool)
@@ -49,7 +51,7 @@ enum RowCommand: Equatable {
         case .revealCard(let card): return ("session.reveal", ["card": .string(card)])
         case .refreshProject(let k): return ("project.refresh", ["project": .string(k)])
         case .open, .openURL, .copy, .finder, .terminal, .copyJobLog, .explain, .sendInput, .triage, .onlyProject,
-             .useTrackerIcon, .hideProject, .removeWorktree, .enhance:
+             .useTrackerIcon, .hideProject, .removeWorktree, .enhance, .refine, .refineIntake:
             return nil
         }
     }
@@ -110,6 +112,7 @@ enum RowMenu {
             out.append(.action("Open session", .open(.item(item.key, .session))))
         } else if caps.contains(.sessionInput) {
             out.append(.action("Start session in Orca…", .startSession(key: item.key)))
+            out.append(.action("Refine…", .refine(key: item.key)))
         }
         if caps.contains(.workers) { out.append(.action("Enhance", .enhance(key: item.key))) }
         if let pr = stream?.prs.first { out.append(.action("Open pull request", .openURL(pr.pr.url))) }
@@ -176,7 +179,7 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func activity(_ e: FeedEntry, projectKey: String?, canTriage: Bool, tracker: String = "Plane") -> [MenuEntry] {
+    static func activity(_ e: FeedEntry, projectKey: String?, canTriage: Bool, canRefine: Bool = false, tracker: String = "Plane") -> [MenuEntry] {
         var out: [MenuEntry] = []
         if e.route != nil || e.intake != nil { out.append(.action("Open", e.route.map { .open($0) } ?? .openURL(e.url ?? ""))) }
         if let u = e.itemURL ?? e.url { out.append(.action(e.source == .run ? "Open on GitHub" : "Open in \(tracker)", .openURL(u))) }
@@ -184,6 +187,7 @@ enum RowMenu {
         if let k = e.itemKey { out.append(.action("Copy ID", .copy(k))) }
         if let u = e.itemURL ?? e.url { out.append(.action("Copy link", .copy(u))) }
         if e.intake != nil && canTriage { out += [.separator, .action("Triage with AI", .triage(entryId: e.id))] }
+        if e.intake != nil && canRefine { out.append(.action("Refine…", .refineIntake(entryId: e.id))) }
         if let projectKey { out += [.separator, .action("Only this project", .onlyProject(projectKey))] }
         return out.tidy
     }
@@ -248,6 +252,14 @@ final class RowCommander {
             SessionStartMenu(data).start(found.item, snap: found.snap, at: anchor)
             return
         }
+        if case .refine(let key) = c {
+            guard let found = store.item(key: key) else { return }
+            RefineStarter(data.agentIndex).start(.item(found.item), in: found.snap.summary) { err in
+                if let err { AlertConfirm.tell("Refine did not start", info: err, in: anchor?.window) }
+            }
+            go(.item(found.item.key, .overview))
+            return
+        }
         if case .enhance(let key) = c {
             guard let found = store.item(key: key), let ref = found.item.ref(in: found.snap.summary.ref) else { return }
             data.enhanceAgent.start(projectKey: found.key, target: .item(ref))
@@ -272,7 +284,7 @@ final class RowCommander {
         case .explain(let repo, let runId, let jobId): explain(repo: repo, runId: runId, jobId: jobId, anchor: anchor)
         case .useTrackerIcon(let k): editLocal(k) { $0.icon = .tracker }
         case .hideProject(let k): editLocal(k) { $0.hidden = true }
-        default: break   // .removeWorktree: the Worktrees page; .triage, .onlyProject: their pages
+        default: break   // .removeWorktree: the Worktrees page; .triage, .refineIntake, .onlyProject: their pages
         }
     }
 

@@ -99,6 +99,7 @@ extension Route {
         case .item(let key, _): return (["item", "session", "queue", "status"], ["key": .string(key)])
         case .project(let key): return (["project", "item"], ["project": .string(key)])
         case .intake(let key): return (["intake"], key.map { ["project": .string($0)] } ?? [:])
+        case .intakeItem(let key, let id): return (["intake"], ["project": .string(key), "id": .string(id)])
         case .run(let repo, let id): return (["run"], ["repo": .string(repo), "runId": .string(id)])
         case .work(.lanes): return (["queue", "plan"], [:])
         case .work: return (["worktree"], [:])

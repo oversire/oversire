@@ -531,6 +531,7 @@ struct RuntimeConfig: Codable, Equatable {
     var snapPrompt = SnapTicket.defaultPrompt   // the prompt of a sent snap basket
     var sessionIntakePrompt = SessionPrompt.intakeDefault
     var sessionFilesPrompt = SessionPrompt.filesDefault
+    var refinePrompt = SessionPrompt.refineDefault
 
     init() {}
 
@@ -542,6 +543,7 @@ struct RuntimeConfig: Codable, Equatable {
         snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
         sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
+        refinePrompt = try c.decodeIfPresent(String.self, forKey: .refinePrompt) ?? SessionPrompt.refineDefault
     }
 
     func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: agent)) }

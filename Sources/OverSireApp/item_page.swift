@@ -40,6 +40,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var streamChecked = Date.distantPast
     private var tailAt = Date.distantPast
     private var saving: String?
+    private var refining = false
     private var note: (Tone, String)?
     private var cleanupOff: Set<String> = []   // safe cleanup lines that the user unchecked
     private var activitySource = Source.all
@@ -207,7 +208,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let cleanup = data.cleaner.lines(item.key, data: data)
         return PageRow("head", item, snap.summary, snap.statusOptions, prog.done, prog.total, snap.openSubItems(of: item.id),
                        snap.canCloseParent(item), data.questions.count(key: key), saving, data.queue.contains(key),
-                       Self.sig(cleanup, data.statusJob.item(key)), canEnhance) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
+                       Self.sig(cleanup, data.statusJob.item(key)), canEnhance, refining) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
     }
 
     private var enhanceTarget: EnhanceTarget? {
@@ -270,6 +271,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
             actions.append(NSStackView(h: [b, more], spacing: 1))
         }
+        if data.statusJob.item(key) == nil, data.has(.sessionInput), RefineStarter(data.agentIndex).session(key) == nil {
+            let b = ActionButton(refining ? "Starting…" : "Refine", symbol: "bubble.left.and.bubble.right") { [weak self] in self?.refine(item, snap: snap) }
+            b.toolTip = "Talk with an agent about this item. On your approval it writes the item and adds sub-items."
+            b.isEnabled = !refining
+            actions.insert(b, at: 0)
+        }
         if canEnhance, let t = enhanceTarget {
             let b = ActionButton("Enhance", symbol: "sparkles") { [weak self] in self?.data.enhanceAgent.start(projectKey: snap.summary.ref.storeKey, target: t) }
             b.toolTip = "A read-only agent reads the code and writes a better description"
@@ -288,6 +295,17 @@ final class ItemPage: Page, NSTextFieldDelegate {
         v.addFull(NSTextField.text(item.title, size: 22, weight: .semibold, lines: 3))
         v.addFull(NSStackView(h: [Wrap(chips), Spacer()] + actions, spacing: 6))
         return v
+    }
+
+    private func refine(_ item: Item, snap: ProjectSnapshot) {
+        refining = true
+        reload()
+        RefineStarter(data.agentIndex).start(.item(item), in: snap.summary) { [weak self] err in
+            guard let self else { return }
+            self.refining = false
+            if let err { AlertConfirm.tell("Refine did not start", info: err, in: self.view.window) }
+            self.reload()
+        }
     }
 
     private func statusChip(snap: ProjectSnapshot, item: Item) -> NSView {

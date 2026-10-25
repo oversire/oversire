@@ -61,6 +61,7 @@ enum Route: Equatable {
 
     case home
     case intake(String?)            // project identifier, nil for all
+    case intakeItem(String, String) // project identifier, intake id
     case activity
     case work(WorkTab)
     case runs(RunFilter)
@@ -76,6 +77,7 @@ enum Route: Equatable {
         switch self {
         case .home: return "home"
         case .intake(let p): return p.map { "intake/\($0)" } ?? "intake"
+        case .intakeItem(let p, let id): return "intake/\(p)/\(id)"
         case .activity: return "activity"
         case .work(let t): return t == .items ? "work" : "work/\(t.rawValue)"
         case .runs(let f): return f == .all ? "runs" : "runs/\(f.rawValue)"
@@ -124,7 +126,8 @@ enum Route: Equatable {
         case "home": self = .home
         // The Inbox is now Intake, Activity and the Needs you list of Home.
         case "inbox": self = rest.first?.lowercased() == "intake" ? .intake(nil) : .home
-        case "intake": self = .intake(rest.first?.uppercased())
+        case "intake":
+            if rest.count > 1, !rest[1].isEmpty { self = .intakeItem(rest[0].uppercased(), rest[1]) } else { self = .intake(rest.first?.uppercased()) }
         case "activity": self = .activity
         case "work": self = .work(rest.first.flatMap { WorkTab(rawValue: $0.lowercased()) } ?? .items)
         // Old links: My items, Sessions and the Queue (and its Plan page) are tabs of Work now.
@@ -166,7 +169,7 @@ enum Route: Equatable {
     // The sidebar entry that shows as selected for this route.
     var sidebarKey: String {
         switch self {
-        case .intake: return "intake"
+        case .intake, .intakeItem: return "intake"
         case .work: return "work"
         case .runs(let f): return f == .failed ? "runs/failed" : f == .unlinked ? "runs/unlinked" : "runs"
         case .run: return "runs"
@@ -182,6 +185,7 @@ enum Route: Equatable {
         switch (self, other) {
         case (.intake, .intake), (.runs, .runs), (.settings, .settings): return true
         case (.item(let a, _), .item(let b, _)): return a == b
+        case (.intakeItem(let a, _), .intakeItem(let b, _)): return a == b
         case (.run(let a, let x), .run(let b, let y)): return a == b && x == y
         case (.project(let a), .project(let b)): return a == b
         case (.projectSettings(let a, _), .projectSettings(let b, _)): return a == b
@@ -193,6 +197,7 @@ enum Route: Equatable {
         switch self {
         case .home: return "Home"
         case .intake: return "Intake"
+        case .intakeItem: return "Intake item"
         case .activity: return "Activity"
         case .work: return "Work"
         case .runs: return "Runs"
@@ -211,6 +216,7 @@ enum Route: Equatable {
         switch self {
         case .run(let repo, _): return ["Runs", repo]
         case .settings: return ["Settings"]
+        case .intakeItem(let p, _): return ["Intake", p]
         case .project: return ["Projects"]
         case .projectSettings(let k, _): return ["Projects", k]
         case .item(let k, _):
@@ -222,7 +228,7 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .intake(nil), .intake("SLING"), .activity, .work(.items), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
+        .home, .intake(nil), .intake("SLING"), .intakeItem("FRITZ", "i1"), .activity, .work(.items), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
@@ -235,12 +241,25 @@ final class Router {
     private(set) var backStack: [Route] = []
     private(set) var forwardStack: [Route] = []
     var onChange: ((Route) -> Void)?
+    /// Asks before a move to another page. True: it holds the move, and calls `proceed` after a yes.
+    var holdLeave: ((Route, _ proceed: @escaping () -> Void) -> Bool)?
+    private var leaving = false
 
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
 
+    private func holds(_ r: Route, _ then: @escaping () -> Void) -> Bool {
+        guard !leaving, !r.samePage(current), let hold = holdLeave else { return false }
+        return hold(r) { [weak self] in
+            self?.leaving = true
+            then()
+            self?.leaving = false
+        }
+    }
+
     func go(_ r: Route) {
         guard r != current else { onChange?(r); return }
+        if holds(r, { [weak self] in self?.go(r) }) { return }
         // A tab change on the same page replaces the entry, so Back leaves the page.
         if r.samePage(current) { current = r; onChange?(r); return }
         backStack.append(current)
@@ -251,14 +270,18 @@ final class Router {
     }
 
     func back() {
-        guard let r = backStack.popLast() else { return }
+        guard let last = backStack.last else { return }
+        if holds(last, { [weak self] in self?.back() }) { return }
+        let r = backStack.removeLast()
         forwardStack.append(current)
         current = r
         onChange?(r)
     }
 
     func forward() {
-        guard let r = forwardStack.popLast() else { return }
+        guard let next = forwardStack.last else { return }
+        if holds(next, { [weak self] in self?.forward() }) { return }
+        let r = forwardStack.removeLast()
         backStack.append(current)
         current = r
         onChange?(r)

@@ -84,6 +84,10 @@ final class AgentCommandsCard: NSStackView {
         promptEditor(card, "New session prompt (files)", value: PROJECTS_CFG.runtime.sessionFilesPrompt, initial: SessionPrompt.filesDefault,
                      help: "The first message of a new session with files and no item. {text} the prompt · {paths} the file paths on the sessions machine, "
                          + "one on each line. With no files, the prompt goes as typed.") { PROJECTS_CFG.runtime.sessionFilesPrompt = $0 }
+        promptEditor(card, "Refine prompt", value: PROJECTS_CFG.runtime.refinePrompt, initial: SessionPrompt.refineDefault,
+                     help: "The first message of Refine on a work item. Refine on an intake item uses the intake prompt above. "
+                         + "{text} title and description · {key} item key · {item} item id · {workspace} · {project}. "
+                         + "With no files, the lines with {item} drop.") { PROJECTS_CFG.runtime.refinePrompt = $0 }
     }
     required init?(coder: NSCoder) { fatalError() }
 

@@ -134,6 +134,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let sampleLogs = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LOGS"] == "1"
     // OVERSIRE_UISHOTS_FAILED=1, with OVERSIRE_UISHOTS_SESSIONS=1: a new session of FRITZ-17 did not start.
     static let failedStart = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FAILED"] == "1"
+    // OVERSIRE_UISHOTS_INTAKE=edit: the intake detail page opens its description in the editor.
+    static let intakeEdit = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_INTAKE"] == "edit"
     // OVERSIRE_UISHOTS_ENHANCE=1: the item page of FRITZ-17 has an Enhance result to apply.
     static let enhanceTicket = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_ENHANCE"] == "1"
     // OVERSIRE_UISHOTS_FILES=folded or open: FRITZ-17 has four images and one PDF.
