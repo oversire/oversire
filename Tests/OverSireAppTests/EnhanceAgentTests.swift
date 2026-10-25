@@ -218,6 +218,15 @@ final class EnhanceAgentTests: XCTestCase {
         XCTAssertEqual(r.agent.states[item.id], .failed("No result after 30 minutes of work. Open the session to look.", kept: nil))
     }
 
+    func testRecoveredRunTimesOutOnlyAfterItsOwnLimit() {
+        var r: EnhanceAgent.Run = run(nil)
+        XCTAssertTrue(r.overdue(t0.addingTimeInterval(EnhanceAgent.timeout + 1)))
+        r.recovered = t0.addingTimeInterval(3600)
+        XCTAssertEqual(r.worked(t0.addingTimeInterval(3600)), 3600, "the pill counts from the start of the session")
+        XCTAssertFalse(r.overdue(t0.addingTimeInterval(3600 + EnhanceAgent.timeout - 1)), "the waits before the restart are not known")
+        XCTAssertTrue(r.overdue(t0.addingTimeInterval(3600 + EnhanceAgent.timeout + 1)))
+    }
+
     func testTryAgainStopsTheOldSessionFirst() async throws {
         let r = try await make()
         let first = try await launch(r)
@@ -391,6 +400,7 @@ final class EnhanceTicketTests: XCTestCase {
             agents.hold = true
             let a = EnhanceAgent(store: store, memory: ProjectMemory(writes: writes), questions: QuestionHub(agents: agents, writes: writes), agents: agents)
             a.host = { host }
+            a.outputs = AIOutputBook(writes: writes)
             return (a, agents)
         }
         let (agent, agents) = await MainActor.run { app() }
@@ -403,9 +413,12 @@ final class EnhanceTicketTests: XCTestCase {
         await fulfillment(of: [began], timeout: 5)
         let result = ###"{"verdict":"vague","description":"## Problem\nThe sync drops labels.","relations":[{"kind":"blocked_by","key":"\###(blocker.key)"},{"kind":"duplicate","key":"\###(twin.key)"}]}"###
         var all = daemon.sessions
+        let started = try XCTUnwrap(all[0].startedAt)
         all[0].state = .done
+        all[0].stateSince = started.addingTimeInterval(600)
         all[0].lastMessage = "```oversire-result\n" + result + "\n```"
         daemon.sessions = all
+        let done = all[0]
         let ready = expectation(forNotification: EnhanceAgent.changed, object: agent) { _ in agent.state(target)?.isReady == true }
         let cards = try await host.workspaces()
         await MainActor.run { agents.absorb(cards) }
@@ -418,6 +431,8 @@ final class EnhanceTicketTests: XCTestCase {
         await fulfillment(of: [found], timeout: 5)
         XCTAssertEqual(other.state(target)?.run?.original, "label sync is broken")
         XCTAssertEqual(other.state(target)?.run?.key, "enhance:" + ticket.key)
+        XCTAssertEqual(other.state(target)?.run?.since, started, "the pill counts from the start of the session, not from its last state")
+        XCTAssertNotNil(other.state(target)?.run?.recovered)
 
         XCTAssertNil(agent.state(.intake(IntakeItem(id: ticket.id, workItemId: ticket.id, name: "", priority: nil, createdAt: Date(), author: nil, source: nil))),
                      "an intake item with the same id has no state")
@@ -440,6 +455,33 @@ final class EnhanceTicketTests: XCTestCase {
         XCTAssertTrue(daemon.sessions.isEmpty)
         let gone = try await host.workspaces()
         await MainActor.run { otherAgents.absorb(gone) }
-        XCTAssertNil(other.state(target))
+        for _ in 0..<500 {
+            if try await !LocalStore(dir: dir).all(AIOutput.self).isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await MainActor.run { writes.changed(AIOutput.collection) }
+        XCTAssertEqual(other.state(target), .applied(accepted: false), "the mark of the other app")
+
+        // A restart keeps the mark. The old session, if it stays, does not come back as a result.
+        let (again, againAgents) = await MainActor.run { app() }
+        XCTAssertEqual(again.state(target), .applied(accepted: false))
+        daemon.sessions = [done]
+        let old = try await host.workspaces()
+        await MainActor.run { againAgents.absorb(old) }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(again.state(target), .applied(accepted: false))
+
+        // A new run of the same key replaces the mark.
+        daemon.sessions = []
+        _ = try await host.launch(LaunchRequest(repo: "/tmp", agent: .claude, prompt: "x", inPlace: true, key: "enhance:" + ticket.key))
+        daemon.sessions[0].startedAt = Date().addingTimeInterval(1)   // the order time has whole seconds
+        let rerun = expectation(forNotification: EnhanceAgent.changed, object: again) { _ in again.state(target)?.run != nil }
+        let fresh = try await host.workspaces()
+        await MainActor.run { againAgents.absorb(fresh) }
+        await fulfillment(of: [rerun], timeout: 5)
+        XCTAssertFalse(again.outputs?.contains(.enhanceWritten, target.id) ?? true)
+
+        await MainActor.run { again.discard(target) }
+        XCTAssertNil(again.state(target))
     }
 }

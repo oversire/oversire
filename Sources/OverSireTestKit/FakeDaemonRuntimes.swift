@@ -138,7 +138,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                                                    branch: r.branch ?? name.lowercased(), liveTerminals: 1, lastActivity: o.createdAt, terminals: [term]))
             }
             sessions.append(DaemonSession(id: term.session!, machine: machine, runtime: o.runtime.rawValue, harness: r.agent.rawValue, workspace: ws,
-                                          terminal: term.id, cwd: path, state: .working, prompt: r.prompt, stateSince: o.createdAt,
+                                          terminal: term.id, cwd: path, state: .working, prompt: r.prompt, stateSince: o.createdAt, startedAt: o.createdAt,
                                           updatedAt: o.createdAt, sources: ["orca"], key: r.key))
             let ref = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: o.runtime, id: "local"), id: ws), id: term.id)
             return DaemonOrderState(state: .done, result: WorkOrderResult(session: ref, paneKey: term.session, turnStarted: !r.prompt.isEmpty))

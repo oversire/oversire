@@ -48,8 +48,11 @@ final class EnhanceAgent {
         var waited: TimeInterval = 0
         var askedAt: Date?
         var seen = false               // the daemon listed the session
+        /// A recovered run does not know the waits before the restart. Its timeout counts from the recovery.
+        var recovered: Date?
 
         func worked(_ now: Date) -> TimeInterval { now.timeIntervalSince(since) - waited - (askedAt.map { now.timeIntervalSince($0) } ?? 0) }
+        func overdue(_ now: Date) -> Bool { worked(now) - (recovered.map { $0.timeIntervalSince(since) } ?? 0) > EnhanceAgent.timeout }
     }
 
     enum State: Equatable {
@@ -101,6 +104,12 @@ final class EnhanceAgent {
     var mayAct: () -> Bool = { true }
     /// For `--uishots`: a state for a target that has none.
     var sample: ((EnhanceTarget) -> State?)?
+    /// The "Written" marks, shared with the other Macs. A mark stays until a new run or a dismiss.
+    var outputs: AIOutputBook? { didSet { attach() } }
+    private var outputsObserver: NSObjectProtocol?
+    static let keepWritten = 200
+
+    private struct Written: Codable { var accepted: Bool }
 
     init(store: ProjectStore, memory: ProjectMemory, questions: QuestionHub, agents: AgentIndex) {
         self.store = store
@@ -112,7 +121,36 @@ final class EnhanceAgent {
                      nc.addObserver(forName: QuestionHub.changed, object: questions, queue: nil) { [weak self] _ in self?.sync() }]
     }
 
-    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        outputsObserver.map(NotificationCenter.default.removeObserver)
+    }
+
+    private func attach() {
+        outputsObserver.map(NotificationCenter.default.removeObserver)
+        guard let outputs else { return }
+        outputsObserver = NotificationCenter.default.addObserver(forName: AIOutputBook.changed, object: outputs, queue: .main) { [weak self] _ in self?.absorb() }
+        absorb()
+    }
+
+    // A mark that is newer than the run of its target shows as Written: after a restart, or when the other app wrote.
+    private func absorb() {
+        guard let outputs else { return }
+        for r in outputs.all(.enhanceWritten, as: Written.self) {
+            if let s = states[r.subject], (s.run?.since ?? .distantFuture) >= r.at { continue }
+            if let run = held.removeValue(forKey: r.subject) { forget(run) }
+            set(r.subject, .applied(accepted: r.value.accepted))
+        }
+    }
+
+    private func writtenAt(_ id: String) -> Date? {
+        outputs?.all(.enhanceWritten, as: Written.self).first { $0.subject == id }?.at
+    }
+
+    private func written(_ id: String, accepted: Bool) {
+        outputs?.put(.enhanceWritten, id, hash: "", Written(accepted: accepted), at: now(), keep: Self.keepWritten)
+        set(id, .applied(accepted: accepted))
+    }
 
     /// The Enhance buttons show. With an old daemon they show too, and a start tells the user to update it.
     var available: Bool { AI_CFG.intakeAgent && host()?.capabilities.contains(.sessionHistory) == true }
@@ -219,6 +257,7 @@ final class EnhanceAgent {
 
     /// Tracks the run. The daemon sessions of the agent index then move it.
     func begin(_ id: String, _ run: Run) {
+        outputs?.remove(.enhanceWritten, id)
         if let s = run.session { questions.track(intake: s, item: run.item) }
         held[id] = run
         set(id, .enhancing(run))
@@ -285,7 +324,7 @@ final class EnhanceAgent {
                 set(id, .asking(run, n: max(n, 1)))
             } else {
                 if let at = run.askedAt { run.waited += t.timeIntervalSince(at); run.askedAt = nil }
-                if run.worked(t) > Self.timeout {
+                if run.overdue(t) {
                     finish(id, run, .failed("No result after 30 minutes of work. Open the session to look.", kept: nil))
                 } else {
                     set(id, .enhancing(run))
@@ -335,7 +374,8 @@ final class EnhanceAgent {
         let known = Set(held.values.compactMap(\.pane)).union(dropped).union(recovering)
         for a in live where a.phase != .failed {
             guard let pane = a.paneKey, let key = a.key, let card = a.card, !known.contains(pane),
-                  let (pk, target) = find(String(key.dropFirst(Self.keyPrefix.count))), states[target.id] == nil else { continue }
+                  let (pk, target) = find(String(key.dropFirst(Self.keyPrefix.count))), states[target.id] == nil || states[target.id]?.isApplied == true,
+                  (writtenAt(target.id) ?? .distantPast) < (a.startedAt ?? a.since) else { continue }
             recovering.insert(pane)
             prepare(pk, target) { [weak self] s in
                 guard let self else { return }
@@ -344,8 +384,9 @@ final class EnhanceAgent {
                     let t = try? await rt.sessions(WorkspaceRef(account: rt.account, id: card)).first { $0.paneKey == pane }?.ref
                     DispatchQueue.main.async {
                         self.recovering.remove(pane)
-                        guard self.states[target.id] == nil else { return }
-                        self.begin(target.id, Run(key: key, session: t, pane: pane, item: s.ref, original: s.body, since: a.since, seen: true))
+                        guard self.states[target.id] == nil || self.states[target.id]?.isApplied == true else { return }
+                        self.begin(target.id, Run(key: key, session: t, pane: pane, item: s.ref, original: s.body, since: a.startedAt ?? a.since,
+                                                  seen: true, recovered: self.now()))
                         self.sync()
                     }
                 }
@@ -445,9 +486,9 @@ final class EnhanceAgent {
                     let after: (Bool) -> Void = { ok in
                         guard ok else { failed("the changes"); return }
                         if let run = ready?.1 { self.stop(run) }
-                        guard accept else { self.set(item.id, .applied(accepted: false)); done(nil); return }
+                        guard accept else { self.written(item.id, accepted: false); done(nil); return }
                         self.store.triage(projectKey: projectKey, item: item, action: dup.map { .duplicate(of: $0.id) } ?? .accept) { ok in
-                            if ready != nil { self.set(item.id, .applied(accepted: ok)) }
+                            if ready != nil { self.written(item.id, accepted: ok) }
                             ok ? done(nil) : failed("the accept")
                         }
                     }
@@ -475,7 +516,7 @@ final class EnhanceAgent {
     private func write(_ edit: IntakeEdit, to id: String, target: EnhanceTarget, run: Run, done: @escaping (String?) -> Void) {
         let ended = {
             self.stop(run)
-            self.set(target.id, .applied(accepted: false))
+            self.written(target.id, accepted: false)
             done(nil)
         }
         let relate = {
@@ -513,6 +554,7 @@ final class EnhanceAgent {
     /// Stops the session and forgets the run.
     func discard(_ item: EnhanceTarget) {
         if let run = held[item.id] ?? states[item.id]?.run { stop(run) }
+        outputs?.remove(.enhanceWritten, item.id)
         drop(item.id)
     }
 
@@ -567,6 +609,7 @@ final class EnhanceAgent {
 
 extension EnhanceAgent.State {
     var isReady: Bool { if case .ready = self { return true } else { return false } }
+    var isApplied: Bool { if case .applied = self { return true } else { return false } }
     /// The session works or asks.
     var isLive: Bool {
         switch self {
@@ -620,6 +663,7 @@ final class EnhancePanel: Card {
             if item.isTicket { add(NSTextField.text("Writes the checked lines to Plane. No accept step: the item is already a ticket.", size: 12, color: Palette.dim, lines: 2)) }
         case .applied:
             add(NSTextField.text("OverSire wrote the checked changes. The original text is in the section \"Original note\".", size: 12, color: Palette.mut, lines: 2))
+            add(NSStackView(h: [ActionButton("Dismiss") { agent.discard(item) }], spacing: 6))
         case .failed(let msg, let kept):
             add(NSTextField.text(msg, size: 12, color: Palette.mut, lines: 3))
             if let kept, !kept.isEmpty { add(TermView(lines: kept.components(separatedBy: "\n"), height: 96)) }

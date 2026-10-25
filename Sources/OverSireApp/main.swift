@@ -920,6 +920,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         itemSummaries.outputs = aiOutputs
         ciAssist.outputs = aiOutputs
         statusJob.outputs = aiOutputs
+        enhanceAgent.outputs = aiOutputs
         guard let o = automations else { return }
         NotificationCenter.default.addObserver(forName: AutomationOwner.changed, object: o, queue: .main) { [weak self] _ in
             log.info("Automations: \(String(describing: o.role), privacy: .public)")

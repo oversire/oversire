@@ -11,6 +11,7 @@ final class AIOutputBook {
         case ciExplanation = "ci-explanation"
         case ciDigest = "ci-digest"
         case sessionStatus = "session-status"
+        case enhanceWritten = "enhance-written"   // not an AI job: Enhance wrote the review of the subject
     }
 
     private let writes: StoreWrites
@@ -59,6 +60,12 @@ final class AIOutputBook {
     }
 
     func contains(_ kind: Kind, _ subject: String) -> Bool { byID[AIOutput.id(kind.rawValue, subject)] != nil }
+
+    func remove(_ kind: Kind, _ subject: String) {
+        let id = AIOutput.id(kind.rawValue, subject)
+        guard byID.removeValue(forKey: id) != nil else { return }
+        writes.delete(AIOutput.self, id: id)
+    }
 
     /// Writes the result and keeps the newest `keep` records of the kind.
     func put<T: Encodable>(_ kind: Kind, _ subject: String, hash: String, _ value: T, at: Date, keep: Int) {

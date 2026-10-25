@@ -15,9 +15,10 @@ public struct AgentSession: Hashable, Sendable {
     public var prompt: String?
     public var message: String?     // the error of a failed start, else the last agent reply
     public var key: String?         // the start key of the session, for example enhance:K-1
+    public var startedAt: Date?     // the start of the session; `since` is the start of the phase
 
     public init(phase: Phase, since: Date, card: String? = nil, paneKey: String? = nil, agent: AgentName = .claude,
-                repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil) {
+                repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil, startedAt: Date? = nil) {
         self.phase = phase
         self.since = since
         self.card = card
@@ -27,6 +28,7 @@ public struct AgentSession: Hashable, Sendable {
         self.prompt = prompt
         self.message = message
         self.key = key
+        self.startedAt = startedAt
     }
 
     /// The session waits, or its turn ended with a question.
