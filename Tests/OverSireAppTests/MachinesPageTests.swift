@@ -390,6 +390,13 @@ final class MachinesModelTests: XCTestCase {
 
         s.group = group([member("mbp", "100.97.81.23")])
         XCTAssertNil(row(.solo), "one member: no row")
+
+        // mba has no daemon: its app joins the group of mbp as a device.
+        s.info = nil
+        s.group?.devices = [GroupDevice(deviceId: "A1", name: "OverSire on mbp", kind: .app, machine: "mbp", issuedBy: "mbp", issuedAt: now),
+                            GroupDevice(deviceId: "A2", name: "OverSire on mba", kind: .app, machine: "mba", issuedBy: "mbp", issuedAt: now)]
+        XCTAssertEqual(row(.other(Lease(name: "automations", holder: "A1", holderName: "mbp", epoch: 1, until: now)))?.status, "Run on mbp",
+                       "two apps on one member: the row shows")
     }
 
     func testAutomationsIsFoundInTheSearch() {

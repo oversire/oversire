@@ -203,7 +203,7 @@ struct MachinesModel: Equatable {
     var sessionsMachine: String?
     /// The runtimes of each machine that answered, in the order of the machines.
     var runtimes: [Runtime]
-    /// nil: the group has one member, or the app has no automation owner.
+    /// nil: one Mac uses the group (one member and one app), or the app has no automation owner.
     var automations: Automations?
 
     var title: String {
@@ -269,7 +269,9 @@ struct MachinesModel: Equatable {
         sessionChoices = machines.filter(\.isThis).map(\.name) + machines.filter { !$0.isThis }.map(\.name)
         sessionsMachine = machines.first(where: \.runsSessions)?.name
         runtimes = machines.flatMap { m in (s.runtimes[m.name] ?? []).map { Runtime(machine: m.name, $0) } }
-        automations = state == .group ? s.automations.map { Automations($0, home: s.group?.home.rawValue ?? "") } : nil
+        // A Mac with no daemon joins as an app, so two apps can share one member.
+        let apps = s.group?.devices.filter { $0.kind == .app }.count ?? 0
+        automations = members.count > 1 || apps > 1 ? s.automations.map { Automations($0, home: s.group?.home.rawValue ?? "") } : nil
     }
 
     static func offline(_ seen: Date?, now: Date) -> String {
