@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 import OverSireCore
 @testable import OverSireApp
@@ -7,6 +8,7 @@ final class UILogTests: XCTestCase {
     private var old: (any LogSink)!
 
     override func setUp() {
+        _ = NSApplication.shared // performClick sends the action through NSApp
         old = UILog.sink
         UILog.sink = lines
     }
