@@ -221,6 +221,7 @@ struct SettingsIndex {
         Entry("Orca account for a machine", .machines, "runtime environment"),
         Entry("Mute sessions", .machines, "silence machine"),
         Entry("Remove a machine", .machines, "group member delete"),
+        Entry("Automations", .machines, "owner lease auto start enhance cleanup write-back digest run them here paused"),
         Entry("Orca live terminal", .runtimes, "runtime stream text only pairing retry"),
         Entry("Install hooks", .hooks, "claude codex opencode live status"),
         Entry("Remove hooks", .hooks, "claude codex opencode"),

@@ -24,6 +24,8 @@ struct MachinesSnapshot: Equatable {
     var health: [String: SourceHealth] = [:]
     /// machine → its agent runtimes. A machine without an entry gave no answer.
     var runtimes: [String: [DaemonRuntime]] = [:]
+    /// The role of this app for the automations. nil: no automation owner.
+    var automations: AutomationRole?
 }
 
 /// The rows of the page. It has no AppKit types, so tests compare it.
@@ -141,6 +143,45 @@ struct MachinesModel: Equatable {
         var canUnpair: Bool { paired && state == .live }
     }
 
+    /// The Automations row: which Mac runs the automatic actions (OVERSIRE-328).
+    struct Automations: Equatable {
+        enum State: Equatable { case here, other(String), paused(home: String) }
+        var state: State
+
+        static let note = "Auto start, Enhance, cleanup, Plane write-back and AI digests run on one Mac only. The other Macs show the results."
+
+        /// home: the home of the group, for a pause before the first read.
+        init(_ r: AutomationRole, home: String) {
+            switch r {
+            case .solo, .owner: state = .here
+            case .other(let l): state = .other(l.holderName.isEmpty ? l.holder : l.holderName)
+            case .paused(let m): state = .paused(home: m.isEmpty ? home : m)
+            }
+        }
+
+        var detail: String {
+            guard case .paused(let h) = state else { return Self.note }
+            return "Paused, so that two Macs do not do the same work. They start again when \(h), the home, is online."
+        }
+
+        var status: String {
+            switch state {
+            case .here: return "Run on this Mac"
+            case .other(let m): return "Run on \(m)"
+            case .paused: return "Paused · home offline"
+            }
+        }
+
+        /// "Run them here" or "Retry". nil: no button.
+        var action: String? {
+            switch state {
+            case .here: return nil
+            case .other: return "Run them here"
+            case .paused: return "Retry"
+            }
+        }
+    }
+
     var state: State
     var groupName: String
     var machines: [Machine]
@@ -162,6 +203,8 @@ struct MachinesModel: Equatable {
     var sessionsMachine: String?
     /// The runtimes of each machine that answered, in the order of the machines.
     var runtimes: [Runtime]
+    /// nil: the group has one member, or the app has no automation owner.
+    var automations: Automations?
 
     var title: String {
         switch state {
@@ -226,6 +269,7 @@ struct MachinesModel: Equatable {
         sessionChoices = machines.filter(\.isThis).map(\.name) + machines.filter { !$0.isThis }.map(\.name)
         sessionsMachine = machines.first(where: \.runsSessions)?.name
         runtimes = machines.flatMap { m in (s.runtimes[m.name] ?? []).map { Runtime(machine: m.name, $0) } }
+        automations = state == .group ? s.automations.map { Automations($0, home: s.group?.home.rawValue ?? "") } : nil
     }
 
     static func offline(_ seen: Date?, now: Date) -> String {
@@ -280,6 +324,8 @@ final class MachinesController {
         return await i.shellFinds()
     }
     var config: () -> MachinesConfig = { MACHINES }
+    /// The automation owner of the app. nil: no group sync.
+    var owner: () -> AutomationOwner? = { (NSApp?.delegate as? GHActionsBar)?.automations }
     var changed: () -> Void = { ChangeBus.shared.post(DataChange(.connection, origin: .user)) }
 
     static let loadingChanged = Notification.Name("MachinesLoading")
@@ -295,6 +341,8 @@ final class MachinesController {
     private(set) var updating: Set<String> = []
     /// The runtimes with a retry, pair or unpair call now: Runtime.key → the verb.
     private(set) var runtimeCalls: [String: String] = [:]
+    /// The verb of the Automations call now: "Run them here" or "Retry".
+    private(set) var automationCall: String?
     /// The daemon of a machine: loopback for this Mac, else the link of the hub. nil: no link.
     lazy var daemon: (String) -> DaemonClient? = { [unowned self] name in
         if name == self.snapshot.info?.machine.rawValue { return self.local }
@@ -307,7 +355,12 @@ final class MachinesController {
     var frozen = false
     private var setupObserver: Any?
 
-    var model: MachinesModel { MachinesModel(snapshot, config: config()) }
+    /// The role of the automations is live, not part of the last read.
+    var model: MachinesModel {
+        var s = snapshot
+        if let o = owner() { s.automations = o.role }
+        return MachinesModel(s, config: config())
+    }
     var busy: Bool { DaemonSetup.shared.busy }
 
     /// Reads again when the data is older than 20 s.
@@ -470,6 +523,23 @@ final class MachinesController {
                 self.notice = "\(verb) \(id) on \(machine): \(DaemonClient.reason(error))"
             }
             self.runtimeCalls[key] = nil
+            self.changed()
+        }
+    }
+
+    /// Run them here: this app takes the lease from the other app.
+    func takeAutomations() { automationCall("Run them here") { await $0.take() } }
+
+    /// Asks the home daemon again after a pause.
+    func retryAutomations() { automationCall("Retry") { await $0.refresh() } }
+
+    private func automationCall(_ verb: String, _ op: @escaping (AutomationOwner) async -> Void) {
+        guard automationCall == nil, let o = owner() else { return }
+        automationCall = verb
+        changed()
+        Task { @MainActor in
+            await op(o)
+            self.automationCall = nil
             self.changed()
         }
     }
@@ -668,11 +738,34 @@ extension SettingsPage {
             }
             card.add(Row([TwoLine("Run sessions on", Self.runSessionsNote, lines: 2), Spacer(), pop], height: 62, label: "Run sessions on"))
         }
+        if let a = m.automations { card.add(automationsRow(a)) }
         v.addFull(card)
         v.addFull(NSTextField.text("Home keeps the shared OverSire state. Use the row menu to make another machine home.",
                                    size: 11.5, color: Palette.dim, lines: 2))
         v.identifier = SettingsAnchor.machines.id
         b.addFull(v)
+    }
+
+    private func automationsRow(_ a: MachinesModel.Automations) -> NSView {
+        let c = MachinesController.shared
+        let tone: Tone
+        switch a.state {
+        case .here: tone = Tone(symbol: "checkmark.circle", color: Palette.ok, word: a.status)
+        case .other: tone = Tone(symbol: "laptopcomputer", color: Palette.acc, word: a.status)
+        case .paused: tone = Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: a.status)
+        }
+        let note = NSTextField.text(a.detail, size: 11.5, color: Palette.dim, lines: 2)
+        var cells: [NSView] = [TwoLine("Automations", subView: note), Spacer(), Pill(tone)]
+        if let verb = a.action {
+            let busy = c.automationCall == verb
+            let b = ActionButton(busy ? (verb == "Retry" ? "Retrying…" : "Taking…") : verb) {
+                if case .paused = a.state { c.retryAutomations() } else { c.takeAutomations() }
+            }
+            b.isEnabled = c.automationCall == nil
+            b.setAccessibilityLabel(verb == "Retry" ? "Retry the automations" : "Run the automations on this Mac")
+            cells.append(b)
+        }
+        return Row(cells, height: 66, label: "Automations, \(a.status)")
     }
 
     private func machineRuntimes(_ b: NSStackView, _ m: MachinesModel) {

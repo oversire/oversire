@@ -1333,7 +1333,8 @@ extension UIShots {
 // MARK: Machines samples
 
 extension MachinesSnapshot {
-    static let scenes: Set<String> = ["machines-loading", "machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine"]
+    static let scenes: Set<String> = ["machines-loading", "machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine",
+                                         "machines-auto-owner", "machines-auto-other", "machines-auto-paused"]
 
     /// mbp is this Mac. mba and devbox are members, or found on the tailnet when this Mac is alone.
     static func sample(_ scene: String, now: Date = Date()) -> MachinesSnapshot {
@@ -1381,6 +1382,15 @@ extension MachinesSnapshot {
             DaemonRuntime(id: "oversire", name: "OverSire", installed: true, reachable: true, capabilities: caps, stream: RuntimeStream(state: .live)),
         ]
         s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running.")]
+        let lease = Lease(name: AutomationOwner.leaseName, holder: "app-mba", holderName: "mba", epoch: 3, until: now.addingTimeInterval(60))
+        switch scene {
+        case "machines-auto-owner": s.automations = .owner(lease)
+        case "machines-auto-other": s.automations = .other(lease)
+        case "machines-auto-paused":
+            s.group?.home = "devbox"
+            s.automations = .paused("devbox")
+        default: break
+        }
         return s
     }
 }
@@ -1391,6 +1401,7 @@ extension UIShots {
         let c = MachinesController.shared
         c.frozen = true
         c.config = { MachinesConfig(sessions: "mbp", hooksConsent: true) }
+        c.owner = { nil }
         c.installed = { scene != "machines-empty" }
         c.use(MachinesSnapshot.sample(scene), loaded: scene != "machines-loading")
         w.router.go(.settings(.general))   // a fresh page, so the pane takes the new height

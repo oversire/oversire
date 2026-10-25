@@ -369,6 +369,33 @@ final class MachinesModelTests: XCTestCase {
                        "The last update failed 2 h ago: update: no write access to /usr/local/bin")
     }
 
+    func testAutomationsRow() {
+        var s = snapshot()
+        let lease = Lease(name: "automations", holder: "app-mba", holderName: "mba", epoch: 2, until: now)
+        func row(_ r: AutomationRole?) -> MachinesModel.Automations? {
+            s.automations = r
+            return MachinesModel(s, config: MachinesConfig(), now: now).automations
+        }
+        XCTAssertNil(row(nil), "no owner: no row")
+        XCTAssertEqual(row(.owner(lease))?.status, "Run on this Mac")
+        XCTAssertNil(row(.solo)?.action)
+        XCTAssertEqual(row(.other(lease))?.status, "Run on mba")
+        XCTAssertEqual(row(.other(lease))?.action, "Run them here")
+        XCTAssertEqual(row(.other(lease))?.detail, MachinesModel.Automations.note)
+        let paused = row(.paused(""))
+        XCTAssertEqual(paused?.state, .paused(home: "mbp"), "before the first read: the home of the group")
+        XCTAssertEqual(paused?.status, "Paused · home offline")
+        XCTAssertEqual(paused?.action, "Retry")
+        XCTAssertEqual(paused?.detail, "Paused, so that two Macs do not do the same work. They start again when mbp, the home, is online.")
+
+        s.group = group([member("mbp", "100.97.81.23")])
+        XCTAssertNil(row(.solo), "one member: no row")
+    }
+
+    func testAutomationsIsFoundInTheSearch() {
+        XCTAssertEqual(SettingsIndex.search("automations").first?.anchor, .machines)
+    }
+
     func testSampleScenesBuildTheirState() {
         let states = ["machines-empty", "machines-found", "machines-group"].map {
             MachinesModel(MachinesSnapshot.sample($0, now: now), config: MachinesConfig(), now: now).state
@@ -395,6 +422,30 @@ final class MachineUpdateTests: XCTestCase {
 
     private func settle(_ c: MachinesController) async {
         for _ in 0..<200 where !c.updating.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+    }
+
+    func testRunThemHereTakesTheLease() async {
+        let home = FakeDaemon(machine: "mbp", group: group([member("mbp", "100.97.81.23"), member("mba", "100.71.4.12")]))
+        func owner(_ device: String, _ name: String) -> AutomationOwner {
+            AutomationOwner(home: { _ in .member("mbp", client(home)) }, device: device, name: { name })
+        }
+        let first = owner("app-mbp", "mbp"), me = owner("app-mba", "mba")
+        await first.refresh()
+        await me.refresh()
+        let c = controller(nil)
+        var s = c.snapshot
+        s.group = home.group
+        c.use(s)
+        c.owner = { me }
+        XCTAssertEqual(c.model.automations?.state, .other("mbp"))
+
+        c.takeAutomations()
+        XCTAssertEqual(c.automationCall, "Run them here")
+        for _ in 0..<200 where c.automationCall != nil { try? await Task.sleep(nanoseconds: 5_000_000) }
+        XCTAssertEqual(c.model.automations?.state, .here)
+        XCTAssertTrue(me.mayAct)
+        await first.refresh()
+        XCTAssertFalse(first.mayAct, "the other app sees the new owner")
     }
 
     func testRuntimeRetry() async {
