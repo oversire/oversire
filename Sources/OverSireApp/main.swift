@@ -77,6 +77,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         a.visible = { [weak self] in (self?.popover.isShown ?? false) || ItemWindow.isOpen }
         a.onAlert = { [weak self] key, agent in self?.agentAlert(key, agent) }
         a.open = { [weak self] k in self.map { $0.projectStore.item(key: k) != nil && !$0.projectStore.isDone(key: k) } ?? false }
+        a.tracked = { [weak self] k in self?.projectStore.item(key: k) != nil }
         return a
     }()
     lazy var machineHub: MachineHub = {

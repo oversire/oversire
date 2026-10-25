@@ -82,6 +82,8 @@ struct RefineStarter {
         let ref = ItemRef(project: summary.ref, id: t.workItemId, key: t.key, url: URL(string: summary.url) ?? URL(string: "about:blank")!)
         let tracker = tracker(summary.ref)
         let note: String? = { if case .item(let i) = t { return i.url }; return nil }()
+        // An intake Refine is not the agent of the work item that it makes.
+        let startKey: String? = { if case .intake = t { return StartKey.refine(t.key) }; return nil }()
         let agents = agents
         Task {
             var t = t
@@ -94,7 +96,7 @@ struct RefineStarter {
                let list = try? await reader.attachments(of: ref) { files = !list.isEmpty }
             let prompt = Self.prompt(t, project: summary.ref, runtime: rt, files: files)
             DispatchQueue.main.async {
-                agents.launch(key: t.key, note: note, root: root, agent: rt.agent, prompt: prompt, command: command, title: name, inPlace: true) { r in
+                agents.launch(key: t.key, note: note, root: root, agent: rt.agent, prompt: prompt, command: command, title: name, inPlace: true, startKey: startKey) { r in
                     if case .failure(let e) = r { done(e.message) } else { done(nil) }
                 }
             }

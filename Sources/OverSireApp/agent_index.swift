@@ -114,6 +114,8 @@ final class AgentIndex: NSObject {
     var quietAfter: () -> TimeInterval = { AGENTS.quietMinutes * 60 }
     /// True when the item of the key is tracked and not Completed or Cancelled.
     var open: (String) -> Bool = { _ in false }
+    /// True when the key is a work item of a tracked project.
+    var tracked: (String) -> Bool = { _ in false }
 
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
 
@@ -459,7 +461,7 @@ final class AgentIndex: NSObject {
         let before = agents
         let cardsChanged = self.cards != cards
         self.cards = cards
-        agents = AgentIndex.index(cards, launches: launches, links: links, open: open, now: at)
+        agents = AgentIndex.index(cards, launches: launches, links: links, open: open, tracked: tracked, now: at)
         feed.record(before: before, after: agents)
         readScreens(at: at)
         var young: [String: (tag: String, due: Date)] = [:]
@@ -506,9 +508,10 @@ final class AgentIndex: NSObject {
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 
     // Item key → the most urgent agent. Agents of closed terminals drop out. An Enhance session is not the agent of its item.
+    // An intake Refine session is the agent of its key only until Refine accepts the item as a work item.
     // A done agent older than a day stays only while its item is open: Session done does not mean the item is done.
     static func index(_ cards: [Workspace], launches: [String: PendingLaunch], links: [String: AgentLink] = [:],
-                      open: (String) -> Bool = { _ in false }, now: Date) -> [String: AgentSession] {
+                      open: (String) -> Bool = { _ in false }, tracked: (String) -> Bool = { _ in false }, now: Date) -> [String: AgentSession] {
         var out: [String: AgentSession] = [:]
         var byPane: [String: String] = [:]
         for (k, l) in links { if let p = l.pane { byPane[p] = k } }
@@ -527,7 +530,10 @@ final class AgentIndex: NSObject {
             }
             for g in c.agents where g.key?.hasPrefix(EnhanceAgent.keyPrefix) != true {
                 let key: String
-                if let k = StartKey.workItem(g.key) { key = k }
+                if let k = StartKey.refineItem(g.key) {
+                    if tracked(k) { continue }
+                    key = k
+                } else if let k = StartKey.workItem(g.key) { key = k }
                 else if named { key = name }
                 else if let k = g.paneKey.flatMap({ byPane[$0] }) { key = k }
                 else if let p = g.prompt, let m = browseRE.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)),

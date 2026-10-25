@@ -100,4 +100,17 @@ final class StartKeyTests: XCTestCase {
         XCTAssertEqual(AgentIndex.index([c], launches: [:], now: Date()).keys.sorted(), ["OVERSIRE-2"])
         XCTAssertEqual(StartKey.workItem("enhance:OVERSIRE-2"), nil)
     }
+
+    // OVERSIRE-335: after Refine accepts the intake item, its session is not the agent of the work item.
+    func testARefineKeyNamesTheIntakeItemOnly() {
+        let g = AgentSession(phase: .working, since: Date(), card: "root", paneKey: "tab-1:leaf-1", key: StartKey.refine("oversire-317"))
+        let c = Workspace(id: "root", repo: "oversire-workspace", path: "/Users/ada/Projects/oversire-workspace", name: "oversire-workspace", comment: nil,
+                          liveTerminals: 1, lastActivity: Date(), agents: [g], kind: .folder)
+        let link = AgentLink(key: "OVERSIRE-317", workspace: WorkspaceRef(account: AccountID(provider: .daemon, id: "mbp"), id: "root"), pane: "tab-1:leaf-1", at: Date())
+        XCTAssertEqual(StartKey.refine("oversire-317"), "refine:OVERSIRE-317")
+        XCTAssertEqual(AgentIndex.index([c], launches: [:], links: ["OVERSIRE-317": link], now: Date()).keys.sorted(), ["OVERSIRE-317"])
+        let accepted = AgentIndex.index([c], launches: [:], links: ["OVERSIRE-317": link], tracked: { $0 == "OVERSIRE-317" }, now: Date())
+        XCTAssertNil(accepted["OVERSIRE-317"])
+        XCTAssertNil(StartKey.refineItem("work:OVERSIRE-317"))
+    }
 }

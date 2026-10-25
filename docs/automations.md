@@ -53,6 +53,6 @@ The other apps read the records. When the hash of the text agrees, they make no 
 
 ## Start keys
 
-The queue and the ▶ start send the start key `work:<KEY>`. Enhance sends `enhance:<KEY>`. The daemon keeps at most one live session for each key. Thus two apps that start one item get one session, also during a change of the owner.
+The queue and the ▶ start send the start key `work:<KEY>`. Enhance sends `enhance:<KEY>`. Refine on an intake item sends `refine:<KEY>`. The daemon keeps at most one live session for each key. Thus two apps that start one item get one session, also during a change of the owner.
 
 The Intake row of an Enhance run shows the machine of the session when it is not this Mac, for example **Enhancing on mbp · 2m**. Each app reads the same session from the daemon.
