@@ -20,12 +20,7 @@ public final class DaemonRunnerTransport: RunnerTransport, RunnerAnswerSending, 
     /// 202: the daemon runs the order. 200: the daemon knows the id and sends its result frame again.
     public func send(_ order: WorkOrder) async throws {
         let (status, data) = try await post("/v1/orders", order)
-        switch status {
-        case 200..<300: return
-        case 401: throw ProviderError.unauthorized
-        case 403: throw ProviderError.forbidden
-        default: throw ProviderError.vendor(code: String(status), message: Self.error(data))
-        }
+        if !(200..<300).contains(status) { throw DaemonClient.refusal(status, data) }
     }
 
     public func messages() -> AsyncStream<RunnerMessage> {
@@ -62,9 +57,7 @@ public final class DaemonRunnerTransport: RunnerTransport, RunnerAnswerSending, 
         case 200..<300: return .sent
         case 409: return .alreadyAnswered
         case 404, 410: return .gone
-        case 401: throw ProviderError.unauthorized
-        case 403: throw ProviderError.forbidden
-        default: throw ProviderError.vendor(code: String(r.0), message: error(r.1))
+        default: throw DaemonClient.refusal(r.0, r.1)
         }
     }
 
@@ -81,10 +74,5 @@ public final class DaemonRunnerTransport: RunnerTransport, RunnerAnswerSending, 
         } catch let e as ProviderError { throw e } catch {
             throw ProviderError.transport(error.localizedDescription)
         }
-    }
-
-    private static func error(_ data: Data) -> String {
-        struct Body: Decodable { let error: String }
-        return (try? JSONDecoder().decode(Body.self, from: data))?.error ?? String(decoding: data.prefix(200), as: UTF8.self)
     }
 }

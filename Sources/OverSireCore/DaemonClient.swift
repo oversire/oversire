@@ -250,12 +250,19 @@ public final class DaemonClient: Sendable {
     }
 
     package static func check(_ data: Data, _ resp: HTTPURLResponse) throws -> Data {
-        switch resp.statusCode {
-        case 200..<300: return data
-        case 401: throw ProviderError.unauthorized
-        case 403: throw ProviderError.forbidden
-        case 404: throw ProviderError.notFound
-        default: throw ProviderError.vendor(code: String(resp.statusCode), message: String(decoding: data.prefix(200), as: UTF8.self))
+        if (200..<300).contains(resp.statusCode) { return data }
+        throw refusal(resp.statusCode, data)
+    }
+
+    /// The error of a reply that is not 2xx. A 403 with a JSON `{"error": ...}` body keeps the daemon text.
+    public static func refusal(_ status: Int, _ data: Data) -> ProviderError {
+        struct Body: Decodable { let error: String }
+        let text = (try? JSONDecoder().decode(Body.self, from: data))?.error
+        switch status {
+        case 401: return .unauthorized
+        case 403: return text.map { .vendor(code: "forbidden", message: $0) } ?? .forbidden
+        case 404: return .notFound
+        default: return .vendor(code: String(status), message: text ?? String(decoding: data.prefix(200), as: UTF8.self))
         }
     }
 

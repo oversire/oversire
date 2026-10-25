@@ -12,9 +12,17 @@ final class GroupJoinTests: XCTestCase {
     }
 
     func testReasonUsesTheErrorOfTheBody() {
-        XCTAssertEqual(DaemonClient.reason(ProviderError.vendor(code: "409", message: #"{"error":"group: this machine is in a group"}"#)),
-                       "This machine is in a group")
+        XCTAssertEqual(DaemonClient.reason(DaemonClient.refusal(409, Data(#"{"error":"group: this machine is in a group"}"#.utf8))),
+                       "This machine is in a group.")
         XCTAssertEqual(DaemonClient.reason(ProviderError.forbidden), "The code is not valid or was used.")
+    }
+
+    func testRefusalKeepsTheDaemonText() {
+        let allow = DaemonClient.refusal(403, Data(#"{"error":"The allow list has no repo /src/a."}"#.utf8))
+        XCTAssertEqual(allow, .vendor(code: "forbidden", message: "The allow list has no repo /src/a."))
+        XCTAssertEqual(allow.message, "The allow list has no repo /src/a.")
+        XCTAssertEqual(DaemonClient.refusal(403, Data()), .forbidden)
+        XCTAssertEqual(DaemonClient.refusal(500, Data("boom".utf8)), .vendor(code: "500", message: "boom"))
     }
 
     func testGroupRoutes() async throws {

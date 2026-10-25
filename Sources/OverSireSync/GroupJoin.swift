@@ -75,11 +75,11 @@ extension DaemonClient {
         switch e {
         case .forbidden: return "The code is not valid or was used."
         case .notFound: return "The daemon does not know this route. Update oversire."
-        case .vendor(let code, let body):
-            struct Body: Decodable { let error: String? }
-            let text = (try? JSONDecoder().decode(Body.self, from: Data(body.utf8)))?.error ?? body
+        case .vendor(let code, let text):
             let clean = text.hasPrefix("group: ") ? String(text.dropFirst(7)) : text
-            return clean.isEmpty ? "The daemon answered \(code)." : clean.prefix(1).uppercased() + clean.dropFirst()
+            guard !clean.isEmpty else { return "The daemon answered \(code)." }
+            let line = clean.prefix(1).uppercased() + clean.dropFirst()
+            return ".!?".contains(line.last!) ? line : line + "."
         default: return e.message
         }
     }
