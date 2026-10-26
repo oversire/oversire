@@ -67,6 +67,19 @@ extension GroomAgentTests {
     }
 
     @MainActor
+    func testLongReviewScrollsInsideThePanel() async throws {
+        let r = try await make()
+        let props = (1...30).map { GroomResult.Proposal(kind: .obsolete, keys: ["FAKE-\($0)"], reason: "Not valid.", confidence: .sure) }
+        let rev = GroomAgent.Review(result: GroomResult(proposals: props, skipped: [], findings: []), keys: props.flatMap(\.keys), intake: [:],
+                                    open: 30, scope: .all, skipped: [], rounds: 1, worked: 60, at: Date())
+        let p = panel(r, .ready(rev, nil))
+        p.widthAnchor.constraint(equalToConstant: 900).isActive = true
+        p.layoutSubtreeIfNeeded()
+        XCTAssertEqual(all(p, GroomLine.self).count, 30)
+        XCTAssertLessThan(p.fittingSize.height, 600, "the lines scroll, so the panel cannot make the window taller")
+    }
+
+    @MainActor
     func testReviewWithNoSelectionCannotApply() async throws {
         let r = try await make()
         let rev = review(r)

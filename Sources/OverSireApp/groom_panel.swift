@@ -73,6 +73,7 @@ final class GroomPanel: Card {
         }
         if let p = agent.pill(pk) { head.append(Pill(p.tone, text: p.text)) }
         add(NSStackView(h: head + [Spacer()], spacing: 8))
+        if state.review == nil { GroomBody.forget(pk) }
 
         let open: [NSView] = agent.canReveal ? [ActionButton("Open session ↗") { agent.reveal(pk) }] : []
         switch state {
@@ -161,7 +162,7 @@ final class GroomPanel: Card {
         boxes.forEach { $0.widthAnchor.constraint(equalToConstant: 290).isActive = true }
         let side = NSStackView(v: boxes, spacing: 10)
         side.setContentHuggingPriority(.required, for: .horizontal)
-        add(NSStackView(h: [left, side], spacing: 14, align: .top))
+        add(GroomBody(NSStackView(h: [left, side], spacing: 14, align: .top), keep: pk + ".review"))
 
         let n = changes.filter { picked.contains($0.id) }.count
         let apply = ActionButton("Apply \(n) change\(n == 1 ? "" : "s")", style: .primary) { [agent, pk] in agent.apply(pk) }
@@ -224,8 +225,10 @@ final class GroomPanel: Card {
     /// The line after or before `line`, for the arrow keys.
     func move(from line: GroomLine, by d: Int) {
         guard let i = lines.firstIndex(where: { $0 === line }) else { return }
-        let next = lines.indices.contains(i + d) ? lines[i + d] : nil
-        if let next { window?.makeFirstResponder(next) }
+        guard lines.indices.contains(i + d) else { return }
+        let next = lines[i + d]
+        window?.makeFirstResponder(next)
+        next.scrollToVisible(next.bounds)
     }
 
     // MARK: After Apply
@@ -265,7 +268,7 @@ final class GroomPanel: Card {
         if !list.arrangedSubviews.isEmpty {
             let c = Card(title: nil, padding: 0, spacing: 0, fill: Palette.bg)
             c.add(list)
-            add(c)
+            add(GroomBody(c, keep: pk + ".applied"))
         }
         add(NSTextField.text("\"Undo last Groom\" puts back the states and descriptions that Groom changed, while no other change came after it. The comments stay.",
                              size: 12, color: Palette.dim, lines: 2))
@@ -390,5 +393,61 @@ final class GroomLine: Row {
 
     static func relationWord(_ kind: String) -> String {
         ["blocked_by": "Blocked by", "blocks": "Blocks", "relates_to": "Relates to", "duplicate": "Duplicate of"][kind] ?? kind
+    }
+}
+
+// The lines of a review or a result. They scroll above `cap`. The fit is below the window size (500) and above
+// the Intake table (490): the table gets smaller first, and a long review cannot make the window taller.
+// A rebuild (a toggle) keeps the position.
+private final class GroomBody: NSScrollView {
+    private static var offsets: [String: CGFloat] = [:]
+    private let keep: String
+    private var restored = false
+    private var observer: Any?
+
+    override var scrollerStyle: NSScroller.Style { get { .overlay } set {} }
+
+    init(_ body: NSView, keep: String, cap: CGFloat = 320) {
+        self.keep = keep
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        drawsBackground = false
+        hasVerticalScroller = true
+        autohidesScrollers = true
+        let doc = Flipped()
+        doc.translatesAutoresizingMaskIntoConstraints = false
+        body.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(body)
+        documentView = doc
+        let fit = heightAnchor.constraint(equalTo: doc.heightAnchor)
+        fit.priority = .init(495)
+        NSLayoutConstraint.activate([
+            doc.leadingAnchor.constraint(equalTo: contentView.leadingAnchor), doc.widthAnchor.constraint(equalTo: contentView.widthAnchor),
+            doc.topAnchor.constraint(equalTo: contentView.topAnchor),
+            body.leadingAnchor.constraint(equalTo: doc.leadingAnchor), body.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
+            body.topAnchor.constraint(equalTo: doc.topAnchor), body.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
+            heightAnchor.constraint(lessThanOrEqualToConstant: cap), heightAnchor.constraint(greaterThanOrEqualToConstant: min(cap, 120)), fit,
+        ])
+        contentView.postsBoundsChangedNotifications = true
+        observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main) {
+            [weak self] _ in
+            guard let self, self.restored else { return }
+            GroomBody.offsets[self.keep] = self.contentView.bounds.minY
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { observer.map(NotificationCenter.default.removeObserver) }
+
+    /// A new run starts at the top.
+    static func forget(_ pk: String) { offsets = offsets.filter { !$0.key.hasPrefix(pk + ".") } }
+
+    override func layout() {
+        super.layout()
+        guard !restored, let doc = documentView, contentView.bounds.height > 0 else { return }
+        restored = true
+        let y = min(GroomBody.offsets[keep] ?? 0, max(0, doc.frame.height - contentView.bounds.height))
+        guard y > 0 else { return }
+        contentView.scroll(to: NSPoint(x: 0, y: y))
+        reflectScrolledClipView(contentView)
     }
 }
