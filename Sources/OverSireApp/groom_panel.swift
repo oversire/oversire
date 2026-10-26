@@ -158,6 +158,10 @@ final class GroomPanel: Card {
         }
         let left = Card(title: nil, padding: 0, spacing: 0, fill: Palette.bg)
         left.add(list)
+        // Above the stack hugging (250): a short list does not stretch to the side column.
+        let short = left.heightAnchor.constraint(equalToConstant: 0)
+        short.priority = .init(251)
+        short.isActive = true
         let boxes = sideBoxes(review)
         boxes.forEach { $0.widthAnchor.constraint(equalToConstant: 290).isActive = true }
         let side = NSStackView(v: boxes, spacing: 10)
@@ -345,9 +349,8 @@ final class GroomLine: Row {
                                                      size: 12, color: Palette.mut))
         }
         body.addArrangedSubview(NSTextField.text(p.reason, size: 12, color: Palette.mut, lines: 4))
-        if !p.evidence.isEmpty {
-            body.addArrangedSubview(NSStackView(h: p.evidence.prefix(4).map { Chiplet($0, mono: true) }, spacing: 6))
-        }
+        // Text, not chips: an agent often writes a sentence, and a chip does not shrink.
+        for e in p.evidence.prefix(4) { body.addArrangedSubview(NSTextField.text(e, size: 11, color: Palette.dim, lines: 2, mono: true)) }
         var disclosure: Disclosure?
         if p.kind == .merge, let text = p.description, !text.isEmpty, let keep = p.keep {
             let d = Disclosure("New description of \(keep)", id: "groom:" + p.id)

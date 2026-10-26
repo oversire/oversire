@@ -79,6 +79,28 @@ extension GroomAgentTests {
         XCTAssertLessThan(p.fittingSize.height, 600, "the lines scroll, so the panel cannot make the window taller")
     }
 
+    // From the OVERSIRE-343 live check: a long evidence made the page wider than the window,
+    // and the line stretched to the side column with a gap above its text.
+    @MainActor
+    func testLongEvidenceFitsTheWindowAndTheLineKeepsItsHeight() async throws {
+        let r = try await make()
+        let p = GroomResult.Proposal(kind: .merge, keys: ["FAKE-1", "FAKE-2"], keep: "FAKE-2", reason: "Both ask for a JSON output.",
+                                     evidence: ["cli/cmd/oversire/main.go:140 prints the version as plain text with fmt.Fprintln"],
+                                     confidence: .sure, description: "## New\nOne.")
+        let rev = GroomAgent.Review(result: GroomResult(proposals: [p], skipped: [], findings: []), keys: ["FAKE-1", "FAKE-2"], intake: [:],
+                                    open: 2, scope: .all, skipped: [], rounds: 1, worked: 60, at: Date())
+        let panel = panel(r, .ready(rev, nil))
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 740, height: 900))
+        host.addSubview(panel)
+        let w = panel.widthAnchor.constraint(equalToConstant: 740)
+        w.priority = .init(500)
+        NSLayoutConstraint.activate([panel.leadingAnchor.constraint(equalTo: host.leadingAnchor), panel.topAnchor.constraint(equalTo: host.topAnchor), w])
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(panel.frame.width, 740, accuracy: 0.5)
+        let line = try XCTUnwrap(all(panel, GroomLine.self).first)
+        XCTAssertEqual(line.frame.height, line.fittingSize.height, accuracy: 1)
+    }
+
     @MainActor
     func testReviewWithNoSelectionCannotApply() async throws {
         let r = try await make()
