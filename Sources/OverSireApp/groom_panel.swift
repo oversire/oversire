@@ -424,12 +424,14 @@ private final class GroomBody: NSScrollView {
         documentView = doc
         let fit = heightAnchor.constraint(equalTo: doc.heightAnchor)
         fit.priority = .init(495)
+        // Unwrapped text, so never more than the true height: a short list gives no empty area.
+        let least = heightAnchor.constraint(greaterThanOrEqualToConstant: min(cap, 120, body.fittingSize.height))
         NSLayoutConstraint.activate([
             doc.leadingAnchor.constraint(equalTo: contentView.leadingAnchor), doc.widthAnchor.constraint(equalTo: contentView.widthAnchor),
             doc.topAnchor.constraint(equalTo: contentView.topAnchor),
             body.leadingAnchor.constraint(equalTo: doc.leadingAnchor), body.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
             body.topAnchor.constraint(equalTo: doc.topAnchor), body.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
-            heightAnchor.constraint(lessThanOrEqualToConstant: cap), heightAnchor.constraint(greaterThanOrEqualToConstant: min(cap, 120)), fit,
+            heightAnchor.constraint(lessThanOrEqualToConstant: cap), least, fit,
         ])
         contentView.postsBoundsChangedNotifications = true
         observer = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: contentView, queue: .main) {

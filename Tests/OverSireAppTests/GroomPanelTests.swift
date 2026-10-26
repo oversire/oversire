@@ -125,6 +125,20 @@ extension GroomAgentTests {
         XCTAssertNotNil(button(panel(r, .applied(rev, GroomOutcome(written: [ids[0]]))), "Undo last Groom"))
     }
 
+    // From the OVERSIRE-343 live check: one applied line had an empty area of 120 pt under it.
+    @MainActor
+    func testShortAppliedListHasNoEmptyArea() async throws {
+        let r = try await make()
+        let rev = review(r)
+        let p = panel(r, .applied(rev, GroomOutcome(written: [rev.changes[0].id])))
+        p.widthAnchor.constraint(equalToConstant: 900).isActive = true
+        p.layoutSubtreeIfNeeded()
+        let scroll = try XCTUnwrap(all(p, NSScrollView.self).first)
+        let doc = try XCTUnwrap(scroll.documentView)
+        XCTAssertLessThan(doc.frame.height, 120)
+        XCTAssertEqual(scroll.frame.height, doc.frame.height, accuracy: 1)
+    }
+
     @MainActor
     func testIntakeHeaderHasGroomButtonAndHint() async throws {
         let r = try await make()
