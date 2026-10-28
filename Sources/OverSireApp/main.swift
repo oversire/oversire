@@ -23,6 +23,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var popover: NSPopover!
     var isPulsing = false
     var iconKey: MenuIconState?
+    var iconShots = 0
     var refreshInFlight = false { didSet { trackRefresh() } }
     private var refreshToken: BusyTracker.Token?
     var pendingCompletion: (() -> Void)?
@@ -805,16 +806,17 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let k = MenuIconState(runs: visibleGrouped(grouped), waitingAgents: agentIndex.agents.values.filter { $0.phase == .waiting }.count,
                               unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot,
                               problems: openProblems.count, questions: questions.open.count)
-        statusItem.button?.toolTip = "OverSire \u{2014} \(k.label)"
         // The shots in the open snap baskets, as a count next to the icon.
         let shots = snap.shotCount
+        // Each set below redraws the item on each display, which fires the appearance
+        // observer again. Without this check the two loop and use a full CPU core.
+        guard k != iconKey || shots != iconShots else { return }
+        iconKey = k
+        iconShots = shots
+        statusItem.button?.toolTip = "OverSire \u{2014} \(k.label)"
         statusItem.button?.imagePosition = .imageLeading
         statusItem.button?.title = shots > 0 ? "\(shots)" : ""
         statusItem.button?.setAccessibilityValue(shots > 0 ? "\(shots) shot\(shots == 1 ? "" : "s") in the snap basket" : nil)
-        // Setting the image redraws the item on each display, which fires the appearance
-        // observer again. Without this check the two loop and use a full CPU core.
-        guard k != iconKey else { return }
-        iconKey = k
         statusItem.button?.image = statusBadgedIcon(ghIcon, color: k.color, badge: k.badge, dot: k.dot, problem: k.problems > 0)
         statusItem.button?.setAccessibilityLabel("OverSire, \(k.label)")
         if k.active { startAnimation() } else { stopAnimation() }

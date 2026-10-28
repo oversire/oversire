@@ -49,9 +49,12 @@ final class ProjectStore {
     private let statePath: String
     private let activityPath: String
     private var timer: Timer?
-    private var readActivity = Set<String>()
-    private var readItems = Set<String>()
-    private var activityCache: [ActivityEntry] = []
+    private var readActivity = Set<String>() { didSet { unread = nil } }
+    private var readItems = Set<String>() { didSet { unread = nil } }
+    private var activityCache: [ActivityEntry] = [] { didSet { unread = nil } }   // newest first
+    private var unread: (count: Int, items: Set<String>)?
+    // Each item that was in a snapshot. An item that comes back over the item limit is not new.
+    private var seenItems = Set<String>()
     private var timelineCache: [String: (stamp: String, entries: [ActivityEntry])] = [:]
     private var optionCache: [String: (options: ItemOptions, at: Date)] = [:]
     private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
@@ -120,7 +123,7 @@ final class ProjectStore {
         Task { [weak self] in
             guard let self = self else { return }
             var fresh: [ProjectSnapshot] = []
-            var kept: [String: Set<String>] = [:]
+            var gone: [String: Set<String>] = [:]
             var error: String?
             var errors: [String: String] = [:]
             for (n, (p, client, previous)) in jobs.enumerated() {
@@ -141,7 +144,7 @@ final class ProjectStore {
                 switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
                 case .success(let s):
                     fresh.append(s)
-                    kept[p.ref.storeKey] = await ProjectStore.stillThere(client, previous, s)
+                    gone[p.ref.storeKey] = await ProjectStore.gone(client, previous, s)
                     line(.ok, "\(s.items.count) items")
                 case .failure(let e):
                     error = "\(p.ref.workspace): " + e.message
@@ -162,7 +165,7 @@ final class ProjectStore {
                                          uniquingKeysWith: { a, _ in a })
                     changed.formUnion(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
                     let before = self.snapshots[key].map(ProjectStore.digest)
-                    self.absorb(snap, kept: kept[key] ?? [])
+                    self.absorb(snap, gone: gone[key] ?? [])
                     if before != self.snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
                 }
                 self.save()
@@ -204,7 +207,7 @@ final class ProjectStore {
                         var c = e
                         c.projectKey = projectKey
                         c.itemId = itemId
-                        c.unread = !self.readActivity.contains(c.id) && !self.readItems.contains(itemId)
+                        c.unread = self.isUnread(c)
                         return c
                     }
                     self.timelineCache[cacheKey] = (stamp, entries)
@@ -218,22 +221,32 @@ final class ProjectStore {
     }
 
     func activity(limit: Int, project: String?) -> [ActivityEntry] {
-        let rows = activityCache.filter { project == nil || $0.projectKey == project }
-            .sorted { $0.at > $1.at }
-        return Array(rows.prefix(limit)).map { e in
+        Array(activityCache.lazy.filter { project == nil || $0.projectKey == project }.prefix(limit).map { e in
             var c = e
-            c.unread = !readActivity.contains(e.id) && !readItems.contains(e.itemId)
+            c.unread = self.isUnread(e)
             return c
+        })
+    }
+
+    // The menu icon and each list row ask this, so it must be cheap.
+    private func unreadRows() -> (count: Int, items: Set<String>) {
+        if let unread { return unread }
+        var n = 0, items = Set<String>()
+        for e in activityCache.prefix(500) where isUnread(e) {
+            n += 1
+            items.insert(e.itemId)
         }
+        unread = (n, items)
+        return (n, items)
     }
 
-    func unreadCount() -> Int {
-        activity(limit: 500, project: nil).filter(\.unread).count
+    private func isUnread(_ e: ActivityEntry) -> Bool {
+        !readActivity.contains(e.id) && !readItems.contains(e.itemId)
     }
 
-    func isUnread(itemId: String) -> Bool {
-        activity(limit: 500, project: nil).contains { $0.itemId == itemId && $0.unread }
-    }
+    func unreadCount() -> Int { unreadRows().count }
+
+    func isUnread(itemId: String) -> Bool { unreadRows().items.contains(itemId) }
 
     func markRead(itemId: String) {
         guard readItems.insert(itemId).inserted else { return }
@@ -599,26 +612,32 @@ final class ProjectStore {
         publish(DataChange(.projects, origin: .user))
     }
 
-    /// The items that left the snapshot but still exist in the tracker. They only fell out of the item limit.
+    /// The items that left the snapshot and that the tracker does not find. Other items only fell out of the item limit.
     /// Only a "not found" reply counts as removed; at most 20 checks for each poll.
-    static func stillThere(_ client: Tracker, _ old: ProjectSnapshot?, _ new: ProjectSnapshot) async -> Set<String> {
+    static func gone(_ client: Tracker, _ old: ProjectSnapshot?, _ new: ProjectSnapshot) async -> Set<String> {
         guard let old else { return [] }
         let ids = Set(new.items.map(\.id))
         var out = Set<String>()
-        for (n, item) in old.items.filter({ !ids.contains($0.id) }).enumerated() {
-            guard n < 20, let ref = item.ref(in: new.summary.ref) else { out.insert(item.id); continue }
-            do { _ = try await client.detail(ref); out.insert(item.id) } catch ProviderError.notFound {} catch { out.insert(item.id) }
+        for item in old.items.filter({ !ids.contains($0.id) }).prefix(20) {
+            guard let ref = item.ref(in: new.summary.ref) else { continue }
+            do { _ = try await client.detail(ref) } catch ProviderError.notFound { out.insert(item.id) } catch {}
         }
         return out
     }
 
-    func absorb(_ snap: ProjectSnapshot, kept: Set<String> = []) {
+    func absorb(_ snap: ProjectSnapshot, gone: Set<String> = []) {
         let key = snap.summary.ref.storeKey
         let old = snapshots[key]
-        let changes = ProjectStore.diff(old, snap).filter { c in
-            if case .removed = c.1 { return !kept.contains(c.itemId) }
-            return true
+        let all = ProjectStore.diff(old, snap)
+        let back = Set(all.compactMap { c -> String? in
+            if case .added = c.1, seenItems.contains(c.itemId) { return c.itemId }
+            return nil
+        })
+        let changes = all.filter { c in
+            if case .removed = c.1 { return gone.contains(c.itemId) }
+            return !back.contains(c.itemId)
         }
+        seenItems.formUnion(snap.items.map(\.id))
         let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
@@ -653,21 +672,43 @@ final class ProjectStore {
         let known = Set(activityCache.map(\.id))
         let fresh = entries.filter { !known.contains($0.id) }
         guard !fresh.isEmpty else { return }
-        activityCache.append(contentsOf: fresh)
         let cutoff = Date().addingTimeInterval(-14 * 86400)
-        activityCache.removeAll { $0.at < cutoff }
-        let text = activityCache.compactMap { e -> String? in
-            guard let d = try? JSONEncoder().encode(e) else { return nil }
+        activityCache = (fresh + activityCache).filter { $0.at >= cutoff }.sorted { $0.at > $1.at }
+        writeActivity()
+    }
+
+    // Oldest first in the file.
+    private func writeActivity() {
+        let enc = JSONEncoder()
+        let text = activityCache.reversed().compactMap { e -> String? in
+            guard let d = try? enc.encode(e) else { return nil }
             return String(data: d, encoding: .utf8)
         }.joined(separator: "\n") + "\n"
         try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
         try? text.write(toFile: activityPath, atomically: true, encoding: .utf8)
     }
 
+    /// Drops the rows of items that only moved across the item limit: an "added" after an older row,
+    /// and a "removed" before a newer row of the same item. Newest first, in and out.
+    static func withoutChurn(_ rows: [ActivityEntry]) -> [ActivityEntry] {
+        var oldest: [String: String] = [:]
+        for e in rows { oldest[e.itemId] = e.id }
+        var newer = Set<String>()
+        return rows.filter { e in
+            defer { newer.insert(e.itemId) }
+            switch e.change {
+            case .added: return oldest[e.itemId] == e.id
+            case .removed: return !newer.contains(e.itemId)
+            default: return true
+            }
+        }
+    }
+
     private struct Disk: Codable {
         var snapshots: [String: ProjectSnapshot]
         var readActivity: [String]
         var readItems: [String]
+        var seenItems: [String]?
     }
 
     private func load() {
@@ -676,17 +717,24 @@ final class ProjectStore {
             snapshots = disk.snapshots.mapValues { ProjectStore.localized($0) }
             readActivity = Set(disk.readActivity)
             readItems = Set(disk.readItems)
+            seenItems = Set(disk.seenItems ?? [])
         }
         let raw = (try? String(contentsOfFile: activityPath, encoding: .utf8)) ?? ""
         let dec = JSONDecoder()
-        activityCache = raw.split(separator: "\n").compactMap {
-            guard let d = $0.data(using: .utf8) else { return nil }
+        let rows = raw.split(separator: "\n").compactMap { line -> ActivityEntry? in
+            guard let d = line.data(using: .utf8) else { return nil }
             return try? dec.decode(ActivityEntry.self, from: d)
+        }.sorted { $0.at > $1.at }
+        activityCache = ProjectStore.withoutChurn(rows)
+        if activityCache.count < rows.count { writeActivity() }
+        if seenItems.isEmpty {
+            seenItems = Set(snapshots.values.flatMap { $0.items.map(\.id) } + activityCache.map(\.itemId))
         }
     }
 
     private func save() {
-        let disk = Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems))
+        let disk = Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems),
+                        seenItems: Array(seenItems))
         guard let data = try? JSONEncoder().encode(disk) else { return }
         try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
         try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)

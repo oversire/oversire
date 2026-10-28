@@ -108,7 +108,7 @@ final class ActivityTests: XCTestCase {
     func testARemovedItemKeepsItsTitle() throws {
         let d = TestAppData()
         d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1"), plane("u-2", key: "OVERSIRE-2")]))
-        d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1")]))
+        d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1")]), gone: ["u-2"])
         let saved = try XCTUnwrap(d.projectStore.activity(limit: 10, project: nil).first)
         XCTAssertEqual(saved.itemKey, "OVERSIRE-2")
         XCTAssertEqual(saved.title, "Title of OVERSIRE-2")
@@ -130,12 +130,46 @@ final class ActivityTests: XCTestCase {
         let summary = ProjectSummary(ref: fake.project, identifier: "FAKE", title: "Fake", url: "", closed: false)
         let before = ProjectSnapshot(summary: summary, statusOptions: [], items: [kept, gone], fetchedAt: Date())
         let after = ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date())
-        let still = await ProjectStore.stillThere(fake, before, after)
-        XCTAssertEqual(still, [there.id], "only the item that Plane does not find counts as removed")
+        let found = await ProjectStore.gone(fake, before, after)
+        XCTAssertEqual(found, ["no-such-id"], "only the item that Plane does not find counts as removed")
 
         let d = TestAppData()
         d.projectStore.absorb(before)
-        d.projectStore.absorb(after, kept: still)
+        d.projectStore.absorb(after, gone: found)
         XCTAssertEqual(d.projectStore.activity(limit: 10, project: nil).map(\.itemKey), ["FAKE-99"])
+    }
+
+    @MainActor
+    func testAnItemThatComesBackIsNotAdded() {
+        let d = TestAppData()
+        let one = plane("u-1", key: "OVERSIRE-1"), two = plane("u-2", key: "OVERSIRE-2")
+        d.projectStore.absorb(snap([one, two]))
+        d.projectStore.absorb(snap([one]))
+        d.projectStore.absorb(snap([one, two, plane("u-3", key: "OVERSIRE-3")]))
+        XCTAssertEqual(d.projectStore.activity(limit: 10, project: nil).map(\.itemKey), ["OVERSIRE-3"],
+                       "the item limit dropped OVERSIRE-2 for one poll; only OVERSIRE-3 is new")
+    }
+
+    func testChurnRowsAreDropped() {
+        let t0 = Date(timeIntervalSince1970: 1000)
+        func row(_ item: String, _ c: ItemChange, _ s: Double) -> ActivityEntry {
+            ActivityEntry.make(projectKey: "p", itemId: item, change: c, actor: nil, url: "", at: t0 + s)
+        }
+        let rows = [row("a", .added, 5), row("a", .removed, 4), row("a", .added, 3), row("a", .closed, 2), row("a", .added, 1),
+                    row("b", .removed, 6), row("c", .added, 7)].sorted { $0.at > $1.at }
+        let kept = ProjectStore.withoutChurn(rows).map { "\($0.itemId) \($0.change.text)" }
+        XCTAssertEqual(kept, ["c Added", "b Removed", "a Closed", "a Added"])
+    }
+
+    @MainActor
+    func testUnreadCountFollowsTheReadMarks() {
+        let d = TestAppData()
+        d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1")]))
+        d.projectStore.absorb(snap([plane("u-1", key: "OVERSIRE-1"), plane("u-2", key: "OVERSIRE-2")]))
+        XCTAssertEqual(d.projectStore.unreadCount(), 1)
+        XCTAssertTrue(d.projectStore.isUnread(itemId: "u-2"))
+        d.projectStore.markRead(itemId: "u-2")
+        XCTAssertEqual(d.projectStore.unreadCount(), 0)
+        XCTAssertFalse(d.projectStore.isUnread(itemId: "u-2"))
     }
 }
