@@ -251,15 +251,17 @@ public struct WorkOrderResult: Hashable, Sendable, Codable {
     public var digest: SessionDigest?    // sessionHistory
     public var paneKey: String?          // sessionStart: the DaemonSession id
     public var turnStarted: Bool?        // sessionStart, sessionSend
+    public var reused: Bool?             // sessionStart: the live session of the start key, not a new one
     public var error: String?
 
     public init(session: SessionRef? = nil, lines: [String]? = nil, digest: SessionDigest? = nil, paneKey: String? = nil,
-                turnStarted: Bool? = nil, error: String? = nil) {
+                turnStarted: Bool? = nil, reused: Bool? = nil, error: String? = nil) {
         self.session = session
         self.lines = lines
         self.digest = digest
         self.paneKey = paneKey
         self.turnStarted = turnStarted
+        self.reused = reused
         self.error = error
     }
 }

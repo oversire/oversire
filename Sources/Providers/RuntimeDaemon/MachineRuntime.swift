@@ -116,8 +116,10 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         }
         let res = try await run(.start(r), runtime: rt)
         guard let s = res.session else { throw ProviderError.decoding("\(machine) started no session") }
-        lock.withLock { runtimeOf[s.workspace.id] = rt }
-        return Launch(card: s.workspace.id, handle: s.id, paneKey: res.paneKey ?? "", turnStarted: res.turnStarted ?? false)
+        // A reused session can be on another runtime than the one asked.
+        let owner = rts.contains { $0.id == s.workspace.account.provider.rawValue } ? s.workspace.account.provider.rawValue : rt
+        lock.withLock { runtimeOf[s.workspace.id] = owner }
+        return Launch(card: s.workspace.id, handle: s.id, paneKey: res.paneKey ?? "", turnStarted: res.turnStarted ?? false, reused: res.reused ?? false)
     }
 
     // MARK: SessionIO

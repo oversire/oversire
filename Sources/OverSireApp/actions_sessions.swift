@@ -29,6 +29,8 @@ struct SessionActions {
                     }
                     d.agentIndex.start(f.item, root: root, agent: a.string("agent").flatMap { $0.isEmpty ? nil : $0 }) { r in
                         switch r {
+                        case .success(let l) where l.reused:
+                            done(.notAllowed("\(f.item.key) has a live session on \(d.agentIndex.place) already, so no new session started. OverSire shows that session. Stop it to start a new one."))
                         case .success: done(.ok(summary: "A session for \(f.item.key) starts in \((root as NSString).lastPathComponent)."))
                         case .failure(let e): done(.failed(e.message))
                         }

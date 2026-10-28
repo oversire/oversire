@@ -128,12 +128,15 @@ public struct Launch: Hashable, Sendable {
     public let handle: String
     public let paneKey: String
     public let turnStarted: Bool
+    /// The runtime gave back the live session of the start key. It started no session.
+    public let reused: Bool
 
-    public init(card: String, handle: String, paneKey: String, turnStarted: Bool) {
+    public init(card: String, handle: String, paneKey: String, turnStarted: Bool, reused: Bool = false) {
         self.card = card
         self.handle = handle
         self.paneKey = paneKey
         self.turnStarted = turnStarted
+        self.reused = reused
     }
 }
 

@@ -172,6 +172,19 @@ final class MachineRuntimeTests: XCTestCase {
         guard case .read(_, 5, true) = d.runtime.orders.last!.order else { return XCTFail() }
     }
 
+    func testAKeyedLaunchSaysWhenItGivesTheLiveSession() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        try await rt.refresh()
+        let req = LaunchRequest(repo: repo, name: "TOWERTAIL-9", agent: .claude, prompt: "Go", key: "work:TOWERTAIL-9")
+        let first = try await rt.launch(req)
+        XCTAssertFalse(first.reused)
+        let again = try await rt.launch(req)
+        XCTAssertTrue(again.reused)
+        XCTAssertEqual([again.card, again.handle, again.paneKey], [first.card, first.handle, first.paneKey])
+        XCTAssertEqual(d.runtime.workspaces.flatMap { $0.terminals ?? [] }.count, 1, "no second terminal")
+    }
+
     func testALaunchSendsModelEffortAndProfile() async throws {
         let d = FakeDaemon()
         let rt = local(d)

@@ -3,7 +3,7 @@ import OverSireCore
 
 /// The runtime routes of a FakeDaemon: runtimes, repos, workspaces, files, reveal and direct work orders.
 /// The default values are the ones of the contract fixtures. A start makes a workspace with one terminal and one session.
-/// A start with a key gives the live session of the key, as the daemon does.
+/// A start with a key gives the live session of the key on the same runtime, as the daemon does.
 public final class FakeDaemonRuntimes: @unchecked Sendable {
     private let lock = NSLock()
     private var _runtimes: [DaemonRuntime] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.223",
@@ -120,9 +120,9 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
         let gone = DaemonOrderState(state: .failed, result: WorkOrderResult(error: "terminal_not_found"))
         switch o.order {
         case .start(let r):
-            if let k = r.key, let s = sessions.first(where: { $0.key == k }), let ws = s.workspace {
+            if let k = r.key, let s = sessions.first(where: { $0.key == k && $0.runtime == o.runtime.rawValue }), let ws = s.workspace {
                 let ref = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: o.runtime, id: "local"), id: ws), id: s.terminal ?? s.id)
-                return DaemonOrderState(state: .done, result: WorkOrderResult(session: ref, paneKey: s.id))
+                return DaemonOrderState(state: .done, result: WorkOrderResult(session: ref, paneKey: s.id, reused: true))
             }
             made += 1
             let name = r.workspaceName ?? "session-\(made)"
