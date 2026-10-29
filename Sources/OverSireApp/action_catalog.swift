@@ -17,7 +17,7 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         let people = people ?? AppPeople.live(data)
         self.link = link
         self.people = people
-        all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs
+        all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs + RunbookActions(link: link).specs
             + RepoActions(link: link).specs + IntakeActions(link: link).specs + MachineActions(link: link).specs
             + ReadActions(link: link).specs + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
         byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -96,7 +96,7 @@ extension Route {
     /// The action domains of the page, and the args that the page gives.
     var actionSubject: (domains: [String], args: [String: JSONValue]) {
         switch self {
-        case .item(let key, _): return (["item", "session", "queue", "status"], ["key": .string(key)])
+        case .item(let key, _): return (["item", "session", "queue", "status", "runbook"], ["key": .string(key)])
         case .project(let key): return (["project", "item"], ["project": .string(key)])
         case .intake(let key): return (["intake"], key.map { ["project": .string($0)] } ?? [:])
         case .intakeItem(let key, let id): return (["intake"], ["project": .string(key), "id": .string(id)])
