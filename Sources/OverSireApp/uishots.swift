@@ -1016,6 +1016,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if p.hasPrefix("assistant:") {
                         self.assistantState(String(p.dropFirst(10)), in: w)
+                    } else if p.hasPrefix("runbooks:") {
+                        self.runbooksState(String(p.dropFirst(9)), in: w)
                     } else if p.hasPrefix("runbook:") {
                         // runbook:working, history, rounds, gate or paused: a run of Full on OVERSIRE-349 in that state.
                         if let k = self.runbookSample(String(p.dropFirst(8))) { w.router.go(.item(k, .runbook)) } else { print("UISHOTS no runbook sample \(p)") }
@@ -1029,6 +1031,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 }
                 // The chat views and the Markdown web views need time.
                 if p.hasPrefix("assistant:") { steps += Array(repeating: {}, count: 4) }
+                if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
                 steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
@@ -1655,6 +1658,7 @@ extension UIShots {
         "approve": "Merge #212 when CI is green.",
         "machines": "What does the agent on studio-mini do now?",
         "problems": "Rerun the Linux tests of SLING-88 on studio-mini.",
+        "runbooks": "Add a step after Implement that writes the missing tests with codex.",
     ]
 
     func makeAssistant() -> AssistantController? {
@@ -1690,6 +1694,18 @@ extension UIShots {
             spec("machine.status", "Read the machine", .read) { a in .failed("\(a.string("machine") ?? "The Mac") does not answer.") },
             spec("queue.list", "Read the queue", .read) { _ in .ok(summary: "4 items wait") },
             spec("pr.merge", "Merge the PR", .outward) { _ in .ok(summary: "#212 is merged") },
+            // Read kind: the shot shows the change, not the approval card.
+            spec("runbook.update", "Change runbook", .read) { a in
+                await MainActor.run {
+                    let step = RunbookStep(id: "tests", name: "Write Tests", agent: "codex",
+                                           prompt: "Write the missing tests for {key} in {worktree}. Then run {done} --verdict done --note \"<one line>\".")
+                    RUNBOOK_UNDO.change("Change Full") { c in
+                        guard let i = c.runtime.runbooks.firstIndex(where: { $0.id == a.string("id") }) else { return }
+                        c.runtime.runbooks[i].steps.insert(step, at: 4)
+                    }
+                }
+                return .ok(summary: "Full is saved: Plan & Refine → Review Plan → Implement Plan Fixes → Implement → Write Tests → Review Implementation → Implement Fixes.")
+            },
             spec("ui.show", "Show a page", .read) { a in
                 let route = a.string("route") ?? "home"
                 return .ok(summary: "Shows \(route)", parts: [.navigation(route: route, focus: nil, from: "home")])
@@ -1729,12 +1745,54 @@ extension UIShots {
             [text("On **studio-mini**, Claude Code works on SLING-88. It runs the Linux tests again after a fix in the parser.\n\n"
                   + "- Started 12 min ago\n- 3 of 5 steps done\n\nReplies: Show the session | Ask it for a status"), usage, end],
         ])
+        cli.script(p["runbooks"]!, [
+            [call("r1", "runbook_update", ["id": .string("full"), "patch": .array([.object([
+                "op": .string("add"), "after": .string("implement"),
+                "step": .object(["name": .string("Write Tests"), "agent": .string("codex")]),
+            ])])]), usage, end],
+            [text("I added **Write Tests** as step 5, after Implement. It runs codex. The check is green: 7 steps.\n\nUndo on the page reverts it."), usage, end],
+        ])
         cli.script(p["problems"]!, [[.fail(.unavailable("Claude Code reached its usage limit."))]])
         key.script(p["problems"]!, [
             [text("First I check that studio-mini is on."),
              call("p1", "machine_status", ["machine": .string("studio-mini")]), usage, end],
             [.event(.error(code: "offline", message: "studio-mini does not answer.")), end],
         ])
+    }
+
+    /// runbooks:<state>: list, open (the Implement step), problem (two problems on the check line) or assistant (an assistant change).
+    /// Each state starts from the default runbooks.
+    func runbooksState(_ state: String, in w: AppWindow) {
+        PROJECTS_CFG.runtime.runbooks = PROJECTS_CFG.runtime.defaultRunbooks
+        let e = SettingsPage.runbookEditor
+        e.select(Runbook.fullID)
+        switch state {
+        case "list":
+            break
+        case "open":
+            e.open = "implement"
+        case "problem":
+            e.open = "review"
+            RUNBOOK_UNDO.change("Change Full") { c in
+                guard let i = c.runtime.runbooks.firstIndex(where: { $0.id == Runbook.fullID }) else { return }
+                c.runtime.runbooks[i].steps[3].agent = "gpt-max"
+                c.runtime.runbooks[i].steps[4].review?.fix = "plan-fixes"
+            }
+        case "assistant":
+            break
+        default:
+            print("UISHOTS bad runbooks state \(state)")
+        }
+        w.router.go(.settings(.agents, tab: .runbooks))
+        bus.post(.config())
+        w.gate.flushNow()
+        guard state == "assistant" else { w.hideAssistant(); return }
+        w.showAssistant()
+        guard let p = w.assistantPanel, p.controller != nil else { return }
+        p.composer.clear()
+        p.newChat()
+        p.composer.textView.string = Self.assistantPrompts["runbooks"]!
+        p.composer.submit()
     }
 
     /// assistant:<state>: closed, setup, new, attach, working, nav, approve, machines, chats, problems.

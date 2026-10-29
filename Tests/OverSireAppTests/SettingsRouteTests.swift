@@ -56,12 +56,14 @@ final class SettingsRouteTests: XCTestCase {
         XCTAssertEqual(open("oversire://settings/projects/nope"), .settings(.projects, anchor: "nope"), "an unknown tab is an anchor")
         XCTAssertEqual(open("oversire://settings/agents#queue"), .settings(.agents, anchor: "queue"))
         XCTAssertEqual(open("oversire://settings/agents/queue"), .settings(.agents, anchor: "queue"))
+        XCTAssertEqual(open("oversire://settings/agents/runbooks"), .settings(.agents, tab: .runbooks))
+        XCTAssertEqual(open("oversire://settings/projects/runbooks"), .settings(.projects, anchor: "runbooks"), "a tab of another page is an anchor")
         XCTAssertEqual(open("oversire://settings/repos#problems"), .settings(.projects, tab: .repos, anchor: "problems"))
     }
 
     func testRoundTrip() {
         let routes: [Route] = Route.SettingsPage.allCases.map { .settings($0) }
-            + Route.SettingsTab.allCases.map { .settings(.projects, tab: $0) }
+            + Route.SettingsTab.allCases.map { .settings($0.page, tab: $0) }
             + [.settings(.agents, anchor: "queue"), .settings(.projects, tab: .linking, anchor: "writeback")]
         for r in routes {
             XCTAssertEqual(Route(url: r.url), r, r.path)

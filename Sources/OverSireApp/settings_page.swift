@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireAssistant
 import OverSireCore
 
 // A switch with a title and a note. It saves the config when it flips.
@@ -56,7 +57,11 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private var anchor: String? { if case .settings(_, _, let a) = route { return a }; return nil }
     var app: GHActionsBar? { NSApp.delegate as? GHActionsBar }
 
-    override var isEditing: Bool { super.isEditing || promptDirty || groomDirty }
+    // Text in the assistant panel is not an edit of the page: a change of the assistant shows at once.
+    override var isEditing: Bool {
+        let inPage = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) ?? false
+        return super.isEditing && inPage || promptDirty || groomDirty
+    }
     override var watches: DataDomains { [.config, .connection] }
 
     override func build(_ col: NSStackView) {
@@ -82,8 +87,9 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .general: general(body)
         case .accounts: accounts(body)
         case .projects:
-            let strip = TabStrip(Route.SettingsTab.allCases.map(\.title), selected: Route.SettingsTab.allCases.firstIndex(of: tab) ?? 0)
-            strip.onSelect = { [weak self] i in self?.go(.settings(.projects, tab: Route.SettingsTab.allCases[i])) }
+            let tabs = Route.SettingsTab.of(.projects)
+            let strip = TabStrip(tabs.map(\.title), selected: tabs.firstIndex(of: tab) ?? 0)
+            strip.onSelect = { [weak self] i in self?.go(.settings(.projects, tab: tabs[i])) }
             body.addArrangedSubview(strip)
             switch tab {
             case .projects: projects(body)
@@ -95,8 +101,14 @@ final class SettingsPage: Page, NSTextFieldDelegate {
                 repos.identifier = SettingsAnchor.repos.id
                 body.addFull(repos)
             case .linking: linking(body); writeBack(body)
+            case .runbooks: break
             }
-        case .agents: agents(body)
+        case .agents:
+            let runbooks = tab == .runbooks
+            let strip = TabStrip(["Agents and queue", "Runbooks"], selected: runbooks ? 1 : 0)
+            strip.onSelect = { [weak self] i in self?.go(.settings(.agents, tab: i == 1 ? .runbooks : nil)) }
+            body.addArrangedSubview(strip)
+            if runbooks { self.runbooks(body) } else { agents(body) }
         case .machines: machines(body)
         case .ai: ai(body)
         case .notifications: notifications(body)
@@ -163,6 +175,11 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         scroll.reveal(target ?? section, top: section)
         (target ?? (flash != nil ? section.findBox { $0 is ListCard } : nil))?.flash()
         return true
+    }
+
+    override var context: PageContext {
+        guard page == .agents, tab == .runbooks else { return super.context }
+        return Self.runbookEditor.context(route: route, projects: data.projectStore.tracked.map(\.identifier))
     }
 
     /// A settings row id is a section anchor.

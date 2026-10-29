@@ -805,6 +805,18 @@ func runSelfTest() {
         runsPage.receive(DataChange(.runs, repos: ["o/r"]))
         check(quiet == 1 && runsPage.buildCount == 2 && runsPage.lastResult?.changed ?? 0 > 0,
               "page builds: one for the open, none for the same data, one for a changed run (\(quiet), \(runsPage.buildCount))")
+        // Settings › Runbooks opens with the default runbooks and with none.
+        func runbooksPage() -> NSView? {
+            let p = SettingsPage(.settings(.agents, tab: .runbooks), data: shots, router: Router())
+            func find(_ v: NSView) -> NSView? { v.identifier == SettingsAnchor.runbooks.id ? v : v.subviews.lazy.compactMap(find).first }
+            return find(p.view)
+        }
+        let keptRunbooks = PROJECTS_CFG.runtime.runbooks
+        PROJECTS_CFG.runtime.runbooks = PROJECTS_CFG.runtime.defaultRunbooks
+        check(runbooksPage() != nil && SettingsPage.runbookEditor.runbook?.id == Runbook.fullID, "runbooks: the page opens on Full")
+        PROJECTS_CFG.runtime.runbooks = []
+        check(runbooksPage() != nil && SettingsPage.runbookEditor.runbook == nil, "runbooks: the page opens with no runbooks")
+        PROJECTS_CFG.runtime.runbooks = keptRunbooks
         Page.deferBuilds = true
         var ws1 = Workstream(key: "FRITZ-1")
         ws1.checkouts = [Checkout(path: "/w", repo: "o/r", branch: "fritz-1/x", head: "s", key: "FRITZ-1", cardId: nil)]

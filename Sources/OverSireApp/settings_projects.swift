@@ -53,6 +53,15 @@ final class ProjectListView: NSStackView {
             m.toolTip = "This project sends no notifications."
             views.append(m)
         }
+        let books = PROJECTS_CFG.runtime.runbooks
+        if !books.isEmpty {
+            let current = PROJECTS_CFG.runbook(for: key)?.id
+            let pick = PopUp(books.map(\.name), selected: books.firstIndex { $0.id == current } ?? 0, label: "Runbook of \(p.title)") { i in
+                RUNBOOK_UNDO.change("Default of \(key)") { $0.setRunbook(books[i].id, for: key) }
+            }
+            pick.toolTip = "The runbook that a start of an item of \(key) uses."
+            views += [NSTextField.text("Runbook", size: 11.5, color: Palette.dim), pick]
+        }
         let b = ActionButton("Settings ›") { [weak self] in self?.open(key) }
         b.setAccessibilityLabel("Settings of \(p.title)")
         views.append(b)

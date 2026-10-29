@@ -49,14 +49,20 @@ enum Route: Equatable {
     // The tabs of the Projects and repos page.
     enum SettingsTab: String, CaseIterable {
         case projects, repos, linking
+        case runbooks
 
         var title: String {
             switch self {
             case .projects: return "Projects"
             case .repos: return "Repos"
             case .linking: return "Linking and write-back"
+            case .runbooks: return "Runbooks"
             }
         }
+
+        var page: SettingsPage { self == .runbooks ? .agents : .projects }
+
+        static func of(_ page: SettingsPage) -> [SettingsTab] { allCases.filter { $0.page == page } }
     }
 
     case home
@@ -162,7 +168,7 @@ enum Route: Equatable {
         if let (p, t, a) = SettingsPage.redirects[head] { return .settings(p, tab: t, anchor: more.first ?? a) }
         guard let p = SettingsPage(rawValue: head) else { return .settings(.general) }
         var tab: SettingsTab?
-        if p == .projects, let t = more.first.flatMap(SettingsTab.init(rawValue:)) { tab = t; more = more.dropFirst() }
+        if let t = more.first.flatMap(SettingsTab.init(rawValue:)), t.page == p { tab = t; more = more.dropFirst() }
         return .settings(p, tab: tab, anchor: more.first)
     }
 

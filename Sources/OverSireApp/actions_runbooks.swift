@@ -125,17 +125,8 @@ struct RunbookActions {
                           kind: .outward, input: ActionSpec.args(["id": Self.id], required: ["id"])) { a in
             await link.run { d, done in
                 guard let b = Self.find(a.string("id")) else { done(Self.unknown(a.string("id"))); return }
-                guard PROJECTS_CFG.runtime.runbooks.count > 1 else { done(.notAllowed("\(b.name) is the last runbook.")); return }
-                if let r = book.open.first(where: { $0.runbook.id == b.id }) {
-                    done(.notAllowed("\(r.item.key) has an open run of \(b.name). Stop the run first.")); return
-                }
-                if let e = d.queue.lanes.flatMap(\.entries).first(where: { $0.runbook == b.id }) {
-                    done(.notAllowed("\(e.key) waits in the queue with \(b.name).")); return
-                }
-                undo.change("Delete \(b.name)") { c in
-                    c.runtime.runbooks.removeAll { $0.id == b.id }
-                    for (k, l) in c.settings where l.runbook == b.id { c.settings[k]?.runbook = nil }
-                }
+                if let why = Self.deleteRefusal(b, book: book, queue: d.queue) { done(.notAllowed(why)); return }
+                undo.change("Delete \(b.name)") { $0.removeRunbook(b.id) }
                 done(.ok(summary: "\(b.name) is deleted."))
             }
         }
@@ -151,11 +142,7 @@ struct RunbookActions {
                 }
                 guard let b = Self.find(a.string("id")) else { done(Self.unknown(a.string("id"))); return }
                 let key = snap.summary.identifier
-                undo.change("Default of \(key)") { c in
-                    var l = c.local(key)
-                    l.runbook = b.id
-                    c.setLocal(key, l)
-                }
+                undo.change("Default of \(key)") { $0.setRunbook(b.id, for: key) }
                 done(.ok(summary: "\(key) uses \(b.name)."))
             }
         }
@@ -335,6 +322,24 @@ struct RunbookActions {
         case let a as ActionError: return a.text
         default: return e.localizedDescription
         }
+    }
+}
+
+extension RunbookActions {
+    /// Why `b` cannot go: the last runbook, or a runbook of an open run or of a queue entry. The editor asks the same.
+    static func deleteRefusal(_ b: Runbook, book: RunbookBook, queue: WorkQueue) -> String? {
+        guard PROJECTS_CFG.runtime.runbooks.count > 1 else { return "\(b.name) is the last runbook." }
+        if let r = book.open.first(where: { $0.runbook.id == b.id }) { return "\(r.item.key) has an open run of \(b.name). Stop the run first." }
+        if let e = queue.lanes.flatMap(\.entries).first(where: { $0.runbook == b.id }) { return "\(e.key) waits in the queue with \(b.name)." }
+        return nil
+    }
+}
+
+extension ProjectsConfig {
+    /// Removes the runbook. The projects that use it go back to Full.
+    mutating func removeRunbook(_ id: String) {
+        runtime.runbooks.removeAll { $0.id == id }
+        for (k, l) in settings where l.runbook == id { settings[k]?.runbook = nil }
     }
 }
 

@@ -5,7 +5,7 @@ enum SettingsAnchor: String, CaseIterable {
     case appearance, menubar, runs, capture, startup, shortcuts
     case services, live
     case projects, refresh, repos, linking, writeback
-    case sessions, queue, worktrees, planner
+    case sessions, queue, worktrees, planner, runbooks
     case thisMac = "this-mac", joinOnly = "join-only", found, machines, runtimes, hooks, daemon
     case engine, localCLI = "local-cli", apiKey = "api-key", use, assistant, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
@@ -30,6 +30,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .queue: return "Queue"
         case .worktrees: return "Worktrees"
         case .planner: return "Intake and planner"
+        case .runbooks: return "Runbooks"
         case .thisMac: return "This Mac"
         case .joinOnly: return "Use other machines only"
         case .found: return "Found on your tailnet"
@@ -59,7 +60,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .appearance, .menubar, .runs, .capture, .startup, .shortcuts: return .general
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
-        case .sessions, .queue, .worktrees, .planner: return .agents
+        case .sessions, .queue, .worktrees, .planner, .runbooks: return .agents
         case .thisMac, .joinOnly, .found, .machines, .runtimes, .hooks, .daemon: return .machines
         case .engine, .localCLI, .apiKey, .use, .assistant, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
@@ -72,6 +73,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .projects, .refresh: return .projects
         case .repos: return .repos
         case .linking, .writeback: return .linking
+        case .runbooks: return .runbooks
         default: return nil
         }
     }
@@ -154,6 +156,8 @@ struct SettingsIndex {
         Entry("Snap basket prompt", .sessions, "template screenshot"),
         Entry("New session prompt", .sessions, "template intake files paths"),
         Entry("Auto start", .queue, "next item"),
+        Entry("Runbook steps", .runbooks, "runbook step review gate pause fix rounds prompt plan implement"),
+        Entry("Default runbook of a project", .projects, "runbook full small"),
         Entry("AI checks on quiet sessions", .queue, "done stuck"),
         Entry("Quiet after", .queue, "idle minutes"),
         Entry("Add to the queue by", .queue, "label bot"),
