@@ -9,7 +9,7 @@ final class GlanceVC: NSViewController {
     }
 
     static let size = NSSize(width: 420, height: 560)
-    static let watches: DataDomains = [.runs, .prs, .agents, .questions, .queue, .projects, .intake, .summaries, .planner, .config]
+    static let watches: DataDomains = [.runs, .prs, .agents, .questions, .queue, .projects, .intake, .summaries, .planner, .config, .runbooks]
     static var tab = Tab.now
 
     private let data: AppData

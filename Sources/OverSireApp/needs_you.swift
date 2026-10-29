@@ -381,7 +381,8 @@ final class NeedsYouCard: NSObject {
 
 // One row of Needs you: one item, or one run or PR with no item. Home, its badge and the menu bar list them.
 struct NeedsYou: Equatable {
-    enum Kind: Int { case question, permission, needsInput, blocked, usageLimit, stuck, notFinished, openSubItems, done, runFailed, review, mention }
+    enum Kind: Int { case question, permission, gate, needsInput, blocked, stepEnded, roundLimit, usageLimit, stuck, notFinished, openSubItems, done, runFailed, review,
+                     mention }
 
     // The chips over the list.
     enum Filter: Int, CaseIterable {
@@ -390,7 +391,7 @@ struct NeedsYou: Equatable {
         func has(_ k: Kind) -> Bool {
             switch self {
             case .all: return true
-            case .blocked: return k == .question || k == .permission || k == .needsInput || k == .blocked
+            case .blocked: return [.question, .permission, .gate, .needsInput, .blocked, .stepEnded, .roundLimit].contains(k)
             case .stuck: return k == .stuck || k == .usageLimit
             case .notFinished: return k == .notFinished || k == .openSubItems
             }
@@ -400,7 +401,10 @@ struct NeedsYou: Equatable {
     // The action that shows on hover.
     enum Act: Equatable {
         case answer, answerInOrca(QuestionID), reply(String), checklist(String), nudge(String), ask(String), approve(String), rerun(repo: String, run: Run), open(String),
-             closeSubItems(String)
+             closeSubItems(String),
+             runbook(String, key: String, step: String? = nil, title: String),   // a run action of the key
+             markDone(key: String, step: String, review: Bool),                   // a menu of the verdicts
+             go(Route, String)
         var title: String {
             switch self {
             case .answer: return "Answer"
@@ -413,6 +417,8 @@ struct NeedsYou: Equatable {
             case .rerun: return "Re-run failed"
             case .open: return "Open PR"
             case .closeSubItems: return "Close sub-items…"
+            case .runbook(_, _, _, let t), .go(_, let t): return t
+            case .markDone(_, _, let review): return review ? "Mark pass ▾" : "Mark done ▾"
             }
         }
     }
@@ -424,17 +430,21 @@ struct NeedsYou: Equatable {
     let route: Route
     var act: Act?
     var watched = false   // a session works on the failed run
+    var more: [Act] = []  // the buttons after the action
 
     /// The id holds the time, so a new event of the same item shows again after a snooze.
     var id: String { "\(kind)|\(key)|\(Int(at.timeIntervalSince1970))" }
 
     /// Changes when the row must update.
-    var rowHash: Int { PageRow.hash([id, reason, String(describing: route), act.map { String(describing: $0) }, watched]) }
+    var rowHash: Int { PageRow.hash([id, reason, String(describing: route), act.map { String(describing: $0) }, watched, String(describing: more)]) }
 
     var tone: Tone {
         switch kind {
         case .question: return .question
         case .permission: return Tone(symbol: "lock.shield.fill", color: Palette.warn, word: "Permission")
+        case .gate: return Tone(symbol: "diamond.fill", color: Palette.warn, word: "Approve")
+        case .stepEnded: return Tone(symbol: "exclamationmark.circle.fill", color: Palette.bad, word: "Step ended")
+        case .roundLimit: return Tone(symbol: "exclamationmark.triangle.fill", color: Palette.bad, word: "Review gaps")
         case .needsInput: return Tone(SessionState.needsInput)
         case .blocked: return Tone(SessionState.blocked)
         case .usageLimit: return Tone(symbol: "hourglass.circle.fill", color: Palette.warn, word: "Usage limit")
@@ -507,6 +517,46 @@ struct NeedsYou: Equatable {
             || (prs.first { $0.0 == repo }?.1.contains { $0.mine && $0.headRefName == r.headBranch } ?? false)
     }
 
+    /// The runs that wait for the user: a gate, a review over its round limit, and a step that ended with no result.
+    /// A run that the user paused gets no row.
+    static func runbooks(_ runs: [RunbookRun]) -> [NeedsYou] {
+        runs.compactMap { r in
+            guard let cur = r.current, let st = r.runbook.step(cur) else { return nil }
+            let key = r.item.key
+            let tab = Route.item(key, .runbook)
+            switch r.state {
+            case .gate:
+                var reason = "Approve to start \(st.name)"
+                if let prev = r.steps.filter({ $0.state.isFinished && $0.state != .skipped && $0.step != cur }).max(by: { ($0.ended ?? .distantPast) < ($1.ended ?? .distantPast) }) {
+                    let name = r.runbook.step(prev.step)?.name ?? prev.step
+                    reason += " · \(name) \(prev.state == .pass ? "passed" : "is done")" + (prev.note.map { ": “\($0)”" } ?? "")
+                }
+                return NeedsYou(kind: .gate, key: key, reason: reason, at: r.updated, route: tab, act: .runbook("runbook.approve", key: key, title: "Approve"),
+                                more: [.go(.item(key, .overview), "Open item")])
+            case .paused:
+                guard let s = r.last(cur) else { return nil }
+                switch s.state {
+                case .gaps where st.review != nil:
+                    let n = st.review?.rounds ?? 0
+                    let reason = "\(st.name): review still finds gaps · the fix round limit is \(n)" + (s.note.map { ". “\($0)”" } ?? "")
+                    return NeedsYou(kind: .roundLimit, key: key, reason: reason, at: r.updated, route: tab,
+                                    act: .runbook("runbook.resume", key: key, title: "One more round"),
+                                    more: [.runbook("runbook.skip", key: key, step: cur, title: "Mark pass")])
+                case .ended, .failed:
+                    return NeedsYou(kind: .stepEnded, key: key, reason: "\(st.name): step ended with no result · " + (r.reason ?? "the session ended"),
+                                    at: r.updated, route: tab, act: .markDone(key: key, step: cur, review: st.review != nil),
+                                    more: [.runbook("runbook.retry", key: key, step: cur, title: "Retry step"), .go(tab, "Open session")])
+                case .blocked:
+                    return NeedsYou(kind: .stepEnded, key: key, reason: "\(st.name) is blocked · " + (s.note ?? r.reason ?? "the agent gives no reason"),
+                                    at: r.updated, route: tab, act: .runbook("runbook.retry", key: key, step: cur, title: "Retry step"),
+                                    more: [.go(tab, "Open session")])
+                default: return nil
+                }
+            default: return nil
+            }
+        }
+    }
+
     /// The rows of the open questions and permissions. A form question gets its answer in Orca.
     static func questions(_ hub: QuestionHub) -> [NeedsYou] {
         hub.open.map { e in
@@ -515,6 +565,7 @@ struct NeedsYou: Equatable {
             let first = q.items.first
             var text = (first?.text ?? "Asks a question").replacingOccurrences(of: "\n", with: " ")
             if q.via == .permission { text = "Allow " + [first?.header, text].compactMap { $0 }.joined(separator: ": ") }
+            if let step = hub.step(q) { text = step + ": " + text }
             let route: Route = hub.origin(q).isIntake ? .intake(key?.split(separator: "-").first.map(String.init))
                 : key.map { .item($0, .session) } ?? .work(.worktrees)
             return NeedsYou(kind: q.via == .permission ? .permission : .question, key: key ?? "Session", reason: "\(text) · \(hub.place(q).text)",
@@ -522,8 +573,8 @@ struct NeedsYou: Equatable {
         }
     }
 
-    static func collect(_ data: AppData, snoozes: Snoozes = SNOOZES, now: Date = Date()) -> [NeedsYou] {
-        var out = questions(data.questions)
+    static func collect(_ data: AppData, snoozes: Snoozes = SNOOZES, now: Date = Date(), runs: [RunbookRun] = RUNBOOKS.open) -> [NeedsYou] {
+        var out = questions(data.questions) + runbooks(runs)
         let agents = data.agentIndex
         for (key, a) in agents.agents where agents.state(key) == .needsInput {
             let ask = (a.message ?? "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
@@ -603,7 +654,9 @@ final class NeedsYouRow: Row {
                    height: 36, label: "\(tone.word): \(n.key), \(n.reason), \(age)") { go(n.route) }
         var actions: [NSView] = []
         if let a = n.act {
-            actions.append(ActionButton(a.title, style: .primary) {
+            let primary = ActionButton(a.title, style: .primary)
+            if case .runbook("runbook.approve", _, _, _) = a { primary.toolTip = "The next step starts at once, also when no queue slot is free." }
+            primary.onClick = { [weak primary] in
                 switch a {
                 case .answer: go(n.route)
                 case .answerInOrca(let id): if let e = data.questions.entries.first(where: { $0.id == id }) { data.questions.reveal(e.question) }
@@ -614,8 +667,15 @@ final class NeedsYouRow: Row {
                 case .rerun(let repo, let r): data.rerun(repo: repo, runs: [r], failedOnly: true)
                 case .open(let url): if let u = URL(string: url) { NSWorkspace.shared.open(u) }
                 case .closeSubItems(let k): NeedsYouRow.finish(k, data: data, window: NSApp.keyWindow)
+                default: NeedsYouRow.perform(a, data: data, go: go, from: primary)
                 }
-            })
+            }
+            actions.append(primary)
+        }
+        for a in n.more {
+            let b = ActionButton(a.title)
+            b.onClick = { [weak b] in NeedsYouRow.perform(a, data: data, go: go, from: b) }
+            actions.append(b)
         }
         let snooze = ActionButton("Snooze") { SNOOZES.snooze(n.id) }
         snooze.toolTip = "Hide this row for one day"
@@ -629,6 +689,27 @@ final class NeedsYouRow: Row {
         }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// The run actions of a row. Mark done shows the verdicts in a menu under the button.
+    static func perform(_ a: NeedsYou.Act, data: AppData, go: (Route) -> Void, from button: NSView?) {
+        switch a {
+        case .runbook(let id, let key, let step, _):
+            var args: [String: JSONValue] = ["key": .string(key)]
+            if let step { args["step"] = .string(step) }
+            data.actions.click(id, args, in: NSApp.keyWindow)
+        case .go(let r, _): go(r)
+        case .markDone(let key, let step, let review):
+            let verdicts = review ? [("Mark pass", "pass"), ("Mark gaps", "gaps"), ("Mark blocked", "blocked")] : [("Mark done", "done"), ("Mark blocked", "blocked")]
+            let list = verdicts.map { t, v in
+                MenuAction(t) { data.actions.click("runbook.markDone", ["key": .string(key), "step": .string(step), "verdict": .string(v)], in: NSApp.keyWindow) }
+            }
+            let m = NSMenu()
+            list.forEach { m.addItem($0.item) }
+            let anchor = button ?? NSApp.keyWindow?.contentView
+            withExtendedLifetime(list) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: (anchor?.bounds.height ?? 0) + 3), in: anchor) }
+        default: break
+        }
+    }
 
     // The two choices of the item page banner. Close sets all open sub-items to the first completed state.
     static func finish(_ key: String, data: AppData, window: NSWindow?) {

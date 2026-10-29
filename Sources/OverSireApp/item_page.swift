@@ -268,10 +268,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
         chips.append(RelativeTimeLabel({ at }, size: 12, format: { "Updated " + $0 }))
         if let saving { chips.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Saving \(saving)…", size: 12, color: Palette.dim)], spacing: 5)) }
         let inQueue = data.queue.contains(key)
-        var actions: [NSView] = [ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward") { [weak self] in
-            guard let self else { return }
-            if inQueue { self.go(.work(.items)) } else { self.data.actions.run("queue.add", ["key": .string(key)]) { _ in self.reload() } }
-        }]
+        let queue = ActionButton(inQueue ? "In the queue" : "Add to queue", symbol: "text.line.first.and.arrowtriangle.forward")
+        queue.onClick = { [weak self, weak queue] in
+            guard let self, let queue else { return }
+            if inQueue { self.go(.work(.items)) } else { QueueAddMenu(data: self.data).show(key, at: queue) { self.reload() } }
+        }
+        var actions: [NSView] = [queue]
         if let s = data.statusJob.item(key) {
             actions.append(StatusPill(s))
         } else {

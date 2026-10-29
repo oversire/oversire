@@ -415,6 +415,8 @@ class Row: Box {
         super.updateTrackingAreas()
     }
     override func mouseEntered(with event: NSEvent) { hover = true }
+    /// For `--uishots`: the hover look with no mouse.
+    func reveal() { hover = true }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateFill()

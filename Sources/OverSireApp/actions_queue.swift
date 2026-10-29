@@ -12,12 +12,16 @@ struct QueueActions {
         let key = ItemActions.key
         let device: () -> String? = { RELAY.deviceID.isEmpty ? nil : RELAY.deviceID }
         return [
-            ActionSpec(id: "queue.add", title: "Add to queue", help: "Adds the item to the queue lane of its project. The queue starts it when a slot is free.",
-                       kind: .change, input: ActionSpec.args(["key": key], required: ["key"])) { a in
+            ActionSpec(id: "queue.add", title: "Add to queue", help: "Adds the item to the queue lane of its project. The queue starts it when a slot is free. "
+                       + "`runbook`: a runbook id that runs in place of one session. Leave it out for one session.",
+                       kind: .change, input: ActionSpec.args(["key": key, "runbook": ("string", "A runbook id, for example full.")], required: ["key"])) { a in
                 await link.item(a) { d, f, done in
                     guard !d.queue.contains(f.item.key) else { done(.ok(summary: "\(f.item.key) is in the queue.")); return }
-                    d.queue.add(f.item, snap: f.snap)
-                    done(.ok(summary: "\(f.item.key) is in the queue of \(f.snap.summary.identifier)."))
+                    let id = a.string("runbook").flatMap { $0.isEmpty ? nil : $0 }
+                    let book = id.flatMap { PROJECTS_CFG.runtime.runbook($0) }
+                    if let id, book == nil { done(.notAllowed(RunbookActions.unknown(id).summary)); return }
+                    d.queue.add(f.item, snap: f.snap, runbook: id)
+                    done(.ok(summary: "\(f.item.key) is in the queue of \(f.snap.summary.identifier)" + (book.map { " with \($0.name)." } ?? ".")))
                 }
             },
             ActionSpec(id: "queue.remove", title: "Remove from queue", help: "Removes the item from its queue lane.", kind: .change,

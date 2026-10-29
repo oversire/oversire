@@ -71,6 +71,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     private(set) var entry: QuestionBoard.Entry
     private(set) var draft = QuestionDraft()
     private let place: QuestionPlace
+    private let step: String?
     private let actions: Actions
     private let now: () -> Date
     private var checkedAt: Date?
@@ -80,11 +81,13 @@ final class QuestionCard: Card, NSTextFieldDelegate {
     private var fields: [String: NSTextField] = [:]
     private let dash = CAShapeLayer()
 
+    /// `step`: the runbook step of the session.
     init(_ e: QuestionBoard.Entry, place: QuestionPlace, checkedAt: Date?, draft: QuestionDraft = QuestionDraft(), now: @escaping () -> Date = Date.init,
-         actions: Actions) {
+         step: String? = nil, actions: Actions) {
         entry = e
         self.draft = draft
         self.place = place
+        self.step = step
         self.checkedAt = checkedAt
         self.now = now
         self.actions = actions
@@ -246,6 +249,7 @@ final class QuestionCard: Card, NSTextFieldDelegate {
                                Chiplet(place.text, symbol: place.local ? "desktopcomputer" : "network")]
         views.append(Chiplet(wayWord, symbol: inRuntime ? "rectangle.and.pencil.and.ellipsis" : "bubble.left.and.bubble.right"))
         if question.round > 1 { views.append(Chiplet("Round \(question.round)")) }
+        if let step { views.append(Chiplet("Step: " + step, symbol: "list.number")) }
         views.append(Spacer())
         let waited = now().timeIntervalSince(question.askedAt)
         if entry.state == .open, waited >= Self.waitsLong {

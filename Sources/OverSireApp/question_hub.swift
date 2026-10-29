@@ -24,6 +24,7 @@ final class QuestionHub {
     /// Posts one notification for a question that waits this long. nil: never.
     var tellAfter: () -> TimeInterval? = { AGENTS.questionNotice.delay }
     var notify: (_ key: String?, _ title: String, _ body: String) -> Void = { _, _, _ in }
+    var runs: RunbookBook = RUNBOOKS
     /// The answers of the runner sessions: the daemon of the session, else the hub.
     var sender: any RunnerAnswerSending = RUNNER_DESK
 
@@ -79,7 +80,13 @@ final class QuestionHub {
 
     /// The item key of the question: its origin, else the work item of its Orca session.
     func key(_ q: SessionQuestion) -> String? {
-        origin(q).item?.key ?? lock.withLock { refs[q.session] }
+        origin(q).item?.key ?? lock.withLock { refs[q.session] } ?? runs.step(session: q.session)?.run.item.key
+    }
+
+    /// The step of a runbook step session: "Implement", or "Review Plan · round 2". The agent key names it when the run has no session ref.
+    func step(_ q: SessionQuestion) -> String? {
+        let agent = key(q).flatMap { agents.agent($0)?.key }
+        return runs.step(session: q.session, key: agent).map { RunbookBook.label($0.run, $0.step) }
     }
 
     /// The origin of the question. A question of an Enhance session is about its item.
@@ -154,7 +161,8 @@ final class QuestionHub {
         a.draft = { [weak self] d in self?.lock.withLock { self?.drafts[id] = d } }
         a.stop = stop
         if channel(e.question) is any Revealing { a.reveal = { [weak self] in self?.reveal(e.question) } }
-        return QuestionCard(e, place: place(e.question), checkedAt: checkedAt(e.question), draft: lock.withLock { drafts[id] } ?? QuestionDraft(), actions: a)
+        return QuestionCard(e, place: place(e.question), checkedAt: checkedAt(e.question), draft: lock.withLock { drafts[id] } ?? QuestionDraft(),
+                            step: step(e.question), actions: a)
     }
 
     /// `done` runs on the main thread with the reason of a failure.
@@ -209,7 +217,8 @@ final class QuestionHub {
     /// The Orca sessions of the open work items, and the runner sessions that have not ended.
     private func sessions() -> [SessionRef] {
         let orca = lock.withLock { Array(refs.keys) + Array(intake.keys) }
-        return orca + writes.load(RunnerSession.self).filter { !$0.state.ended }.map(\.session)
+        let steps = runs.open.flatMap { $0.steps.filter(\.state.isLive).compactMap(\.session) }
+        return orca + steps + writes.load(RunnerSession.self).filter { !$0.state.ended }.map(\.session)
     }
 
     /// Finds the terminal of each work item. One `sessions` call for each workspace.

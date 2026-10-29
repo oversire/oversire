@@ -310,7 +310,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         case "gate":
             state = .gate
             steps.append(StepRun(step: "implement", state: .waits))
-        case "paused":
+        case "paused", "needs":
             steps += [step("implement", 1, .done, 52, 140, "All 9 sub-items are in. Tests pass."),
                       step("review", 1, .gaps, 141, 150, "The Needs you card has no keyboard path."),
                       step("fixes", 1, .done, 151, 160, "Added the keyboard path."),
@@ -328,6 +328,33 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                              runbook: full, agents: agents, state: state, reason: reason, current: current, steps: steps, started: t0, updated: Date())
         RUNBOOKS.set([run])
         switch scene {
+        case "needs":
+            // Three cards in Needs you: this round limit, a gate and a step with no result.
+            func copy(_ key: String, _ state: RunbookRun.State, _ cur: String, _ last: StepRun, reason: String? = nil) -> RunbookRun? {
+                guard let f = projectStore.item(key: key), let r = f.item.ref(in: f.snap.summary.ref) else { return nil }
+                var c = run
+                c.id = RunbookRunID(rawValue: "rb_" + key.lowercased())
+                c.item = r
+                c.title = f.item.title
+                c.state = state
+                c.reason = reason
+                c.current = cur
+                c.steps = Array(steps.prefix(4)) + [last]
+                return c
+            }
+            let open = found.snap.items.map(\.key).filter { $0 != found.item.key && !projectStore.isDone(key: $0) }
+            guard open.count >= 2 else { print("UISHOTS needs two open OVERSIRE items"); break }
+            RUNBOOKS.set([run] + [copy(open[0], .gate, "implement", StepRun(step: "implement", state: .waits)),
+                                  copy(open[1], .paused, "implement", step("implement", 1, .ended, 52, 95), reason: "The session ended with no step done.")]
+                .compactMap { $0 })
+        case "lane":
+            // The run holds a slot. One entry waits to start with Small.
+            let pk = found.snap.summary.ref.storeKey
+            for k in queue.lane(pk)?.entries.map(\.key) ?? [] { queue.remove(k) }
+            if let next = found.snap.items.first(where: { $0.key != found.item.key && !projectStore.isDone(key: $0.key) }) {
+                queue.add(next, snap: found.snap, runbook: "small")
+            }
+            RunbookTab.seed(run, pick: nil)
         case "history":
             let d = SessionDigest(harness: .claude, sessionId: "s-plan", source: .orcaTerminal, turns: 3,
                                   earlier: [.init(prompt: "Plan OVERSIRE-349 in worktree group .wt/oversire-349. Post a plan comment.",
@@ -948,6 +975,17 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         if let pill = UIShots.find(root, { ($0 as? StatusPill).map { text.isEmpty || $0.status.label.contains(text) } ?? false }) as? StatusPill {
                             pill.hover?.show()
                         } else { print("UISHOTS no status pill \(p)") }
+                    } else if p.hasPrefix("reveal:"), let root = w.window?.contentView {
+                        // reveal:<text>: the hover buttons of each row whose label has the text.
+                        let text = String(p.dropFirst(7))
+                        var rows: [Row] = []
+                        func walk(_ v: NSView) {
+                            if let r = v as? Row, r.accessibilityLabel()?.contains(text) == true { rows.append(r) }
+                            v.subviews.forEach(walk)
+                        }
+                        walk(root)
+                        if rows.isEmpty { print("UISHOTS no row \(p)") }
+                        rows.forEach { $0.reveal() }
                     } else if p.hasPrefix("scroll:"), let root = w.window?.contentView {
                         // scroll:<text>: the first row whose label has the text goes to the top.
                         let text = String(p.dropFirst(7))
@@ -1019,8 +1057,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("runbooks:") {
                         self.runbooksState(String(p.dropFirst(9)), in: w)
                     } else if p.hasPrefix("runbook:") {
-                        // runbook:working, history, rounds, gate or paused: a run of Full on OVERSIRE-349 in that state.
-                        if let k = self.runbookSample(String(p.dropFirst(8))) { w.router.go(.item(k, .runbook)) } else { print("UISHOTS no runbook sample \(p)") }
+                        // runbook:working, history, rounds, gate, paused, needs or lane: a run of Full on OVERSIRE-349 in that state.
+                        // runbook:needs: Home with three run cards. runbook:lane: the queue lanes with a working run.
+                        let scene = String(p.dropFirst(8))
+                        if let k = self.runbookSample(scene) {
+                            w.router.go(scene == "needs" ? .home : scene == "lane" ? .work(.lanes) : .item(k, .runbook))
+                        } else { print("UISHOTS no runbook sample \(p)") }
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {

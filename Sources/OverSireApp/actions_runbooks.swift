@@ -289,7 +289,7 @@ struct RunbookActions {
 
     private static func find(_ id: String?) -> Runbook? { id.flatMap { PROJECTS_CFG.runtime.runbook($0.lowercased()) } }
 
-    private static func unknown(_ id: String?) -> ActionResult {
+    static func unknown(_ id: String?) -> ActionResult {
         .notAllowed("There is no runbook \(id ?? ""). The runbooks: \(PROJECTS_CFG.runtime.runbooks.map(\.id).joined(separator: ", ")).")
     }
 

@@ -14,14 +14,16 @@ struct MenuIconState: Equatable {
     /// The open OverSire problems. The ▲ shows only when the Logs settings keep the mark on.
     let problems: Int
 
-    init(runs: [(String, [Run])], waitingAgents: Int, unread: Int, unreadDot: Bool, problems: Int = 0, questions: Int = 0) {
+    /// `runbooks`: the runs that wait for the user, at a gate or paused.
+    init(runs: [(String, [Run])], waitingAgents: Int, unread: Int, unreadDot: Bool, problems: Int = 0, questions: Int = 0, runbooks: Int = 0) {
         let (c, b, l) = overallStatus(runs)
         color = c; badge = b
         active = hasActive(runs)
-        dot = waitingAgents > 0 || questions > 0 || (unreadDot && unread > 0)
+        dot = waitingAgents > 0 || questions > 0 || runbooks > 0 || (unreadDot && unread > 0)
         self.problems = problems
         var text = waitingAgents > 0 ? "\(l) · \(waitingAgents) session\(waitingAgents == 1 ? "" : "s") wait\(waitingAgents == 1 ? "s" : "")" : l
         if questions > 0 { text += " · \(questions) question\(questions == 1 ? "" : "s")" }
+        if runbooks > 0 { text += " · \(runbooks) runbook\(runbooks == 1 ? "" : "s") wait\(runbooks == 1 ? "s" : "")" }
         if problems > 0 { text += " · \(problems) problem\(problems == 1 ? "" : "s")" }
         label = text
     }

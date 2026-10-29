@@ -36,7 +36,7 @@ final class QueuePage: Page {
         DispatchQueue.main.async { [weak self] in self?.reload() }
     }
 
-    override var watches: DataDomains { [.queue, .agents, .projects, .relations, .planner, .summaries, .questions, .config] }
+    override var watches: DataDomains { [.queue, .agents, .projects, .relations, .planner, .summaries, .questions, .config, .runbooks] }
 
     override func sections() -> [PageSection]? {
         let mode = AGENTS.aiMode, board = board, auto = AGENTS.autoStart
@@ -120,7 +120,7 @@ final class QueuePage: Page {
         let store = data.projectStore, job = data.statusJob
         let items: [String] = keys.map { k in
             let title = store.item(key: k)?.item.title ?? ""
-            let label = job.item(k)?.label ?? ""
+            let label = (RUNBOOKS.run(for: k).map { "\($0.state)|\($0.current ?? "")" } ?? "") + (job.item(k)?.label ?? "")
             return "\(k)|\(title)|\(label)|\(String(describing: book?.areas(key: k) ?? []))|\(data.planner.kind(k, project: lane.project))"
         }
         let parts: [AnyHashable] = [
@@ -279,7 +279,7 @@ final class QueuePage: Page {
     }
 
     private func runningCard(_ c: QueueBoard.Card, kind: (String) -> AreaKind) -> NSView {
-        let badge = data.statusJob.item(c.key).map { StatusPill($0) }
+        let badge = runBar(c.key) ?? data.statusJob.item(c.key).map { StatusPill($0) }
         return card(c, lead: Glyph("play.fill", color: Palette.run, size: 10), badge: badge, kind: kind,
                     note: claimText(c.key), label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) }
     }
@@ -343,7 +343,7 @@ final class QueuePage: Page {
     // The dense list: one line per item.
     private func list(_ card: Card, _ b: QueueBoard, lane: QueueLane, pick: QueueLane.Pick, kind: @escaping (String) -> AreaKind) {
         for c in b.running {
-            card.add(line(c, lead: Glyph("play.fill", color: Palette.run, size: 11), kind: kind, status: data.statusJob.item(c.key).map { StatusPill($0) },
+            card.add(line(c, lead: Glyph("play.fill", color: Palette.run, size: 11), kind: kind, status: runBar(c.key) ?? data.statusJob.item(c.key).map { StatusPill($0) },
                           label: "\(c.key) runs") { [weak self] in self?.go(.item(c.key, .session)) })
         }
         let entries = lane.entries
@@ -383,6 +383,10 @@ final class QueuePage: Page {
         // The actions take no width: they show over the trailing edge on hover or focus.
         row.hoverViews = actions
         return row
+    }
+
+    private func runBar(_ key: String) -> NSView? {
+        RUNBOOKS.run(for: key).flatMap { $0.state.isOpen ? RunStepBar($0) : nil }
     }
 
     // A running item whose claim could not grow.
@@ -494,10 +498,14 @@ final class QueuePage: Page {
             }
             guard !open.isEmpty else { continue }
             let sub = NSMenu()
+            let add = QueueAddMenu(data: data)
             for i in open.prefix(40) {
-                let a = MenuAction("\(i.key)  \(i.title.prefix(70))") { [weak self] in self?.data.actions.click("queue.add", ["key": .string(i.key)], in: self?.view.window) }
-                keep.append(a)
-                sub.addItem(a.item)
+                let mi = NSMenuItem(title: "\(i.key)  \(i.title.prefix(70))", action: nil, keyEquivalent: "")
+                let choices = add.choices(i.key)
+                keep += choices
+                mi.submenu = NSMenu()
+                choices.forEach { mi.submenu?.addItem($0.item) }
+                sub.addItem(mi)
             }
             let mi = NSMenuItem(title: "\(s.title) (\(open.count))", action: nil, keyEquivalent: "")
             mi.submenu = sub
@@ -528,6 +536,34 @@ final class SlotMeter: NSStackView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+// The steps of a run as small boxes, then "4/6 · Implement". Done steps are filled, the current step is ringed.
+final class RunStepBar: NSStackView {
+    init(_ r: RunbookRun) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 6
+        translatesAutoresizingMaskIntoConstraints = false
+        let at = r.position.map { $0 - 1 } ?? r.runbook.steps.count
+        let boxes = NSStackView(h: r.runbook.steps.indices.map { i -> NSView in
+            let b = Box(fill: i < at ? Palette.ok : nil, border: i == at ? Palette.run : i < at ? nil : Palette.line, radius: 2)
+            if i == at { b.borderWidth = 2 }
+            b.widthAnchor.constraint(equalToConstant: 8).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 8).isActive = true
+            return b
+        }, spacing: 2)
+        let name = r.current.flatMap { r.runbook.step($0)?.name } ?? ""
+        let text = "\(min(at + 1, r.runbook.steps.count))/\(r.runbook.steps.count)" + (name.isEmpty ? "" : " · " + name)
+        let label = NSTextField.text(text, size: 11.5, color: Palette.mut)
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        addArrangedSubview(boxes)
+        addArrangedSubview(label)
+        setAccessibilityElement(true)
+        setAccessibilityLabel("\(r.runbook.name): step \(text)")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 // An empty slot in the Running column.
 // `left` names the session that freed it.
 final class FreeSlot: Box {
@@ -546,4 +582,33 @@ final class FreeSlot: Box {
         setAccessibilityLabel(text.replacingOccurrences(of: "\n", with: ", "))
     }
     required init?(coder: NSCoder) { fatalError() }
+}
+
+// "Add to queue" asks how the item starts: a runbook, the project default checked, or one session.
+struct QueueAddMenu {
+    let data: AppData
+
+    func choices(_ key: String, done: @escaping () -> Void = {}) -> [MenuAction] {
+        let project = key.split(separator: "-").first.map(String.init) ?? key
+        let def = PROJECTS_CFG.runbook(for: project)?.id
+        let data = data
+        func add(_ id: String?) {
+            var args: [String: JSONValue] = ["key": .string(key)]
+            if let id { args["runbook"] = .string(id) }
+            data.actions.run("queue.add", args) { _ in done() }
+        }
+        let books = PROJECTS_CFG.runtime.runbooks.map { b in
+            let a = MenuAction("Run \(b.name)" + (b.id == def ? " (default)" : "")) { add(b.id) }
+            a.item.state = b.id == def ? .on : .off
+            return a
+        }
+        return books + [MenuAction("One session") { add(nil) }]
+    }
+
+    func show(_ key: String, at anchor: NSView, done: @escaping () -> Void) {
+        let list = choices(key, done: done)
+        let m = NSMenu()
+        list.forEach { m.addItem($0.item) }
+        withExtendedLifetime(list) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 3), in: anchor) }
+    }
 }

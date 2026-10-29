@@ -164,6 +164,15 @@ final class WorkQueue {
     var planner: () -> PlannerBook? = { nil }
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
+    var runs: () -> [RunbookRun] = { RUNBOOKS.open }
+    /// Starts a run of an entry with a runbook. `done` gets the error text, on the main thread.
+    var startRun: (Runbook, Item, ProjectSummary, @escaping (String?) -> Void) -> Void = { book, item, summary, done in
+        Task {
+            let e: String?
+            do { _ = try await RunbookStarter().start(book, item: item, in: summary); e = nil } catch { e = RunbookActions.why(error) }
+            await MainActor.run { done(e) }
+        }
+    }
 
     init(writes: StoreWrites, store: ProjectStore, agents: AgentIndex) {
         self.writes = writes
@@ -186,7 +195,8 @@ final class WorkQueue {
 
     // MARK: Edits
 
-    func add(_ item: Item, snap: ProjectSnapshot, source: QueueEntry.Source = .you) {
+    /// `runbook`: the Runbook id that starts in place of one session.
+    func add(_ item: Item, snap: ProjectSnapshot, source: QueueEntry.Source = .you, runbook: String? = nil) {
         let key = item.key.uppercased()
         guard !contains(key) else { return }
         let pk = snap.summary.ref.storeKey
@@ -195,16 +205,16 @@ final class WorkQueue {
         }
         let li = lanes.firstIndex { $0.project == pk }!
         let at = LaneOrder.insert(item.fields["Priority"], into: lanes[li].entries.map(\.key)) { [store] in store.item(key: $0)?.item.fields["Priority"] }
-        lanes[li].entries.insert(QueueEntry(key: key, title: item.title, added: Date(), source: source), at: at)
+        lanes[li].entries.insert(QueueEntry(key: key, title: item.title, added: Date(), source: source, runbook: runbook), at: at)
         seen.insert(key)
         save()
     }
 
     /// Adds the item of a key to the lane of its project. False when no tracked project has the key.
     @discardableResult
-    func add(key: String) -> Bool {
+    func add(key: String, runbook: String? = nil) -> Bool {
         guard let f = store.item(key: key) else { return false }
-        add(f.item, snap: f.snap)
+        add(f.item, snap: f.snap, runbook: runbook)
         return true
     }
 
@@ -246,15 +256,17 @@ final class WorkQueue {
 
     // MARK: Ticks
 
-    // Agents of the lane that hold a slot and are not released. A background command holds its slot,
-    // "Blocked on you" and "Session done" free it.
+    // Agents of the lane that hold a slot and are not released, and the runs of the lane with a step that runs.
+    // A background command holds its slot, "Blocked on you" and "Session done" free it. A run at a gate or paused holds none.
     func busy(_ lane: QueueLane) -> Int { running(lane).count }
 
     func running(_ lane: QueueLane) -> [String] {
         let prefix = lane.identifier.uppercased() + "-"
-        return agents.agents.filter { k, a in
+        let live = agents.agents.filter { k, a in
             k.hasPrefix(prefix) && !released.contains(k) && (a.phase == .starting || agents.state(k)?.holdsSlot == true)
         }.map(\.key)
+        let runs = runs().filter { $0.state == .running && $0.item.key.uppercased().hasPrefix(prefix) }.map { $0.item.key.uppercased() }
+        return Array(Set(live + runs))
     }
 
     /// The agents of the lane that left their slot, the newest first. A free slot names them.
@@ -312,7 +324,21 @@ final class WorkQueue {
             save()
             return e
         }
-        agents.start(item, root: root) { _ in }
+        if let id = lanes[li].entries.first(where: { $0.key == key })?.runbook {
+            guard let book = PROJECTS_CFG.runtime.runbook(id) else {
+                let e = "\(key) waits for the runbook \(id), and it is gone. Remove the entry and add it again."
+                setState(project) { $0.error = e }
+                save()
+                return e
+            }
+            startRun(book, item, snap.summary) { [weak self] e in
+                guard let e else { return }
+                self?.setState(project) { $0.error = "\(key): \(e)" }
+                self?.save()
+            }
+        } else {
+            agents.start(item, root: root) { _ in }
+        }
         lanes[li].entries.removeAll { $0.key == key }
         setState(project) {
             $0.lastStarted = key

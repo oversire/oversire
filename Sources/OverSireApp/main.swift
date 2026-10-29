@@ -241,6 +241,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // Before the first reloadList: projectStore.track publishes the cached items at once, and each tick asks the gates.
         startAutomations()
         machineHub.start()
+        RUNBOOKS.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "runbook:" + key) }
+        NotificationCenter.default.addObserver(forName: RunbookBook.changed, object: RUNBOOKS, queue: .main) { [weak self] _ in self?.updateIcon() }
         RUNBOOKS.start()
         DaemonSetup.shared.offerUpdateOnce()
         relay.start()
@@ -806,7 +808,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func updateIcon() {
         let k = MenuIconState(runs: visibleGrouped(grouped), waitingAgents: agentIndex.agents.values.filter { $0.phase == .waiting }.count,
                               unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot,
-                              problems: openProblems.count, questions: questions.open.count)
+                              problems: openProblems.count, questions: questions.open.count, runbooks: NeedsYou.runbooks(RUNBOOKS.open).count)
         // The shots in the open snap baskets, as a count next to the icon.
         let shots = snap.shotCount
         // Each set below redraws the item on each display, which fires the appearance

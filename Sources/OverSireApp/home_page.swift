@@ -104,7 +104,7 @@ final class HomePage: Page {
     private var all = false
     static let shown = 5
 
-    override var watches: DataDomains { [.runs, .prs, .agents, .queue, .projects, .intake, .questions, .summaries, .stats, .config] }
+    override var watches: DataDomains { [.runs, .prs, .agents, .queue, .projects, .intake, .questions, .summaries, .stats, .config, .runbooks] }
 
     override func sections() -> [PageSection]? {
         pageBusy = data.loadingFirst

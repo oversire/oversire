@@ -109,7 +109,7 @@ extension SettingsPage {
                 settingsChanged()
             }),
             FieldRow("Add to the queue by", note: "Label or assignee in Plane.", NSStackView(h: [label, bot], spacing: 8)),
-            FieldRow("Tell me about a question", note: "One notification when a session waits for an answer.",
+            FieldRow("Tell me about a question", note: "One notification when a session waits for an answer, or a runbook waits for you.",
                      Segmented(notices.map(\.label), selected: notices.firstIndex(of: AGENTS.questionNotice) ?? 1, label: "Tell me about a question") {
                 AGENTS.questionNotice = notices[$0]
                 saveConfig()
