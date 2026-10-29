@@ -14,16 +14,20 @@ struct RunbookStarter {
         let problems = book.validate(agents: rt.runbookAgents)
         guard problems.isEmpty else { throw RunbookRefusal(message: "\(book.name) has problems.", problems: problems) }
         var agents: [String: AgentLaunchSpec] = [:]
-        for name in Set(book.steps.map(\.agent)) {
-            let l = rt.launch(name, name: item.key, key: item.key, title: item.title)
-            let command: String
-            do { command = try rt.command(for: name).resolve(name: item.key, key: item.key, title: item.title) } catch {
-                throw SessionStartError.badCommand(String(describing: error))
-            }
-            agents[name] = AgentLaunchSpec(cli: l.cli, command: command, model: l.model, effort: l.effort, profile: l.profile)
-        }
+        for name in Set(book.steps.map(\.agent)) { agents[name] = try spec(name, key: item.key, title: item.title) }
         let ref = ItemRef(project: summary.ref, id: item.id, key: item.key, url: URL(string: item.url) ?? URL(string: "about:blank")!)
         return RunbookStart(item: ref, title: item.title, repo: repo, runbook: book, agents: agents, startAt: step)
+    }
+
+    /// One agent as a start of the item resolves it. A step patch of a run uses it too.
+    func spec(_ name: String, key: String, title: String) throws -> AgentLaunchSpec {
+        let rt = cfg().runtime
+        let l = rt.launch(name, name: key, key: key, title: title)
+        let command: String
+        do { command = try rt.command(for: name).resolve(name: key, key: key, title: title) } catch {
+            throw SessionStartError.badCommand(String(describing: error))
+        }
+        return AgentLaunchSpec(cli: l.cli, command: command, model: l.model, effort: l.effort, profile: l.profile)
     }
 
     func start(_ book: Runbook, item: Item, in summary: ProjectSummary, at step: String? = nil) async throws -> RunbookRun {

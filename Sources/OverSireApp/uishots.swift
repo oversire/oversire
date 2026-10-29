@@ -286,6 +286,67 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw URLError(.cannotConnectToHost) }
     }
 
+    /// A run of Full on OVERSIRE-349: the plan passed its review in round 2, Implement works or waits at its gate.
+    private func runbookSample(_ scene: String) -> String? {
+        guard let found = projectStore.item(key: "OVERSIRE-349"), let ref = found.item.ref(in: found.snap.summary.ref),
+              let full = PROJECTS_CFG.runtime.runbook(Runbook.fullID) ?? PROJECTS_CFG.runtime.defaultRunbooks.first else { return nil }
+        let t0 = Date().addingTimeInterval(-3 * 3600)
+        func at(_ m: Double) -> Date { t0.addingTimeInterval(m * 60) }
+        var n = 0
+        func step(_ id: String, _ round: Int, _ state: StepRun.State, _ from: Double, _ to: Double?, _ note: String? = nil) -> StepRun {
+            n += 1
+            let ws = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "mba"), id: "wt-oversire-349"), id: "term_\(n)")
+            return StepRun(step: id, round: round, state: state, session: ws, daemonSession: "tab1:leaf\(n)", terminal: ws.id, note: note,
+                           started: at(from), ended: to.map(at))
+        }
+        var steps = [step("plan", 1, .done, 0, 27, "9 sub-items: contract, engine, routes, app model, tab, assistant, editor, cards, docs."),
+                     step("review-plan", 1, .gaps, 28, 34, "352 has no test for a daemon restart in a live step."),
+                     step("plan-fixes", 1, .done, 35, 46, "Added the restart test to 352."),
+                     step("review-plan", 2, .pass, 47, 50, "Each sub-item has files, flow and tests.")]
+        var state = RunbookRun.State.running
+        var reason: String?
+        var current = "implement"
+        switch scene {
+        case "gate":
+            state = .gate
+            steps.append(StepRun(step: "implement", state: .waits))
+        case "paused":
+            steps += [step("implement", 1, .done, 52, 140, "All 9 sub-items are in. Tests pass."),
+                      step("review", 1, .gaps, 141, 150, "The Needs you card has no keyboard path."),
+                      step("fixes", 1, .done, 151, 160, "Added the keyboard path."),
+                      step("review", 2, .gaps, 161, 170, "The card still loses focus after a rebuild.")]
+            state = .paused
+            reason = "The review still finds gaps after 2 rounds."
+            current = "review"
+        default:
+            steps.append(step("implement", 1, .working, 52, nil))
+        }
+        let agents = Dictionary(uniqueKeysWithValues: Set(full.steps.map(\.agent)).map {
+            ($0, AgentLaunchSpec(cli: "claude", command: "claude -n OVERSIRE-349", model: $0 == "claude-max" ? "claude-opus-5-5" : nil, profile: $0))
+        })
+        let run = RunbookRun(id: "rb_uishots", item: ref, title: found.item.title, machine: "mba", runtime: "orca", repo: "/Users/fritz/Projects/oversire-workspace",
+                             runbook: full, agents: agents, state: state, reason: reason, current: current, steps: steps, started: t0, updated: Date())
+        RUNBOOKS.set([run])
+        switch scene {
+        case "history":
+            let d = SessionDigest(harness: .claude, sessionId: "s-plan", source: .orcaTerminal, turns: 3,
+                                  earlier: [.init(prompt: "Plan OVERSIRE-349 in worktree group .wt/oversire-349. Post a plan comment.",
+                                                  closing: "I read the item and the code. The plan has 9 sub-items.")],
+                                  last: [.init(prompt: "Make 352 also cover a daemon restart.",
+                                               text: "I added a restart case to 352: the engine reads the run from disk and reuses the live session by its key.", tools: 4),
+                                         .init(prompt: "Good. End the step.",
+                                               text: "I ran oversire step done --verdict done with a one-line note.", tools: 1)])
+            RunbookTab.seed(run, pick: "plan", histories: [steps[0]: d])
+        case "rounds":
+            let d = SessionDigest(harness: .claude, sessionId: "s-review", source: .orcaTerminal, turns: 1,
+                                  last: [.init(prompt: "Review the plan of OVERSIRE-349 (round 1). Notes so far: 9 sub-items.",
+                                               text: "The plan is good. One gap: 352 has no test for a daemon restart in a live step. Verdict: gaps.", tools: 6)])
+            RunbookTab.seed(run, pick: "review-plan", round: 1, histories: [steps[1]: d])
+        default: RunbookTab.seed(run, pick: nil)
+        }
+        return found.item.key
+    }
+
     /// This Mac (mba) and mbp. OVERSIRE_UISHOTS_MACHINE=mbp: mbp runs the sessions. none: no daemon on this Mac.
     private func useSampleMachines() {
         let pick = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_MACHINE"]
@@ -955,6 +1016,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         CommandPalette.show(over: w, query: String(p.dropFirst("palette:".count)))
                     } else if p.hasPrefix("assistant:") {
                         self.assistantState(String(p.dropFirst(10)), in: w)
+                    } else if p.hasPrefix("runbook:") {
+                        // runbook:working, history, rounds, gate or paused: a run of Full on OVERSIRE-349 in that state.
+                        if let k = self.runbookSample(String(p.dropFirst(8))) { w.router.go(.item(k, .runbook)) } else { print("UISHOTS no runbook sample \(p)") }
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {

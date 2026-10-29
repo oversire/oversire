@@ -8,11 +8,13 @@ final class RunbookBook {
     static let changed = Notification.Name("RunbookBook.changed")
 
     private let runtime: () -> (any RunbookRunning)?
+    private let bus: ChangeBus
     private var runs: [String: RunbookRun] = [:]   // item key → run
     private var timer: Timer?
 
-    init(runtime: @escaping () -> (any RunbookRunning)? = { ENV.runtime as? any RunbookRunning }) {
+    init(runtime: @escaping () -> (any RunbookRunning)? = { ENV.runtime as? any RunbookRunning }, bus: ChangeBus = .shared) {
         self.runtime = runtime
+        self.bus = bus
     }
 
     /// The last run of the item, open or not.
@@ -35,8 +37,8 @@ final class RunbookBook {
         do {
             let list = try await rt.runbookRuns(item: nil, open: false)
             await MainActor.run {
-                list.forEach { _ = keep($0) }
-                NotificationCenter.default.post(name: Self.changed, object: self)
+                let changed = list.filter { keep($0) }.map(\.item.key)
+                if !changed.isEmpty { post(Set(changed)) }
             }
         } catch {
             log.info("Runbooks: the read failed: \(String(describing: error), privacy: .public)")
@@ -46,7 +48,7 @@ final class RunbookBook {
     /// A run from a frame or from an action reply.
     func apply(_ r: RunbookRun) {
         guard keep(r) else { return }
-        NotificationCenter.default.post(name: Self.changed, object: self)
+        post([r.item.key])
     }
 
     /// A newer run of the item wins. An older copy of the same run does not.
@@ -62,6 +64,12 @@ final class RunbookBook {
     func set(_ list: [RunbookRun]) {
         runs = [:]
         list.forEach { _ = keep($0) }
+        post([])
+    }
+
+    /// An empty key set: all items.
+    private func post(_ keys: Set<String>) {
+        bus.post(DataChange(.runbooks, items: keys, origin: .event))
         NotificationCenter.default.post(name: Self.changed, object: self)
     }
 }

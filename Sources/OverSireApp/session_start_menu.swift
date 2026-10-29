@@ -87,6 +87,59 @@ struct SessionStartMenu {
         return menu
     }
 
+    /// "Run a runbook": the runbooks with the project default first, and "Start at a step".
+    func runbooks(into menu: NSMenu, _ item: Item, snap: ProjectSnapshot, at anchor: NSView, started: @escaping (RunbookRun) -> Void) {
+        let books = PROJECTS_CFG.runtime.runbooks
+        guard !books.isEmpty else { return }
+        let first = PROJECTS_CFG.runbook(for: snap.summary.identifier)
+        let sorted = books.filter { $0.id == first?.id } + books.filter { $0.id != first?.id }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Run a runbook", action: nil, keyEquivalent: "").isEnabled = false
+        for b in sorted {
+            let mi = MenuAction(b.id == first?.id ? "\(b.name) (default)" : b.name) { [weak anchor] in
+                guard let anchor else { return }
+                self.runbook(b, item, snap: snap, at: anchor, started: started)
+            }.item
+            mi.toolTip = b.steps.map(\.name).joined(separator: " → ")
+            menu.addItem(mi)
+        }
+        let at = NSMenuItem(title: "Start at a step", action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+        for b in sorted {
+            let one = NSMenuItem(title: b.name, action: nil, keyEquivalent: "")
+            let steps = NSMenu()
+            for (i, st) in b.steps.enumerated() where i > 0 {
+                steps.addItem(MenuAction("\(i + 1). \(st.name)") { [weak anchor] in
+                    guard let anchor else { return }
+                    self.runbook(b, item, snap: snap, at: anchor, step: st.id, started: started)
+                }.item)
+            }
+            one.submenu = steps
+            one.isEnabled = b.steps.count > 1
+            sub.addItem(one)
+        }
+        at.submenu = sub
+        menu.addItem(at)
+    }
+
+    /// Starts a runbook on the sessions machine. Without a saved Orca workspace, a menu at `anchor` asks for it.
+    func runbook(_ book: Runbook, _ item: Item, snap: ProjectSnapshot, at anchor: NSView, step: String? = nil, started: @escaping (RunbookRun) -> Void) {
+        let window = anchor.window
+        pickRoot(snap, at: anchor, key: item.key) { root in
+            var s = RunbookStarter()
+            if let root { s.root = { _ in root } }
+            Task {
+                do {
+                    let run = try await s.start(book, item: item, in: snap.summary, at: step)
+                    await MainActor.run { started(run) }
+                } catch {
+                    let info = (error as? ProviderError)?.message ?? error.localizedDescription
+                    await MainActor.run { AlertConfirm.tell("\(book.name) did not start on \(item.key)", info: info, in: window) }
+                }
+            }
+        }
+    }
+
     // A failure shows its reason: the pill alone is easy to miss.
     private func run(_ item: Item, root: String?, agent: String?, in window: NSWindow?) {
         var args: [String: JSONValue] = ["key": .string(item.key)]

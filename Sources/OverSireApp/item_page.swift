@@ -52,6 +52,13 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var pendingComment: String?
     private var questionCards: [QuestionID: QuestionCard] = [:]
     private lazy var needsYou = NeedsYouCard(page: self)
+    private lazy var runbookTab: RunbookTab = {
+        let t = RunbookTab()
+        t.reload = { [weak self] in self?.reload() }
+        t.window = { [weak self] in self?.view.window }
+        t.go = { [weak self] in self?.go($0) }
+        return t
+    }()
 
     override var pageWidth: CGFloat { 960 }
 
@@ -87,11 +94,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override var watches: DataDomains {
-        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config, .intake]
+        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config, .intake, .runbooks]
         switch tab {
         case .overview: d.formUnion([.relations, .planner, .runs, .prs])
         case .session, .activity: d.formUnion([.runs, .prs])
-        case .subitems: break
+        case .runbook, .subitems: break
         }
         return d
     }
@@ -140,6 +147,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let rows: [PageRow]
         switch tab {
         case .overview: rows = overview(pk: pk, snap: snap, item: item, stream: stream)
+        case .runbook: rows = runbook(snap: snap, item: item, stream: stream)
         case .session: rows = session(stream: stream)
         case .subitems: rows = subItems(snap: snap, item: item)
         case .activity: rows = activity(item: item, stream: stream)
@@ -156,8 +164,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let warn = snap.isDoneWithOpenSubItems(item)
         let asks = data.questions.count(key: key)
         let tab = self.tab
-        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks) { [unowned self] in
-            let tabs = Route.ItemTab.allCases
+        let run = RUNBOOKS.run(for: key)
+        let hasRun = run != nil || tab == .runbook
+        let mark = run.map { RunbookTab.tone($0.state) }
+        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks, hasRun, run?.state, run?.position) { [unowned self] in
+            let tabs = Route.ItemTab.allCases.filter { $0 != .runbook || hasRun }
             var sub = TabStrip.Tab(title: "Sub-items")
             if prog.total > 0 {
                 sub.lead = [ProgressRing(done: prog.done, started: started, total: prog.total).sized(14)]
@@ -166,7 +177,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
             let sessionTab = TabStrip.Tab(title: "Session", count: asks > 0 ? asks : nil,
                                           label: asks > 0 ? "Session, \(asks) question\(asks == 1 ? "" : "s")" : nil)
-            let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview"), sessionTab, sub, TabStrip.Tab(title: "Activity")],
+            var runTab = TabStrip.Tab(title: "Runbook")
+            if let run, let mark {
+                runTab.lead = [Glyph(mark.symbol, color: mark.color, size: 11)]
+                runTab.label = "Runbook, \(mark.word)" + (run.position.map { ", step \($0) of \(run.runbook.steps.count)" } ?? "")
+            }
+            let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview")] + (hasRun ? [runTab] : []) + [sessionTab, sub, TabStrip.Tab(title: "Activity")],
                                  selected: tabs.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
             return NSStackView(h: [strip, Spacer()])
@@ -181,17 +197,17 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 if self.tab == .activity { self.reload() }
             }
         }
-        if let a = stream?.agent, tab == .session, live?.sessionID != a.paneKey, -streamChecked.timeIntervalSinceNow > 15 {
+        if let a = stream?.agent, showsLive, live?.sessionID != a.paneKey, -streamChecked.timeIntervalSinceNow > 15 {
             streamChecked = Date()
             let k = key
             data.agentIndex.stream(k) { [weak self] t in
-                guard let self, self.key == k, self.tab == .session, let t, let id = a.paneKey else { return }
+                guard let self, self.key == k, self.showsLive, let t, let id = a.paneKey else { return }
                 self.live?.stop()
                 self.live = t.view == .chat ? self.chatCard(a, session: id, request: t.request) : self.terminalCard(session: id, request: t.request)
                 self.reload()
             }
         }
-        if stream?.agent != nil, live == nil, tab == .session, -tailAt.timeIntervalSinceNow > 5 {
+        if stream?.agent != nil, live == nil, showsLive, -tailAt.timeIntervalSinceNow > 5 {
             tailAt = Date()
             data.agentIndex.tail(key, lines: 60) { [weak self] lines in
                 guard let self, lines != self.tail else { return }
@@ -200,6 +216,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
         }
     }
+
+    /// The Session tab and the Runbook tab show the terminal of the session.
+    private var showsLive: Bool { tab == .session || tab == .runbook }
 
     // MARK: Head and properties
 
@@ -264,10 +283,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
             let more = ActionButton("", symbol: "chevron.down", style: .primary)
             more.setAccessibilityLabel("Start in Orca with")
-            more.toolTip = "Start in Orca with another agent"
+            more.toolTip = "Start in Orca with another agent, or run a runbook"
             more.onClick = { [weak self, weak b, weak more] in
                 guard let self, let b, let more else { return }
-                SessionStartMenu(self.data).agents(item, snap: snap, at: b).popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
+                let starts = SessionStartMenu(self.data)
+                let menu = starts.agents(item, snap: snap, at: b)
+                if self.data.has(.runbooks), RUNBOOKS.run(for: item.key)?.state.isOpen != true {
+                    starts.runbooks(into: menu, item, snap: snap, at: b) { [weak self] _ in self?.go(.item(item.key, .runbook)) }
+                }
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
             }
             actions.append(NSStackView(h: [b, more], spacing: 1))
         }
@@ -722,13 +746,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func session(stream: Workstream?) -> [PageRow] {
         var rows = DaemonBanner.rows() + questionRows()
         if let a = stream?.agent {
-            let s = data.statusJob.item(key)
-            if let live, live.sessionID == a.paneKey {
-                let fill = { [unowned self] in live.setHead(self.liveChips(a, chat: live is SessionChatCard), since: a.since) }
-                rows.append(PageRow("live-" + live.sessionID, ObjectIdentifier(live), Self.sig(a, s), sending, update: { _ in fill() }) { fill(); return live })
-            } else {
-                rows.append(PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) })
-            }
+            rows.append(liveRow(a))
         } else {
             rows.append(PageRow("no-session", key) { Banner(.idle, title: "No Orca session yet.", body: "Start the item in Orca to see its session here.") })
         }
@@ -739,6 +757,27 @@ final class ItemPage: Page, NSTextFieldDelegate {
             rows.append(PageRow("ask", Self.sig(notes.answers[k]), asking, AI_CFG.enabled) { [unowned self] in self.askCard() })
         }
         return rows
+    }
+
+    /// The live terminal or chat of the session, else its last screen lines.
+    private func liveRow(_ a: AgentSession) -> PageRow {
+        let s = data.statusJob.item(key)
+        if let live, live.sessionID == a.paneKey {
+            let fill = { [unowned self] in live.setHead(self.liveChips(a, chat: live is SessionChatCard), since: a.since) }
+            return PageRow("live-" + live.sessionID, ObjectIdentifier(live), Self.sig(a, s), sending, update: { _ in fill() }) { fill(); return live }
+        }
+        return PageRow("terminal", Self.sig(a, s), tail, sending) { [unowned self] in self.terminalCard(a, status: s) }
+    }
+
+    // MARK: Runbook
+
+    private func runbook(snap: ProjectSnapshot, item: Item, stream: Workstream?) -> [PageRow] {
+        let k = key
+        guard let run = RUNBOOKS.run(for: k) else {
+            return [PageRow("rb-none", k) { Banner(.idle, title: "No runbook run yet.", body: "Use the arrow of Start in Orca to run a runbook on this item.") }]
+        }
+        let live = stream?.agent.map { liveRow($0) }
+        return DaemonBanner.rows() + questionRows() + runbookTab.rows(run, item: item, snap: snap, canReveal: data.agentIndex.canReveal, live: live)
     }
 
     private func terminalCard(_ a: AgentSession, status s: ItemStatus?) -> NSView {

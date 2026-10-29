@@ -21,19 +21,20 @@ struct DataDomains: OptionSet, Sendable, Hashable {
     static let logs = DataDomains(rawValue: 1 << 11)
     static let connection = DataDomains(rawValue: 1 << 12)
     static let config = DataDomains(rawValue: 1 << 13)
+    static let runbooks = DataDomains(rawValue: 1 << 14)
 
-    static let all = DataDomains(rawValue: (1 << 14) - 1)
+    static let all = DataDomains(rawValue: (1 << 15) - 1)
 
     /// The domains whose keys are repos, store keys or item keys.
     static let byRepo: DataDomains = [.runs, .prs]
     static let byProject: DataDomains = [.projects, .intake]
-    static let byItem: DataDomains = [.agents, .relations, .summaries]
+    static let byItem: DataDomains = [.agents, .relations, .summaries, .runbooks]
 
     var names: [String] {
         let all: [(DataDomains, String)] = [(.runs, "runs"), (.prs, "prs"), (.projects, "projects"), (.agents, "agents"), (.queue, "queue"),
                                             (.relations, "relations"), (.stats, "stats"), (.questions, "questions"), (.intake, "intake"),
                                             (.summaries, "summaries"), (.planner, "planner"), (.logs, "logs"), (.connection, "connection"),
-                                            (.config, "config")]
+                                            (.config, "config"), (.runbooks, "runbooks")]
         return all.filter { contains($0.0) }.map(\.1)
     }
 }

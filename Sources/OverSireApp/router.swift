@@ -6,7 +6,7 @@ enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     // Lanes is the board of the queue lanes. It has no tab: the Up next group links to it.
     enum WorkTab: String, CaseIterable { case items, worktrees, lanes }
-    enum ItemTab: String, CaseIterable { case overview, session, subitems, activity }
+    enum ItemTab: String, CaseIterable { case overview, runbook, session, subitems, activity }
     enum SettingsPage: String, CaseIterable {
         case general, accounts, projects, agents, machines, ai, notifications, logs
 
