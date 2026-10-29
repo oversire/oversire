@@ -46,13 +46,15 @@ public struct QueueEntry: Codable, Hashable, Sendable {
     public var condition: Condition
     public var added: Date
     public var source: Source
+    public var runbook: String?        // the Runbook id of the start; nil: one session
 
-    public init(key: String, title: String, condition: Condition = .slot, added: Date, source: Source = .you) {
+    public init(key: String, title: String, condition: Condition = .slot, added: Date, source: Source = .you, runbook: String? = nil) {
         self.key = key
         self.title = title
         self.condition = condition
         self.added = added
         self.source = source
+        self.runbook = runbook
     }
 }
 
