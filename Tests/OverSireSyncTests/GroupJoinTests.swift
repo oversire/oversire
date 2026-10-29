@@ -4,7 +4,7 @@ import OverSireTestKit
 @testable import OverSireSync
 
 final class GroupJoinTests: XCTestCase {
-    func testFramesParse() {
+    func testFramesParse() throws {
         let result = DaemonFrame.parse(#"{"type":"joinResult","host":"100.97.81.23:7690","request":"r-1","status":"denied"}"#)
         XCTAssertEqual(result, .joinResult(JoinResultFrame(host: "100.97.81.23:7690", request: "r-1", status: .denied)))
         XCTAssertNil(DaemonFrame.parse(#"{"type":"poke"}"#))
@@ -14,6 +14,12 @@ final class GroupJoinTests: XCTestCase {
         }
         XCTAssertEqual(l.holderName, "mbp")
         XCTAssertEqual(l.epoch, 2)
+        let run = String(decoding: try contractFixture("runbook-run", "gate"), as: UTF8.self)
+        guard case .runbookRun(let r)? = DaemonFrame.parse(#"{"type":"runbookRun","run":"# + run + "}") else {
+            return XCTFail("no runbookRun frame")
+        }
+        XCTAssertEqual(r.state, .gate)
+        XCTAssertEqual(r.current, "implement")
     }
 
     func testReasonUsesTheErrorOfTheBody() {

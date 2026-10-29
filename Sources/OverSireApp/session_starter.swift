@@ -14,6 +14,7 @@ enum SessionStartError: LocalizedError, Equatable {
     case noCreate(String)
     case badCommand(String)
     case hostFiles(String)
+    case noRunbooks
 
     var errorDescription: String? {
         switch self {
@@ -24,6 +25,7 @@ enum SessionStartError: LocalizedError, Equatable {
         case .noCreate(let k): return "The tracker of \(k) cannot take files."
         case .badCommand(let e): return "The agent command is not valid: \(e)"
         case .hostFiles(let e): return "The files did not go to the sessions machine: \(e)"
+        case .noRunbooks: return "The daemon on the sessions machine cannot run runbooks. Update oversire."
         }
     }
 }

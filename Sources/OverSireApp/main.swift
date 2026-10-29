@@ -241,6 +241,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // Before the first reloadList: projectStore.track publishes the cached items at once, and each tick asks the gates.
         startAutomations()
         machineHub.start()
+        RUNBOOKS.start()
         DaemonSetup.shared.offerUpdateOnce()
         relay.start()
         updatePolling()

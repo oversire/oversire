@@ -72,7 +72,7 @@ final class MachineRuntimeTests: XCTestCase {
         let rt = local(d)
         XCTAssertEqual(rt.capabilities, [.questions], "no read of /v1/runtimes yet")
         try await rt.refresh()
-        XCTAssertEqual(rt.capabilities, [.questions, .sessionInput, .sessionTail, .sessionHistory, .hostFiles, .reveal, .removeWorkspace, .sessionKey])
+        XCTAssertEqual(rt.capabilities, [.questions, .sessionInput, .sessionTail, .sessionHistory, .hostFiles, .reveal, .removeWorkspace, .sessionKey, .runbooks])
 
         d.runtime.runtimes = try contract(DaemonRuntimesPage.self, "daemon-runtimes-page", "orca-down").runtimes
         try await rt.refresh()
@@ -364,5 +364,89 @@ final class MachineRuntimeTests: XCTestCase {
         let b: Void? = await second.next()
         XCTAssertNotNil(a)
         XCTAssertNotNil(b)
+    }
+
+    // MARK: Runbooks
+
+    func testRunbookRoutes() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        try await rt.refresh()
+        XCTAssertTrue(rt.capabilities.contains(.runbooks))
+        let start = try contract(RunbookStart.self, "runbook-start", "full")
+        let run = try await rt.startRunbook(start)
+        XCTAssertEqual(run.state, .running)
+        XCTAssertEqual(run.current, "plan")
+        XCTAssertEqual(d.body(of: "POST /v1/runbook-runs")?["repo"] as? String, start.repo)
+
+        let open = try await rt.runbookRuns(item: "OVERSIRE-341", open: true)
+        XCTAssertEqual(open.map(\.id), [run.id])
+        XCTAssertEqual(d.requests.last?.url?.query, "item=OVERSIRE-341&open=1")
+        let gone = try await rt.runbookRuns(item: "OVERSIRE-1", open: false)
+        XCTAssertTrue(gone.isEmpty)
+
+        let patched = try await rt.act(.patch(StepPatch(prompt: "Review {key}. Then run {done}.")), step: "review", on: run.id)
+        XCTAssertEqual(patched.runbook.step("review")?.prompt, "Review {key}. Then run {done}.")
+        XCTAssertEqual(d.calls.last, "PATCH /v1/runbook-runs/\(run.id)/steps/review")
+        let paused = try await rt.act(.pause, on: run.id)
+        XCTAssertEqual(paused.state, .paused)
+        XCTAssertEqual(d.calls.last, "POST /v1/runbook-runs/\(run.id)/pause")
+        let done = try await rt.act(.done(StepDone(verdict: .done, note: "Plan posted.")), step: "plan", on: run.id)
+        XCTAssertEqual(done.last("plan")?.note, "Plan posted.")
+        XCTAssertEqual(done.state, .paused, "a step done in a paused run does not go on")
+        let again = try await rt.runbookRun(run.id)
+        XCTAssertEqual(again, done)
+    }
+
+    func testRunbookRefusalsMap() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        var start = try contract(RunbookStart.self, "runbook-start", "full")
+        start.runbook.steps[1].prompt = "Review {key} with {colour}."
+        do {
+            _ = try await rt.startRunbook(start)
+            XCTFail("a runbook with problems starts")
+        } catch let e as RunbookRefusal {
+            XCTAssertEqual(e.problems.map(\.step), ["review-plan", "review-plan"])
+        }
+        start = try contract(RunbookStart.self, "runbook-start", "full")
+        let run = try await rt.startRunbook(start)
+        do {
+            _ = try await rt.startRunbook(start)
+            XCTFail("a second open run starts")
+        } catch ProviderError.vendor(let code, _) {
+            XCTAssertEqual(code, "409")
+        }
+        do {
+            _ = try await rt.act(.approve, on: run.id)
+            XCTFail("approve of a running run")
+        } catch ProviderError.vendor(let code, _) {
+            XCTAssertEqual(code, "409")
+        }
+        do {
+            _ = try await rt.runbookRun("rb_00000000")
+            XCTFail("an unknown run")
+        } catch ProviderError.notFound {}
+    }
+
+    func testEachRunChangePushesAFrame() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        let frames = Frames()
+        d.runbooks.observe { frames.add(FakeDaemon.frame($0)) }
+        let run = try await rt.startRunbook(try contract(RunbookStart.self, "runbook-start", "full"))
+        _ = try await rt.act(.stop, on: run.id)
+        let runs = frames.all.compactMap { f -> RunbookRun? in
+            struct Frame: Decodable { let type: String; let run: RunbookRun }
+            return (try? DaemonClient.decode(Data(f.utf8)) as Frame).map(\.run)
+        }
+        XCTAssertEqual(runs.map(\.state), [.running, .stopped])
+    }
+
+    private final class Frames: @unchecked Sendable {
+        private let lock = NSLock()
+        private var list: [String] = []
+        func add(_ f: String) { lock.withLock { list.append(f) } }
+        var all: [String] { lock.withLock { list } }
     }
 }

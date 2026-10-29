@@ -206,6 +206,43 @@ public final class DaemonClient: Sendable {
         _ = try await send(try json("DELETE", "/v1/leases/\(Self.escape(name))\(c.percentEncodedQuery.map { "?" + $0 } ?? "")", Optional<[String: String]>.none))
     }
 
+    // MARK: Runbook runs (member routes)
+
+    /// 400 throws RunbookRefusal with the problems of the runbook. 409: the item has an open run.
+    public func startRunbook(_ s: RunbookStart) async throws -> RunbookRun {
+        var r = try json("POST", "/v1/runbook-runs", s)
+        r.timeoutInterval = 30
+        let (data, resp) = try await exchange(r)
+        if resp.statusCode == 400 {
+            struct Body: Decodable { let error: String?; let problems: [RunbookProblem]? }
+            let b = try? JSONDecoder().decode(Body.self, from: data)
+            throw RunbookRefusal(message: b?.error ?? "The daemon refused the runbook.", problems: b?.problems ?? [])
+        }
+        return try Self.decode(try Self.check(data, resp))
+    }
+
+    public func runbookRuns(item: String?, open: Bool) async throws -> [RunbookRun] {
+        var c = URLComponents()
+        c.queryItems = (item.map { [URLQueryItem(name: "item", value: $0)] } ?? []) + (open ? [URLQueryItem(name: "open", value: "1")] : [])
+        return try await get("/v1/runbook-runs\(c.percentEncodedQuery.map { "?" + $0 } ?? "")")
+    }
+
+    public func runbookRun(_ id: RunbookRunID) async throws -> RunbookRun { try await get("/v1/runbook-runs/\(Self.escape(id.rawValue))") }
+
+    public func act(_ a: RunbookAction, on id: RunbookRunID) async throws -> RunbookRun {
+        try await post("/v1/runbook-runs/\(Self.escape(id.rawValue))/\(a.rawValue)", [String: String]())
+    }
+
+    public func act(_ a: StepAction, step: String, on id: RunbookRunID) async throws -> RunbookRun {
+        let path = "/v1/runbook-runs/\(Self.escape(id.rawValue))/steps/\(Self.escape(step))"
+        switch a {
+        case .done(let d): return try await post(path + "/done", d)
+        case .retry: return try await post(path + "/retry", [String: String]())
+        case .skip: return try await post(path + "/skip", [String: String]())
+        case .patch(let p): return try await call("PATCH", path, p)
+        }
+    }
+
     // Question ids hold ":" and other characters that a path segment must escape.
     package static func escape(_ id: String) -> String {
         var allowed = CharacterSet.urlPathAllowed

@@ -18,8 +18,13 @@ public final class FakeRuntime: AgentRuntime, SessionIO, Revealing, HostFileWrit
     private var histories: [String: SessionDigest] = [:]
     private var requests: [LaunchRequest] = []
 
-    public init(account: String = "local", capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory, .removeWorkspace]) {
+    /// The runbook runs of RunbookRunning.
+    public let runbooks: FakeRunbookEngine
+
+    public init(account: String = "local",
+                capabilities: Set<Capability> = [.sessionInput, .sessionTail, .reveal, .hostFiles, .sessionHistory, .removeWorkspace, .runbooks]) {
         base = FakeProvider(id: "fake-runtime", account: account, capabilities: capabilities)
+        runbooks = FakeRunbookEngine(machine: MachineName(rawValue: account))
     }
 
     public var revealed: [SessionRef] { (try? base.locked { shown }) ?? [] }

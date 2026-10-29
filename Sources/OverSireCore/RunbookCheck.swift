@@ -1,7 +1,7 @@
 import Foundation
 
 /// One problem of a runbook. `step` is nil for a problem of the whole runbook.
-public struct RunbookProblem: Hashable, Sendable {
+public struct RunbookProblem: Codable, Hashable, Sendable {
     public var step: String?
     public var text: String
 

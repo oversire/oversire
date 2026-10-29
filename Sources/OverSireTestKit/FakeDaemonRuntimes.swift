@@ -8,7 +8,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
     private let lock = NSLock()
     private var _runtimes: [DaemonRuntime] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: true, version: "1.4.223",
                                                             capabilities: ["sessionInput", "sessionTail", "sessionHistory", "hostFiles",
-                                                                           "workspaces", "reveal", "removeWorkspace", "sessionKey"])]
+                                                                           "workspaces", "reveal", "removeWorkspace", "sessionKey", "runbooks"])]
     private var _repos: [DaemonRepo] = [DaemonRepo(id: "r-towertail", runtime: "orca", name: "towertail", path: "/Users/ada/Projects/towertail", folder: false)]
     private var _workspaces: [DaemonWorkspace] = []
     private var _orders: [WorkOrder] = []

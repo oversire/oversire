@@ -48,6 +48,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case joinResult(JoinResultFrame)
     /// The home daemon has a new holder of the lease, or the holder released it.
     case lease(Lease)
+    /// A runbook run of the daemon changed. Each daemon sends its own runs.
+    case runbookRun(RunbookRun)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -60,6 +62,9 @@ public enum DaemonFrame: Hashable, Sendable {
         case "lease":
             struct Frame: Decodable { let lease: Lease }
             return (try? DaemonClient.decode(data) as Frame).map { .lease($0.lease) }
+        case "runbookRun":
+            struct Frame: Decodable { let run: RunbookRun }
+            return (try? DaemonClient.decode(data) as Frame).map { .runbookRun($0.run) }
         default: return nil
         }
     }

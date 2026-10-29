@@ -270,6 +270,64 @@ public enum RuntimeConformance {
                 r.expect(!after.contains { $0.id == l.card }, "workspaces still lists the removed card \(l.card)")
             }
         }
+        if let rb = rt as? any RunbookRunning, rt.capabilities.contains(.runbooks) { r.merge(await runbooks(rb, repo: repo)) }
+        return r
+    }
+
+    /// One run of a runbook with a review that finds gaps once: one, check, fix, check, done.
+    static func runbooks(_ rt: any RunbookRunning, repo: String) async -> ConformanceReport {
+        var r = ConformanceReport()
+        let project = ProjectRef(account: AccountID(provider: "plane", id: "conformance"), id: "p1", key: "CONFORMANCE")
+        let item = ItemRef(project: project, id: "i2", key: "CONFORMANCE-2", url: URL(string: "https://example.com/CONFORMANCE-2")!)
+        let done = " Then run {done}."
+        let book = Runbook(id: "conformance", name: "Conformance", steps: [
+            RunbookStep(id: "one", name: "One", agent: "claude", prompt: "Work on {key}." + done),
+            RunbookStep(id: "check", name: "Check", agent: "claude", prompt: "Check {key}." + done, review: .init(fix: "fix")),
+            RunbookStep(id: "fix", name: "Fix", agent: "claude", prompt: "Fix {key}." + done),
+        ])
+        let start = RunbookStart(item: item, repo: repo, runbook: book, agents: ["claude": AgentLaunchSpec(cli: "claude", profile: "claude")])
+        var bad = start
+        bad.runbook.steps[0].prompt = "No end."
+        do {
+            _ = try await rt.startRunbook(bad)
+            r.expect(false, "a start of a runbook with problems did not throw")
+        } catch let e as RunbookRefusal {
+            r.expect(e.problems.contains { $0.step == "one" }, "the refusal does not name the step one: \(e.problems)")
+        } catch {
+            r.expect(false, "a start of a runbook with problems threw \(error), not a RunbookRefusal")
+        }
+        guard var run = await r.step("startRunbook", { try await rt.startRunbook(start) }) else { return r }
+        r.expect(run.state == .running && run.current == "one", "a new run is \(run.state.rawValue) at \(run.current ?? "no step")")
+        let id = run.id
+        await r.expectError("a second start for the item", { if case .vendor("409", _) = $0 { true } else { false } }) {
+            _ = try await rt.startRunbook(start)
+        }
+        if let open = await r.step("runbookRuns", { try await rt.runbookRuns(item: item.key, open: true) }) {
+            r.expect(open.map(\.id) == [id], "the open runs of the item are \(open.map(\.id))")
+        }
+        await r.expectError("done of a step that is not current", { if case .vendor("409", _) = $0 { true } else { false } }) {
+            _ = try await rt.act(.done(StepDone(verdict: .pass)), step: "check", on: id)
+        }
+        await r.expectError("the verdict pass for a step that is not a review", { if case .vendor("400", _) = $0 { true } else { false } }) {
+            _ = try await rt.act(.done(StepDone(verdict: .pass)), step: "one", on: id)
+        }
+        let path: [(String, StepDone.Verdict, String?)] = [("one", .done, "check"), ("check", .gaps, "fix"), ("fix", .done, "check"), ("check", .pass, nil)]
+        for (step, verdict, next) in path {
+            guard let after = await r.step("done \(step) \(verdict.rawValue)", {
+                try await rt.act(.done(StepDone(verdict: verdict, note: "conformance")), step: step, on: id)
+            }) else { return r }
+            run = after
+            r.expect(run.current == next, "after \(step) \(verdict.rawValue) the current step is \(run.current ?? "none"), not \(next ?? "none")")
+        }
+        r.expect(run.state == .done, "the run is \(run.state.rawValue) at the end, not done")
+        r.expect(run.rounds(of: "check").map(\.state) == [.gaps, .pass], "the check rounds are \(run.rounds(of: "check").map(\.state.rawValue))")
+        if let got = await r.step("runbookRun", { try await rt.runbookRun(id) }) {
+            r.expect(got == run, "runbookRun gives another run than the last change")
+        }
+        await r.expectError("approve of a run that is done", { if case .vendor("409", _) = $0 { true } else { false } }) {
+            _ = try await rt.act(.approve, on: id)
+        }
+        await r.expectError("an unknown run", { $0 == .notFound }) { _ = try await rt.runbookRun("rb_00000000") }
         return r
     }
 }

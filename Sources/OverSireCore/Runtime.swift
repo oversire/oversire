@@ -272,3 +272,42 @@ public protocol WorkspaceRemoving: AgentRuntime {
     func remove(_ w: Workspace, force: Bool, runHooks: Bool) async throws -> WorkspaceRemoval
 }
 
+
+/// A change of a whole run.
+public enum RunbookAction: String, Sendable, CaseIterable {
+    case approve, pause, resume, stop
+}
+
+/// A change of one step of a run.
+public enum StepAction: Hashable, Sendable {
+    case done(StepDone)
+    case retry
+    case skip
+    /// Only for a step that did not start.
+    case patch(StepPatch)
+}
+
+/// The daemon refused a start (400). `problems` are the runbook problems, if any.
+public struct RunbookRefusal: Error, Hashable, Sendable, LocalizedError {
+    public let message: String
+    public let problems: [RunbookProblem]
+
+    public init(message: String, problems: [RunbookProblem] = []) {
+        self.message = message
+        self.problems = problems
+    }
+
+    public var errorDescription: String? { ([message] + problems.map(\.text)).joined(separator: " ") }
+}
+
+/// Runs runbooks on the machine: one session for each step (OVERSIRE-349).
+/// A wrong state throws `ProviderError.vendor(code: "409", ...)`; an unknown run throws `.notFound`.
+public protocol RunbookRunning: AgentRuntime {
+    /// Throws `RunbookRefusal` for a runbook with problems.
+    func startRunbook(_ s: RunbookStart) async throws -> RunbookRun
+    /// `item` nil: all items. `open`: only the runs that can go on.
+    func runbookRuns(item: String?, open: Bool) async throws -> [RunbookRun]
+    func runbookRun(_ id: RunbookRunID) async throws -> RunbookRun
+    func act(_ a: RunbookAction, on id: RunbookRunID) async throws -> RunbookRun
+    func act(_ a: StepAction, step: String, on id: RunbookRunID) async throws -> RunbookRun
+}

@@ -49,7 +49,8 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     public var capabilities: Set<Capability> {
         var caps: Set<Capability> = [.questions]
         for r in runtimes where r.reachable { caps.formUnion(r.capabilities.map(Capability.init(rawValue:))) }
-        let parts: Set<Capability> = [.sessionInput, .sessionTail, .sessionHistory, .hostFiles, .removeWorkspace, .sessionKey, .questions, .sessionStream]
+        let parts: Set<Capability> = [.sessionInput, .sessionTail, .sessionHistory, .hostFiles, .removeWorkspace, .sessionKey, .questions, .sessionStream,
+                                     .runbooks]
         return caps.intersection(reveals ? parts.union([.reveal]) : parts)
     }
 

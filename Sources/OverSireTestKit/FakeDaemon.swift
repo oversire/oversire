@@ -36,11 +36,21 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     public let token: String?
     /// The runtime routes: runtimes, workspaces, files and orders.
     public let runtime = FakeDaemonRuntimes()
+    /// The runbook routes. Each change of a run pushes a runbookRun frame.
+    public let runbooks: FakeRunbookEngine
 
     public init(info: DaemonInfo, group: Group? = nil, token: String? = nil) {
         _info = info
         _group = group
         self.token = token
+        runbooks = FakeRunbookEngine(machine: info.machine)
+        runbooks.observe { [weak self] r in self?.push(Self.frame(r)) }
+    }
+
+    /// The {"type":"runbookRun"} frame of a run.
+    public static func frame(_ r: RunbookRun) -> String {
+        struct Frame: Encodable { let type = "runbookRun"; let run: RunbookRun }
+        return (try? encoder.encode(Frame(run: r))).map { String(decoding: $0, as: UTF8.self) } ?? ""
     }
 
     /// A daemon on loopback with the fixture values of daemon-info/loopback.json.
@@ -132,11 +142,17 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = request.url!
-        let (status, body): (Int, Data) = try with {
+        let c = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let parts = (c?.percentEncodedPath ?? url.path).split(separator: "/").map(String.init).map { $0.removingPercentEncoding ?? $0 }
+        var (status, body): (Int, Data) = try with {
             _requests.append(request)
             guard _online else { throw ProviderError.transport("connection refused") }
             guard authorized(request) else { return (401, Data(#"{"error":"unauthorized"}"#.utf8)) }
-            return try route(request.httpMethod ?? "GET", url, body: request.httpBody)
+            return parts.starts(with: ["v1", "runbook-runs"]) ? (0, Data()) : try route(request.httpMethod ?? "GET", url, body: request.httpBody)
+        }
+        // Out of the lock: a change of a run pushes a frame.
+        if status == 0 {
+            (status, body) = runbooks.route(request.httpMethod ?? "GET", parts, query: c?.queryItems ?? [], body: request.httpBody) ?? (404, Data())
         }
         return (body, HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!)
     }
