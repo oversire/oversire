@@ -275,6 +275,11 @@ struct ProjectsConfig: Codable {
 
     func local(_ key: String) -> ProjectLocalSettings { settings[key.uppercased()] ?? ProjectLocalSettings() }
 
+    /// The default runbook of a project. A removed runbook falls back to Full, then to the first runbook.
+    func runbook(for key: String) -> Runbook? {
+        local(key).runbook.flatMap(runtime.runbook) ?? runtime.runbook(Runbook.fullID) ?? runtime.runbooks.first
+    }
+
     mutating func setLocal(_ key: String, _ s: ProjectLocalSettings) { settings[key.uppercased()] = s }
 
     // The notification settings of a project. Nil when the project is muted.
@@ -398,6 +403,7 @@ struct ProjectLocalSettings: Codable, Equatable {
     var branchTemplate: String?       // {key}, {KEY}, {slug}, {title}
     var agent: String?
     var prompt: String?
+    var runbook: String?              // the default Runbook id; nil: full
     var notifications: ProjectNotificationSettings?   // nil uses the app default
     var categories: [String: StatusCategory] = [:]   // status id → category
     var hidden = false
@@ -416,6 +422,7 @@ struct ProjectLocalSettings: Codable, Equatable {
         branchTemplate = try c.decodeIfPresent(String.self, forKey: .branchTemplate)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        runbook = try c.decodeIfPresent(String.self, forKey: .runbook)
         notifications = try c.decodeIfPresent(ProjectNotificationSettings.self, forKey: .notifications)
         categories = try c.decodeIfPresent([String: StatusCategory].self, forKey: .categories) ?? [:]
         hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
@@ -610,8 +617,9 @@ struct RuntimeConfig: Codable, Equatable {
     var sessionIntakePrompt = SessionPrompt.intakeDefault
     var sessionFilesPrompt = SessionPrompt.filesDefault
     var refinePrompt = SessionPrompt.refineDefault
+    var runbooks: [Runbook] = []
 
-    init() {}
+    init() { runbooks = defaultRunbooks }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -623,6 +631,7 @@ struct RuntimeConfig: Codable, Equatable {
         sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
         refinePrompt = try c.decodeIfPresent(String.self, forKey: .refinePrompt) ?? SessionPrompt.refineDefault
+        runbooks = try c.decodeIfPresent([Runbook].self, forKey: .runbooks) ?? defaultRunbooks
     }
 
     /// The Harness name of a CLI name or a program path, else nil.
