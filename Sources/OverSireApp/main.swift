@@ -199,6 +199,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             btn.imagePosition = .imageOnly
             btn.target = self
             btn.action = #selector(statusItemClicked)
+            btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
             // Re-render the cached tinted icon when the system flips light/dark.
             appearanceObs = btn.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
                 DispatchQueue.main.async { self?.updateIcon() }
@@ -1143,7 +1144,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     // The rules are in `IconClick`.
     @objc func statusItemClicked() {
         // A transient panel can close on the mouse down, just before this click.
-        switch IconClick.action(appWindow.iconClickState, panelShown: popover.isShown || Date().timeIntervalSince(closeTime) <= 0.3) {
+        let secondary = NSApp.currentEvent.map { $0.type == .rightMouseUp || $0.modifierFlags.contains(.control) } ?? false
+        switch IconClick.action(appWindow.iconClickState, panelShown: popover.isShown || Date().timeIntervalSince(closeTime) <= 0.3, secondary: secondary) {
         case .raise: showWindow()
         case .panel, .closePanel: toggle()
         }
@@ -1309,8 +1311,10 @@ enum IconClick {
     enum Action: Equatable { case panel, raise, closePanel }
 
     /// With the panel open, the window is not key, so a second click only closes the panel.
-    static func action(_ w: Window, panelShown: Bool) -> Action {
+    /// A secondary (right or control) click always toggles the panel.
+    static func action(_ w: Window, panelShown: Bool, secondary: Bool = false) -> Action {
         if panelShown { return .closePanel }
+        if secondary { return .panel }
         switch w {
         case .minimized, .background: return .raise
         case .closed, .front, .elsewhere: return .panel

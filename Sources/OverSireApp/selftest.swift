@@ -887,6 +887,10 @@ func runSelfTest() {
         (.front, false, .panel), (.elsewhere, false, .panel), (.background, true, .closePanel), (.closed, true, .closePanel),
     ]
     for (w, shown, a) in clicks { check(IconClick.action(w, panelShown: shown) == a, "icon click: \(w), panel \(shown) gives \(a)") }
+    for w: IconClick.Window in [.closed, .minimized, .background, .front, .elsewhere] {
+        check(IconClick.action(w, panelShown: false, secondary: true) == .panel, "icon right click: \(w) gives the panel")
+        check(IconClick.action(w, panelShown: true, secondary: true) == .closePanel, "icon right click: \(w), panel open gives close")
+    }
     let filesPrompt = SessionPrompt.files(SessionPrompt.filesDefault, text: "Look", paths: ["/tmp/oversire/x/a.png"])
     check(filesPrompt == "Look\n\nAttached files:\n/tmp/oversire/x/a.png", "session: files prompt \(filesPrompt)")
 
