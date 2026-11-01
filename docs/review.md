@@ -50,7 +50,7 @@ A round goes to the session of the key:
 | Working | The prompt waits for the end of the turn (`queued`). |
 | Ended, or none | A new session starts in the same place: the group for code, the project root for a plan (`newSession`). |
 
-A second batch waits behind the first. When a delivery fails, the round shows the error, and the comments stay with the round.
+A second batch waits behind the first. When a delivery fails, the round shows the error, and the comments stay with the round. A round also repeats each comment of an earlier round that went to the agent and has no answer, for example when the session ended in the round.
 
 The code session has the start key `work:<KEY>`. The plan session has the start key `plan:<KEY>`. Thus plan comments go to the Plan session and code comments go to the work session.
 
@@ -66,7 +66,7 @@ The Merge sheet shows the merge mode of each repository:
 | Rebase | The base moved, and `git merge-tree` finds no conflict. The daemon rebases the branch, then fast-forwards. |
 | Conflict | The rebase has conflicts. **Fix with agent** sends the conflict files to the session. The agent rebases and runs `oversire review ready` again. |
 
-The merge is all or none: when one repository fails, the daemon merges none. The repositories merge in the order of `review.order` in the daemon config, for example `["agent-binder", "oversire", "cloud", "cli"]`. A repository that is not in the list merges after them, in alphabetic order. **Remove the group** removes the worktrees and the links of `.wt/<KEY>/` after the merge. OverSire then sets the item to Done. The daemon never pushes: the base branch shows under "Merged, not pushed".
+The merge is all or none: when one repository fails, the daemon merges none. The repositories merge in the order of `review.order` in the daemon config, for example `["agent-binder", "oversire", "cloud", "cli"]`. A repository that is not in the list merges after them, in alphabetic order. **Remove the group** removes the worktrees and the links of `.wt/<KEY>/` after the merge. A file that is not a link, for example `.wt/<KEY>/.claude/`, keeps the folder: the merge is done, and OverSire tells you that the group stays. OverSire then sets the item to Done. The daemon never pushes: the base branch shows under "Merged, not pushed".
 
 ## Two Macs
 
