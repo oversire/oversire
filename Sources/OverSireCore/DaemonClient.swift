@@ -248,6 +248,65 @@ public final class DaemonClient: Sendable {
         }
     }
 
+    // MARK: Reviews (member routes, review.json)
+
+    public func reviews(kind: ReviewKind?) async throws -> ReviewsPage {
+        try await get("/v1/reviews" + Self.query(["kind": kind?.rawValue]))
+    }
+
+    public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail {
+        try await get(Self.reviewPath(key) + Self.query(["kind": kind.rawValue]))
+    }
+
+    public func diff(_ key: String, repo: String, path: String) async throws -> FileDiff {
+        try await get(Self.reviewPath(key, "/diff") + Self.query(["repo": repo, "path": path]))
+    }
+
+    public func addComment(_ key: String, _ d: CommentDraft) async throws -> ReviewComment {
+        try await post(Self.reviewPath(key, "/comments"), d)
+    }
+
+    public func editComment(_ key: String, id: String, _ e: CommentEdit) async throws {
+        _ = try await send(try json("PATCH", Self.reviewPath(key, "/comments/\(Self.escape(id))"), e))
+    }
+
+    public func deleteComment(_ key: String, id: String, kind: ReviewKind) async throws {
+        let path = Self.reviewPath(key, "/comments/\(Self.escape(id))") + Self.query(["kind": kind.rawValue])
+        _ = try await send(try json("DELETE", path, Optional<[String: String]>.none))
+    }
+
+    public func markViewed(_ key: String, _ m: ViewedMark) async throws {
+        _ = try await send(try json("PUT", Self.reviewPath(key, "/viewed"), m))
+    }
+
+    public func submit(_ key: String, _ s: SubmitReview) async throws -> ReviewRound {
+        var r = try json("POST", Self.reviewPath(key, "/submit"), s)
+        r.timeoutInterval = 60
+        return try Self.decode(try await send(r))
+    }
+
+    public func merge(_ key: String, _ m: MergeRequest) async throws -> MergeResult {
+        var r = try json("POST", Self.reviewPath(key, "/merge"), m)
+        r.timeoutInterval = 120
+        return try Self.decode(try await send(r))
+    }
+
+    public func fix(_ key: String) async throws -> ReviewRound {
+        var r = try json("POST", Self.reviewPath(key, "/fix") + Self.query(["kind": ReviewKind.code.rawValue]), [String: String]())
+        r.timeoutInterval = 60
+        return try Self.decode(try await send(r))
+    }
+
+    private static func reviewPath(_ key: String, _ tail: String = "") -> String { "/v1/reviews/\(escape(key))\(tail)" }
+
+    private static func query(_ items: KeyValuePairs<String, String?>) -> String {
+        var c = URLComponents()
+        c.queryItems = items.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }
+        // Go reads "+" in a query as a space.
+        guard let q = c.percentEncodedQuery, !q.isEmpty else { return "" }
+        return "?" + q.replacingOccurrences(of: "+", with: "%2B")
+    }
+
     // Question ids hold ":" and other characters that a path segment must escape.
     package static func escape(_ id: String) -> String {
         var allowed = CharacterSet.urlPathAllowed

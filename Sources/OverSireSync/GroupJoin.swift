@@ -50,6 +50,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case lease(Lease)
     /// A runbook run of the daemon changed. Each daemon sends its own runs.
     case runbookRun(RunbookRun)
+    /// A review of the daemon changed. A hint: the app gets the review again.
+    case review(ReviewEvent)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -65,6 +67,7 @@ public enum DaemonFrame: Hashable, Sendable {
         case "runbookRun":
             struct Frame: Decodable { let run: RunbookRun }
             return (try? DaemonClient.decode(data) as Frame).map { .runbookRun($0.run) }
+        case "review": return (try? DaemonClient.decode(data) as ReviewEvent).map(DaemonFrame.review)
         default: return nil
         }
     }
