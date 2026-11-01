@@ -2,8 +2,9 @@ import Cocoa
 import OverSireCore
 
 // ─── Item › Changes ──────────────────────────────────────────────────────────
-// The code review of an item (OVERSIRE-372): the repos of the worktree group, a file list by repo, and the diff.
-// Click a line number to comment on the line. Shift-click a second number on the same side for a range.
+// The code review of an item (OVERSIRE-372): the repos of the worktree group, the review bar, the file panel and the diff.
+// The file panel and the diff scroll in their own height (OVERSIRE-387).
+// Click a line number or the hover "+" to comment on the line. Shift-click a second number on the same side for a range.
 // Added lines show "+" on green, removed lines "−" on vermillion, so color is never the only signal.
 
 /// A line number in a diff. A click picks the line. Return or Space picks it with the keyboard, Shift-Return makes a range.
@@ -11,13 +12,24 @@ final class DiffGutter: NSView {
     private let onPick: (_ shift: Bool) -> Void
     private let label: NSTextField
 
-    init(_ text: String, width: CGFloat, picked: Bool, name: String, onPick: @escaping (_ shift: Bool) -> Void) {
+    /// A line with a comment: pending or sent shows orange, answered green. The thread under the line says the same in text.
+    enum Mark { case none, pending, answered }
+
+    init(_ text: String, width: CGFloat, picked: Bool, mark: Mark = .none, name: String, onPick: @escaping (_ shift: Bool) -> Void) {
         self.onPick = onPick
-        label = .text(text, size: 11, color: picked ? Palette.acc : Palette.dim, mono: true)
+        label = .text(text, size: 11, weight: picked || mark != .none ? .semibold : .regular, color: picked ? Palette.acc : Palette.dim, mono: true)
         label.alignment = .right
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
+        if picked || mark != .none {
+            let bar = Box(fill: picked ? Palette.acc : mark == .answered ? Palette.ok : Palette.warn, border: nil, radius: 1)
+            addSubview(bar)
+            NSLayoutConstraint.activate([
+                bar.leadingAnchor.constraint(equalTo: leadingAnchor), bar.widthAnchor.constraint(equalToConstant: 3),
+                bar.topAnchor.constraint(equalTo: topAnchor), bar.heightAnchor.constraint(equalToConstant: 18),
+            ])
+        }
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: width),
             label.leadingAnchor.constraint(equalTo: leadingAnchor), label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
@@ -25,7 +37,7 @@ final class DiffGutter: NSView {
         ])
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel(name)
+        setAccessibilityLabel(name + (mark == .none ? "" : mark == .answered ? ", has an answered comment" : ", has a comment"))
         toolTip = "Click to comment. Shift-click for a range."
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -41,6 +53,58 @@ final class DiffGutter: NSView {
     }
     override func drawFocusRingMask() { bounds.fill() }
     override var focusRingMaskBounds: NSRect { bounds }
+}
+
+/// A diff line that shows a "+" on hover. A click on the "+" starts a comment on the line.
+/// The keyboard path is the line number (`DiffGutter`), so the "+" is not an accessibility element.
+final class DiffLineBox: Box {
+    private var plus: NSView?
+    private var tracking: NSTrackingArea?
+
+    func addPlus(at anchor: NSView, onPick: @escaping (_ shift: Bool) -> Void) {
+        let p = PlusMark(onPick)
+        p.isHidden = true
+        addSubview(p)
+        NSLayoutConstraint.activate([
+            p.centerXAnchor.constraint(equalTo: anchor.centerXAnchor), p.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+        ])
+        plus = p
+    }
+
+    override func updateTrackingAreas() {
+        if let tracking { removeTrackingArea(tracking) }
+        if plus != nil {
+            let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+            addTrackingArea(t)
+            tracking = t
+        }
+        super.updateTrackingAreas()
+    }
+    override func mouseEntered(with event: NSEvent) { plus?.isHidden = false }
+    /// For `--uishots`: the hover look with no mouse.
+    func showPlus() { plus?.isHidden = false }
+    override func mouseExited(with event: NSEvent) { plus?.isHidden = true }
+
+    private final class PlusMark: Box {
+        private let onPick: (_ shift: Bool) -> Void
+
+        init(_ onPick: @escaping (_ shift: Bool) -> Void) {
+            self.onPick = onPick
+            super.init(fill: Palette.acc, border: nil, radius: 4)
+            let t = NSTextField.text("+", size: 12, weight: .bold, color: Palette.bg, mono: true)
+            addSubview(t)
+            NSLayoutConstraint.activate([
+                widthAnchor.constraint(equalToConstant: 16), heightAnchor.constraint(equalToConstant: 16),
+                t.centerXAnchor.constraint(equalTo: centerXAnchor), t.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            toolTip = "Comment on this line. Shift-click for a range."
+            setAccessibilityElement(false)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func mouseDown(with event: NSEvent) { onPick(event.modifierFlags.contains(.shift)) }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    }
 }
 
 /// The merge of one repo, from `ReviewRepo.merge`.
@@ -77,11 +141,12 @@ final class ReviewChangesTab {
     var window: () -> NSWindow? = { nil }
     var go: (Route) -> Void = { _ in }
     private var threads: [String: ReviewThreads] = [:]
+    private var panels: [String: FilePanel] = [:]
     /// The most diff lines that the tab shows for one file.
     static let lineLimit = 1500
 
     func threads(_ desk: ReviewDesk) -> ReviewThreads {
-        if let t = threads[desk.id] { return t }
+        if let t = threads[desk.id], t.desk === desk { return t }
         let t = ReviewThreads(desk)
         t.reload = { [weak self] in self?.reload() }
         t.window = { [weak self] in self?.window() }
@@ -91,11 +156,28 @@ final class ReviewChangesTab {
         }
         t.jump = { [weak self, weak desk] c in
             guard let desk, case .code(let repo, let path, _, _, _) = c.anchor else { return }
-            desk.file = repo + "/" + path
+            let id = repo + "/" + path
+            desk.file = id
+            desk.reveal = ReviewThreads.anchorID(c)
+            if let f = desk.files.first(where: { $0.id == id }), !desk.filter.matches(f) { desk.filter = FileFilter() }
+            desk.collapsed = desk.collapsed.filter { !id.hasPrefix($0 + "/") }
             self?.open(desk)
         }
         threads[desk.id] = t
         return t
+    }
+
+    func panel(_ desk: ReviewDesk) -> FilePanel {
+        if let p = panels[desk.id], p.desk === desk { return p }
+        let p = FilePanel(desk)
+        p.changed = { [weak self] in self?.reload() }
+        p.open = { [weak self, weak desk] f in
+            guard let desk else { return }
+            desk.file = f.id
+            self?.open(desk)
+        }
+        panels[desk.id] = p
+        return p
     }
 
     func rows(_ desk: ReviewDesk) -> [PageRow] {
@@ -105,7 +187,7 @@ final class ReviewChangesTab {
         if let e = desk.error, desk.detail == nil {
             out.append(PageRow("error", e) { Banner(.bad, title: "The daemon on \(s.machine) did not give the review", body: e) })
         }
-        out.append(PageRow("repos", s.repos, s.note, s.state, s.group, desk.pending.count) { [unowned self] in self.repos(desk) })
+        out.append(PageRow("repos", s.repos, s.note, s.state, s.group, desk.pending.count, desk.filter.repo) { [unowned self] in self.repos(desk) })
         if desk.detail == nil {
             out.append(PageRow("loading", desk.loading) {
                 let c = ListCard()
@@ -114,22 +196,32 @@ final class ReviewChangesTab {
             })
             return out
         }
-        out.append(PageRow("rounds", desk.rounds, s.round, desk.pending.count) { t.rounds() })
+        out.append(PageRow("review-bar", desk.rounds, s.round, desk.pending, desk.error, t.hash) { t.reviewBar() })
         let file = desk.files.first { $0.id == desk.file }
         let diff = file.flatMap { desk.diffs[$0.id] }
         let notes = file.map { desk.comments(in: $0) } ?? []
-        out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos) { [unowned self] in
-            let side = self.fileList(desk)
-            let main = file.map { self.diffPanel(desk, file: $0, diff: diff, threads: t) } ?? EmptyNote("No changed files.") as NSView
-            main.setContentHuggingPriority(.init(1), for: .horizontal)
-            let h = NSStackView(h: [side, main], spacing: 14)
-            h.alignment = .top
-            h.distribution = .fill
-            side.widthAnchor.constraint(equalToConstant: 250).isActive = true
-            return h
+        let fill: (NSView) -> Void = { [unowned self] v in
+            guard let pane = v as? TwoPane else { return }
+            let p = self.panel(desk)
+            pane.side.set(header: p.head, body: p.body(), place: "files")
+            if let file {
+                let (head, body) = self.diffPanel(desk, file: file, diff: diff, threads: t)
+                pane.main.set(header: head, body: body, place: file.id)
+            } else {
+                pane.main.set(header: nil, body: EmptyNote("No changed files."), place: "")
+            }
+            guard desk.reveal != nil else { return }
+            DispatchQueue.main.async { [weak pane, weak desk] in
+                guard let pane, let desk, let r = desk.reveal, pane.main.reveal(r) else { return }
+                desk.reveal = nil
+            }
+        }
+        out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos,
+                           desk.filter, desk.view, desk.collapsed, desk.reveal, update: fill) {
+            let pane = TwoPane(sideWidth: 300, keep: "changes")
+            fill(pane)
+            return pane
         })
-        out.append(PageRow("pending", desk.pending, t.hash) { t.pendingList() })
-        out.append(PageRow("batch", desk.pending.count, desk.error, t.hash, desk.summary.round) { t.batchBar() })
         return out
     }
 
@@ -160,10 +252,24 @@ final class ReviewChangesTab {
             case .rebase: parts.append(mark.line("\(r.base) has \(r.behind) new commit\(r.behind == 1 ? "" : "s")"))
             case .conflict: parts.append(mark.line("Conflict: " + (r.conflictFiles ?? []).joined(separator: ", ")))
             }
-            let line = NSStackView(h: parts, spacing: 8)
-            line.setAccessibilityElement(true)
-            line.setAccessibilityLabel("\(r.name), \(r.branch) into \(r.base), \(r.ahead) commits, \(mark.word)")
-            card.add(line)
+            let label = "\(r.name), \(r.branch) into \(r.base), \(r.ahead) commits, \(mark.word)"
+            guard s.repos.count > 1 else {
+                let line = NSStackView(h: parts, spacing: 8)
+                line.setAccessibilityElement(true)
+                line.setAccessibilityLabel(label)
+                card.add(line)
+                continue
+            }
+            // A click shows only the files of this repo. A second click shows all.
+            let on = desk.filter.repo == r.name
+            let row = Row(parts, height: 28, inset: 8, label: label + (on ? ", files shown" : ", show its files")) { [weak self] in
+                desk.filter.repo = on ? nil : r.name
+                self?.reload()
+            }
+            row.stack.spacing = 8
+            row.restBorder = on ? Palette.acc : nil
+            row.selected = on
+            card.add(row)
         }
         var foot: [NSView] = []
         if let note = s.note { foot.append(NSTextField.text("Agent: " + note, size: 12, color: Palette.mut, lines: 2)) }
@@ -184,45 +290,7 @@ final class ReviewChangesTab {
         return card
     }
 
-    // MARK: File list
-
-    private func fileList(_ desk: ReviewDesk) -> NSView {
-        let card = Card(padding: 8, spacing: 2)
-        let pend = desk.pendingByFile
-        let byRepo = Dictionary(grouping: desk.files, by: \.repo)
-        for r in desk.summary.repos.map(\.name) + byRepo.keys.filter({ k in !desk.summary.repos.contains { $0.name == k } }).sorted() {
-            guard let files = byRepo[r] else { continue }
-            card.add(NSTextField.text(r, size: 11.5, weight: .semibold, color: Palette.mut, mono: true))
-            for f in files {
-                let (dir, name) = Self.split(f.path)
-                let letter = NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: Self.color(f.status), mono: true)
-                let title = NSStackView(v: [NSTextField.text(name, size: 12), NSTextField.text(dir, size: 10.5, color: Palette.dim)], spacing: 0)
-                title.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-                var views: [NSView] = [letter, title, Spacer()]
-                if let n = pend[f.id] { views.append(NSTextField.text("✎\(n)", size: 11, weight: .semibold, color: Palette.warn)) }
-                if f.viewed { views.append(NSTextField.text("✓", size: 11, weight: .bold, color: Palette.ok)) }
-                views.append(NSTextField.text(f.binary ? "bin" : "+\(f.added) −\(f.removed)", size: 10.5, color: Palette.dim, mono: true))
-                let label = "\(Self.word(f.status)) \(f.path), \(f.added) added, \(f.removed) removed"
-                    + (pend[f.id].map { ", \($0) pending comments" } ?? "") + (f.viewed ? ", viewed" : "")
-                let row = Row(views, height: 30, inset: 6, label: label) { [weak self] in
-                    desk.file = f.id
-                    self?.open(desk)
-                }
-                row.stack.spacing = 6
-                row.selected = f.id == desk.file
-                card.add(row)
-            }
-            if let commits = desk.summary.repos.first(where: { $0.name == r })?.commits, !commits.isEmpty {
-                card.add(NSTextField.text("Commits", size: 11, weight: .semibold, color: Palette.dim))
-                for c in commits.prefix(8) {
-                    let l = NSTextField.text("\(c.sha.prefix(7))  \(c.subject)", size: 11, color: Palette.mut, mono: true)
-                    l.toolTip = c.subject
-                    card.add(l)
-                }
-            }
-        }
-        return card
-    }
+    // MARK: File names
 
     static func split(_ path: String) -> (dir: String, name: String) {
         guard let i = path.lastIndex(of: "/") else { return ("", path) }
@@ -249,8 +317,8 @@ final class ReviewChangesTab {
 
     // MARK: Diff
 
-    private func diffPanel(_ desk: ReviewDesk, file f: ReviewFile, diff: FileDiff?, threads t: ReviewThreads) -> NSView {
-        let card = Card(padding: 0, spacing: 0)
+    /// The fixed header and the body of the diff of one file.
+    private func diffPanel(_ desk: ReviewDesk, file f: ReviewFile, diff: FileDiff?, threads t: ReviewThreads) -> (NSView, NSView) {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
         let pathField = NSTextField.text(path, size: 12, weight: .semibold, mono: true)
         pathField.setContentCompressionResistancePriority(.init(1), for: .horizontal)
@@ -259,13 +327,17 @@ final class ReviewChangesTab {
             self?.reload()
         }
         let viewed = CheckBox("Viewed", on: f.viewed, label: "Mark \(f.path) as viewed") { on in Task { _ = await desk.setViewed(f, on) } }
-        let head = NSStackView(h: [NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: Self.color(f.status), mono: true),
-                                   pathField, Spacer(), mode, viewed], spacing: 8)
+        var parts: [NSView] = [NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: Self.color(f.status), mono: true), pathField, Spacer()]
+        if let n = desk.pendingByFile[f.id] {
+            let chip = Chiplet("\(n) pending", symbol: "text.bubble", color: Palette.warn)
+            chip.setAccessibilityLabel("\(n) pending comment\(n == 1 ? "" : "s") in this file")
+            parts.append(chip)
+        }
+        let head = NSStackView(h: parts + [mode, viewed], spacing: 8)
         head.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-        card.add(head)
         let body = NSStackView(v: [], spacing: 0)
         body.alignment = .leading
-        card.add(body)
+        body.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 0)
         func note(_ s: String) {
             let n = NSTextField.text(s, size: 12, color: Palette.dim, lines: 3)
             let w = NSStackView(h: [n, Spacer()])
@@ -275,11 +347,12 @@ final class ReviewChangesTab {
         if f.untracked == true { note("This file is not committed. The agent did not commit it.") }
         guard let diff else {
             note(desk.error.map { "The diff did not load: \($0)" } ?? "Loading the diff…")
-            return card
+            return (head, body)
         }
-        if diff.binary || f.binary { note("Binary file. OverSire does not show a binary diff."); return card }
+        if diff.binary || f.binary { note("Binary file. OverSire does not show a binary diff."); return (head, body) }
         if diff.hunks.isEmpty { note("No line changes.") }
         let notes = desk.comments(in: f)
+        let marks = Self.marks(notes)
         var shown = 0
         for h in diff.hunks {
             guard shown < Self.lineLimit else { break }
@@ -294,7 +367,7 @@ final class ReviewChangesTab {
             body.addFull(hv)
             if desk.split {
                 for (l, r) in Self.pairs(h.lines) {
-                    body.addFull(splitRow(desk, file: f, l, r))
+                    body.addFull(splitRow(desk, file: f, marks, l, r))
                     shown += 1
                     for p in (l == r ? [l] : [l, r]).compactMap({ $0.flatMap(LinePick.place) }) {
                         after(p, desk: desk, file: f, notes: notes, threads: t, into: body)
@@ -302,14 +375,32 @@ final class ReviewChangesTab {
                 }
             } else {
                 for l in h.lines {
-                    body.addFull(unifiedRow(desk, file: f, l))
+                    body.addFull(unifiedRow(desk, file: f, marks, l))
                     shown += 1
                     if let p = LinePick.place(l) { after(p, desk: desk, file: f, notes: notes, threads: t, into: body) }
                 }
             }
         }
         if diff.truncated || shown >= Self.lineLimit { note("The diff is long. OverSire shows the first lines only. Open the file in your editor for the rest.") }
-        return card
+        return (head, body)
+    }
+
+    struct Place: Hashable {
+        let side: ReviewAnchor.Side
+        let line: Int
+    }
+
+    /// The lines that have a comment. A line with an open comment shows as pending.
+    static func marks(_ notes: [ReviewComment]) -> [Place: DiffGutter.Mark] {
+        var out: [Place: DiffGutter.Mark] = [:]
+        for c in notes {
+            guard case .code(_, _, let line, let from, let side) = c.anchor else { continue }
+            for n in min(from ?? line, line)...max(from ?? line, line) {
+                let k = Place(side: side ?? .new, line: n)
+                if c.state == .answered { out[k] = out[k] ?? .answered } else { out[k] = .pending }
+            }
+        }
+        return out
     }
 
     /// The threads and the composer after a line.
@@ -344,10 +435,10 @@ final class ReviewChangesTab {
         reload()
     }
 
-    private func gutter(_ desk: ReviewDesk, _ f: ReviewFile, _ l: DiffLine, text: String, width: CGFloat) -> NSView {
+    private func gutter(_ desk: ReviewDesk, _ f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ l: DiffLine, text: String, width: CGFloat) -> NSView {
         guard let p = LinePick.place(l) else { return NSTextField.text(text, size: 11, color: Palette.dim, mono: true) }
         let on = picked(desk, f, p)
-        return DiffGutter(text, width: width, picked: on, name: "Comment on \(p.side == .old ? "old " : "")line \(p.line)") { [weak self] shift in
+        return DiffGutter(text, width: width, picked: on, mark: marks[Place(side: p.side, line: p.line)] ?? .none, name: "Comment on \(p.side == .old ? "old " : "")line \(p.line)") { [weak self] shift in
             self?.pickLine(desk, f, p, shift: shift)
         }
     }
@@ -369,24 +460,30 @@ final class ReviewChangesTab {
         let (m, color) = Self.mark(l.kind)
         let on = LinePick.place(l).map { picked(desk, f, $0) } ?? false
         let fill = on ? Palette.acc.withAlphaComponent(0.2) : color?.withAlphaComponent(0.12)
-        let box = Box(fill: fill, border: nil, radius: 0)
+        let box = DiffLineBox(fill: fill, border: nil, radius: 0)
         let markField = NSTextField.text(m, size: 11.5, weight: .bold, color: color ?? Palette.dim, mono: true)
         markField.setAccessibilityLabel(l.kind == .add ? "added" : l.kind == .del ? "removed" : "")
         let text = NSTextField.text(l.text.isEmpty ? " " : l.text, size: 11.5, color: Palette.fg, lines: 0, mono: true)
         text.lineBreakMode = .byCharWrapping
         text.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        // The text takes the free width, so it wraps at the edge of the card.
+        text.setContentHuggingPriority(.init(1), for: .horizontal)
         let s = NSStackView(h: gutters + [markField, text], spacing: 4)
         s.alignment = .top
+        s.distribution = .fill
         box.addSubview(s)
         NSLayoutConstraint.activate([
             s.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 2), s.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -8),
             s.topAnchor.constraint(equalTo: box.topAnchor, constant: 1), s.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -1),
         ])
+        if let p = LinePick.place(l) {
+            box.addPlus(at: markField) { [weak self] shift in self?.pickLine(desk, f, p, shift: shift) }
+        }
         return box
     }
 
     /// The old and the new number. The number of the side that a comment takes is the button.
-    private func unifiedRow(_ desk: ReviewDesk, file f: ReviewFile, _ l: DiffLine) -> NSView {
+    private func unifiedRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ l: DiffLine) -> NSView {
         func plain(_ n: Int?) -> NSView {
             let t = NSTextField.text(n.map(String.init) ?? "", size: 11, color: Palette.dim, mono: true)
             t.alignment = .right
@@ -396,14 +493,14 @@ final class ReviewChangesTab {
             return box
         }
         let numbers = l.kind == .del
-            ? [gutter(desk, f, l, text: l.old.map(String.init) ?? "", width: 40), plain(nil)]
-            : [plain(l.old), gutter(desk, f, l, text: l.new.map(String.init) ?? "", width: 40)]
+            ? [gutter(desk, f, marks, l, text: l.old.map(String.init) ?? "", width: 40), plain(nil)]
+            : [plain(l.old), gutter(desk, f, marks, l, text: l.new.map(String.init) ?? "", width: 40)]
         return line(desk, f, l, gutters: numbers)
     }
 
-    private func splitRow(_ desk: ReviewDesk, file f: ReviewFile, _ l: DiffLine?, _ r: DiffLine?) -> NSView {
-        let left = line(desk, f, l, gutters: l.map { [gutter(desk, f, $0, text: $0.old.map(String.init) ?? $0.new.map(String.init) ?? "", width: 40)] } ?? [])
-        let right = line(desk, f, r, gutters: r.map { [gutter(desk, f, $0, text: $0.new.map(String.init) ?? "", width: 40)] } ?? [])
+    private func splitRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ l: DiffLine?, _ r: DiffLine?) -> NSView {
+        let left = line(desk, f, l, gutters: l.map { [gutter(desk, f, marks, $0, text: $0.old.map(String.init) ?? $0.new.map(String.init) ?? "", width: 40)] } ?? [])
+        let right = line(desk, f, r, gutters: r.map { [gutter(desk, f, marks, $0, text: $0.new.map(String.init) ?? "", width: 40)] } ?? [])
         let rule = Box(fill: Palette.line, border: nil, radius: 0)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         let h = NSStackView(h: [left, rule, right], spacing: 0)

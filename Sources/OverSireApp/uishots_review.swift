@@ -7,6 +7,7 @@ import OverSireCore
 
 extension UIShots {
     /// review:list, changes, split, plan, submit, approve, merge, conflict or empty.
+    /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         Self.seedReviews(empty: scene == "empty")
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
@@ -15,10 +16,26 @@ extension UIShots {
             return
         }
         code.split = scene == "split"
+        code.view = scene == "files" ? .list : .tree
+        if scene == "search" { code.filter.query = "review" }
+        if scene == "filters" {
+            code.filter.repo = "oversire"
+            code.filter.hidden = [.changed]
+        }
         code.pick = scene == "changes" ? LinePick(repo: "oversire", path: "Sources/OverSireApp/review_tab.swift", side: .new, line: 41).click(43, side: .new, shift: true) : nil
         plan.block = scene == "plan" ? "risks" : nil
         switch scene {
-        case "changes", "split": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "files", "search", "filters": w.router.go(.item("FRITZ-17", .changes))
+        case "pending", "hover":
+            w.router.go(.item("FRITZ-17", .changes))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard let root = w.window?.contentView else { return }
+                if scene == "hover" {
+                    (Self.find(root) { $0 is DiffLineBox && $0.frame.height > 0 && $0.visibleRect.height > 0 } as? DiffLineBox)?.showPlus()
+                } else {
+                    (Self.find(root) { ($0 as? Chiplet)?.onClick != nil && ($0.accessibilityLabel() ?? "").contains("pending") } as? Chiplet)?.onClick?()
+                }
+            }
         case "plan": w.router.go(.item("OVERSIRE-349", .plan))
         case "submit", "approve", "merge":
             w.router.go(.item("FRITZ-17", .changes))
@@ -65,7 +82,13 @@ extension UIShots {
             ReviewFile(repo: "oversire", path: tab, status: .added, added: 180, removed: 0),
             ReviewFile(repo: "oversire", path: "Sources/OverSireApp/work_page.swift", status: .modified, added: 22, removed: 30, viewed: true),
             ReviewFile(repo: "oversire", path: "Sources/OverSireApp/status_icon.swift", status: .modified, added: 12, removed: 8),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/review_list.swift", status: .deleted, added: 0, removed: 64),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireCore/Review.swift", status: .added, added: 96, removed: 0),
+            ReviewFile(repo: "oversire", path: "Tests/OverSireAppTests/ReviewTabTests.swift", status: .added, added: 58, removed: 0),
+            ReviewFile(repo: "oversire", path: "docs/reviews.md", status: .modified, added: 14, removed: 2),
             ReviewFile(repo: "cli", path: "review/routes.go", status: .modified, added: 41, removed: 6),
+            ReviewFile(repo: "cli", path: "review/routes_test.go", status: .added, added: 33, removed: 0),
+            ReviewFile(repo: "cli", path: "server/old_review.go", status: .deleted, added: 0, removed: 21),
         ]
         let comments = [
             ReviewComment(id: "c_00000001", key: "FRITZ-17", round: 1, state: .answered,

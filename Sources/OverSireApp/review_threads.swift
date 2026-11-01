@@ -28,10 +28,13 @@ final class CheckBox: NSButton {
     @objc private func fire() { onFlip?(isOn) }
 }
 
-/// A text field for a comment. Return adds it, Option-Return makes a new line.
-final class CommentField: NSTextField {
+/// A text field for a comment. Return adds it, Option-Return makes a new line, Esc cancels.
+final class CommentField: NSTextField, NSTextFieldDelegate {
+    var onCancel: (() -> Void)?
+
     init(_ text: String, placeholder: String, label: String) {
         super.init(frame: .zero)
+        delegate = self
         stringValue = text
         placeholderString = placeholder
         setAccessibilityLabel(label)
@@ -44,6 +47,12 @@ final class CommentField: NSTextField {
         heightAnchor.constraint(greaterThanOrEqualToConstant: 54).isActive = true
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
+        guard sel == #selector(NSResponder.cancelOperation(_:)), let onCancel else { return false }
+        onCancel()
+        return true
+    }
 }
 
 /// The comment parts of one review tab. Main thread only.
@@ -58,6 +67,7 @@ final class ReviewThreads {
     private weak var composerField: CommentField?
     private weak var editField: CommentField?
     private var busy = false
+    private var popover: NSPopover?
 
     private static let time: DateFormatter = {
         let f = DateFormatter()
@@ -84,6 +94,11 @@ final class ReviewThreads {
     // MARK: Rounds strip
 
     func rounds() -> NSView {
+        let n = desk.pending.count
+        return NSStackView(h: roundChips() + [Chiplet("Round \(desk.nextRound) · \(n) pending", color: n > 0 ? Palette.warn : Palette.dim), Spacer()], spacing: 6)
+    }
+
+    private func roundChips() -> [NSView] {
         var parts: [NSView] = [NSTextField.text("Rounds", size: 12, weight: .semibold, color: Palette.mut)]
         for r in desk.rounds {
             let (mark, word) = Self.state(r)
@@ -93,10 +108,8 @@ final class ReviewThreads {
             chip.toolTip = r.error ?? r.summary
             parts.append(chip)
         }
-        let n = desk.pending.count
-        parts.append(Chiplet("Round \(desk.nextRound) · \(n) pending", color: n > 0 ? Palette.warn : Palette.dim))
-        if desk.rounds.isEmpty { parts.insert(NSTextField.text("No round yet.", size: 12, color: Palette.dim), at: 1) }
-        return NSStackView(h: parts + [Spacer()], spacing: 6)
+        if desk.rounds.isEmpty { parts.append(NSTextField.text("No round yet.", size: 12, color: Palette.dim)) }
+        return parts
     }
 
     /// The glyph and the word of a round.
@@ -126,9 +139,12 @@ final class ReviewThreads {
                 self?.reload()
             }
             b.setAccessibilityLabel("Round \(c.round), answered by the agent, \(place). Show the comment.")
-            return NSStackView(h: [b, Spacer()])
+            let s = NSStackView(h: [b, Spacer()])
+            s.identifier = NSUserInterfaceItemIdentifier(Self.anchorID(c))
+            return s
         }
         let card = Card(padding: 10, spacing: 6, fill: Palette.raise)
+        card.identifier = NSUserInterfaceItemIdentifier(Self.anchorID(c))
         let who: String
         switch c.state {
         case .pending: who = "You · Pending · \(place)"
@@ -149,6 +165,7 @@ final class ReviewThreads {
         card.add(NSStackView(h: head, spacing: 8))
         if desk.editing == c.id {
             let f = CommentField(editField?.stringValue ?? c.text, placeholder: "What should the agent change here?", label: "Edit the comment")
+            f.onCancel = { [weak self] in self?.desk.editing = nil; self?.reload() }
             f.target = self
             f.action = #selector(saveEdit)
             editField = f
@@ -171,6 +188,9 @@ final class ReviewThreads {
         return card
     }
 
+    /// The view identifier of a comment, for `ScrollCard.reveal`.
+    static func anchorID(_ c: ReviewComment) -> String { "comment." + c.id }
+
     @objc private func saveEdit() {
         guard let id = desk.editing, let c = desk.comments.first(where: { $0.id == id }), let f = editField else { return }
         let text = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -187,11 +207,12 @@ final class ReviewThreads {
         let f = CommentField(composerField?.stringValue ?? desk.draft, placeholder: "What should the agent change here?", label: "New comment, \(label)")
         f.target = self
         f.action = #selector(addDraft)
+        f.onCancel = { [weak self] in self?.cancelDraft() }
         composerField = f
         card.add(f)
         let add = ActionButton(busy ? "Adding…" : "Add to review", style: .primary) { [weak self] in self?.addDraft() }
         add.isEnabled = !busy
-        card.add(NSStackView(h: [NSTextField.text("Option-Return makes a new line.", size: 11.5, color: Palette.dim), Spacer(),
+        card.add(NSStackView(h: [NSTextField.text("Return adds · Option-Return new line · Esc cancels", size: 11.5, color: Palette.dim), Spacer(),
                                  ActionButton("Cancel") { [weak self] in self?.cancelDraft() }, add], spacing: 8))
         DispatchQueue.main.async { [weak f] in if f?.window?.firstResponder is NSTextView == false { f?.window?.makeFirstResponder(f) } }
         return card
@@ -232,6 +253,90 @@ final class ReviewThreads {
             card.add(row)
         }
         return card
+    }
+
+    // MARK: Review bar
+
+    /// The Changes tab bar (OVERSIRE-390): the rounds, the pending batch as a popover, Discard all and Submit.
+    func reviewBar() -> NSView {
+        let n = desk.pending.count
+        var views = roundChips() + [Spacer()]
+        if let e = desk.error { views.append(NSTextField.text(e, size: 12, color: Palette.bad, lines: 2)) }
+        let text = "Round \(desk.nextRound) · \(n) pending"
+        let chip = Chiplet(text, symbol: n > 0 ? "text.bubble" : "circle", color: n > 0 ? Palette.warn : Palette.dim)
+        chip.toolTip = n > 0 ? "Show the pending comments" : "No pending comments. You can still approve."
+        if n > 0 {
+            chip.onClick = { [weak self, weak chip] in if let chip { self?.showPending(from: chip) } }
+            chip.setAccessibilityRole(.popUpButton)
+            chip.setAccessibilityLabel(text + ", not sent yet. Show the list.")
+        }
+        views.append(chip)
+        if n > 0 { views.append(ActionButton("Discard all", style: .danger) { [weak self] in self?.discardAll() }) }
+        let submit = ActionButton(n > 0 ? "Submit review · \(n)" : "Submit review", style: .primary) { [weak self] in self?.submit() }
+        submit.isEnabled = !busy && desk.detail != nil
+        views.append(submit)
+        let bar = Box(fill: Palette.panel, border: n > 0 ? Palette.warn : Palette.line, radius: 8)
+        let s = NSStackView(h: views, spacing: 8)
+        bar.addSubview(s)
+        NSLayoutConstraint.activate([
+            s.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 12), s.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -12),
+            s.topAnchor.constraint(equalTo: bar.topAnchor, constant: 7), s.bottomAnchor.constraint(equalTo: bar.bottomAnchor, constant: -7),
+        ])
+        bar.setAccessibilityElement(true)
+        bar.setAccessibilityRole(.group)
+        bar.setAccessibilityLabel("Review, " + text)
+        return bar
+    }
+
+    /// The pending batch. A click on a comment shows its place.
+    func pendingPopover() -> NSView {
+        let width: CGFloat = 400
+        let list = NSStackView(v: [], spacing: 2)
+        list.edgeInsets = NSEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
+        let head = NSStackView(h: [NSTextField.text("Round \(desk.nextRound) · \(desk.pending.count) pending · not sent yet", size: 12, weight: .semibold, color: Palette.warn), Spacer()])
+        head.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 4, right: 6)
+        list.addFull(head)
+        for c in desk.pending {
+            let place = ReviewDesk.place(c, plan: desk.detail?.plan)
+            let row = Row([NSStackView(v: [NSTextField.text(place, size: 11, color: Palette.dim, mono: true),
+                                           NSTextField.text(c.text, size: 12, lines: 2)], spacing: 2)],
+                          height: 36, inset: 6, label: "Pending comment on \(place): \(c.text)") { [weak self] in
+                self?.popover?.close()
+                self?.jump(c)
+            }
+            list.addFull(row)
+        }
+        list.widthAnchor.constraint(equalToConstant: width).isActive = true
+        SidePane.fitLabels(list)
+        list.layoutSubtreeIfNeeded()
+        let height = min(list.fittingSize.height, 420)
+        let doc = Flipped()
+        doc.translatesAutoresizingMaskIntoConstraints = false
+        doc.addSubview(list)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = doc
+        NSLayoutConstraint.activate([
+            doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            list.leadingAnchor.constraint(equalTo: doc.leadingAnchor), list.topAnchor.constraint(equalTo: doc.topAnchor),
+            list.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
+        ])
+        return scroll
+    }
+
+    private func showPending(from v: NSView) {
+        popover?.close()
+        let p = NSPopover()
+        p.behavior = .transient
+        let vc = NSViewController()
+        vc.view = pendingPopover()
+        p.contentViewController = vc
+        p.contentSize = vc.view.frame.size
+        popover = p
+        p.show(relativeTo: v.bounds, of: v, preferredEdge: .maxY)
     }
 
     // MARK: Batch bar

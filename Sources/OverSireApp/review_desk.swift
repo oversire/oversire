@@ -87,6 +87,11 @@ final class ReviewDesk {
     var draft = ""
     var editing: String?
     var unfolded: Set<String> = []
+    var view = FileView.saved { didSet { FileView.saved = view } }
+    var filter = FileFilter()
+    var collapsed: Set<String> = []
+    /// The comment to scroll to after the next build of the diff.
+    var reveal: String?
 
     init(summary: ReviewSummary, source: (any ReviewSource)?, tracker: (any ReviewTracking)?, bus: ChangeBus = .shared) {
         machine = summary.machine
@@ -138,6 +143,19 @@ final class ReviewDesk {
         var out: [String: Int] = [:]
         for c in pending { if case .code(let repo, let path, _, _, _) = c.anchor { out[repo + "/" + path, default: 0] += 1 } }
         return out
+    }
+
+    /// ReviewFile.id → answered comments.
+    var answeredByFile: [String: Int] {
+        var out: [String: Int] = [:]
+        for c in comments where c.state == .answered {
+            if case .code(let repo, let path, _, _, _) = c.anchor { out[repo + "/" + path, default: 0] += 1 }
+        }
+        return out
+    }
+
+    var tree: FileTree {
+        FileTree(files: files, repos: summary.repos.map(\.name), filter: filter, collapsed: collapsed, pending: pendingByFile)
     }
 
     // MARK: Calls

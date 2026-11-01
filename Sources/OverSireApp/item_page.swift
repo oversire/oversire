@@ -23,7 +23,7 @@ final class MenuChip: Chiplet {
 
 // The page of one work item: its summary, status, session, sub-items and activity.
 final class ItemPage: Page, NSTextFieldDelegate {
-    override var fillsHeight: Bool { tab == .subitems }
+    override var fillsHeight: Bool { tab == .subitems || tab == .changes }
     private let subTable = ColumnLayout(id: "subitems-2", columns: ItemLine.columns())
     private enum Source: String, CaseIterable { case all = "All", plane = "Plane", github = "GitHub", orca = "Orca", oversire = "OverSire" }
 

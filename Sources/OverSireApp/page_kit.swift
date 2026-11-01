@@ -1606,6 +1606,114 @@ final class SidePane: NSView {
     }
 }
 
+// A card with a fixed header and a body that scrolls on its own (OVERSIRE-387).
+// `set` swaps the views and keeps the scroll position while `place` stays the same.
+final class ScrollCard: Box {
+    let scroll: NSScrollView = OverlayScroll()
+    private let head = NSView()
+    private let rule = Box(fill: Palette.line, border: nil, radius: 0)
+    private let doc = Flipped()
+    private var place: String?
+
+    init(keep: String) {
+        super.init(fill: Palette.panel, border: Palette.line, radius: 10)
+        layer?.masksToBounds = true
+        [head, rule, scroll, doc].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
+        scroll.identifier = NSUserInterfaceItemIdentifier(PageScroll.keepPrefix + keep)
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = doc
+        [head, rule, scroll].forEach(addSubview)
+        let none = head.heightAnchor.constraint(equalToConstant: 0)
+        none.priority = .init(1)
+        NSLayoutConstraint.activate([
+            head.leadingAnchor.constraint(equalTo: leadingAnchor), head.trailingAnchor.constraint(equalTo: trailingAnchor),
+            head.topAnchor.constraint(equalTo: topAnchor), none,
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor), rule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rule.topAnchor.constraint(equalTo: head.bottomAnchor), rule.heightAnchor.constraint(equalToConstant: 1),
+            scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: rule.bottomAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+            doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// The same header view stays in place, so a search field in it keeps the focus.
+    func set(header: NSView?, body: NSView, place: String) {
+        if header == nil || header?.superview !== head {
+            head.subviews.forEach { $0.removeFromSuperview() }
+            if let header { Self.pin(header, in: head) }
+        }
+        rule.isHidden = header == nil
+        let y = scroll.contentView.bounds.origin.y
+        doc.subviews.forEach { $0.removeFromSuperview() }
+        Self.pin(body, in: doc)
+        SidePane.fitLabels(doc)
+        layoutSubtreeIfNeeded()
+        let keepY = place == self.place ? y : 0
+        self.place = place
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(keepY, max(0, doc.frame.height - scroll.contentView.bounds.height))))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    /// Scrolls the view with this identifier into sight. False when the body has no such view.
+    @discardableResult
+    func reveal(_ id: String) -> Bool {
+        guard let v = Self.find(id, in: doc) else { return false }
+        layoutSubtreeIfNeeded()
+        v.scrollToVisible(v.bounds.insetBy(dx: 0, dy: -40))
+        return true
+    }
+
+    private static func find(_ id: String, in v: NSView) -> NSView? {
+        if v.identifier?.rawValue == id { return v }
+        for sub in v.subviews { if let f = find(id, in: sub) { return f } }
+        return nil
+    }
+
+    private static func pin(_ v: NSView, in box: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(v)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: box.leadingAnchor), v.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            v.topAnchor.constraint(equalTo: box.topAnchor), v.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ])
+    }
+
+    override func layout() {
+        super.layout()
+        if SidePane.fitLabels(doc) { doc.needsLayout = true }
+    }
+}
+
+// Two scroll cards side by side. They take the free page height (`Page.fillsHeight`), so the page does not grow.
+final class TwoPane: NSView {
+    let side: ScrollCard
+    let main: ScrollCard
+
+    init(sideWidth: CGFloat, keep: String) {
+        side = ScrollCard(keep: keep + ".side")
+        main = ScrollCard(keep: keep + ".main")
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.init(1), for: .vertical)
+        setContentCompressionResistancePriority(.init(1), for: .vertical)
+        addSubview(side)
+        addSubview(main)
+        NSLayoutConstraint.activate([
+            side.leadingAnchor.constraint(equalTo: leadingAnchor), side.topAnchor.constraint(equalTo: topAnchor),
+            side.bottomAnchor.constraint(equalTo: bottomAnchor), side.widthAnchor.constraint(equalToConstant: sideWidth),
+            main.leadingAnchor.constraint(equalTo: side.trailingAnchor, constant: 14), main.trailingAnchor.constraint(equalTo: trailingAnchor),
+            main.topAnchor.constraint(equalTo: topAnchor), main.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // A short window scrolls the page as a whole.
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 360),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 private final class OverlayScroll: NSScrollView {
     override var scrollerStyle: NSScroller.Style { get { .overlay } set {} }
 }
