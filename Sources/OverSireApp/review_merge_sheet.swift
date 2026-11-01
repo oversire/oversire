@@ -14,6 +14,7 @@ final class ReviewMergeSheet {
     private let setDone: CheckBox
     private let result: NSTextField
     private var choice: MergeChoice
+    private weak var parent: NSWindow?
 
     init(desk: ReviewDesk, done: @escaping () -> Void) {
         self.desk = desk
@@ -89,7 +90,10 @@ final class ReviewMergeSheet {
                 }
                 let r = try await desk.merge(removeGroup: remove, setDone: setDone)
                 if r.merged {
+                    let window = self.parent
                     finish()
+                    // The merge is done, but the daemon could not remove the group.
+                    if let e = r.error { AlertConfirm.tell("\(self.desk.key) is merged", info: e, in: window) }
                 } else {
                     show(r)
                 }
@@ -122,6 +126,7 @@ final class ReviewMergeSheet {
     }
 
     func present(over parent: NSWindow?) {
+        self.parent = parent
         sheet.present(over: parent)
         // The sheet keeps this object until it closes.
         sheet.onClose = { [self] in sheet.onClose = {} }
