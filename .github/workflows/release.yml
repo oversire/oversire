@@ -107,7 +107,12 @@ jobs:
             exit 1
           fi
           rm "$key"
-          xcrun stapler staple OverSire.app
+          # The staple reads the ticket from CloudKit. A lost connection there is not rare, so try again.
+          for n in 1 2 3 4 5; do
+            xcrun stapler staple OverSire.app && break
+            [ "$n" = 5 ] && exit 1
+            sleep $((n * 20))
+          done
           spctl --assess --type execute -vv OverSire.app
           ditto -c -k --keepParent OverSire.app OverSire.zip
 
