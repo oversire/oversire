@@ -115,6 +115,7 @@ final class ContractTests: XCTestCase {
         "event-append": roundTrip(Event.Append.self),
         "event-append-result": roundTrip(Event.AppendResult.self),
         "item-links": roundTrip(ItemLinks.self),
+        "event-frame": roundTrip(Event.Frame.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.

@@ -265,6 +265,18 @@ extension Event {
     }
 }
 
+extension Event {
+    /// The WebSocket frame {type: event} of the daemon: one new row.
+    public struct Frame: Hashable, Sendable, Codable {
+        public var type: String
+        public var event: Event
+        public init(event: Event) {
+            type = "event"
+            self.event = event
+        }
+    }
+}
+
 /// The parent of an item, from the tracker (event.json ItemLink).
 public struct ItemLink: Hashable, Sendable, Codable {
     public var item: String
