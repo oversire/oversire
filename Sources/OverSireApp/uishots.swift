@@ -898,6 +898,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedSummaries()
         seedSessions()
         seedCleanup()
+        Self.seedReviews()
         MainActor.assumeIsolated { seedFiles() }
         // The seeded sessions join their items.
         workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
@@ -1063,6 +1064,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         if let k = self.runbookSample(scene) {
                             w.router.go(scene == "needs" ? .home : scene == "lane" ? .work(.lanes) : .item(k, .runbook))
                         } else { print("UISHOTS no runbook sample \(p)") }
+                    } else if p.hasPrefix("review:") {
+                        // review:list, changes, split, plan, submit, approve, merge, conflict or empty: the samples of uishots_review.swift.
+                        self.reviewState(String(p.dropFirst(7)), in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {

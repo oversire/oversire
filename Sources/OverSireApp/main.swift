@@ -244,6 +244,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         RUNBOOKS.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "runbook:" + key) }
         NotificationCenter.default.addObserver(forName: RunbookBook.changed, object: RUNBOOKS, queue: .main) { [weak self] _ in self?.updateIcon() }
         RUNBOOKS.start()
+        REVIEWS.tracker = projectStore
+        NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: REVIEWS, queue: .main) { [weak self] _ in self?.updateIcon() }
+        REVIEWS.start()
         DaemonSetup.shared.offerUpdateOnce()
         relay.start()
         updatePolling()
@@ -310,6 +313,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // The daemon banner of Work and the Session tab.
         NotificationCenter.default.addObserver(forName: MachineHub.changed, object: machineHub, queue: .main) { [weak self] _ in
             self?.reloadList(DataChange(.agents, origin: .event))
+            Task { await REVIEWS.refresh() }
         }
         NotificationCenter.default.addObserver(forName: Cleaner.changed, object: cleaner, queue: .main) { [weak self] n in
             let k = n.userInfo?[Cleaner.keyInfo] as? String
@@ -808,7 +812,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func updateIcon() {
         let k = MenuIconState(runs: visibleGrouped(grouped), waitingAgents: agentIndex.agents.values.filter { $0.phase == .waiting }.count,
                               unread: projectStore.unreadCount(), unreadDot: PROJECTS_CFG.menuDot,
-                              problems: openProblems.count, questions: questions.open.count, runbooks: NeedsYou.runbooks(RUNBOOKS.open).count)
+                              problems: openProblems.count, questions: questions.open.count, runbooks: NeedsYou.runbooks(RUNBOOKS.open).count,
+                              reviews: REVIEWS.yourTurn)
         // The shots in the open snap baskets, as a count next to the icon.
         let shots = snap.shotCount
         // Each set below redraws the item on each display, which fires the appearance

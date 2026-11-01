@@ -361,6 +361,31 @@ final class ProjectStore {
         }
     }
 
+    // Sets the item and its open sub-items at all levels to the first state of the group, then reloads once (OVERSIRE-372).
+    // A sub-item that is not loaded uses the parent URL: the tracker writes by id.
+    func move(key: String, group: String, else category: StatusCategory, done: @escaping (Bool) -> Void) {
+        guard let found = item(key: key), let client = trackers.tracker(found.snap.summary.ref.workspace),
+              let parent = found.item.ref(in: found.snap.summary.ref),
+              let state = found.snap.firstState(group: group, else: category) else { done(false); return }
+        let snap = found.snap
+        let ids = [found.item.id] + snap.openDescendants(of: found.item.id)
+        let refs = ids.map { id in
+            snap.items.first { $0.id == id }?.ref(in: snap.summary.ref) ?? ItemRef(project: snap.summary.ref, id: id, key: "", url: parent.url)
+        }
+        ids.forEach { suppressNotify.insert($0) }
+        Task { [weak self] in
+            var failed = 0
+            for ref in refs {
+                do { try await client.update(ref, ItemPatch(status: state.id)) } catch { failed += 1 }
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if failed > 0 { self.lastError = "Could not set \(failed) of \(refs.count) items to \(state.name)" }
+                self.refresh([found.key], force: true) { done($0 && failed == 0) }
+            }
+        }
+    }
+
     // Moves a Done parent back to the first started state.
     func reopen(itemId: String, done: @escaping (Bool) -> Void) {
         guard let found = item(itemId), let state = found.snap.firstState(group: "started", else: .progress) else { done(false); return }

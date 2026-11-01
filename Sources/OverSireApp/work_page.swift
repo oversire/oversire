@@ -91,19 +91,24 @@ final class WorkPage: Page {
         let data = page.data
         let worktrees = data.agentIndex.cards.filter { AgentsPage.cardKey($0, data: data) != nil }.count
         let mine = mine(data).count
-        let tabs: [Route.WorkTab] = [.items, .worktrees]
+        let reviews = REVIEWS.rows.count, turn = REVIEWS.yourTurn
+        let tabs: [Route.WorkTab] = [.items, .review, .worktrees]
         return [
             PageRow("header", caption, extra) { PageHeader("Work", caption: caption, actions: actions()) },
         ] + DaemonBanner.rows() + [
-            PageRow("tabs", tab.rawValue, mine, worktrees, extra) { [weak page] in
-                let strip = TabStrip(["Items", "Worktrees"], selected: tabs.firstIndex(of: tab) ?? 0, counts: [mine, worktrees])
+            PageRow("tabs", tab.rawValue, mine, worktrees, reviews, turn, extra) { [weak page] in
+                var review = TabStrip.Tab(title: "Review", count: reviews > 0 ? reviews : nil,
+                                          label: "Review, \(reviews) review\(reviews == 1 ? "" : "s"), \(turn) your turn")
+                if turn > 0 { review.lead = [ReviewMark("◆", Palette.warn, "Your turn").view(size: 11)] }
+                let strip = TabStrip(tabs: [TabStrip.Tab(title: "Items", count: mine), review, TabStrip.Tab(title: "Worktrees", count: worktrees)],
+                                     selected: tabs.firstIndex(of: tab) ?? 0)
                 strip.onSelect = { i in page?.go(.work(tabs[i])) }
                 return NSStackView(h: [strip, Spacer()] + trailing(), spacing: 8)
             },
         ]
     }
 
-    override var watches: DataDomains { [.projects, .agents, .runs, .queue, .summaries, .planner, .config] }
+    override var watches: DataDomains { [.projects, .agents, .runs, .queue, .summaries, .planner, .config, .reviews] }
 
     override func sections() -> [PageSection]? {
         let q = data.queue

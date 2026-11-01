@@ -235,10 +235,15 @@ final class LiveSync {
                     if self?.generation == gen { hub.logGap(machine) }
                 }
                 Task { await RUNBOOKS.refresh() }
+                Task { await REVIEWS.refresh(machine: machine) }
             }, onStore: { DispatchQueue.main.async { STORE_WRITES.syncNow() } },
             onGroup: { DispatchQueue.main.async { [weak self] in self?.group?.reread() ?? hub.refresh() } }, onFrame: { text in
                 DispatchQueue.main.async { [weak self] in self?.group?.frame(text, from: machine) }
-                if case .runbookRun(let r)? = DaemonFrame.parse(text) { DispatchQueue.main.async { RUNBOOKS.apply(r) } }
+                switch DaemonFrame.parse(text) {
+                case .runbookRun(let r)?: DispatchQueue.main.async { RUNBOOKS.apply(r) }
+                case .review(let e)?: Task { await REVIEWS.apply(e, from: machine) }
+                default: break
+                }
                 guard l.local else { return }
                 DispatchQueue.main.async { hub.frame(text) }
             })

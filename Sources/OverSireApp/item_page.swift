@@ -59,6 +59,19 @@ final class ItemPage: Page, NSTextFieldDelegate {
         t.go = { [weak self] in self?.go($0) }
         return t
     }()
+    private lazy var changesTab: ReviewChangesTab = {
+        let t = ReviewChangesTab()
+        t.reload = { [weak self] in self?.reload() }
+        t.window = { [weak self] in self?.view.window }
+        t.go = { [weak self] in self?.go($0) }
+        return t
+    }()
+    private lazy var planTab: ReviewPlanTab = {
+        let t = ReviewPlanTab()
+        t.reload = { [weak self] in self?.reload() }
+        t.window = { [weak self] in self?.view.window }
+        return t
+    }()
 
     override var pageWidth: CGFloat { 960 }
 
@@ -94,11 +107,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override var watches: DataDomains {
-        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config, .intake, .runbooks]
+        var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config, .intake, .runbooks, .reviews]
         switch tab {
         case .overview: d.formUnion([.relations, .planner, .runs, .prs])
         case .session, .activity: d.formUnion([.runs, .prs])
-        case .runbook, .subitems: break
+        case .runbook, .subitems, .plan, .changes: break
         }
         return d
     }
@@ -115,6 +128,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let (_, _, item) = data.projectStore.item(key: key) {
             loadData(item: item, stream: data.workstreams.stream(key))
             if tab == .overview, data.projectStore.relations.supports(item.key) { data.projectStore.relations.load([item.key]) }
+            loadReview()
         } else {
             pageBusy = data.projectsLoading
         }
@@ -151,8 +165,33 @@ final class ItemPage: Page, NSTextFieldDelegate {
         case .session: rows = session(stream: stream)
         case .subitems: rows = subItems(snap: snap, item: item)
         case .activity: rows = activity(item: item, stream: stream)
+        case .plan: rows = reviewDesk(.plan).map { planTab.rows($0) } ?? noReview(.plan)
+        case .changes: rows = reviewDesk(.code).map { changesTab.rows($0) } ?? noReview(.code)
         }
         return [PageSection("top", rows: top), PageSection(tab.rawValue, rows: rows)]
+    }
+
+    // MARK: Review
+
+    /// The desk of the open review of the item, from the daemon of its machine.
+    private func reviewDesk(_ kind: ReviewKind) -> ReviewDesk? {
+        REVIEWS.review(key, kind: kind).flatMap { REVIEWS.desk($0) }
+    }
+
+    /// Reads the review and the diff of the shown file once. A failed read waits for Refresh or a review frame.
+    private func loadReview() {
+        guard tab == .plan || tab == .changes, let desk = reviewDesk(tab == .plan ? .plan : .code) else { return }
+        if desk.detail == nil, !desk.loading, desk.error == nil { Task { await desk.load() } }
+        if tab == .changes, let f = desk.files.first(where: { $0.id == desk.file }), desk.diffs[f.id] == nil { Task { await desk.diff(f) } }
+    }
+
+    private func noReview(_ kind: ReviewKind) -> [PageRow] {
+        let k = key
+        return [PageRow("none", k, kind) {
+            EmptyNote(kind == .plan ? "\(k) has no plan to review. A plan shows here when a Plan session hands off."
+                                    : "\(k) has no code to review. Code shows here when its worktree group has commits and no session works in it.",
+                      symbol: "checkmark.circle")
+        }]
     }
 
     // A hash part for values that are not Hashable.
@@ -167,8 +206,17 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let run = RUNBOOKS.run(for: key)
         let hasRun = run != nil || tab == .runbook
         let mark = run.map { RunbookTab.tone($0.state) }
-        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks, hasRun, run?.state, run?.position) { [unowned self] in
-            let tabs = Route.ItemTab.allCases.filter { $0 != .runbook || hasRun }
+        let plan = REVIEWS.review(key, kind: .plan), code = REVIEWS.review(key, kind: .code)
+        let hasPlan = plan != nil || tab == .plan, hasCode = code != nil || tab == .changes
+        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks, hasRun, run?.state, run?.position, plan, code) { [unowned self] in
+            let tabs = Route.ItemTab.allCases.filter { t in
+                switch t {
+                case .runbook: return hasRun
+                case .plan: return hasPlan
+                case .changes: return hasCode
+                default: return true
+                }
+            }
             var sub = TabStrip.Tab(title: "Sub-items")
             if prog.total > 0 {
                 sub.lead = [ProgressRing(done: prog.done, started: started, total: prog.total).sized(14)]
@@ -182,11 +230,30 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 runTab.lead = [Glyph(mark.symbol, color: mark.color, size: 11)]
                 runTab.label = "Runbook, \(mark.word)" + (run.position.map { ", step \($0) of \(run.runbook.steps.count)" } ?? "")
             }
-            let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview")] + (hasRun ? [runTab] : []) + [sessionTab, sub, TabStrip.Tab(title: "Activity")],
-                                 selected: tabs.firstIndex(of: tab) ?? 0)
+            let strip = TabStrip(tabs: tabs.map { t -> TabStrip.Tab in
+                switch t {
+                case .overview: return TabStrip.Tab(title: "Overview")
+                case .plan: return Self.reviewTab("Plan", plan, count: nil)
+                case .runbook: return runTab
+                case .session: return sessionTab
+                case .changes: return Self.reviewTab("Changes", code, count: code?.fileCount)
+                case .subitems: return sub
+                case .activity: return TabStrip.Tab(title: "Activity")
+                }
+            }, selected: tabs.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
             return NSStackView(h: [strip, Spacer()])
         }
+    }
+
+    /// A review tab: ◆ when it is your turn, ● while the agent works, ✕ on a conflict.
+    private static func reviewTab(_ title: String, _ s: ReviewSummary?, count: Int?) -> TabStrip.Tab {
+        var t = TabStrip.Tab(title: title, count: count)
+        guard let s else { return t }
+        let mark = ReviewMark(s)
+        t.lead = [mark.view(size: 11)]
+        t.label = "\(title), \(mark.word)" + (count.map { ", \($0) files" } ?? "")
+        return t
     }
 
     private func loadData(item: Item, stream: Workstream?) {

@@ -898,6 +898,7 @@ enum PageFactory {
         case .intakeItem: return IntakeDetailPage(r, data: data, router: router)
         case .activity: return ActivityPage(r, data: data, router: router)
         case .work(.items): return WorkPage(r, data: data, router: router)
+        case .work(.review): return ReviewPage(r, data: data, router: router)
         case .work(.worktrees): return AgentsPage(r, data: data, router: router)
         case .work(.lanes): return QueuePage(r, data: data, router: router)
         case .project: return ProjectPage(r, data: data, router: router)

@@ -5,8 +5,8 @@ import OverSireCore
 enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     // Lanes is the board of the queue lanes. It has no tab: the Up next group links to it.
-    enum WorkTab: String, CaseIterable { case items, worktrees, lanes }
-    enum ItemTab: String, CaseIterable { case overview, runbook, session, subitems, activity }
+    enum WorkTab: String, CaseIterable { case items, review, worktrees, lanes }
+    enum ItemTab: String, CaseIterable { case overview, plan, runbook, session, changes, subitems, activity }
     enum SettingsPage: String, CaseIterable {
         case general, accounts, projects, agents, machines, ai, notifications, logs
 
@@ -234,10 +234,11 @@ enum Route: Equatable {
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .intake(nil), .intake("SLING"), .intakeItem("FRITZ", "i1"), .activity, .work(.items), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
+        .home, .intake(nil), .intake("SLING"), .intakeItem("FRITZ", "i1"), .activity, .work(.items), .work(.review), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
+        .item("FRITZ-17", .changes), .item("OVERSIRE-349", .plan),
     ]
 }
 
