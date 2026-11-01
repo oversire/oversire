@@ -251,7 +251,7 @@ final class ProjectPage: Page {
         }
         var rows: [PageRow] = []
         for (opt, its) in groups where !its.isEmpty {
-            rows.append(StickyListCard.group(opt.id, opt.name, count: its.count, extra: [opt.category.rank, opt.color] as [AnyHashable]) {
+            rows.append(StickyListCard.group(opt.id, opt.name, count: its.count, extra: [opt.rank, opt.color] as [AnyHashable]) {
                 [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16)]
             })
             let m = more[opt.id] ?? MoreRows()
@@ -268,9 +268,9 @@ final class ProjectPage: Page {
         return [top, PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
-    // Plane states in their category order. Without Show done, Done items follow the "Hide Done items" setting.
+    // Plane states in their rank order. Without Show done, Done items follow the "Hide Done items" setting.
     private func statusGroups(_ snap: ProjectSnapshot, _ items: [Item]) -> [(StatusOption, [Item])] {
-        let opts = snap.statusOptions.enumerated().sorted { ($0.element.category.rank, $0.offset) < ($1.element.category.rank, $1.offset) }.map(\.element)
+        let opts = snap.statusOptions.enumerated().sorted { ($0.element.rank, $0.offset) < ($1.element.rank, $1.offset) }.map(\.element)
         let days = PROJECTS_CFG.hideDoneAfterDays
         let sorted = snap.groupSorted(showDone ? items : items.filter { !snap.isHiddenDone($0, afterDays: days) })
         var out = opts.map { o in (o, sorted.filter { $0.statusOptionId == o.id }) }
@@ -281,7 +281,7 @@ final class ProjectPage: Page {
     }
 
     private func boardView(_ groups: [(StatusOption, [Item])], _ ws: WorkstreamIndex, _ snap: ProjectSnapshot) -> NSView {
-        let cols: [NSView] = groups.filter { !$0.1.isEmpty || $0.0.category != .done }.map { opt, its in
+        let cols: [NSView] = groups.filter { !$0.1.isEmpty || ![.done, .blocked].contains($0.0.category) }.map { opt, its in
             let c = Card(padding: 10, spacing: 8)
             c.add(NSStackView(h: [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
                                   NSTextField.text(opt.name, size: 12.5, weight: .semibold),

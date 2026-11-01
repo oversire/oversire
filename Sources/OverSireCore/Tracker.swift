@@ -35,12 +35,12 @@ public enum StatusCategory: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    // List order: active work first, done last.
+    // Page order: the most active work first, done last.
     public var rank: Int {
         switch self {
-        case .progress: return 0
+        case .blocked: return 0
         case .review: return 1
-        case .blocked: return 2
+        case .progress: return 2
         case .todo: return 3
         case .done: return 4
         }
@@ -75,6 +75,9 @@ public struct StatusOption: Codable, Hashable, Sendable {
     ]
 
     public var category: StatusCategory { localCategory ?? autoCategory }
+
+    /// The page order: the category rank, and in Todo the Backlog group last.
+    public var rank: Int { category.rank * 2 + (category == .todo && group == "backlog" ? 1 : 0) }
 
     // The group decides first. The name splits "started" into review and blocked.
     public var autoCategory: StatusCategory {
@@ -416,7 +419,7 @@ public struct ProjectSnapshot: Codable, Sendable {
 
     // Status rank, then priority (Urgent first, none last), then title A to Z.
     public func sorted(_ list: [Item]) -> [Item] {
-        func rank(_ i: Item) -> Int { (option(i.statusOptionId)?.category ?? .todo).rank }
+        func rank(_ i: Item) -> Int { option(i.statusOptionId)?.rank ?? StatusCategory.todo.rank * 2 }
         func priority(_ i: Item) -> Int {
             StatusOption.priorities.firstIndex { $0.name == i.fields["Priority"] } ?? StatusOption.priorities.count
         }

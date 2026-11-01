@@ -45,6 +45,14 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertEqual(s.sortedItems.map(\.id), ["2", "1", "4", "3"])
     }
 
+    func testPageOrder() {
+        let opts = [StatusOption(id: "bl", name: "Backlog", color: "", group: "backlog"), todo, doing,
+                    StatusOption(id: "rv", name: "Needs Review", color: "", group: "started"),
+                    StatusOption(id: "bk", name: "Blocked", color: "", group: "started"), done]
+        let s = snap(opts.map { item($0.id, status: $0.id) }, opts)
+        XCTAssertEqual(s.sortedItems.map(\.id), ["bk", "rv", "s2", "s1", "bl", "s5"])
+    }
+
     func testPriorityOrder() {
         func pri(_ id: String, _ status: String, _ p: String?) -> Item { item(id, status: status, fields: p.map { ["Priority": $0] } ?? [:]) }
         let s = snap([pri("a", "s1", "Low"), pri("b", "s1", nil), pri("c", "s1", "Urgent"),
