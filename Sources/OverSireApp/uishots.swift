@@ -1914,7 +1914,7 @@ private struct NoSockets: WebSocketConnecting {
 }
 
 extension UIShots {
-    /// stream:<frame>: the live terminal card. Frames: live, control, poll, lost, ended.
+    /// stream:<frame>: the live terminal card. Frames: live, control, poll, lost, ended, handover.
     static func streamSample(_ frame: String) -> NSWindow {
         let w = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 900, height: 620), styleMask: [.titled], backing: .buffered, defer: false)
         w.title = "Session"
@@ -1927,14 +1927,20 @@ extension UIShots {
         let request = stream ?? URLRequest(url: URL(string: "ws://127.0.0.1:7690/v1/sessions/s-1/stream")!)
         let socket: any WebSocketConnecting = stream == nil ? NoSockets() : URLSessionWebSockets()
         let poll = frame == "poll", place = poll || frame == "control" ? "mini" : "this Mac"
+        // handover: an oversire session that moved to the terminal of the daemon.
+        let own = frame == "handover", runtime = own ? "OverSire" : "Orca"
         var trailing: [NSView] = [ActionButton("Pop out", symbol: "macwindow")]
-        if place == "this Mac" { trailing.append(ActionButton("Open in Orca ↗")) }
+        if own {
+            trailing.append(ActionButton("Back to chat", symbol: "bubble.left.and.bubble.right"))
+        } else if place == "this Mac" {
+            trailing.append(ActionButton("Open in Orca ↗"))
+        }
         let card = LiveTerminalCard(sessionID: "s-1", stream: SessionStream(request: request, view: .terminal, socket: socket),
-                                    runtime: "Orca", place: place, trailing: trailing)
+                                    runtime: runtime, place: place, trailing: trailing)
         card.onDetails = {}
         card.onRetry = {}
         let since = Date().addingTimeInterval(-22 * 60)
-        card.setHead([Chiplet("claude"), Chiplet("Orca · \(place)")], since: since)
+        card.setHead(own ? [Chiplet("claude · terminal"), Chiplet("OverSire runner · mba")] : [Chiplet("claude"), Chiplet("Orca · \(place)")], since: since)
         page.rebuild { col in col.addFull(card) }
         if stream != nil { w.orderFrontRegardless(); return w }
         // The live frame is wider than the card: the font shrinks to fit.

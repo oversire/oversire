@@ -51,6 +51,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let questions: Capability = "questions"
     /// A start with a key gives the live session of the key (OVERSIRE-318). Enhance needs it.
     public static let sessionKey: Capability = "sessionKey"
+    /// POST /v1/sessions/{id}/handover moves a session between chat and terminal (OVERSIRE-361).
+    public static let sessionHandover: Capability = "sessionHandover"
     /// The daemon runs runbooks (OVERSIRE-349).
     public static let runbooks: Capability = "runbooks"
     public static let cloudDispatch: Capability = "cloudDispatch"

@@ -83,6 +83,15 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                 _workspaces.removeAll { $0.id == w.id }
                 sessions.removeAll { $0.workspace == w.id }
                 return try ok(WorkspaceRemoval(warning: nil))
+            case ("POST", let p) where p.count == 4 && p[1] == "sessions" && p[3] == "handover":
+                // The fake moves the session at once. The daemon waits for the end of the turn.
+                let h = try Self.decoder.decode(SessionHandover.self, from: body ?? Data())
+                guard let i = sessions.firstIndex(where: { $0.id == p[2] }) else { return error(404, "no session \(p[2])") }
+                guard _runtimes.contains(where: { $0.id == sessions[i].runtime && $0.capabilities.contains("sessionHandover") }) else {
+                    return error(501, "The runtime cannot move the session.")
+                }
+                sessions[i].view = h.view
+                return (202, Data("{}".utf8))
             case ("POST", ["v1", "files"]):
                 let f = try Self.decoder.decode(WorkspaceFiles.self, from: body ?? Data())
                 _files.append(f.files)

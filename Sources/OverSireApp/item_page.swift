@@ -197,13 +197,19 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 if self.tab == .activity { self.reload() }
             }
         }
+        // A handover changes the view of the same session.
+        if let a = stream?.agent, let v = a.view, let l = live, l.sessionID == a.paneKey, (l is SessionChatCard) != (v == .chat) {
+            l.stop()
+            live = nil
+            streamChecked = .distantPast
+        }
         if let a = stream?.agent, showsLive, live?.sessionID != a.paneKey, -streamChecked.timeIntervalSinceNow > 15 {
             streamChecked = Date()
             let k = key
             data.agentIndex.stream(k) { [weak self] t in
                 guard let self, self.key == k, self.showsLive, let t, let id = a.paneKey else { return }
                 self.live?.stop()
-                self.live = t.view == .chat ? self.chatCard(a, session: id, request: t.request) : self.terminalCard(session: id, request: t.request)
+                self.live = t.view == .chat ? self.chatCard(a, session: id, request: t.request) : self.terminalCard(a, session: id, request: t.request)
                 self.reload()
             }
         }
@@ -816,22 +822,36 @@ final class ItemPage: Page, NSTextFieldDelegate {
     /// The agent and the place of a live card: "claude", "Orca · this Mac".
     private func liveChips(_ a: AgentSession, chat: Bool) -> [NSView] {
         let place = data.agentIndex.place
-        return (chat ? [Chiplet("\(a.agent.rawValue) · agent-wire"), Chiplet("OverSire runner · \(place)")]
-                     : [Chiplet(a.agent.rawValue), Chiplet("Orca · \(place)")]) + Self.profileTag(a)
+        let chips: [NSView]
+        switch (chat, a.view) {
+        case (true, _): chips = [Chiplet("\(a.agent.rawValue) · agent-wire"), Chiplet("OverSire runner · \(place)")]
+        case (false, .terminal): chips = [Chiplet("\(a.agent.rawValue) · terminal"), Chiplet("OverSire runner · \(place)")]
+        default: chips = [Chiplet(a.agent.rawValue), Chiplet("Orca · \(place)")]
+        }
+        return chips + Self.profileTag(a)
     }
 
-    private func terminalCard(session id: String, request: URLRequest) -> LiveTerminalCard {
+    private func terminalCard(_ a: AgentSession, session id: String, request: URLRequest) -> LiveTerminalCard {
         let k = key, place = data.agentIndex.place
+        // An oversire session after a handover: the agent CLI runs in a terminal of the daemon.
+        let own = a.view == .terminal
+        let runtime = own ? "OverSire" : "Orca"
         let pop = ActionButton("Pop out", symbol: "macwindow") {
             LiveTerminalWindow.show(sessionID: id, title: "\(k) terminal",
-                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()), runtime: "Orca", place: place)
+                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()), runtime: runtime, place: place)
         }
         pop.setAccessibilityLabel("Open the terminal in its own window")
         var trailing: [NSView] = [pop]
-        // Only a session on this Mac opens in Orca. A remote session uses Pop out.
-        if data.agentIndex.canReveal { trailing.append(ActionButton("Open in Orca ↗", action: "session.reveal", ["key": .string(k)])) }
+        if own {
+            let back = ActionButton("Back to chat", symbol: "bubble.left.and.bubble.right") { [weak self] in self?.handover(k, to: .chat) }
+            back.setAccessibilityLabel("Move the session back to the chat when you quit the agent in the terminal")
+            trailing.append(back)
+        } else if data.agentIndex.canReveal {
+            // Only a session on this Mac opens in Orca. A remote session uses Pop out.
+            trailing.append(ActionButton("Open in Orca ↗", action: "session.reveal", ["key": .string(k)]))
+        }
         let c = LiveTerminalCard(sessionID: id, stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()),
-                                 runtime: "Orca", place: place, trailing: trailing)
+                                 runtime: runtime, place: place, trailing: trailing)
         c.onDetails = { [weak self] in self?.go(.settings(.machines)) }
         c.onRetry = { [weak self] in self?.retryLive(k) }
         return c
@@ -861,8 +881,27 @@ final class ItemPage: Page, NSTextFieldDelegate {
                                trailing: [open, stop])
     }
 
-    /// On this Mac, Terminal opens in the folder of the session. The harness session id goes to the clipboard.
+    /// The daemon moves the session to its own terminal when it can. Else Terminal opens in the folder of the session.
     private func openInTerminal(_ k: String) {
+        data.agentIndex.canHandover(k) { [weak self] ok in
+            guard let self else { return }
+            if ok { self.handover(k, to: .terminal) } else { self.openTerminalApp(k) }
+        }
+    }
+
+    private func handover(_ k: String, to view: DaemonSession.View) {
+        note = (.info, view == .terminal ? "The session moves to a terminal at the end of the turn."
+                                         : "The session moves back to the chat when you quit the agent in the terminal.")
+        reload()
+        data.agentIndex.handover(k, to: view) { [weak self] e in
+            guard let self, let e else { return }
+            self.note = (.bad, "Could not move the session: \(e.message)")
+            self.reload()
+        }
+    }
+
+    /// On this Mac, Terminal opens in the folder of the session. The harness session id goes to the clipboard.
+    private func openTerminalApp(_ k: String) {
         let agents = data.agentIndex
         agents.daemonSession(k) { [weak self] s in
             guard let self else { return }

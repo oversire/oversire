@@ -19,10 +19,11 @@ public struct AgentSession: Hashable, Sendable {
     public var profile: String?     // the agent of an OverSire start, for example claude-max
     public var model: String?
     public var effort: String?
+    public var view: DaemonSession.View?   // the view that the daemon gives; nil: the default of the runtime
 
     public init(phase: Phase, since: Date, card: String? = nil, paneKey: String? = nil, agent: AgentName = .claude,
                 repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil, startedAt: Date? = nil,
-                profile: String? = nil, model: String? = nil, effort: String? = nil) {
+                profile: String? = nil, model: String? = nil, effort: String? = nil, view: DaemonSession.View? = nil) {
         self.phase = phase
         self.since = since
         self.card = card
@@ -36,6 +37,7 @@ public struct AgentSession: Hashable, Sendable {
         self.profile = profile
         self.model = model
         self.effort = effort
+        self.view = view
     }
 
     /// The session waits, or its turn ended with a question.

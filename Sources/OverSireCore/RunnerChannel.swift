@@ -206,12 +206,13 @@ public struct RunnerSession: StoreRecord {
     public var permission: PermissionPrompt?
     public var question: RunnerQuestion?
     public var error: String?
+    public var view: DaemonSession.View?  // nil: chat
     public var startedAt: Date
     public var updatedAt: Date
 
     public init(id: String, runner: String, session: SessionRef, order: String, agent: String, repo: String, branch: String? = nil,
                 item: ItemRef? = nil, state: State, summary: String? = nil, permission: PermissionPrompt? = nil,
-                question: RunnerQuestion? = nil, error: String? = nil, startedAt: Date, updatedAt: Date) {
+                question: RunnerQuestion? = nil, error: String? = nil, view: DaemonSession.View? = nil, startedAt: Date, updatedAt: Date) {
         self.id = id
         self.runner = runner
         self.session = session
@@ -225,6 +226,7 @@ public struct RunnerSession: StoreRecord {
         self.permission = permission
         self.question = question
         self.error = error
+        self.view = view
         self.startedAt = startedAt
         self.updatedAt = updatedAt
     }

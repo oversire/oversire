@@ -124,6 +124,43 @@ final class MachineRuntimeTests: XCTestCase {
                                               title: "claude", paneKey: "tab-3:leaf-1", orphaned: false)])
     }
 
+    func testTheViewAndTheHandoverOfAnOversireSession() async throws {
+        let d = FakeDaemon()
+        var ws = try contract(DaemonWorkspacesPage.self, "daemon-workspaces-page", "two").workspaces[0]
+        ws.runtime = "oversire"
+        d.runtime.workspaces = [ws]
+        d.runtime.runtimes = [DaemonRuntime(id: "oversire", name: "OverSire", installed: true, reachable: true,
+                                            capabilities: ["sessionInput", "sessionStream", "sessionHandover"])]
+        var s = try contract(DaemonSession.self, "daemon-session", "oversire-waiting")
+        s.workspace = ws.id
+        s.view = nil
+        d.sessions = [s]
+        let rt = local(d)
+        try await rt.refresh()
+        var list = try await rt.workspaces()
+        var a = try XCTUnwrap(list.first?.agents.first)
+        let chatView = await rt.stream(of: a)?.view
+        XCTAssertEqual(chatView, .chat, "no view: the default of the oversire runtime")
+        let can = await rt.canHandover(a)
+        XCTAssertTrue(can)
+
+        try await rt.handover(a, to: .terminal)
+        list = try await rt.workspaces()
+        a = try XCTUnwrap(list.first?.agents.first)
+        XCTAssertEqual(a.view, .terminal)
+        let termView = await rt.stream(of: a)?.view
+        XCTAssertEqual(termView, .terminal)
+
+        d.runtime.runtimes[0].capabilities = ["sessionInput", "sessionStream"]
+        try await rt.refresh()
+        let cannot = await rt.canHandover(a)
+        XCTAssertFalse(cannot)
+        do {
+            try await rt.handover(a, to: .chat)
+            XCTFail("a runtime with no sessionHandover refuses")
+        } catch {}
+    }
+
     func testAllRuntimesFailing() async throws {
         let d = FakeDaemon()
         d.runtime.runtimes = []

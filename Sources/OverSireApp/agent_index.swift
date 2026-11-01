@@ -8,6 +8,8 @@ typealias AgentHost = AgentRuntime & SessionIO
 protocol SessionStreaming {
     func stream(of s: AgentSession) async -> (request: URLRequest, view: StreamView)?
     func session(id: String) async throws -> DaemonSession
+    func canHandover(_ s: AgentSession) async -> Bool
+    func handover(_ s: AgentSession, to view: DaemonSession.View) async throws
 }
 
 /// A runtime that runs a local tool, which can be missing.
@@ -411,6 +413,27 @@ final class AgentIndex: NSObject {
         Task {
             let t = await rt.stream(of: a)
             DispatchQueue.main.async { done(t) }
+        }
+    }
+
+    /// The runtime of the session of the key can move it between chat and terminal.
+    func canHandover(_ key: String, done: @escaping (Bool) -> Void) {
+        guard let a = agent(key), let rt = runtime() as? any SessionStreaming else { done(false); return }
+        Task {
+            let ok = await rt.canHandover(a)
+            DispatchQueue.main.async { done(ok) }
+        }
+    }
+
+    /// Moves the session of the key to the view at the end of its turn.
+    func handover(_ key: String, to view: DaemonSession.View, done: @escaping (ProviderError?) -> Void) {
+        guard let a = agent(key), let rt = runtime() as? any SessionStreaming else {
+            done(.vendor(code: "no_session", message: "The session is closed")); return
+        }
+        Task {
+            var err: ProviderError?
+            if case .failure(let e) = await Result(awaiting: { try await rt.handover(a, to: view) }) { err = e }
+            DispatchQueue.main.async { done(err) }
         }
     }
 

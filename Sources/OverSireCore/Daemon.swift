@@ -23,6 +23,8 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
     public enum State: String, Codable, Sendable { case starting, working, waiting, done, failed }
     /// monitoring: the session works, but only a background shell runs.
     public enum Reason: String, Codable, Sendable { case question, permission, turnEnd, interrupted, error, monitoring }
+    /// chat: the turns from agent-wire. terminal: the agent CLI in a terminal.
+    public enum View: String, Codable, Sendable { case chat, terminal }
 
     public var id: String               // Orca: the pane key <tabId>:<leafId>; CLI: cli:<harness session id>; oversire: s-…
     public var machine: MachineName
@@ -47,12 +49,13 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
     public var model: String?           // LaunchRequest.model; nil for a session that OverSire did not start
     public var effort: String?
     public var profile: String?         // the OverSire agent name
+    public var view: View?              // nil: chat for the oversire runtime, terminal for the others
 
     public init(id: String, machine: MachineName, runtime: String, harness: String, workspace: String? = nil,
                 terminal: String? = nil, harnessSession: String? = nil, cwd: String, repo: String? = nil, branch: String? = nil,
                 state: State, reason: Reason? = nil, question: QuestionID? = nil, prompt: String? = nil,
                 lastMessage: String? = nil, stateSince: Date, startedAt: Date? = nil, updatedAt: Date, sources: [String], key: String? = nil,
-                model: String? = nil, effort: String? = nil, profile: String? = nil) {
+                model: String? = nil, effort: String? = nil, profile: String? = nil, view: View? = nil) {
         self.id = id
         self.machine = machine
         self.runtime = runtime
@@ -76,6 +79,7 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
         self.model = model
         self.effort = effort
         self.profile = profile
+        self.view = view
     }
 }
 
@@ -447,6 +451,13 @@ public struct SessionAsk: Codable, Hashable, Sendable {
         self.timeoutSec = timeoutSec
         self.readOnly = readOnly
     }
+}
+
+/// The body of POST /v1/sessions/{id}/handover. The daemon moves the session at the end of the turn.
+public struct SessionHandover: Codable, Hashable, Sendable {
+    public var view: DaemonSession.View
+
+    public init(view: DaemonSession.View) { self.view = view }
 }
 
 /// The answer of POST /v1/sessions/{id}/ask. A 409 or 504 has error and screenTail, no reply.

@@ -42,6 +42,12 @@ public final class DaemonClient: Sendable {
         return try Self.decode(try Self.check(data, resp))
     }
 
+    /// Member route. The daemon moves the session to the view at the end of the current turn.
+    /// 409: the session ended, has no harness session yet, or moves now. 501: the runtime cannot move it.
+    public func handover(session id: String, to view: DaemonSession.View) async throws {
+        let _: Done = try await post("/v1/sessions/\(Self.escape(id))/handover", SessionHandover(view: view))
+    }
+
     public func group() async throws -> Group { try await get("/v1/group") }
 
     /// Member route. The daemon installs a newer CLI and then restarts. A download can take minutes.

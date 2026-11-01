@@ -95,7 +95,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
             let agents = (byWorkspace[w.id] ?? []).filter { $0.runtime == w.runtime }.map { s in
                 AgentSession(phase: Self.phase(s), since: s.stateSince, card: w.id, paneKey: s.id, agent: AgentName(rawValue: s.harness),
                              repo: repo, prompt: s.prompt, message: s.lastMessage, key: s.key, startedAt: s.startedAt,
-                             profile: s.profile, model: s.model, effort: s.effort)
+                             profile: s.profile, model: s.model, effort: s.effort, view: s.view)
             }
             return Workspace(id: w.id, repo: repo, path: w.path, name: w.name ?? "", comment: w.comment, liveTerminals: w.liveTerminals,
                              lastActivity: w.lastActivity, agents: agents, kind: Self.kind(w.kind), branch: w.branch ?? "")
@@ -153,7 +153,21 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         guard let id = s.paneKey, !id.isEmpty, let card = s.card else { return nil }
         let rt = await runtime(of: card)
         guard runtimes.contains(where: { $0.id == rt && $0.reachable && $0.capabilities.contains(Capability.sessionStream.rawValue) }) else { return nil }
-        return (client.streamRequest(session: id), rt == Self.chatRuntime ? .chat : .terminal)
+        let view: StreamView = s.view.map { $0 == .chat ? .chat : .terminal } ?? (rt == Self.chatRuntime ? .chat : .terminal)
+        return (client.streamRequest(session: id), view)
+    }
+
+    /// The runtime of the session can move it between chat and terminal.
+    public func canHandover(_ s: AgentSession) async -> Bool {
+        guard let card = s.card, s.paneKey?.isEmpty == false else { return false }
+        let rt = await runtime(of: card)
+        return runtimes.contains { $0.id == rt && $0.reachable && $0.capabilities.contains(Capability.sessionHandover.rawValue) }
+    }
+
+    /// Moves the session to the view at the end of its turn.
+    public func handover(_ s: AgentSession, to view: DaemonSession.View) async throws {
+        guard let id = s.paneKey, !id.isEmpty else { throw ProviderError.notFound }
+        try await client.handover(session: id, to: view)
     }
 
     /// The daemon record of a session: its folder and the session id of its harness.
