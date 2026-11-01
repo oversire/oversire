@@ -1064,6 +1064,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         if let k = self.runbookSample(scene) {
                             w.router.go(scene == "needs" ? .home : scene == "lane" ? .work(.lanes) : .item(k, .runbook))
                         } else { print("UISHOTS no runbook sample \(p)") }
+                    } else if p.hasPrefix("journey:") {
+                        // journey:full, folded, noai (Status recap) or timeline, real, tip-mark, tip-bar, tip-cut: uishots_journey.swift.
+                        self.journeyState(String(p.dropFirst(8)), in: w)
                     } else if p.hasPrefix("review:") {
                         // review:list, changes, split, plan, submit, approve, merge, conflict or empty: the samples of uishots_review.swift.
                         self.reviewState(String(p.dropFirst(7)), in: w)

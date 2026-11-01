@@ -9,7 +9,20 @@ struct StatusCard {
     let stream: Workstream?
     let data: AppData
     let needsYou: NeedsYouCard
+    /// The recap from the event rows (OVERSIRE-383). Nil before the first read.
+    var recap: RecapInput? = nil
     let go: (Route) -> Void
+
+    /// What the recap parts need from the page.
+    struct RecapInput {
+        var catchUp: CatchUp
+        var ai: Recap?
+        var busy: Bool
+        var expanded: Bool
+        var expand: () -> Void
+        var confirm: (CatchUp.Line) -> Void
+        var askWhy: (CatchUp.Line) -> Void
+    }
 
     func build() -> NSView {
         let job = data.statusJob
@@ -43,6 +56,14 @@ struct StatusCard {
             }
         }
         let c = Card(title: "Status", trailing: trailing, spacing: 10)
+        let folded = recap.map { $0.catchUp.folded && !$0.expanded } ?? false
+        if let r = recap {
+            if let n = r.catchUp.now { c.add(RecapPanel.nowLine(n) { a, k in go(.item(k, Self.tab(a))) }) }
+            if folded, let since = r.catchUp.since {
+                c.add(NSStackView(h: [NSTextField.text("Nothing new since you looked \(relativeAgo(since)).", size: 12.5, color: Palette.dim),
+                                      ActionButton("Show recap", style: .link) { r.expand() }, Spacer()], spacing: 6))
+            }
+        }
 
         if agent?.phase == .failed {
             c.add(Self.note("✕", "The session did not start. " + (agent?.message ?? ""), color: Palette.bad, key: k, go: go))
@@ -64,9 +85,21 @@ struct StatusCard {
             noStatus(c)
         }
         if let why = s?.partial, agent?.phase != .failed { c.add(Self.note("▲", "From the screen only. " + why, color: Palette.warn, key: k, go: go)) }
+        if let r = recap, !folded {
+            RecapPanel(catchUp: r.catchUp, recap: r.ai, busy: r.busy, open: { go(.item($0, .overview)) }, confirm: r.confirm, askWhy: r.askWhy).add(to: c)
+        }
         c.add(chips())
         if let s { c.add(NSTextField.text(s.read + (s.byAI ? " · by AI" : "") + " · " + s.cause, size: 11.5, color: Palette.dim, lines: 2)) }
         return c
+    }
+
+    /// The tab of the one button of the Now line.
+    static func tab(_ a: CatchUp.Action) -> Route.ItemTab {
+        switch a {
+        case .reviewCode: return .changes
+        case .reviewPlan: return .plan
+        case .answer, .continueSession: return .session
+        }
     }
 
     // A note with a link to the log lines of the item: amber where the data is partial, red for a failure.

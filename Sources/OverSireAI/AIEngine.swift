@@ -49,6 +49,7 @@ public struct AITaskKind: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let question: AITaskKind = "question"
     public static let itemSummary: AITaskKind = "itemSummary"
     public static let status: AITaskKind = "status"
+    public static let recap: AITaskKind = "recap"
     /// The system prompt of the assistant chat. Not a job: ChatEngine runs it.
     public static let assistant: AITaskKind = "assistant"
 }

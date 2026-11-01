@@ -44,6 +44,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var note: (Tone, String)?
     private var cleanupOff: Set<String> = []   // safe cleanup lines that the user unchecked
     private var activitySource = Source.all
+    /// Your last look of the item on this Mac before this visit, and the time of this visit (OVERSIRE-383).
+    private var localLook: Date?
+    private var openedAt = Date()
+    private var recapOpen = false
+    /// The Timeline tab (OVERSIRE-384).
+    private var timelineReal = false
+    private var timelineFilter = TimelineFilter.all
+    private var timelinePin: TimelineGraphView.Target?
     private var replyField: NSTextField?
     private var commentField: NSTextField?
     private var askField: NSTextField?
@@ -88,7 +96,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     override func show(_ r: Route) {
         if case .item(let k, let t) = r, k != key || t != tab {
-            if k != key { timeline = nil; tail = []; descriptionOpen = false }
+            if k != key {
+                timeline = nil; tail = []; descriptionOpen = false
+                localLook = JOURNAL.lastLook(k)
+                openedAt = Date()
+                recapOpen = false
+                timelinePin = nil
+                JOURNAL.look(k, at: openedAt)
+            }
             tailAt = .distantPast
             dropLive()
         }
@@ -109,8 +124,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
     override var watches: DataDomains {
         var d: DataDomains = [.projects, .agents, .questions, .queue, .summaries, .config, .intake, .runbooks, .reviews]
         switch tab {
-        case .overview: d.formUnion([.relations, .planner, .runs, .prs])
-        case .session, .activity: d.formUnion([.runs, .prs])
+        case .overview: d.formUnion([.relations, .planner, .runs, .prs, .events])
+        case .activity: d.formUnion([.runs, .prs, .events])
+        case .session: d.formUnion([.runs, .prs])
         case .runbook, .subitems, .plan, .changes: break
         }
         return d
@@ -129,6 +145,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
             loadData(item: item, stream: data.workstreams.stream(key))
             if tab == .overview, data.projectStore.relations.supports(item.key) { data.projectStore.relations.load([item.key]) }
             loadReview()
+            if tab == .overview || tab == .activity { JOURNAL.load(item.key) }
+            if tab == .activity, let p = parentKey(item) { JOURNAL.load(p) }
+            if tab == .overview, let (snap, cu) = catchUp(), let rows = JOURNAL.rows(key) {
+                RECAPS.want(key, title: item.title, since: cu.since, rows: cu.fresh.isEmpty ? [] : rows.filter { r in cu.fresh.contains { $0.id == r.id } },
+                            open: !snap.isClosed(item.statusOptionId))
+            }
         } else {
             pageBusy = data.projectsLoading
         }
@@ -238,7 +260,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 case .session: return sessionTab
                 case .changes: return Self.reviewTab("Changes", code, count: code?.fileCount)
                 case .subitems: return sub
-                case .activity: return TabStrip.Tab(title: "Activity")
+                case .activity: return TabStrip.Tab(title: "Timeline")
                 }
             }, selected: tabs.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in guard let self else { return }; self.go(.item(self.key, tabs[i])) }
@@ -567,9 +589,37 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let s = job.status(k)
         let print = Self.sig(s, job.reading.contains(k), stream, agents.agent(k), job.item(k), s.flatMap(job.outOfDate), job.on,
                              agents.watch(k)?.recap, data.projectStore.isDone(key: k), AGENTS.writeBack, data.questions.entries(key: key))
-        return PageRow("status", print) { [unowned self] in
-            StatusCard(key: self.key, stream: stream, data: self.data, needsYou: self.needsYou) { [weak self] in self?.go($0) }.build()
+        let input = recapInput()
+        let rprint = Self.sig(input?.catchUp, input?.ai, input?.busy, input?.expanded)
+        return PageRow("status", print, rprint) { [unowned self] in
+            StatusCard(key: self.key, stream: stream, data: self.data, needsYou: self.needsYou, recap: input) { [weak self] in self?.go($0) }.build()
         }
+    }
+
+    /// The catch-up of the item tree from the event rows. Nil before the first read.
+    private func catchUp() -> (ProjectSnapshot, CatchUp)? {
+        guard let (_, snap, item) = data.projectStore.item(key: key), let rows = JOURNAL.rows(key) else { return nil }
+        let subs = subItems(snap, item).map { CatchUpBuilder.Sub(key: $0.key, title: $0.title, closed: snap.isClosed($0.statusOptionId)) }
+        let since = JOURNAL.since(key, before: localLook, opened: openedAt)
+        let notPushed = REVIEWS.notPushed.map { "\($0.item.repo) \($0.item.base) +\($0.item.ahead)" + ($0.machine.isEmpty ? "" : " on \($0.machine)") }
+        return (snap, CatchUpBuilder(key: item.key, subs: subs, rows: rows, since: since, notPushed: notPushed).build())
+    }
+
+    private func recapInput() -> StatusCard.RecapInput? {
+        guard let (_, cu) = catchUp() else { return nil }
+        let k = key.uppercased()
+        let fresh = JOURNAL.rows(key)?.filter { r in cu.fresh.contains { $0.id == r.id } } ?? []
+        return StatusCard.RecapInput(
+            catchUp: cu, ai: fresh.isEmpty ? nil : RECAPS.recap(k, rows: fresh), busy: RECAPS.busy.contains(k), expanded: recapOpen,
+            expand: { [weak self] in self?.recapOpen = true; self?.reload() },
+            confirm: { RECAPS.confirm(k, $0) },
+            askWhy: { [weak self] ch in
+                guard let self else { return }
+                let target = JOURNAL.rows(k)?.first { ch.ids.contains($0.id) }?.item ?? k
+                self.data.actions.run("session.send", ["key": .string(target), "text": .string("Why did you choose this: \(ch.text)? Answer in 2 sentences.")]) { [weak self] r in
+                    if case .ok = r {} else { self?.note = (.bad, "Could not ask: \(r.summary)"); self?.reload() }
+                }
+            })
     }
 
     // The web view keeps its holder while the body stays the same.
@@ -1164,6 +1214,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func activity(item: Item, stream: Workstream?) -> [PageRow] {
+        if let t = timelineRows(item: item) { return t }
         let all = events(item: item, stream: stream)
         let source = activitySource, pending = pendingComment, loading = timeline == nil
         let shown = all.filter { source == .all || $0.source == source }
@@ -1176,6 +1227,94 @@ final class ItemPage: Page, NSTextFieldDelegate {
             PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
             PageRow("list", Self.sig(shown), pending, loading) { [unowned self] in self.activityList(shown, pending: pending, loading: loading) },
         ]
+    }
+
+    // MARK: Timeline
+
+    /// The sub-items in key order: OVERSIRE-378 before OVERSIRE-379.
+    private func subItems(_ snap: ProjectSnapshot, _ item: Item) -> [Item] {
+        func n(_ k: String) -> Int { Int(k.split(separator: "-").last ?? "") ?? 0 }
+        return snap.children(of: item.id).sorted { (n($0.key), $0.key) < (n($1.key), $1.key) }
+    }
+
+    private func parentKey(_ item: Item) -> String? {
+        guard let pid = item.parentId, let (_, snap, _) = data.projectStore.item(key: item.key) else { return nil }
+        return snap.items.first { $0.id == pid }?.key
+    }
+
+    /// The lane graph and the event rows. Nil with no rows: the page then shows the tracker activity.
+    private func timelineRows(item: Item) -> [PageRow]? {
+        guard let (_, snap, _) = data.projectStore.item(key: item.key), var rows = JOURNAL.rows(item.key), !rows.isEmpty else { return nil }
+        var parent: TimelineModel.Lane?
+        if let pk = parentKey(item), let p = snap.items.first(where: { $0.key == pk }) {
+            parent = TimelineModel.Lane(key: p.key, title: p.title)
+            rows = ItemJournal.merge(rows, (JOURNAL.rows(pk) ?? []).filter { $0.item?.uppercased() == pk.uppercased() })
+        }
+        let subs = parent == nil ? subItems(snap, item).map { TimelineModel.Lane(key: $0.key, title: $0.title) } : []
+        let now = Date()
+        let model = TimelineModel.build(key: item.key, title: item.title, subs: subs, parent: parent, rows: rows, now: now)
+        let since = JOURNAL.since(item.key, before: localLook, opened: openedAt)
+        let preset = TimelineGraphView.preset
+        let real = preset?.real ?? timelineReal, filter = timelineFilter, pin = timelinePin, pending = pendingComment
+        let shown = Array(rows.filter { filter.matches($0) }.reversed().prefix(300))
+        let head = "\(spanText(model.end.timeIntervalSince(model.start))) · \(Int((model.active / 3600).rounded())) active hours"
+        var out: [PageRow] = [
+            PageRow("tl-head", head, real) { [unowned self] in
+                NSStackView(h: [NSTextField.text(head, size: 12.5, weight: .medium, color: Palette.mut), Spacer(),
+                                ToggleChip("Cut empty time", on: !real) { [weak self] in self?.timelineReal = false; self?.reload() },
+                                ToggleChip("Real time", on: real) { [weak self] in self?.timelineReal = true; self?.reload() }], spacing: 6)
+            },
+            PageRow("tl-graph", Self.sig(rows.map(\.id)), real, pin?.id, since, model.lanes.map(\.key), preset) { [unowned self] in
+                let g = TimelineGraphView(model: model, real: real, lastLook: since, now: now, pinned: pin?.id)
+                g.onPin = { [weak self] t in self?.timelinePin = t; self?.reload() }
+                return g
+            },
+            PageRow("tl-legend") { TimelineLegend.view() },
+        ]
+        if let pin {
+            out.append(PageRow("tl-pin", pin.id) { [unowned self] in
+                let c = Card(title: pin.title, trailing: [ActionButton("Unpin", style: .link) { [weak self] in self?.timelinePin = nil; self?.reload() }])
+                for d in pin.detail where !d.isEmpty { c.add(NSTextField.text(d, size: 12.5, color: Palette.mut, lines: 4)) }
+                if let id = pin.event { c.add(NSTextField.text("Event \(id)", size: 11, color: Palette.dim, mono: true)) }
+                return c
+            })
+        }
+        out += [
+            PageRow("tl-filters", filter) { [unowned self] in
+                NSStackView(h: TimelineFilter.allCases.map { f in
+                    ToggleChip(f.rawValue, on: filter == f) { [weak self] in self?.timelineFilter = f; self?.reload() } as NSView
+                } + [Spacer()], spacing: 6)
+            },
+            PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
+            PageRow("tl-rows", Self.sig(shown.map(\.id)), pending) { [unowned self] in self.eventList(shown, pending: pending, now: now) },
+        ]
+        return out
+    }
+
+    private func eventList(_ shown: [OverSireCore.Event], pending: String?, now: Date) -> NSView {
+        let list = ListCard()
+        if let pending {
+            list.add(Row([Spinner(size: .mini), NSTextField.text(pending, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
+                         height: 34, label: "Sending comment: \(pending)"))
+        }
+        for e in shown {
+            let item = TimelineGraphView.short(e.item ?? key)
+            let who = TimelineGraphView.who(e)
+            // Private text stays on your Macs. This app runs on one of them.
+            let text = (e.isPrivate ? "Private · " : "") + e.summary
+            let time = NSTextField.text(dayTime(e.at, now: now), size: 11, color: Palette.dim, mono: true)
+            time.widthAnchor.constraint(equalToConstant: 92).isActive = true
+            let chip = Chiplet(item)
+            let actor = NSTextField.text(who, size: 11.5, color: Palette.dim)
+            actor.widthAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
+            let body = NSTextField.text(text, size: 12.5, lines: 2)
+            body.setContentHuggingPriority(.init(1), for: .horizontal)
+            var open: (() -> Void)?
+            if let k = e.item, k.uppercased() != key.uppercased() { open = { [weak self] in self?.go(.item(k, .activity)) } }
+            list.add(Row([time, chip, actor, body], height: 30, label: "\(dayTime(e.at, now: now)), \(item), \(who): \(text)", onClick: open))
+        }
+        if list.isEmpty { list.add(EmptyNote("No rows for this filter.")) }
+        return list
     }
 
     private func composeRow() -> NSView {
