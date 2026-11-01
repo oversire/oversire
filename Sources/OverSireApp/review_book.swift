@@ -151,6 +151,12 @@ final class ReviewBook {
         if let d = desks[s.id] { return d }
         guard let src = source(s.machine) else { return nil }
         let d = ReviewDesk(summary: s, source: src, tracker: tracker, bus: bus)
+        d.agent = { key in
+            let rt = PROJECTS_CFG.runtime
+            guard let command = try? rt.command(for: rt.agent).resolve(name: key, key: key, title: key) else { return nil }
+            let l = rt.launch(rt.agent, name: key, key: key, title: key)
+            return AgentLaunchSpec(cli: l.cli, command: command, model: l.model, effort: l.effort, profile: l.profile)
+        }
         desks[s.id] = d
         return d
     }

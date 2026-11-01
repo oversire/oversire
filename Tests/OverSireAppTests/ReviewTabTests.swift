@@ -175,6 +175,17 @@ final class ReviewTabTests: XCTestCase {
         XCTAssertFalse(src.calls.contains { $0.hasPrefix("edit") })
     }
 
+    func testASubmitSendsTheAgentOnlyWhenTheDaemonKnowsNone() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        let d = await desk(src)
+        let spec = AgentLaunchSpec(cli: "claude", profile: "claude")
+        d.agent = { _ in spec }
+        _ = await d.add(.code(repo: "oversire", path: "a.go", line: 3, side: .new), text: "one")
+        _ = try await d.submit(.requestChanges, summary: nil, post: false)
+        _ = try await d.submit(.approve, summary: nil, post: false)
+        XCTAssertEqual(src.launches, [spec, nil], "no session known: the agent goes; an approve starts nothing")
+    }
+
     func testDiscardAllDeletesOnlyThePendingComments() async {
         let src = FakeReviewSource(machine: "mba")
         let d = await desk(src)

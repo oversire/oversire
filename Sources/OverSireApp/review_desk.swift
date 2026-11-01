@@ -76,6 +76,8 @@ final class ReviewDesk {
     /// The text of the last failed call.
     private(set) var error: String?
     private(set) var loading = false
+    /// The agent for a new session when the daemon knows no agent of the key.
+    var agent: (String) -> AgentLaunchSpec? = { _ in nil }
 
     // The place in the tab. It stays across builds of the page.
     var file: String?
@@ -215,7 +217,10 @@ final class ReviewDesk {
         let note = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = note?.isEmpty == false ? note : nil
         do {
-            let round = try await source.submit(key, SubmitReview(kind: kind, verdict: verdict, summary: summary, postToTracker: post))
+            // A given launch wins over the agent of the last session, so send one only when the daemon knows none.
+            let known = self.summary.session?.harness != nil
+            let launch = verdict == .requestChanges && !known ? agent(key) : nil
+            let round = try await source.submit(key, SubmitReview(kind: kind, verdict: verdict, summary: summary, postToTracker: post, launch: launch))
             await MainActor.run {
                 if post { self.tracker?.post(self.key, markdown: self.trackerNote(round, batch)) { _ in } }
                 if verdict == .approve, self.kind == .plan { self.tracker?.move(key: self.key, group: "unstarted", else: .todo) { _ in } }

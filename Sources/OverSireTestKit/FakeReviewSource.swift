@@ -16,6 +16,8 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
     public var now: @Sendable () -> Date = { Date(timeIntervalSince1970: 1_793_000_000) }
     /// The calls in order, for example "submit SLING-170".
     public private(set) var calls: [String] = []
+    /// The agent of each submit, or nil.
+    public private(set) var launches: [AgentLaunchSpec?] = []
     /// Each call throws this error while it is set.
     public var failure: Error?
 
@@ -102,7 +104,8 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
     }
 
     public func submit(_ key: String, _ s: SubmitReview) async throws -> ReviewRound {
-        try change(key, s.kind ?? .code, "submit") { d in
+        with { launches.append(s.launch) }
+        return try change(key, s.kind ?? .code, "submit") { d in
             let n = d.summary.round + 1
             var count = 0
             for i in d.comments.indices where d.comments[i].state == .pending {
