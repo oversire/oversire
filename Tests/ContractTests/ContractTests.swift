@@ -94,6 +94,20 @@ final class ContractTests: XCTestCase {
         "runbook-run": roundTrip(RunbookRun.self),
         "step-done": roundTrip(StepDone.self),
         "step-patch": roundTrip(StepPatch.self),
+        "reviews-page": roundTrip(ReviewsPage.self),
+        "review-detail": roundTrip(ReviewDetail.self),
+        "file-diff": roundTrip(FileDiff.self),
+        "comment-draft": roundTrip(CommentDraft.self),
+        "comment-edit": roundTrip(CommentEdit.self),
+        "comment-reply": roundTrip(CommentReply.self),
+        "viewed-mark": roundTrip(ViewedMark.self),
+        "submit-review": roundTrip(SubmitReview.self),
+        "review-round": roundTrip(ReviewRound.self),
+        "review-ready": roundTrip(ReviewReady.self),
+        "merge-request": roundTrip(MergeRequest.self),
+        "merge-result": roundTrip(MergeResult.self),
+        "plan-doc": roundTrip(PlanDoc.self),
+        "review-event": roundTrip(ReviewEvent.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
@@ -103,7 +117,7 @@ final class ContractTests: XCTestCase {
         "refs.json": 1, "provider-event.json": 1, "actions.json": 2, "ai-task.json": 1, "account.json": 1,
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
-        "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1,
+        "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1, "review.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
