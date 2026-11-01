@@ -38,6 +38,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     /// A poll with no change also means the data is current.
     var lastUpdate: Date { max(lastFetch, relay.lastPoll ?? .distantPast) }
     var closeTime = Date.distantPast
+    /// The open panel came from a right click, so the main window stays behind.
+    var keptWindowBack = false
     var firstLoad = true
     var ghIcon: NSImage?
     var prevStatuses: [String: String] = [:]
@@ -1147,11 +1149,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let secondary = NSApp.currentEvent.map { $0.type == .rightMouseUp || $0.modifierFlags.contains(.control) } ?? false
         switch IconClick.action(appWindow.iconClickState, panelShown: popover.isShown || Date().timeIntervalSince(closeTime) <= 0.3, secondary: secondary) {
         case .raise: showWindow()
-        case .panel, .closePanel: toggle()
+        case .panel, .closePanel: toggle(keepWindowBack: secondary)
         }
     }
 
-    @objc func toggle() {
+    @objc func toggle(keepWindowBack: Bool = false) {
         if popover.isShown { popover.close() }
         else if Date().timeIntervalSince(closeTime) > 0.3 {
             // Pin appearance BEFORE constructing the view tree so .cgColor resolves correctly.
@@ -1161,7 +1163,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     self.popover.contentViewController = GENERAL.smallPopover ? GlanceVC(data: self) { [weak self] in self?.open($0) } : self.makeTabVC()
                 }
             }
-            NSApp.activate(ignoringOtherApps: true)
+            keptWindowBack = keepWindowBack
+            if keepWindowBack { appWindow.activateBehind() } else { NSApp.activate(ignoringOtherApps: true) }
             popover.show(relativeTo: statusItem.button!.bounds, of: statusItem.button!, preferredEdge: .minY)
             // No refresh here. makeTabVC() snapshots `grouped` at build time and
             // never re-reads it, so a fetch started now lands in a view nobody is
@@ -1250,6 +1253,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     func popoverDidClose(_ notification: Notification) {
         closeTime = Date()
+        if keptWindowBack { keptWindowBack = false; appWindow.returnBehind() }
         popover.behavior = .transient
         popover.contentViewController = nil  // Release settings view if open
         updatePolling()                      // nobody is watching: back to the slow cadence

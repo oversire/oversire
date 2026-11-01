@@ -430,7 +430,42 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         if let focus { page?.focus(focus) }
     }
 
+    /// The window of another app that was in front of this window, and the app that was in front, before `activateBehind`.
+    private var behind: (window: Int, app: NSRunningApplication?)?
+
+    /// Activates the app, but keeps the window behind the window of another app that was in front of it.
+    func activateBehind() {
+        guard let w = window, w.isVisible, !w.isMiniaturized, !NSApp.isActive, let above = Self.windowAbove(w.windowNumber) else {
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        behind = (above, NSWorkspace.shared.frontmostApplication)
+        var token: NSObjectProtocol?
+        token = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            token.map(NotificationCenter.default.removeObserver)
+            if self?.behind?.window == above { w.order(.below, relativeTo: above) }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Undoes `activateBehind` when the panel closes. AppKit makes the window key and brings it to the front.
+    func returnBehind() {
+        guard let b = behind else { return }
+        behind = nil
+        guard let w = window, w.isVisible, !w.isMiniaturized else { return }
+        w.order(.below, relativeTo: b.window)
+        if NSApp.isActive { b.app?.activate(options: []) }
+    }
+
+    /// The normal window of another app directly in front of the window `n`.
+    private static func windowAbove(_ n: Int) -> Int? {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements], CGWindowID(n)) as? [[String: Any]] ?? []
+        let pid = Int(ProcessInfo.processInfo.processIdentifier)
+        return list.last { $0[kCGWindowLayer as String] as? Int == 0 && $0[kCGWindowOwnerPID as String] as? Int != pid }?[kCGWindowNumber as String] as? Int
+    }
+
     func show(_ route: Route? = nil, focus: String? = nil) {
+        behind = nil
         if let route { router.go(route) }
         if let focus { page?.focus(focus) }
         if window?.isMiniaturized == true { window?.deminiaturize(nil) }
