@@ -56,7 +56,7 @@ let package = Package(
         .testTarget(name: "CIGitHubActionsTests", dependencies: ["CIGitHubActions", "RuntimeDaemon", "OverSireTestKit"]),
         .testTarget(name: "RuntimeDaemonTests", dependencies: ["RuntimeDaemon", "OverSireTestKit"]),
         .testTarget(name: "TemplateTests", dependencies: ["TrackerTemplate", "CodeHostTemplate", "CITemplate", "OverSireTestKit"]),
-        .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI"]),
+        .testTarget(name: "ContractTests", dependencies: ["OverSireCore", "OverSireAI", "OverSireTestKit"]),
         .testTarget(name: "LiveTests", dependencies: ["OverSireAI", "OverSireAssistant", "AIEngineAgentBinder", .product(name: "AgentBinder", package: "agent-binder"), "TrackerPlane", "CodeHostGitHub", "CIGitHubActions", "RuntimeDaemon", "OverSireTestKit"]),
     ],
     swiftLanguageModes: [.v6]

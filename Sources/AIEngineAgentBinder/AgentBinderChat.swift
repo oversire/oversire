@@ -2,6 +2,7 @@ import Foundation
 import OverSireCore
 import OverSireAI
 import AgentBinder
+import struct AgentBinder.Event
 
 // ─── Chat through the local CLI ──────────────────────────────────────────────
 // One AgentBinder session for each thread. It stays open between turns.

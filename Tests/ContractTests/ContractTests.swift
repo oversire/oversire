@@ -1,6 +1,7 @@
 import XCTest
 import OverSireCore
 @testable import OverSireAI
+import OverSireTestKit
 
 /// Each file in Contract/fixtures decodes, encodes again and gives the same JSON.
 final class ContractTests: XCTestCase {
@@ -108,6 +109,12 @@ final class ContractTests: XCTestCase {
         "merge-result": roundTrip(MergeResult.self),
         "plan-doc": roundTrip(PlanDoc.self),
         "review-event": roundTrip(ReviewEvent.self),
+        "event": roundTrip(Event.self),
+        "event-draft": roundTrip(EventDraft.self),
+        "event-page": roundTrip(Event.Page.self),
+        "event-append": roundTrip(Event.Append.self),
+        "event-append-result": roundTrip(Event.AppendResult.self),
+        "item-links": roundTrip(ItemLinks.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
@@ -118,6 +125,7 @@ final class ContractTests: XCTestCase {
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
         "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1, "review.json": 1,
+        "event.json": 1, "event-kinds.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
@@ -246,5 +254,22 @@ final class ContractTests: XCTestCase {
             let want = try Data(contentsOf: dir.appendingPathComponent(name.replacingOccurrences(of: ".jsonl", with: ".json")))
             XCTAssertEqual(String(decoding: try canonical(data), as: UTF8.self), String(decoding: try canonical(want), as: UTF8.self), name)
         }
+    }
+
+    /// Each kind of event-kinds.json has the fixture event/<kind>.json, and each fixture has a kind of the catalog.
+    func testEventCatalogMatchesTheFixtures() throws {
+        let catalog = try EventCatalog.load(contract: Self.root)
+        let dir = Self.root.appendingPathComponent("fixtures/event")
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }
+        let special: Set<String> = ["parent-unknown.json", "private-prompt.json", "provider-human.json"]
+        XCTAssertEqual(Set(names).subtracting(special), Set(catalog.kinds.keys.map { "\($0).json" }), "one fixture for each kind")
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        for name in names {
+            let e = try dec.decode(Event.self, from: Data(contentsOf: dir.appendingPathComponent(name)))
+            XCTAssertEqual(catalog.problems(e.draft), [], name)
+            if !special.contains(name) { XCTAssertEqual("\(e.kind.rawValue).json", name) }
+        }
+        XCTAssertFalse(catalog.problems(EventDraft(id: "x:1", at: Date(), kind: "made.up", actorType: .human, actor: "a", via: "cli", summary: "")).isEmpty)
     }
 }
