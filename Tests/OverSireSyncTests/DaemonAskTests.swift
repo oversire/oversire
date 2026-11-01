@@ -42,9 +42,11 @@ final class DaemonAskTests: XCTestCase {
     func testWritesWithNoBodyAreJSON() async throws {
         let http = RecordedHTTP()
         http.on("POST", "\(base)/v1/runtimes/orca/retry", 200, #"{"id":"orca","name":"Orca","installed":true,"reachable":true,"capabilities":[]}"#)
+        http.on("POST", "\(base)/v1/update", 200, #"{"checkedAt":"2026-11-01T10:00:00Z","latest":"0.3.1"}"#)
         let c = client(http)
         _ = try await c.retryRuntime("orca")
-        XCTAssertEqual(http.requests.count, 1)
+        _ = try await c.update()
+        XCTAssertEqual(http.requests.count, 2)
         for r in http.requests {
             XCTAssertEqual(r.value(forHTTPHeaderField: "Content-Type"), "application/json", r.url?.path ?? "")
             XCTAssertNil(r.httpBody)

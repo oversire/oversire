@@ -52,8 +52,7 @@ public final class DaemonClient: Sendable {
 
     /// Member route. The daemon installs a newer CLI and then restarts. A download can take minutes.
     public func update() async throws -> DaemonUpdate {
-        var r = request("/v1/update")
-        r.httpMethod = "POST"
+        var r = try json("POST", "/v1/update", Optional<[String: String]>.none)
         r.timeoutInterval = 360
         return try Self.decode(try await send(r))
     }
