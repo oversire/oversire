@@ -11,7 +11,7 @@ extension Runbook {
         static let planFixes = "Read the last review comment on {key}. Change the items so that each gap is closed. Post a comment with what changed. Then run {done} --verdict done --note \"<one line>\"."
         static let implement = "Implement {key} ({url}) in worktree group {worktree}. Read the item, its sub-items and their comments. Work the sub-items in the plan order. For each sub-item, start one sub-agent with the sub-item key and the worktree, and wait for it to finish before the next one. After each sub-item: run the tests, commit, set the sub-item to Done. Use AskUserQuestion when a decision is mine. Then run {done} --verdict done --note \"<one line>\"."
         static let review = "Read {key}, its sub-items and the comments. Check the work in {worktree} against the spec, item by item. Check that UI work matches the artifact design of the item. Run the tests. Post one comment on {key} with the gaps. Then run {done} --verdict pass or {done} --verdict gaps, with --note \"<one line>\"."
-        static let fixes = "Read the last review comment on {key}. Fix each gap in {worktree}. Make sure that the tests pass. Merge into local main in the merge order of CLAUDE.md. Ask me with AskUserQuestion before any push or release. Then run {done} --verdict done --note \"<one line>\"."
+        static let fixes = "Read the last review comment on {key}. Fix each gap in {worktree}. Make sure that the tests pass. Commit. Do not merge: hand off for review. Then run {done} --verdict done --note \"<one line>\"."
     }
 
     /// Full, Small and Plan only. A step of claude-max uses `base` when the config has no claude-max agent.
