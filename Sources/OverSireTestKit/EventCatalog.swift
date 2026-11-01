@@ -53,3 +53,11 @@ public struct EventCatalog: Sendable {
         return out
     }
 }
+
+extension ConformanceReport {
+    /// Each row follows the catalog, and no two rows have the same id.
+    public mutating func expectEvents(_ rows: [EventDraft], _ what: String, catalog: EventCatalog = .repo) {
+        for d in rows { for p in catalog.problems(d) { expect(false, "\(what) event: \(p)") } }
+        expect(Set(rows.map(\.id)).count == rows.count, "\(what) events repeat an id")
+    }
+}

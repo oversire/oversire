@@ -34,6 +34,7 @@ struct AppConfig: Codable {
     var logs: LogConfig?
     var accounts: [AccountConfig]?   // one entry for each connected vendor account
     var machines: MachinesConfig?
+    var email: String?               // your email in the event rows (OVERSIRE-382)
 }
 
 // How much the AI checks may do. Auto acts only on "looks done". "Looks stuck" always asks.
@@ -988,6 +989,7 @@ var LINKING = LinkRules()
 var AGENTS = AgentsConfig()
 var LOGS_CFG = LogConfig()
 var MACHINES = MachinesConfig()
+var MY_EMAIL: String?
 var ACCOUNTS: [AccountConfig] = []
 let DEFAULT_BRANCHES: Set<String> = ["main", "develop"]
 
@@ -1033,6 +1035,7 @@ func loadConfig(save: Bool = true) {
     if let a = c.agents { AGENTS = a }
     if let l = c.logs { LOGS_CFG = l }
     if let m = c.machines { MACHINES = m }
+    MY_EMAIL = c.email
     ACCOUNTS = AppEnvironment.accounts(from: c)
     let moved = LegacyMigration.moveOrca(&ACCOUNTS, machines: &MACHINES, environment: PROJECTS_CFG.orca.legacyEnvironment)
     AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
@@ -1059,6 +1062,7 @@ func saveConfig() {
                       relay: RELAY, notifications: NOTIFICATIONS, tabs: TABS, projects: PROJECTS_CFG, ai: AI_CFG, general: GENERAL, linking: LINKING, agents: AGENTS, logs: LOGS_CFG)
     c.accounts = ACCOUNTS
     c.machines = MACHINES == MachinesConfig() ? nil : MACHINES
+    c.email = MY_EMAIL
     if let data = try? JSONEncoder().encode(c) {
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         if let pretty = try? JSONSerialization.data(withJSONObject: json as Any, options: .prettyPrinted) {

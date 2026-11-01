@@ -69,7 +69,7 @@ public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, Co
 
     static let changesQuery = """
         query($q: String!, $n: Int!) { search(query: $q, type: ISSUE, first: $n) { nodes { ... on PullRequest {
-          number title state author { login } headRefName baseRefName url createdAt updatedAt reviewDecision
+          number title state author { login } headRefName headRefOid baseRefName url createdAt updatedAt reviewDecision
           additions deletions isDraft labels(first: 20) { nodes { name color } } body } } } }
         """
 
@@ -106,13 +106,15 @@ public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, Co
         let labels = ((n["labels"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { l in
             (l["name"] as? String).map { ChangeRequest.Label(name: $0, color: l["color"] as? String) }
         }
-        return ChangeRequest(number: number, title: title, state: n["state"] as? String ?? "OPEN",
+        var c = ChangeRequest(number: number, title: title, state: n["state"] as? String ?? "OPEN",
                              author: .init(login: (n["author"] as? [String: Any])?["login"] as? String ?? "ghost"),
                              headRefName: n["headRefName"] as? String ?? "", baseRefName: n["baseRefName"] as? String ?? "",
                              url: n["url"] as? String ?? "", createdAt: n["createdAt"] as? String ?? "",
                              updatedAt: n["updatedAt"] as? String ?? "", reviewDecision: n["reviewDecision"] as? String,
                              additions: n["additions"] as? Int ?? 0, deletions: n["deletions"] as? Int ?? 0,
                              isDraft: n["isDraft"] as? Bool ?? false, labels: labels, body: n["body"] as? String)
+        c.headSha = n["headRefOid"] as? String
+        return c
     }
 
     public func changes(_ r: RepoRef, head branch: String) async throws -> [ChangeRequest] {
@@ -126,13 +128,16 @@ public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, Co
     static func restChange(_ p: [String: Any]) -> ChangeRequest? {
         guard let number = p["number"] as? Int, let title = p["title"] as? String else { return nil }
         let state = p["merged_at"] is String ? "MERGED" : (p["state"] as? String == "open" ? "OPEN" : "CLOSED")
-        return ChangeRequest(number: number, title: title, state: state,
+        var c = ChangeRequest(number: number, title: title, state: state,
                              author: .init(login: (p["user"] as? [String: Any])?["login"] as? String ?? "ghost"),
                              headRefName: (p["head"] as? [String: Any])?["ref"] as? String ?? "",
                              baseRefName: (p["base"] as? [String: Any])?["ref"] as? String ?? "",
                              url: p["html_url"] as? String ?? "", createdAt: p["created_at"] as? String ?? "",
                              updatedAt: p["updated_at"] as? String ?? "", reviewDecision: nil, additions: 0, deletions: 0,
                              isDraft: p["draft"] as? Bool ?? false, labels: [], body: p["body"] as? String)
+        c.headSha = (p["head"] as? [String: Any])?["sha"] as? String
+        if state == "MERGED" { c.mergeSha = p["merge_commit_sha"] as? String }
+        return c
     }
 
     public func deleteBranch(_ r: RepoRef, name: String) async throws {

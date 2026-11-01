@@ -52,6 +52,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case runbookRun(RunbookRun)
     /// A review of the daemon changed. A hint: the app gets the review again.
     case review(ReviewEvent)
+    /// A new row of the events table of the daemon.
+    case event(Event)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -68,6 +70,7 @@ public enum DaemonFrame: Hashable, Sendable {
             struct Frame: Decodable { let run: RunbookRun }
             return (try? DaemonClient.decode(data) as Frame).map { .runbookRun($0.run) }
         case "review": return (try? DaemonClient.decode(data) as ReviewEvent).map(DaemonFrame.review)
+        case "event": return (try? DaemonClient.decode(data) as Event.Frame).map { .event($0.event) }
         default: return nil
         }
     }

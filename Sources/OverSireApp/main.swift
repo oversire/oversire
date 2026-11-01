@@ -250,6 +250,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         REVIEWS.tracker = projectStore
         NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: REVIEWS, queue: .main) { [weak self] _ in self?.updateIcon() }
         REVIEWS.start()
+        startEvents()
         DaemonSetup.shared.offerUpdateOnce()
         relay.start()
         updatePolling()
@@ -622,6 +623,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             Self.logPoll(found.filter { $0.1 == nil }.map(\.0), runs: totalRuns, ms: Int(elapsed * 1000))
             DispatchQueue.main.async {
                 self.detectTransitions(runRes)
+                EVENTS.runs(runRes)
+                if includePRs { EVENTS.changes(prRes) }
                 self.ciAssist.observe(runRes)
                 DeployLog.shared.record(runRes)
                 self.grouped = runRes
@@ -683,6 +686,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.detectTransitions(fresh, partial: true)
+                EVENTS.runs(fresh)
+                if includePRs { EVENTS.changes(prRes) }
                 self.ciAssist.observe(fresh)
                 DeployLog.shared.record(fresh + backfill)
                 self.grouped = mergeGrouped(self.grouped, fresh, order: REPOS)

@@ -299,6 +299,24 @@ public final class DaemonClient: Sendable {
 
     private static func reviewPath(_ key: String, _ tail: String = "") -> String { "/v1/reviews/\(escape(key))\(tail)" }
 
+    // MARK: Events (member routes, event.json)
+
+    /// A member daemon keeps the rows and sends them home through its outbox.
+    @discardableResult
+    public func appendEvents(_ drafts: [EventDraft]) async throws -> Event.AppendResult {
+        try await post("/v1/events", Event.Append(events: drafts))
+    }
+
+    public func setItemLinks(_ links: [ItemLink]) async throws {
+        _ = try await send(try json("POST", "/v1/events/links", ItemLinks(links: links)))
+    }
+
+    public func events(_ q: Event.Query) async throws -> Event.Page {
+        var c = URLComponents()
+        c.queryItems = q.queryItems
+        return try await get("/v1/items/\(Self.escape(q.item))/events?" + (c.percentEncodedQuery ?? ""))
+    }
+
     private static func query(_ items: KeyValuePairs<String, String?>) -> String {
         var c = URLComponents()
         c.queryItems = items.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }

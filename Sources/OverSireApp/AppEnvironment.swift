@@ -159,6 +159,13 @@ extension AppEnvironment: RepoAccounts {}
 
 extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeListing, LabelIdReading {}
 
+extension PlaneTracker: OwnerEmail {
+    func ownerEmail() async -> String? {
+        guard let me = try? await me() else { return nil }
+        return await memberDetails().first { $0.id == me.id }?.email
+    }
+}
+
 extension PlaneTracker: IntakePage {
     func intakeURL(_ p: ProjectRef) -> String { "\(workspace.webURL)/\(workspace.slug)/projects/\(p.id)/intake" }
 }

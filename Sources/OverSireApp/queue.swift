@@ -311,7 +311,12 @@ final class WorkQueue {
         guard AGENTS.autoStart, agents.ready != nil, mayAct() else { return }
         let world = world(workstreams: workstreams)
         for lane in lanes {
-            if let e = lane.pick(state: states[lane.project], world: world).entry { start(e.key, project: lane.project) }
+            let p = lane.pick(state: states[lane.project], world: world)
+            let id = store.snapshots[lane.project]?.summary.identifier ?? lane.project
+            for e in lane.entries {
+                if let h = p.holds[e.key], h != .unknown { EVENTS.held(e.key, project: id, lane: lane.project, reason: h.reason) } else { EVENTS.released(e.key) }
+            }
+            if let e = p.entry { start(e.key, project: lane.project) }
         }
     }
 
@@ -346,6 +351,12 @@ final class WorkQueue {
         } else {
             agents.start(item, root: root) { _ in }
         }
+        let runbook = lanes[li].entries.first { $0.key == key }?.runbook
+        var payload: [String: JSONValue] = ["lane": .string(project)]
+        if let runbook { payload["runbook"] = .string(runbook) }
+        EVENTS.system(.queuePicked, item: key, project: snap.summary.identifier, actor: "queue", verb: "picked", "Started from the \(project) lane",
+                      payload: payload)
+        EVENTS.released(key)
         lanes[li].entries.removeAll { $0.key == key }
         setState(project) {
             $0.lastStarted = key

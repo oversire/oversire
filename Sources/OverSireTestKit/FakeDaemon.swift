@@ -30,6 +30,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _update: DaemonUpdate?
     private var _leases: [String: Lease] = [:]
     private var _models: [String: AgentModels] = [:]
+    private var _rows: [Event] = []
+    private var _links: [String: String] = [:]
     private var sockets: [FakeDaemonSocket] = []
 
     /// The credential that a call must carry. nil: no check (loopback).
@@ -113,6 +115,11 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         with { _events.append(e) }
         push(#"{"type":"poke"}"#)
     }
+
+    /// The rows of the events table, in seq order.
+    public var rows: [Event] { with { _rows } }
+    /// Item → parent, from POST /v1/events/links.
+    public var itemLinks: [String: String] { with { _links } }
 
     /// The daemon sends this after a roster change.
     public func groupChanged() { push(#"{"type":"group"}"#) }
@@ -256,6 +263,27 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
             let names = Set(d["harnesses"] ?? [])
             _hooks = _hooks.map { h in names.contains(h.name) ? HarnessHooks(name: h.name, hooks: m == "POST" ? .installed : .missing) : h }
             return try ok(_hooks)
+        case ("POST", ["v1", "events"]):
+            let a = try DaemonClient.decode(body ?? Data()) as Event.Append
+            var n = 0
+            for d in a.events where !_rows.contains(where: { $0.id == d.id }) {
+                var d = d
+                if d.parentItem == nil, let k = d.item { d.parentItem = _links[k.uppercased()] }
+                _rows.append(Event(seq: Int64(_rows.count + 1), seenAt: Date(), draft: d))
+                n += 1
+            }
+            return try ok(Event.AppendResult(accepted: n, head: Int64(_rows.count)))
+        case ("POST", ["v1", "events", "links"]):
+            let l = try DaemonClient.decode(body ?? Data()) as ItemLinks
+            for x in l.links { _links[x.item.uppercased()] = x.parent?.uppercased() }
+            return (200, Data(#"{"updated":\#(l.links.count)}"#.utf8))
+        case ("GET", let p) where p.count == 4 && p[1] == "items" && p[3] == "events":
+            let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let tree = q.first { $0.name == "tree" }?.value == "1"
+            let after = Int64(q.first { $0.name == "after" }?.value ?? "") ?? 0
+            let k = p[2].uppercased()
+            let list = _rows.filter { $0.seq > after && ($0.item == k || (tree && $0.parentItem == k)) }
+            return try ok(Event.Page(events: list, next: list.last?.seq ?? after, head: Int64(_rows.count), more: false))
         case ("GET", ["v1", "events"]):
             let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let after = q.first { $0.name == "after" }.flatMap { $0.value.flatMap(Int.init) } ?? 0

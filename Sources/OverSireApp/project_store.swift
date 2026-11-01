@@ -267,6 +267,11 @@ final class ProjectStore {
     }
 
     func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
+        let before = item(itemId)
+        let done = { (ok: Bool) in
+            if ok, let b = before { EVENTS.stateSet(b.item, in: b.snap, to: optionId) }
+            done(ok)
+        }
         write(itemId, failure: "Could not change the status", done: done) { c, ref in
             try await c.update(ref, ItemPatch(status: optionId))
         }
@@ -475,6 +480,9 @@ final class ProjectStore {
                 if case .failure(let e) = r {
                     self.suppressNotify.remove(item.workItemId)
                     self.lastError = action.failure + e.message
+                } else if case .accept = action {
+                    EVENTS.action(.intakeAccepted, item: nil, project: snap.summary.identifier, verb: "intake:\(item.id)", item.name,
+                                  payload: ["intake": .string(item.id), "title": .string(item.name)])
                 }
                 self.refresh([projectKey], force: true) { done($0 && r.isOk) }
             }
@@ -666,6 +674,7 @@ final class ProjectStore {
         let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
+        EVENTS.tracker(changes, old: old, new: snap, skipState: suppressNotify)
         guard old != nil, !changes.isEmpty else { return }
         let at = snap.fetchedAt
         let me = snap.me?.lowercased()

@@ -98,7 +98,9 @@ struct PlanStarter {
             let prompt = Self.prompt(t, project: summary.ref, runtime: rt, files: files)
             DispatchQueue.main.async {
                 agents.launch(key: t.key, note: note, root: root, agent: launch, prompt: prompt, title: name, inPlace: true, startKey: startKey) { r in
-                    if case .failure(let e) = r { done(e.message) } else { done(nil) }
+                    if case .failure(let e) = r { done(e.message); return }
+                    EVENTS.action(.planStarted, item: t.key, project: summary.identifier, verb: "plan", "Plan session \(name)")
+                    done(nil)
                 }
             }
         }

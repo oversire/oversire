@@ -62,7 +62,7 @@ final class MachineHub {
         switch DaemonFrame.parse(text) {
         case .joinRequest(let r)?: approvals.handle(r)
         case .joinResult(let r)?: joins.received(r)
-        case .lease?, .runbookRun?, .review?, nil: break
+        case .lease?, .runbookRun?, .review?, .event?, nil: break
         }
     }
 

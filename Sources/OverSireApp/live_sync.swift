@@ -242,6 +242,7 @@ final class LiveSync {
                 switch DaemonFrame.parse(text) {
                 case .runbookRun(let r)?: DispatchQueue.main.async { RUNBOOKS.apply(r) }
                 case .review(let e)?: Task { await REVIEWS.apply(e, from: machine) }
+                case .event(let e)?: DispatchQueue.main.async { EVENTS.received(e) }
                 default: break
                 }
                 guard l.local else { return }

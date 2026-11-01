@@ -1,5 +1,6 @@
 import Foundation
 import OverSireCore
+import OverSireSync
 
 public enum TrackerConformance {
     /// Writes one item and one comment in the first open project.
@@ -21,6 +22,8 @@ public enum TrackerConformance {
         r.expect(t.keyFormat.keys(in: "Fix \(ref.key) now") == [ref.key.uppercased()], "the key format does not find \(ref.key)")
         r.expect(t.keyFormat.key(inBranch: "feature/\(ref.key.lowercased())-fix") == ref.key.uppercased(), "no key in a branch name")
         if let list = await r.step("items", { try await t.items(p, since: nil, limit: 50) }) {
+            r.expectEvents(TrackerEvents.drafts(list.map { ($0.id, .added) }, old: nil, new: Self.snapshot(projects, p, list),
+                                                provider: t.account.provider.rawValue, machine: "conformance"), "tracker")
             r.expect(list.contains { $0.id == ref.id }, "items does not list the new item")
             r.expect(list.map(\.activityAt) == list.map(\.activityAt).sorted(by: >), "items are not newest first")
             r.expect(Set(list.map(\.id)).count == list.count, "items gives one id more than one time")
@@ -49,6 +52,11 @@ public enum TrackerConformance {
         r.merge(await attachments(t, item: ref))
         r.merge(await intakeAndAttachments(t, project: p))
         return r
+    }
+
+    static func snapshot(_ projects: [ProjectSummary], _ p: ProjectRef, _ items: [Item]) -> ProjectSnapshot {
+        let s = projects.first { $0.ref == p } ?? ProjectSummary(ref: p, identifier: "X", title: "X", url: "", closed: false)
+        return ProjectSnapshot(summary: s, statusOptions: [], items: items, fetchedAt: Date())
     }
 
     /// Makes one intake item, attaches one small file, then deletes the intake item.
@@ -157,6 +165,9 @@ public enum CodeHostConformance {
         r.expect(repos.allSatisfy { $0.ref.account == h.account }, "a repo has an other account")
         guard let changes = await r.step("changes", { try await h.changes(repo, ChangeFilter(limit: 5)) }) else { return r }
         r.expect(changes.count <= 5, "changes gave \(changes.count) for limit 5")
+        let provider = h.account.provider.rawValue
+        var events = ChangeEvents(source: ChangeEvents.source(of: provider), provider: provider)
+        r.expectEvents(events.drafts(repo: repo.path, open: changes, machine: "conformance") { _ in nil }.drafts, "code host")
         _ = await r.step("commitMessage", { try await h.commitMessage(repo, sha: sha) })
         if let cl = h as? any CollaboratorListing, h.capabilities.contains(.collaborators),
            let people = await r.step("collaborators", { try await cl.collaborators(repo) }) {
@@ -180,6 +191,7 @@ public enum CodeHostConformance {
         if let bd = h as? any BranchDeleting, let heads = await r.step("changes of head", { try await bd.changes(repo, head: c.headRefName) }) {
             r.expect(heads.contains { $0.number == c.number }, "changes of head \(c.headRefName) do not list #\(c.number)")
             r.expect(heads.allSatisfy { $0.headRefName == c.headRefName }, "changes of head list an other head")
+            r.expectEvents(heads.compactMap { events.ended(repo: repo.path, $0, machine: "conformance", item: nil) }, "code host ends")
         }
         return r
     }
@@ -194,6 +206,10 @@ public enum CIConformance {
         guard let runs = await r.step("runs", { try await ci.runs(RunQuery(repo: repo, limit: 3)) }) else { return r }
         r.expect(runs.count <= 3, "runs gave \(runs.count) for limit 3")
         r.expect(runs.map(\.createdAt) == runs.map(\.createdAt).sorted(by: >), "runs are not newest first")
+        let provider = ci.account.provider.rawValue
+        var events = CIEvents(source: CIEvents.source(of: provider), provider: provider)
+        events.horizon = .infinity
+        r.expectEvents(events.drafts(repo: repo.path, runs: runs, machine: "conformance") { _ in nil }, "CI")
         guard let newest = runs.first else {
             r.expect(false, "no run in \(repo.path)")
             return r

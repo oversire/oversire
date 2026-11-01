@@ -34,10 +34,14 @@ public struct ChangeRequest: Codable, Hashable, Sendable {
     public let labels: [Label]
     public let body: String?
     public var mine = false          // authored by the user; else a review request
+    /// The last commit of the head branch, when the adapter knows it.
+    public var headSha: String? = nil
+    /// The merge commit of a merged change.
+    public var mergeSha: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case number, title, state, author, headRefName, baseRefName, url, createdAt, updatedAt
-        case reviewDecision, additions, deletions, isDraft, labels, body
+        case reviewDecision, additions, deletions, isDraft, labels, body, headSha, mergeSha
     }
 
     public init(number: Int, title: String, state: String, author: Author, headRefName: String, baseRefName: String,
