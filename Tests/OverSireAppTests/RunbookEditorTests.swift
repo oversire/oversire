@@ -10,7 +10,7 @@ final class RunbookEditorTests: XCTestCase {
         saved = PROJECTS_CFG
         var cfg = ProjectsConfig()
         cfg.runtime.add("claude-max", cli: "claude")
-        cfg.runtime.runbooks = cfg.runtime.defaultRunbooks
+        cfg.runtime.runbooks = cfg.runtime.oldRunbooks
         PROJECTS_CFG = cfg
         e = RunbookEditor(undo: RunbookUndo(bus: ChangeBus()))
         e.follow()
@@ -127,7 +127,7 @@ final class RunbookEditorTests: XCTestCase {
         XCTAssertNil(e.addStep())
         e.restoreDefaults()
         e.follow()
-        XCTAssertEqual(e.runbooks.map(\.id), ["full", "small", "plan-only"])
+        XCTAssertEqual(e.runbooks.map(\.id), ["plan", "ship"])
     }
 
     func testTheAssistantSeesTheRunbook() {

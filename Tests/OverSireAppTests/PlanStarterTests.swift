@@ -3,7 +3,7 @@ import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
-final class RefineTests: XCTestCase {
+final class PlanStarterTests: XCTestCase {
     private final class Trackers: TrackerDirectory {
         let fake: FakeTracker
         init(_ fake: FakeTracker) { self.fake = fake }
@@ -25,8 +25,8 @@ final class RefineTests: XCTestCase {
         cfg = ProjectsConfig()
     }
 
-    private func starter() -> RefineStarter {
-        var s = RefineStarter(agents)
+    private func starter() -> PlanStarter {
+        var s = PlanStarter(agents)
         let fake = fake!, cfg = cfg
         s.tracker = { _ in fake }
         s.root = { _ in "/src/fake" }
@@ -34,7 +34,7 @@ final class RefineTests: XCTestCase {
         return s
     }
 
-    private func start(_ t: RefineTarget) async throws -> LaunchRequest {
+    private func start(_ t: PlanTarget) async throws -> LaunchRequest {
         let summary = try await fake.projects()[0]
         let done = expectation(description: "start")
         var err: String?
@@ -74,24 +74,28 @@ final class RefineTests: XCTestCase {
         XCTAssertEqual(router.current, .home)
     }
 
-    func testIntakeRefineOpensATerminalInTheFolder() async throws {
+    func testIntakePlanOpensATerminalInTheFolder() async throws {
         let i = try await intake("Labels drop", body: "The sync drops labels.")
         let r = try await start(.intake(i, key: "FAKE-1", body: nil))
         XCTAssertEqual(r.repo, "/src/fake")
         XCTAssertEqual(r.inPlace, true)
-        XCTAssertEqual(r.title, "refine-fake-1")
+        XCTAssertEqual(r.title, "plan-fake-1")
+        XCTAssertEqual(r.key, "plan:FAKE-1", "plan comments go to this session")
         XCTAssertNil(r.item, "no worktree for an item")
         XCTAssertTrue(r.prompt.hasPrefix("Labels drop\n\nThe sync drops labels."), "the start reads the body: \(r.prompt)")
         XCTAssertTrue(r.prompt.contains("plane-cli intake update \(i.id) -w fake -p FAKE --status 1"), r.prompt)
         XCTAssertTrue(r.prompt.contains("FAKE-1"), r.prompt)
+        let accept = try XCTUnwrap(r.prompt.range(of: "plane-cli intake update"))
+        let ready = try XCTUnwrap(r.prompt.range(of: "oversire review ready --key FAKE-1 --kind plan --plan .oversire/plans/FAKE-1.md"), r.prompt)
+        XCTAssertLessThan(accept.lowerBound, ready.lowerBound, "the plan accepts the intake item first")
         XCTAssertFalse(r.prompt.contains("attachment download"), "no files: no download line")
         let items = try await fake.items(fake.project, since: nil, limit: 10)
-        XCTAssertEqual(items.count, 1, "Refine makes no item")
+        XCTAssertEqual(items.count, 1, "Plan makes no item")
         XCTAssertTrue(fake.uploads.isEmpty)
-        await MainActor.run { XCTAssertNotNil(starter().session("fake-1"), "the Refine button opens the session") }
+        await MainActor.run { XCTAssertNotNil(starter().session("fake-1"), "the Plan button opens the session") }
     }
 
-    func testIntakeRefineWithFilesKeepsTheDownloadLine() async throws {
+    func testIntakePlanWithFilesKeepsTheDownloadLine() async throws {
         let i = try await intake("Labels drop", body: "")
         let ref = ItemRef(project: fake.project, id: i.workItemId, key: "FAKE-1", url: URL(string: "https://tracker.fake/FAKE-1")!)
         _ = try await fake.attach(AttachmentUpload(name: "shot.png", mimeType: "image/png", data: Data("png".utf8)), to: ref)
@@ -100,16 +104,34 @@ final class RefineTests: XCTestCase {
         XCTAssertTrue(r.prompt.contains("plane-cli wi attachment download \(i.workItemId) -w fake -p FAKE --dir .oversire/FAKE-1"), r.prompt)
     }
 
-    func testItemRefineUsesTheEditedTemplate() async throws {
+    func testItemPlanUsesTheEditedTemplate() async throws {
         let ref = try await fake.create(ItemDraft(title: "Fix the sync", bodyMarkdown: "It is slow."), in: fake.project)
         let item = try await fake.detail(ref).item
         cfg.runtime.refinePrompt = "Refine {key}: {text}"
         let r = try await start(.item(item))
         XCTAssertEqual(r.prompt, "Refine \(item.key): Fix the sync\n\nIt is slow.")
         XCTAssertEqual(r.note, item.url)
+        XCTAssertEqual(r.key, StartKey.plan(item.key))
     }
 
-    func testRefineSendsTheModelOfTheDefaultAgent() async throws {
+    func testItemPlanEndsAtThePlanReview() async throws {
+        let ref = try await fake.create(ItemDraft(title: "Fix the sync", bodyMarkdown: ""), in: fake.project)
+        let item = try await fake.detail(ref).item
+        let r = try await start(.item(item))
+        XCTAssertTrue(r.prompt.contains("oversire review ready --key \(item.key) --kind plan"), r.prompt)
+        XCTAssertFalse(r.prompt.contains("plane-cli intake update"), "a work item has nothing to accept")
+    }
+
+    func testAPlanSessionIsTheAgentOfItsItem() {
+        let g = AgentSession(phase: .working, since: Date(), card: "root", paneKey: "tab-1:leaf-1", key: StartKey.plan("fake-1"))
+        let c = Workspace(id: "root", repo: "fake", path: "/src/fake", name: "fake", comment: nil, liveTerminals: 1, lastActivity: Date(), agents: [g], kind: .folder)
+        let index = AgentIndex.index([c], launches: [:], tracked: { _ in true }, now: Date())
+        XCTAssertEqual(index.keys.sorted(), ["FAKE-1"], "also after it accepts the intake item")
+        XCTAssertEqual(StartKey.planItem("plan:FAKE-1"), "FAKE-1")
+        XCTAssertNil(StartKey.planItem("work:FAKE-1"))
+    }
+
+    func testPlanSendsTheModelOfTheDefaultAgent() async throws {
         let ref = try await fake.create(ItemDraft(title: "Fix the sync", bodyMarkdown: ""), in: fake.project)
         let item = try await fake.detail(ref).item
         cfg.runtime.setProfile("claude", AgentProfile(cli: "claude", model: "claude-opus-5-5", effort: "high"))
@@ -120,9 +142,13 @@ final class RefineTests: XCTestCase {
         XCTAssertEqual(r.effort, "high")
     }
 
-    func testRefinePromptDecodesAndKeepsAnEdit() throws {
+    func testPlanPromptDecodesAndKeepsAnEdit() throws {
         let old = try JSONDecoder().decode(RuntimeConfig.self, from: Data("{}".utf8))
         XCTAssertEqual(old.refinePrompt, SessionPrompt.refineDefault)
+        let saved = try JSONSerialization.data(withJSONObject: ["refinePrompt": SessionPrompt.refineOld, "sessionIntakePrompt": SessionPrompt.intakeRefine])
+        let moved = try JSONDecoder().decode(RuntimeConfig.self, from: saved)
+        XCTAssertEqual(moved.refinePrompt, SessionPrompt.refineDefault, "the old Refine default becomes the Plan default")
+        XCTAssertEqual(moved.sessionIntakePrompt, SessionPrompt.intakeDefault)
         var c = RuntimeConfig()
         c.refinePrompt = "Talk about {key}."
         let back = try JSONDecoder().decode(RuntimeConfig.self, from: JSONEncoder().encode(c))

@@ -30,7 +30,7 @@ final class RunbookRunTests: XCTestCase {
 
     func testTheStartResolvesEachAgentOfTheSteps() throws {
         let cfg = config()
-        let full = try XCTUnwrap(cfg.runtime.runbook("full"))
+        let full = try XCTUnwrap(cfg.runtime.runbook("ship"))
         let s = try starter(nil, cfg: cfg).request(full, item: item, in: summary)
         XCTAssertEqual(s.repo, "/src/oversire-workspace")
         XCTAssertEqual(s.item.key, "OVERSIRE-341")
@@ -46,7 +46,7 @@ final class RunbookRunTests: XCTestCase {
 
     func testTheStartRefusesABadRunbookAndNoRoot() throws {
         let cfg = config()
-        var book = try XCTUnwrap(cfg.runtime.runbook("small"))
+        var book = try XCTUnwrap(cfg.runtime.runbook("ship"))
         book.steps[0].agent = "gone"
         XCTAssertThrowsError(try starter(nil, cfg: cfg).request(book, item: item, in: summary)) { e in
             XCTAssertEqual((e as? RunbookRefusal)?.problems.map(\.text), ["Implement: there is no agent gone."])
@@ -72,7 +72,7 @@ final class RunbookRunTests: XCTestCase {
     func testAStartAtAStepSkipsTheStepsBefore() async throws {
         let cfg = config()
         let rt = FakeRuntime()
-        let run = try await starter(rt, cfg: cfg).start(try XCTUnwrap(cfg.runtime.runbook("full")), item: item, in: summary, at: "implement")
+        let run = try await starter(rt, cfg: cfg).start(Runbook.planAndShip(cfg.runtime), item: item, in: summary, at: "implement")
         XCTAssertEqual(run.current, "implement")
         XCTAssertEqual(run.state, .running, "a start at a step that pauses before does not wait at the gate")
         XCTAssertEqual(run.steps.prefix(3).map(\.state), [.skipped, .skipped, .skipped])

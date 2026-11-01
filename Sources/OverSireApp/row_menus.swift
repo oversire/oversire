@@ -112,7 +112,7 @@ enum RowMenu {
             out.append(.action("Open session", .open(.item(item.key, .session))))
         } else if caps.contains(.sessionInput) {
             out.append(.action("Start session in Orca…", .startSession(key: item.key)))
-            out.append(.action("Refine…", .refine(key: item.key)))
+            out.append(.action("Plan…", .refine(key: item.key)))
         }
         if caps.contains(.sessionHistory) { out.append(.action("Enhance", .enhance(key: item.key))) }
         if let pr = stream?.prs.first { out.append(.action("Open pull request", .openURL(pr.pr.url))) }
@@ -187,7 +187,7 @@ enum RowMenu {
         if let k = e.itemKey { out.append(.action("Copy ID", .copy(k))) }
         if let u = e.itemURL ?? e.url { out.append(.action("Copy link", .copy(u))) }
         if e.intake != nil && canTriage { out += [.separator, .action("Triage with AI", .triage(entryId: e.id))] }
-        if e.intake != nil && canRefine { out.append(.action("Refine…", .refineIntake(entryId: e.id))) }
+        if e.intake != nil && canRefine { out.append(.action("Plan…", .refineIntake(entryId: e.id))) }
         if let projectKey { out += [.separator, .action("Only this project", .onlyProject(projectKey))] }
         return out.tidy
     }
@@ -254,8 +254,8 @@ final class RowCommander {
         }
         if case .refine(let key) = c {
             guard let found = store.item(key: key) else { return }
-            RefineStarter(data.agentIndex).start(.item(found.item), in: found.snap.summary) { err in
-                if let err { AlertConfirm.tell("Refine did not start", info: err, in: anchor?.window) }
+            PlanStarter(data.agentIndex).start(.item(found.item), in: found.snap.summary) { err in
+                if let err { AlertConfirm.tell("Plan did not start", info: err, in: anchor?.window) }
             }
             go(.item(found.item.key, .overview))
             return

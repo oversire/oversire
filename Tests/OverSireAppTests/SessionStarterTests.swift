@@ -103,8 +103,9 @@ final class SessionStarterTests: XCTestCase {
         XCTAssertEqual(term.opened[0].path, "/src/fake")
         XCTAssertEqual(term.opened[0].title, "claude-why-is-the")
         let prompt = term.opened[0].prompt
-        XCTAssertTrue(prompt.hasPrefix("Why is the sync slow?\nIt takes 2 min.\n\nThis request is intake item \(key). It is not a ticket yet."))
-        XCTAssertTrue(prompt.hasSuffix("Do not make a new ticket."), "no files: the files line drops")
+        XCTAssertTrue(prompt.hasPrefix("Why is the sync slow?\nIt takes 2 min.\n\nThis request is intake item \(key). It is not a ticket yet. Plan it."))
+        XCTAssertFalse(prompt.contains("Its files:"), "no files: the files line drops")
+        XCTAssertTrue(prompt.contains("oversire review ready --key \(key) --kind plan"))
         XCTAssertEqual(steps, ["Creating item…", "Opening terminal…"])
         XCTAssertEqual(term.revealed, [r.session])
     }

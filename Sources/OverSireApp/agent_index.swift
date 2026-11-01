@@ -533,7 +533,8 @@ final class AgentIndex: NSObject {
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 
     // Item key → the most urgent agent. Agents of closed terminals drop out. An Enhance session is not the agent of its item.
-    // An intake Refine session is the agent of its key only until Refine accepts the item as a work item.
+    // An old intake Refine session is the agent of its key only until Refine accepts the item as a work item.
+    // A Plan session (plan:<KEY>) is the agent of its item, also after it accepts an intake item.
     // A done agent older than a day stays only while its item is open: Session done does not mean the item is done.
     static func index(_ cards: [Workspace], launches: [String: PendingLaunch], links: [String: AgentLink] = [:],
                       open: (String) -> Bool = { _ in false }, tracked: (String) -> Bool = { _ in false }, now: Date) -> [String: AgentSession] {
@@ -559,7 +560,7 @@ final class AgentIndex: NSObject {
                 if let k = StartKey.refineItem(g.key) {
                     if tracked(k) { continue }
                     key = k
-                } else if let k = StartKey.workItem(g.key) { key = k }
+                } else if let k = StartKey.workItem(g.key) ?? StartKey.planItem(g.key) { key = k }
                 else if named { key = name }
                 else if let k = g.paneKey.flatMap({ byPane[$0] }) { key = k }
                 else if let p = g.prompt, let m = browseRE.firstMatch(in: p, range: NSRange(p.startIndex..., in: p)),

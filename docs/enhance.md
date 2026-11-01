@@ -4,6 +4,18 @@ Enhance gives an intake item or a ticket a better description. A coding agent re
 
 To clean up the full list first (merge, close, fold), use Groom. See [groom.md](groom.md).
 
+## The ladder
+
+Each step of an item has one tool, and each tool has one stop:
+
+| Step | Tool | What the agent does | Where it stops |
+|---|---|---|---|
+| 1 | **Enhance** | Rewrites the description. No talk, no plan. | The Enhance review: you apply the lines to Plane. |
+| 2 | **Plan** | Accepts an intake item, asks you questions, writes the plan and the sub-items. No code. | Work › Review › Plans to approve. Approve sets the item and its sub-items to Todo. |
+| 3 | **Ship** | Implements the Todo item and its sub-items in `.wt/<KEY>`, one commit per sub-item. | Work › Review › Code to review. You merge from OverSire. |
+
+Plan was Refine before OVERSIRE-373. See [runbooks.md](runbooks.md) for Plan and Ship as runbooks, and [review.md](review.md) for the review gate.
+
 ## Flow
 
 1. Click **Enhance** on an intake row, in the intake detail, or on the item page. "Enhance vague items" (Settings › Agents) starts it for a new intake item with a short note.

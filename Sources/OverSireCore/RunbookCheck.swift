@@ -13,7 +13,7 @@ public struct RunbookProblem: Codable, Hashable, Sendable {
 
 extension Runbook {
     /// The placeholders of a step prompt. The daemon renders them (cli/runbook/prompt.go).
-    public static let placeholders = ["key", "url", "title", "item", "workspace", "project", "round", "notes", "worktree", "done"]
+    public static let placeholders = ["key", "url", "title", "item", "workspace", "project", "round", "notes", "group", "worktree", "done"]
     public static let maxRounds = 5
 
     /// The rules of the runbook editor and of runbook.validate. The daemon checks the same rules, minus the agents.

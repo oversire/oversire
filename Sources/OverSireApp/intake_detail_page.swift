@@ -165,7 +165,7 @@ final class IntakeDetailPage: Page {
         let ids = list.map(\.id), i = ids.firstIndex(of: item.id) ?? 0
         let agent = data.enhanceAgent
         let canEnhance = agent.available && agent.state(.intake(item)) == nil
-        let session = key.flatMap { RefineStarter(data.agentIndex).session($0) } != nil
+        let session = key.flatMap { PlanStarter(data.agentIndex).session($0) } != nil
         let canRefine = key != nil && data.has(.sessionInput)
         let editing = editor != nil
         return PageRow("bar", ids, i, busy, canEnhance, session, canRefine, refining, editing) { [unowned self] in
@@ -213,7 +213,7 @@ final class IntakeDetailPage: Page {
         if session {
             return ActionButton("Open session", symbol: "terminal") { [weak self] in self?.openTerminal(key) }
         }
-        let b = ActionButton(refining ? "Starting…" : "Refine", symbol: "bubble.left.and.bubble.right") { [weak self] in
+        let b = ActionButton(refining ? "Starting…" : "Plan", symbol: "list.bullet.clipboard") { [weak self] in
             guard let self else { return }
             self.refine(.intake(item, key: key, body: self.details[item.workItemId]?.body), snap: snap)
         }
@@ -222,14 +222,14 @@ final class IntakeDetailPage: Page {
         return b
     }
 
-    private func refine(_ t: RefineTarget, snap: ProjectSnapshot) {
+    private func refine(_ t: PlanTarget, snap: ProjectSnapshot) {
         refining = true
         note = nil
         reload()
-        RefineStarter(data.agentIndex).start(t, in: snap.summary) { [weak self] err in
+        PlanStarter(data.agentIndex).start(t, in: snap.summary) { [weak self] err in
             guard let self else { return }
             self.refining = false
-            if let err { self.note = (.bad, "Refine did not start: \(err)") }
+            if let err { self.note = (.bad, "Plan did not start: \(err)") }
             self.reload()
         }
     }
@@ -288,7 +288,7 @@ final class IntakeDetailPage: Page {
 
     private func refineRow(_ key: String, snap: ProjectSnapshot) -> PageRow? {
         let agents = data.agentIndex
-        let starter = RefineStarter(agents)
+        let starter = PlanStarter(agents)
         guard let a = starter.session(key) else { return nil }
         let last = agents.watch(key)?.recap ?? a.message
         let folder = starter.root(snap.summary) ?? a.repo
@@ -567,7 +567,7 @@ final class RefineCard: Card {
         var trailing: [NSView] = [Chiplet("Runs on: \(place)")]
         if !path.isEmpty { trailing.append(Chiplet(path, mono: true)) }
         trailing += [Pill(tone, text: a.phase == .waiting ? tone.word : a.label()), ActionButton("Open terminal", symbol: "terminal", style: .primary, open), more]
-        super.init(title: "Refine session", trailing: trailing)
+        super.init(title: "Plan session", trailing: trailing)
         more.onClick = { [weak self, weak more] in
             guard let self, let more else { return }
             let m = NSMenu()

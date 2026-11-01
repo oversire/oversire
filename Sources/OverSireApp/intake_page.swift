@@ -199,8 +199,8 @@ final class IntakeListPage: Page {
     // Starts Refine, then opens the detail page: its Refine card shows the session.
     private func refine(_ e: FeedEntry) {
         guard let (pk, item) = e.intake, let key = e.intakeKey, let snap = data.projectStore.snapshot(pk) else { return }
-        RefineStarter(data.agentIndex).start(.intake(item, key: key, body: nil), in: snap.summary) { [weak self] err in
-            if let err { AlertConfirm.tell("Refine did not start", info: err, in: self?.view.window) }
+        PlanStarter(data.agentIndex).start(.intake(item, key: key, body: nil), in: snap.summary) { [weak self] err in
+            if let err { AlertConfirm.tell("Plan did not start", info: err, in: self?.view.window) }
         }
         go(data.projectStore.intakeRoute(pk, id: item.id))
     }
@@ -209,7 +209,7 @@ final class IntakeListPage: Page {
         guard let (pk, item) = e.intake else { return NSView() }
         let agent = data.enhanceAgent
         let detail = data.projectStore.intakeRoute(pk, id: item.id)
-        let canRefine = e.intakeKey != nil && data.has(.sessionInput) && RefineStarter(data.agentIndex).session(e.intakeKey ?? "") == nil
+        let canRefine = e.intakeKey != nil && data.has(.sessionInput) && PlanStarter(data.agentIndex).session(e.intakeKey ?? "") == nil
         var actions: [NSView] = []
         if busy.contains(item.id) {
             actions.append(Spinner())
@@ -217,7 +217,7 @@ final class IntakeListPage: Page {
             if agent.available && agent.state(.intake(item)) == nil {
                 actions.append(ActionButton("Enhance", symbol: "sparkles", style: .primary) { agent.start(projectKey: pk, target: .intake(item)) })
             }
-            if canRefine { actions.append(ActionButton("Refine") { [weak self] in self?.refine(e) }) }
+            if canRefine { actions.append(ActionButton("Plan") { [weak self] in self?.refine(e) }) }
             actions.append(ActionButton("Accept  1") { [weak self] in self?.triage(pk, item, .accept) })
             actions.append(ActionButton("Accept and queue  Q") { [weak self] in self?.queue(pk, item) })
             actions.append(ActionButton("Duplicate  2") { [weak self] in self?.go(detail) })

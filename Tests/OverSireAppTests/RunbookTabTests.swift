@@ -4,7 +4,7 @@ import XCTest
 
 final class RunbookTabTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_792_400_000)
-    private var full: Runbook { ProjectsConfig().runtime.defaultRunbooks.first { $0.id == Runbook.fullID }! }
+    private var full: Runbook { Runbook.planAndShip(ProjectsConfig().runtime) }
 
     private func run(_ id: RunbookRunID, _ steps: [StepRun], state: RunbookRun.State = .running, current: String? = "implement") -> RunbookRun {
         let ref = ItemRef(project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"),

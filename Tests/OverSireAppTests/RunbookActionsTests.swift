@@ -22,7 +22,7 @@ final class RunbookActionsTests: XCTestCase {
         saved = PROJECTS_CFG
         var cfg = ProjectsConfig()
         cfg.runtime.add("claude-max", cli: "claude")
-        cfg.runtime.runbooks = cfg.runtime.defaultRunbooks
+        cfg.runtime.runbooks = cfg.runtime.oldRunbooks
         cfg.setOrcaRoot(summary, "/src/sling")
         PROJECTS_CFG = cfg
         d = TestAppData()

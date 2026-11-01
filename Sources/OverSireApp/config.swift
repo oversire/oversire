@@ -275,9 +275,9 @@ struct ProjectsConfig: Codable {
 
     func local(_ key: String) -> ProjectLocalSettings { settings[key.uppercased()] ?? ProjectLocalSettings() }
 
-    /// The default runbook of a project. A removed runbook falls back to Full, then to the first runbook.
+    /// The default runbook of a project. A removed runbook falls back to Ship, then to the first runbook.
     func runbook(for key: String) -> Runbook? {
-        local(key).runbook.flatMap(runtime.runbook) ?? runtime.runbook(Runbook.fullID) ?? runtime.runbooks.first
+        local(key).runbook.flatMap(runtime.runbook) ?? runtime.runbook(Runbook.shipID) ?? runtime.runbooks.first
     }
 
     mutating func setLocal(_ key: String, _ s: ProjectLocalSettings) { settings[key.uppercased()] = s }
@@ -618,6 +618,8 @@ struct RuntimeConfig: Codable, Equatable {
     var sessionFilesPrompt = SessionPrompt.filesDefault
     var refinePrompt = SessionPrompt.refineDefault
     var runbooks: [Runbook] = []
+    /// The note of the Plan and Ship split (OVERSIRE-373). Settings › Runbooks shows it until the user closes it.
+    var runbookNote: String?
 
     init() { runbooks = defaultRunbooks }
 
@@ -630,8 +632,15 @@ struct RuntimeConfig: Codable, Equatable {
         snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
         sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
-        refinePrompt = try c.decodeIfPresent(String.self, forKey: .refinePrompt) ?? SessionPrompt.refineDefault
-        runbooks = try c.decodeIfPresent([Runbook].self, forKey: .runbooks) ?? defaultRunbooks
+        refinePrompt = SessionPrompt.migrate(refine: try c.decodeIfPresent(String.self, forKey: .refinePrompt) ?? SessionPrompt.refineDefault)
+        runbookNote = try c.decodeIfPresent(String.self, forKey: .runbookNote)
+        if let saved = try c.decodeIfPresent([Runbook].self, forKey: .runbooks) {
+            let m = Self.migrate(saved, defaults: defaultRunbooks)
+            runbooks = m.books
+            if let n = m.note { runbookNote = n }
+        } else {
+            runbooks = defaultRunbooks
+        }
     }
 
     /// The Harness name of a CLI name or a program path, else nil.

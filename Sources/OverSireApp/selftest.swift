@@ -813,7 +813,7 @@ func runSelfTest() {
         }
         let keptRunbooks = PROJECTS_CFG.runtime.runbooks
         PROJECTS_CFG.runtime.runbooks = PROJECTS_CFG.runtime.defaultRunbooks
-        check(runbooksPage() != nil && SettingsPage.runbookEditor.runbook?.id == Runbook.fullID, "runbooks: the page opens on Full")
+        check(runbooksPage() != nil && SettingsPage.runbookEditor.runbook?.id == Runbook.planID, "runbooks: the page opens on Plan")
         PROJECTS_CFG.runtime.runbooks = []
         check(runbooksPage() != nil && SettingsPage.runbookEditor.runbook == nil, "runbooks: the page opens with no runbooks")
         PROJECTS_CFG.runtime.runbooks = keptRunbooks
@@ -874,10 +874,11 @@ func runSelfTest() {
     check(SessionConfig().shortcutLabel == "⌃⌥⌘N", "session: shortcut label \(SessionConfig().shortcutLabel)")
     let intakeValues = ["text": "Fix it", "key": "K-1", "item": "i1", "intake": "n1", "workspace": "w", "project": "K"]
     let intakePrompt = SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: false)
-    check(intakePrompt.hasPrefix("Fix it\n\nThis request is intake item K-1. It is not a ticket yet.\nDo not implement it.")
-          && intakePrompt.contains("  plane-cli intake update n1 -w w -p K --status 1\n") && intakePrompt.hasSuffix("Do not make a new ticket."),
+    check(intakePrompt.hasPrefix("Fix it\n\nThis request is intake item K-1. It is not a ticket yet. Plan it.")
+          && intakePrompt.contains("  plane-cli intake update n1 -w w -p K --status 1\n") && !intakePrompt.contains("Its files:")
+          && intakePrompt.contains("oversire review ready --key K-1 --kind plan"),
           "session: intake prompt without files \(intakePrompt)")
-    check(SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: true).hasSuffix("download i1 -w w -p K --dir .oversire/K-1"),
+    check(SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: true).contains("download i1 -w w -p K --dir .oversire/K-1\n"),
           "session: intake prompt with files")
     check(SessionPrompt.migrate(intake: SessionPrompt.intakeOld) == SessionPrompt.intakeDefault, "session: the old intake default migrates")
     check(SessionPrompt.migrate(intake: "{text} mine") == "{text} mine", "session: an edited intake template stays")

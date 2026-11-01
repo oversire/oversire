@@ -120,7 +120,7 @@ struct RunbookActions {
 
     private var delete: ActionSpec {
         let link = link, undo = undo, book = book
-        return ActionSpec(id: "runbook.delete", title: "Delete runbook", help: "Deletes a runbook. The projects that use it go back to Full. "
+        return ActionSpec(id: "runbook.delete", title: "Delete runbook", help: "Deletes a runbook. The projects that use it go back to Ship. "
                             + "It refuses the last runbook, and a runbook of an open run or of a queue entry. runbook.undo brings it back.",
                           kind: .outward, input: ActionSpec.args(["id": Self.id], required: ["id"])) { a in
             await link.run { d, done in
@@ -300,7 +300,7 @@ struct RunbookActions {
 
     private static func text(_ problems: [RunbookProblem]) -> String { problems.map { "! \($0.text)" }.joined(separator: "\n") }
 
-    /// "Full on OVERSIRE-349: Implement (step 4 of 6), working."
+    /// "Ship on OVERSIRE-349: Implement (step 1 of 3), working."
     static func line(_ r: RunbookRun) -> String {
         let step = r.current.flatMap(r.runbook.step).map { s in " \(s.name) (step \(r.position ?? 0) of \(r.runbook.steps.count))," } ?? ""
         let state = r.current.flatMap(r.last)?.state.rawValue
@@ -336,7 +336,7 @@ extension RunbookActions {
 }
 
 extension ProjectsConfig {
-    /// Removes the runbook. The projects that use it go back to Full.
+    /// Removes the runbook. The projects that use it go back to Ship.
     mutating func removeRunbook(_ id: String) {
         runtime.runbooks.removeAll { $0.id == id }
         for (k, l) in settings where l.runbook == id { settings[k]?.runbook = nil }

@@ -1,6 +1,6 @@
 # Runbooks
 
-A runbook takes one item from plan to merge in fixed steps (OVERSIRE-349). Each step is a new agent session in the workspace of the item. The daemon of the sessions machine (Settings › Machines › Run sessions on) runs the steps. You answer the questions and approve the gates in Needs you.
+A runbook takes one item through fixed steps (OVERSIRE-349). Each runbook ends at a review gate in Work › Review (OVERSIRE-365). The agent does not merge: you review the diff or the plan, and you merge from OverSire. See [review.md](review.md). Each step is a new agent session in the workspace of the item. The daemon of the sessions machine (Settings › Machines › Run sessions on) runs the steps. You answer the questions and approve the gates in Needs you.
 
 The daemon side (routes, the engine, `oversire step done`) is in the README of the CLI, section "Runbooks". The wire bodies are in `Contract/schema/runbook.json`.
 
@@ -14,17 +14,38 @@ A runbook is a list of steps. Each step has:
 - `pauseBefore`: a gate. The run waits for your approval before the step,
 - `review`: the step is a review. Its verdict is `pass` or `gaps`. `fix` names the fix step after it, and `rounds` is the fix round limit.
 
-The prompt can use `{key}`, `{url}`, `{title}`, `{item}`, `{workspace}`, `{project}`, `{round}`, `{notes}`, `{worktree}` and `{done}`. `{notes}` holds the notes of the start and the note of each step before.
+The prompt can use `{key}`, `{url}`, `{title}`, `{item}`, `{workspace}`, `{project}`, `{round}`, `{notes}`, `{group}`, `{worktree}` and `{done}`. `{notes}` holds the notes of the start and the note of each step before. `{group}` is the worktree group of the item, `.wt/<key>`. `{worktree}` is the old name of `{group}`.
 
-A new config has three runbooks. You can change them.
+## Plan and Ship
 
-| Runbook | Steps |
-|---|---|
-| Full | Plan & Refine, Review Plan, Implement Plan Fixes, ◆ Implement, Review Implementation, Implement Fixes |
-| Small | Implement, Review Implementation, Implement Fixes |
-| Plan only | Plan & Refine, Review Plan, Implement Plan Fixes |
+A new config has two runbooks (OVERSIRE-373). You can change them.
 
-◆ is a gate. A step of `claude-max` uses the default agent when the config has no `claude-max`.
+| Runbook | Steps | Ends with |
+|---|---|---|
+| Plan | Plan, Review Plan, Implement Plan Fixes | `oversire review ready --kind plan`: the plan waits in Work › Review › Plans to approve. |
+| Ship | Implement, Review Implementation, Implement Fixes | `oversire review ready --kind code`: the group waits in Work › Review › Code to review. |
+
+A step of `claude-max` uses the default agent when the config has no `claude-max`.
+
+- **Plan** writes no code. The agent writes the plan to `.oversire/plans/<KEY>.md`, with a `##` heading for each part, makes the sub-items and posts the plan as a comment. When you approve the plan, OverSire sets the item and its sub-items to Todo.
+- **Ship** works in the group `.wt/<parent key>`. It does the sub-items one after the other, in the plan order, in the same group. Each commit has an `Item: <KEY>` line, so that the review shows the sub-item of each commit.
+- The review step of each runbook runs `oversire review ready` when it finds no gaps. The fix step runs it at its end.
+
+The Plan button of an item or an intake item starts the same plan as a talk: one session with the start key `plan:<KEY>`. On an intake item, the agent accepts the item first, with the same ID. See [enhance.md](enhance.md) for the ladder Enhance, Plan, Ship.
+
+Ship on an item that is not in Todo asks **Plan first, or ship as is?** Plan first opens the Plan session. Ship as is starts Ship. A start at a later step does not ask.
+
+### The move from Full
+
+A config from before OVERSIRE-373 has Full, Small and Plan only. The first start moves them:
+
+- Full becomes Ship: the steps from Implement on. The gate before Implement goes, because the plan review is the gate now.
+- Plan only becomes Plan.
+- Small goes when it has the old default steps, because Ship is the same. An edited Small stays.
+- A step prompt that is the old default gets the new default. An edited prompt stays.
+- A queue entry or a project that names `full`, `small` or `plan-only` gets Ship or Plan.
+
+Settings › Agents › Runbooks shows a note about the move until you close it.
 
 ## How a run goes
 
@@ -62,6 +83,8 @@ The item page has a Runbook tab when the item has a run. It shows:
 ## The queue
 
 Add to queue asks for the runbook: Run <runbook> or One session. The queue starts a run for an entry with a runbook.
+
+The queue ships only items in Todo (the Plane state group `unstarted`). An item in another state, for example Backlog, waits in its lane with **◇ Plan first · Backlog**. Approve its plan, or set it to Todo, and the queue takes it. An entry with the Plan runbook starts in each state.
 
 A run holds a queue slot only while a step starts, works or asks. A run at a gate or paused frees its slot. The running card of the lane shows a step bar: a filled square for each done step, a ring on the current step, and "n/N · step name".
 

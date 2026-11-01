@@ -11,7 +11,7 @@ final class RunbookNeedsYouTests: XCTestCase {
     private let term = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "daemon", id: "mba"), id: "wt-2"), id: "term-5")
 
     private func run(_ state: RunbookRun.State, current: String?, _ steps: [StepRun], reason: String? = nil, id: RunbookRunID = "rb_1") -> RunbookRun {
-        let full = ProjectsConfig().runtime.defaultRunbooks[0]
+        let full = Runbook.planAndShip(ProjectsConfig().runtime)
         return RunbookRun(id: id, item: item, machine: "mba", runtime: "orca", repo: "/src", runbook: full, agents: [:], state: state, reason: reason,
                           current: current, steps: steps, started: t0, updated: t0.addingTimeInterval(600))
     }
@@ -127,7 +127,7 @@ final class RunbookNeedsYouTests: XCTestCase {
         XCTAssertNil(RunbookBook.parse("work:OVERSIRE-2"))
         let book = RunbookBook(runtime: { nil }, bus: ChangeBus())
         book.set([run(.running, current: "plan", [step("plan", .working)])])
-        XCTAssertEqual(book.step(session: nil, key: "runbook:rb_1.plan.1").map { RunbookBook.label($0.run, $0.step) }, "Plan & Refine")
+        XCTAssertEqual(book.step(session: nil, key: "runbook:rb_1.plan.1").map { RunbookBook.label($0.run, $0.step) }, "Plan")
         XCTAssertNil(book.step(session: nil, key: "runbook:rb_9.plan.1"))
     }
 
@@ -181,7 +181,7 @@ final class RunbookNeedsYouTests: XCTestCase {
             XCTAssertTrue(q.add(key: "OVERSIRE-2", runbook: "small"))
             XCTAssertEqual(q.lane(ref.storeKey)?.entries.first?.runbook, "small")
             XCTAssertNil(q.start("OVERSIRE-2", project: ref.storeKey))
-            XCTAssertEqual(started, ["small|OVERSIRE-2"])
+            XCTAssertEqual(started, ["ship|OVERSIRE-2"], "an old id starts its new runbook")
             XCTAssertFalse(q.contains("OVERSIRE-2"))
 
             XCTAssertTrue(q.add(key: "OVERSIRE-2", runbook: "gone"))

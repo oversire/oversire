@@ -286,10 +286,10 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw URLError(.cannotConnectToHost) }
     }
 
-    /// A run of Full on OVERSIRE-349: the plan passed its review in round 2, Implement works or waits at its gate.
+    /// A run of a user runbook (Plan, then Ship) on OVERSIRE-349: the plan passed its review in round 2, Implement works or waits at its gate.
     private func runbookSample(_ scene: String) -> String? {
-        guard let found = projectStore.item(key: "OVERSIRE-349"), let ref = found.item.ref(in: found.snap.summary.ref),
-              let full = PROJECTS_CFG.runtime.runbook(Runbook.fullID) ?? PROJECTS_CFG.runtime.defaultRunbooks.first else { return nil }
+        guard let found = projectStore.item(key: "OVERSIRE-349"), let ref = found.item.ref(in: found.snap.summary.ref) else { return nil }
+        let full = Runbook.planAndShip(PROJECTS_CFG.runtime)
         let t0 = Date().addingTimeInterval(-3 * 3600)
         func at(_ m: Double) -> Date { t0.addingTimeInterval(m * 60) }
         var n = 0
@@ -1744,13 +1744,13 @@ extension UIShots {
             spec("runbook.update", "Change runbook", .read) { a in
                 await MainActor.run {
                     let step = RunbookStep(id: "tests", name: "Write Tests", agent: "codex",
-                                           prompt: "Write the missing tests for {key} in {worktree}. Then run {done} --verdict done --note \"<one line>\".")
-                    RUNBOOK_UNDO.change("Change Full") { c in
+                                           prompt: "Write the missing tests for {key} in {group}. Then run {done} --verdict done --note \"<one line>\".")
+                    RUNBOOK_UNDO.change("Change Ship") { c in
                         guard let i = c.runtime.runbooks.firstIndex(where: { $0.id == a.string("id") }) else { return }
-                        c.runtime.runbooks[i].steps.insert(step, at: 4)
+                        c.runtime.runbooks[i].steps.insert(step, at: 1)
                     }
                 }
-                return .ok(summary: "Full is saved: Plan & Refine → Review Plan → Implement Plan Fixes → Implement → Write Tests → Review Implementation → Implement Fixes.")
+                return .ok(summary: "Ship is saved: Implement → Write Tests → Review Implementation → Implement Fixes.")
             },
             spec("ui.show", "Show a page", .read) { a in
                 let route = a.string("route") ?? "home"
@@ -1792,11 +1792,11 @@ extension UIShots {
                   + "- Started 12 min ago\n- 3 of 5 steps done\n\nReplies: Show the session | Ask it for a status"), usage, end],
         ])
         cli.script(p["runbooks"]!, [
-            [call("r1", "runbook_update", ["id": .string("full"), "patch": .array([.object([
+            [call("r1", "runbook_update", ["id": .string("ship"), "patch": .array([.object([
                 "op": .string("add"), "after": .string("implement"),
                 "step": .object(["name": .string("Write Tests"), "agent": .string("codex")]),
             ])])]), usage, end],
-            [text("I added **Write Tests** as step 5, after Implement. It runs codex. The check is green: 7 steps.\n\nUndo on the page reverts it."), usage, end],
+            [text("I added **Write Tests** as step 2, after Implement. It runs codex. The check is green: 4 steps.\n\nUndo on the page reverts it."), usage, end],
         ])
         cli.script(p["problems"]!, [[.fail(.unavailable("Claude Code reached its usage limit."))]])
         key.script(p["problems"]!, [
@@ -1811,7 +1811,7 @@ extension UIShots {
     func runbooksState(_ state: String, in w: AppWindow) {
         PROJECTS_CFG.runtime.runbooks = PROJECTS_CFG.runtime.defaultRunbooks
         let e = SettingsPage.runbookEditor
-        e.select(Runbook.fullID)
+        e.select(Runbook.shipID)
         switch state {
         case "list":
             break
@@ -1819,10 +1819,10 @@ extension UIShots {
             e.open = "implement"
         case "problem":
             e.open = "review"
-            RUNBOOK_UNDO.change("Change Full") { c in
-                guard let i = c.runtime.runbooks.firstIndex(where: { $0.id == Runbook.fullID }) else { return }
-                c.runtime.runbooks[i].steps[3].agent = "gpt-max"
-                c.runtime.runbooks[i].steps[4].review?.fix = "plan-fixes"
+            RUNBOOK_UNDO.change("Change Ship") { c in
+                guard let i = c.runtime.runbooks.firstIndex(where: { $0.id == Runbook.shipID }) else { return }
+                c.runtime.runbooks[i].steps[0].agent = "gpt-max"
+                c.runtime.runbooks[i].steps[1].review?.fix = "plan-fixes"
             }
         case "assistant":
             break

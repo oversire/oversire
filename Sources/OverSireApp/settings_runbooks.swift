@@ -6,7 +6,7 @@ import OverSireCore
 /// An edit that makes the runbook invalid saves too. The check line shows the problem.
 /// Use it on the main thread.
 final class RunbookEditor {
-    static let newPrompt = "Work on {key} ({url}) in worktree group {worktree}. Then run {done} --verdict done --note \"<one line>\"."
+    static let newPrompt = "Work on {key} ({url}) in worktree group {group}. Then run {done} --verdict done --note \"<one line>\"."
 
     private let undo: RunbookUndo
     private(set) var selected: String?
@@ -285,6 +285,14 @@ final class RunbookEditorView: NSStackView {
         addFull(head)
         addFull(NSTextField.text("A runbook takes an item from plan to merge in fixed steps. Each step is a fresh agent session.",
                                  size: 11.5, color: Palette.dim, lines: 2))
+        if let note = PROJECTS_CFG.runtime.runbookNote {
+            let close = ActionButton("Close") { [weak self] in
+                PROJECTS_CFG.runtime.runbookNote = nil
+                saveConfig()
+                self?.rebuild()
+            }
+            addFull(Banner(.info, title: "Plan and Ship", body: note, actions: [close]))
+        }
         guard let b = editor.runbook else { empty(); return }
         addFull(runbookList(b))
         addFull(nameRow(b))
@@ -298,7 +306,7 @@ final class RunbookEditorView: NSStackView {
     private func empty() {
         let card = ListCard()
         card.add(EmptyNote("There are no runbooks. Add one, or ask the assistant to make one.", symbol: "list.number"))
-        card.add(Row([Spacer(), ActionButton("Add Full, Small and Plan only") { [weak self] in self?.editor.restoreDefaults() }], height: 40))
+        card.add(Row([Spacer(), ActionButton("Add Plan and Ship") { [weak self] in self?.editor.restoreDefaults() }], height: 40))
         addFull(card)
     }
 

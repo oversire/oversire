@@ -11,7 +11,31 @@ struct SessionStartMenu {
     /// Starts in the saved workspace of the project. Without one, a menu at `anchor` asks for it.
     func start(_ item: Item, snap: ProjectSnapshot, at anchor: NSView, agent: String? = nil) {
         let window = anchor.window
-        pickRoot(snap, at: anchor, key: item.key) { root in self.run(item, root: root, agent: agent, in: window) }
+        shipGate(item, snap: snap, in: window) { [weak anchor] in
+            guard let anchor else { return }
+            self.pickRoot(snap, at: anchor, key: item.key) { root in self.run(item, root: root, agent: agent, in: window) }
+        }
+    }
+
+    /// Ship on an item that is not in Todo asks first (OVERSIRE-373). `ship` runs on "Ship as is".
+    /// "Plan first" opens the Plan session of the item.
+    func shipGate(_ item: Item, snap: ProjectSnapshot, in window: NSWindow?, ship: @escaping () -> Void) {
+        guard let state = snap.notTodo(item) else { ship(); return }
+        let spec = AlertConfirm.Spec(title: "Plan first, or ship as is?",
+                                     info: "\(item.key) is in \(state), not Todo. A plan ends at the plan review in Work › Review. "
+                                         + "When you approve the plan, the item and its sub-items go to Todo.",
+                                     buttons: ["Plan first", "Ship as is", "Cancel"])
+        let agents = data.agentIndex
+        AlertConfirm.show(spec, in: window) { a in
+            switch a.button {
+            case 0:
+                PlanStarter(agents).start(.item(item), in: snap.summary) { err in
+                    if let err { AlertConfirm.tell("Plan did not start", info: err, in: window) }
+                }
+            case 1: ship()
+            default: break
+            }
+        }
     }
 
     /// Gives nil when the project has a saved Orca workspace. Else a menu at `anchor` asks for one.
@@ -123,8 +147,17 @@ struct SessionStartMenu {
     }
 
     /// Starts a runbook on the sessions machine. Without a saved Orca workspace, a menu at `anchor` asks for it.
-    func runbook(_ book: Runbook, _ item: Item, snap: ProjectSnapshot, at anchor: NSView, step: String? = nil, started: @escaping (RunbookRun) -> Void) {
+    /// A runbook other than Plan asks first when the item is not in Todo. A start at a later step does not ask.
+    func runbook(_ book: Runbook, _ item: Item, snap: ProjectSnapshot, at anchor: NSView, step: String? = nil, asked: Bool = false,
+                 started: @escaping (RunbookRun) -> Void) {
         let window = anchor.window
+        guard asked || book.id == Runbook.planID || step != nil || snap.notTodo(item) == nil else {
+            shipGate(item, snap: snap, in: window) { [weak anchor] in
+                guard let anchor else { return }
+                self.runbook(book, item, snap: snap, at: anchor, asked: true, started: started)
+            }
+            return
+        }
         pickRoot(snap, at: anchor, key: item.key) { root in
             var s = RunbookStarter()
             if let root { s.root = { _ in root } }

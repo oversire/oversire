@@ -370,9 +370,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
             actions.append(NSStackView(h: [b, more], spacing: 1))
         }
-        if data.statusJob.item(key) == nil, data.has(.sessionInput), RefineStarter(data.agentIndex).session(key) == nil {
-            let b = ActionButton(refining ? "Starting…" : "Refine", symbol: "bubble.left.and.bubble.right") { [weak self] in self?.refine(item, snap: snap) }
-            b.toolTip = "Talk with an agent about this item. On your approval it writes the item and adds sub-items."
+        if data.statusJob.item(key) == nil, data.has(.sessionInput), PlanStarter(data.agentIndex).session(key) == nil {
+            let b = ActionButton(refining ? "Starting…" : "Plan", symbol: "list.bullet.clipboard") { [weak self] in self?.refine(item, snap: snap) }
+            b.toolTip = "An agent plans this item and adds sub-items. You approve the plan in Work › Review."
             b.isEnabled = !refining
             actions.insert(b, at: 0)
         }
@@ -400,10 +400,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func refine(_ item: Item, snap: ProjectSnapshot) {
         refining = true
         reload()
-        RefineStarter(data.agentIndex).start(.item(item), in: snap.summary) { [weak self] err in
+        PlanStarter(data.agentIndex).start(.item(item), in: snap.summary) { [weak self] err in
             guard let self else { return }
             self.refining = false
-            if let err { AlertConfirm.tell("Refine did not start", info: err, in: self.view.window) }
+            if let err { AlertConfirm.tell("Plan did not start", info: err, in: self.view.window) }
             self.reload()
         }
     }
