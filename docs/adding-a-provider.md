@@ -213,7 +213,16 @@ In the `.unauthorized` scenario, `probe()` must throw `ProviderError.unauthorize
 
 To run a suite against the real vendor, add a test to `Tests/LiveTests`. These tests run only with `OVERSIRE_LIVE=1` and the token in the environment.
 
-## 8. Register the adapter
+## 8. Events
+
+The app maps each poll to rows of the events table (see `docs/events.md`). The mappers work on the protocol, not on the vendor: `TrackerEvents`, `ChangeEvents` and `CIEvents` in `Sources/OverSireSync/ProviderEvents.swift`. Thus an adapter that fills the protocol types needs no event code.
+
+1. Give stable ids. The row id is `<provider>:<native id>`. The cloud webhook of the same change must give the same id.
+2. Add a kind only for activity that the protocol does not cover. Add it to `Contract/schema/event-kinds.json` first, with the fixture `Contract/fixtures/event/<kind>.json`, and map it in the mapper of the layer.
+3. Put no token and no body text in a row. A row holds ids, states and a short title.
+4. The layer suites (`TrackerConformance`, `CodeHostConformance`, `CIConformance`) check that each row follows the catalog.
+
+## 9. Register the adapter
 
 Add the descriptor to the list in `AppEnvironment.init` in `Sources/OverSireApp/AppEnvironment.swift`:
 
@@ -223,7 +232,7 @@ for d in [PlaneTracker.descriptor, LinearTracker.descriptor, GitHubCodeHost.desc
 
 Then add the import of the target at the top of the file, and add the target to the `OverSireApp` dependencies in `Package.swift`. The vendor is now on the Providers page.
 
-## 9. Check
+## 10. Check
 
 1. `swift build` and `swift test`. For a fast loop, run `swift test --filter TrackerLinearTests`.
 2. `.build/debug/oversire --selftest`.

@@ -90,6 +90,14 @@ final class CatchUpTests: XCTestCase {
         XCTAssertNil(Recap.parse("not json", rows: rows, hash: "h"))
     }
 
+    func testRecapInputHidesPrivateText() {
+        let d = EventDraft(id: "hook:p1", at: now, kind: .promptSubmitted, item: "OVERSIRE-380", actorType: .human, actor: "ada",
+                           via: "hook", summary: "my secret prompt", isPrivate: true)
+        let text = Recap.input(key: "OVERSIRE-377", title: "", since: nil, rows: [Event(seq: 1, seenAt: now, draft: d)]).text
+        XCTAssertFalse(text.contains("secret"))
+        XCTAssertTrue(text.contains("(private)"))
+    }
+
     func testRecapCacheNeedsTheSameRows() {
         let job = RecapJob(path: nil, ai: { nil })
         let rows = JourneySample.rows(now: now)

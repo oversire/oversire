@@ -36,7 +36,7 @@ final class MachineRuntimeTests: XCTestCase {
     func testRuntimeConformance() async {
         let d = FakeDaemon()
         let rt = local(d)
-        let r = await RuntimeConformance.run(repo: repo) {
+        let r = await RuntimeConformance.run(repo: repo, events: { try await rt.events($0) }) {
             try await rt.refresh()
             return rt
         }

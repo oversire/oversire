@@ -96,6 +96,7 @@ OverSire can start a coding agent on a Plane item in an [Orca](https://github.co
 - **Enhance** — an agent session reads the code, asks you what the code cannot tell, and writes a new description for an intake item or a ticket. You check what goes to Plane. See [docs/enhance.md](docs/enhance.md)
 - **Groom** — one agent session reads the intake and the backlog of a project, and proposes merges, closes, parents and relations. You select the changes, and Apply writes them to Plane one item at a time. **Undo last Groom** puts them back. See [docs/groom.md](docs/groom.md)
 - **Session tab** — the item window shows the live session through the daemon of its machine: a terminal for an Orca session (text only for now), a chat for an `oversire` session. See [docs/live-session.md](docs/live-session.md)
+- **Status recap and Timeline** — the Status card of an item tells what changed since your last look: the board of the sub-items, the next action, the counts and a short AI recap. The **Timeline** tab shows one lane for each sub-item, with the agent turns, the waits, CI, merges and releases. Both read the events table of the home daemon. See [docs/events.md](docs/events.md)
 - **Notifications** — "Agent needs input" and "Agent done". Turn them on or off in Settings › Notifications › Agents and mentions. A project can override them
 - **The agent does the work** — ▶ does not change the Plane item. The agent sets In progress, does the work and closes the item. The default prompt is `work on {url} in worktree group .wt/{key}`
 

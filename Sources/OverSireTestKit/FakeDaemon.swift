@@ -294,8 +294,41 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         case ("POST", ["v1", "ack"]):
             if let body, let d = try JSONSerialization.jsonObject(with: body) as? [String: Int], let seq = d["seq"] { _acks.append(seq) }
             return (200, Data(#"{"ok":true}"#.utf8))
-        default: return try runtime.route(method, parts, body: body, machine: _info.machine, sessions: &_sessions) ?? missing
+        default:
+            let known = Set(_sessions.map(\.id))
+            let res = try runtime.route(method, parts, body: body, machine: _info.machine, sessions: &_sessions) ?? missing
+            for s in _sessions where !known.contains(s.id) { addRows(Self.startRows(s)) }
+            return res
         }
+    }
+
+    // Runs under the lock.
+    private func addRows(_ drafts: [EventDraft]) {
+        for d in drafts where !_rows.contains(where: { $0.id == d.id }) {
+            _rows.append(Event(seq: Int64(_rows.count + 1), seenAt: Date(), draft: d))
+        }
+    }
+
+    /// As capture.SessionRows of the daemon: a new session gives session.started, and turn.started when it works.
+    /// The item comes from the key, else from the branch or the folder.
+    static func startRows(_ s: DaemonSession) -> [EventDraft] {
+        let at = s.startedAt ?? s.stateSince
+        let ms = String(Int64(at.timeIntervalSince1970 * 1000))
+        let item = [s.key, s.branch, (s.cwd as NSString).lastPathComponent].compactMap { t in
+            t.flatMap { $0.range(of: "[A-Za-z][A-Za-z0-9]*-[0-9]+", options: .regularExpression).map { r in t![r].uppercased() } }
+        }.first
+        let actor = s.harness.isEmpty ? "agent" : s.harness
+        var payload: [String: JSONValue] = ["harness": .string(actor), "runtime": .string(s.runtime)]
+        if !s.cwd.isEmpty { payload["cwd"] = .string(s.cwd) }
+        var out = [EventDraft(id: "session:\(s.id):\(ms):started", at: at, kind: .sessionStarted, item: item, machine: s.machine.rawValue,
+                              session: s.key ?? s.id, actorType: .agent, actor: actor, via: "daemon", summary: "Session started", payload: payload)]
+        if s.state == .working {
+            let id = "session:\(s.id):\(ms):turn.started"
+            out.append(EventDraft(id: id, at: at, kind: .turnStarted, item: item, machine: s.machine.rawValue, session: s.key ?? s.id, corr: id,
+                                  actorType: .agent, actor: actor, via: "daemon", summary: "Turn 1 started",
+                                  payload: ["turn": .int(1), "steer": .bool(false)]))
+        }
+        return out
     }
 
     // Runs under the lock. The rules of cli/lease: a renew keeps the epoch, a new holder increases it.

@@ -24,7 +24,7 @@ struct Recap: Codable, Equatable {
         var lines: [String] = []
         var size = 0
         for e in rows.reversed() {
-            let l = "[\(e.id)] \(f.string(from: e.at)) \(e.item ?? key) \(e.kind.rawValue) \(e.actorType.rawValue):\(e.actor) \(e.summary)"
+            let l = "[\(e.id)] \(f.string(from: e.at)) \(e.item ?? key) \(e.kind.rawValue) \(e.actorType.rawValue):\(e.actor) \(e.isPrivate ? "(private)" : e.summary)"
             if size + l.count + 1 > budget { break }
             size += l.count + 1
             lines.append(l)

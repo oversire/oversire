@@ -243,7 +243,9 @@ public enum CIConformance {
 
 public enum RuntimeConformance {
     /// Launches one session, then uses SessionIO and Revealing when the runtime has them.
-    public static func run(repo: String, make: @Sendable () async throws -> any AgentRuntime) async -> ConformanceReport {
+    /// `events` reads the event rows of an item: the rows of the launch must follow the catalog.
+    public static func run(repo: String, events: (@Sendable (Event.Query) async throws -> Event.Page)? = nil,
+                           make: @Sendable () async throws -> any AgentRuntime) async -> ConformanceReport {
         var r = ConformanceReport()
         guard let rt = await r.step("make", make) else { return r }
         if let envs = await r.step("environments", { try await rt.environments() }) {
@@ -260,6 +262,10 @@ public enum RuntimeConformance {
         guard let s = sessions.first(where: { $0.ref.id == l.handle })?.ref else {
             r.expect(false, "sessions does not list the handle \(l.handle)")
             return r
+        }
+        if let events, let page = await r.step("events", { try await events(Event.Query(item: "CONFORMANCE-1")) }) {
+            r.expect(page.events.contains { $0.kind == .sessionStarted }, "the launch gives no session.started row")
+            r.expectEvents(page.events.map(\.draft), "runtime")
         }
         if let io = rt as? any SessionIO {
             _ = await r.step("send", { try await io.send(s, text: "Conformance input") })
