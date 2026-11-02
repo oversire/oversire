@@ -601,8 +601,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         guard let (_, snap, item) = data.projectStore.item(key: key), let rows = JOURNAL.rows(key) else { return nil }
         let subs = subItems(snap, item).map { CatchUpBuilder.Sub(key: $0.key, title: $0.title, closed: snap.isClosed($0.statusOptionId)) }
         let since = JOURNAL.since(key, before: localLook, opened: openedAt)
-        let notPushed = REVIEWS.notPushed.map { "\($0.item.repo) \($0.item.base) +\($0.item.ahead)" + ($0.machine.isEmpty ? "" : " on \($0.machine)") }
-        return (snap, CatchUpBuilder(key: item.key, subs: subs, rows: rows, since: since, notPushed: notPushed).build())
+        return (snap, CatchUpBuilder(key: item.key, subs: subs, rows: rows, since: since, notPushed: REVIEWS.notPushed).build())
     }
 
     private func recapInput() -> StatusCard.RecapInput? {

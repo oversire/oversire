@@ -132,12 +132,15 @@ public struct NotPushed: Codable, Hashable, Sendable {
     public var repo: String
     public var base: String
     public var ahead: Int
+    /// The item keys that the commits name. Nil from an older daemon.
+    public var items: [String]?
 
-    public init(root: String, repo: String, base: String, ahead: Int) {
+    public init(root: String, repo: String, base: String, ahead: Int, items: [String]? = nil) {
         self.root = root
         self.repo = repo
         self.base = base
         self.ahead = ahead
+        self.items = items
     }
 }
 

@@ -7,7 +7,7 @@ final class CatchUpTests: XCTestCase {
     // Sun 1 Nov 10:40, local time.
     let now = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 10, minute: 40))!
 
-    func build(folded: Bool = false, since: Date? = nil, closed: Set<String> = [], notPushed: [String] = []) -> CatchUp {
+    func build(folded: Bool = false, since: Date? = nil, closed: Set<String> = [], notPushed: [(machine: String, item: NotPushed)] = []) -> CatchUp {
         let rows = JourneySample.rows(now: now, folded: folded)
         let subs = zip(JourneySample.subs, JourneySample.titles).map { CatchUpBuilder.Sub(key: $0, title: $1, closed: closed.contains($0)) }
         let s = since ?? lastLook(rows)
@@ -22,7 +22,9 @@ final class CatchUpTests: XCTestCase {
     }
 
     func testBoardAndNow() {
-        let c = build(notPushed: ["cli main +2"])
+        let other = NotPushed(root: "/w", repo: "website", base: "main", ahead: 1, items: ["MCPQ-3"])
+        let old = NotPushed(root: "/w", repo: "docs", base: "main", ahead: 4)
+        let c = build(notPushed: [("", NotPushed(root: "/w", repo: "cli", base: "main", ahead: 2, items: ["oversire-380"])), ("mbp", other), ("mbp", old)])
         XCTAssertEqual(c.board.map(\.mark), [.merged, .merged, .yours, .merged])
         XCTAssertEqual(c.board.map(\.ships), [["v0.14.0"], ["cli v0.9.2"], [], ["v0.14.0"]])
         XCTAssertEqual(c.merged, 3)

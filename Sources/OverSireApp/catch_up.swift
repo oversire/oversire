@@ -108,8 +108,8 @@ struct CatchUpBuilder {
     /// The last look of the user. Nil: the first look.
     var since: Date?
     var now = Date()
-    /// Base branches with local commits: "cli main +2".
-    var notPushed: [String] = []
+    /// Base branches with local commits, from the Review book of each machine.
+    var notPushed: [(machine: String, item: NotPushed)] = []
 
     private var sorted: [Event] { rows.sorted { ($0.at, $0.seq) < ($1.at, $1.seq) } }
 
@@ -226,7 +226,11 @@ struct CatchUpBuilder {
             let what = s.action == .answer ? "Answer \(short(k)): " + s.note : "Review \(short(k)), " + s.note.replacingOccurrences(of: " · not merged", with: "")
             out.append(CatchUp.Pending(kind: kind, key: k, text: what + ".", yours: true, event: s.event))
         }
-        out += notPushed.map { CatchUp.Pending(kind: .notPushed, key: nil, text: "Not pushed: " + $0, yours: true, event: nil) }
+        let tree = Set(([key] + subs.map(\.key)).map { $0.uppercased() })
+        for (machine, np) in notPushed where (np.items ?? []).contains(where: { tree.contains($0.uppercased()) }) {
+            let text = "Not pushed: \(np.repo) \(np.base) +\(np.ahead)" + (machine.isEmpty ? "" : " on \(machine)")
+            out.append(CatchUp.Pending(kind: .notPushed, key: nil, text: text, yours: true, event: nil))
+        }
         return out
     }
 

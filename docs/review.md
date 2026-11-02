@@ -26,6 +26,8 @@ The Review tab of the Work page has these groups:
 | Conflict | Merges that stopped on a conflict. |
 | Merged, not pushed | Base branches with local commits that the remote does not have. Push them yourself. |
 
+The Status card of an item shows a base that is not pushed only when its commits name the item or a sub-item. A commit names an item in its message (`(OVERSIRE-383)` or the trailer `Item: KEY`), or the base reflog names a merged branch such as `oversire-383`.
+
 Each row shows the key, the title, the machine, the round, the number of pending comments, the repositories with their `+added −removed`, and the merge mode. The glyph and the word tell the state, not only the color.
 
 ## Code review
