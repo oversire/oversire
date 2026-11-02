@@ -268,14 +268,18 @@ final class ProjectPage: Page {
         return [top, PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
-    // Plane states in their rank order. Without Show done, Done items follow the "Hide Done items" setting.
     private func statusGroups(_ snap: ProjectSnapshot, _ items: [Item]) -> [(StatusOption, [Item])] {
+        Self.statusGroups(snap, items, showDone: showDone, hideDoneAfterDays: PROJECTS_CFG.hideDoneAfterDays)
+    }
+
+    // Plane states in their rank order. Without Show done, Done items follow the "Hide Done items" setting.
+    // A Done item with open sub-items goes in the first started group (`listStateId`).
+    static func statusGroups(_ snap: ProjectSnapshot, _ items: [Item], showDone: Bool, hideDoneAfterDays days: Int) -> [(StatusOption, [Item])] {
         let opts = snap.statusOptions.enumerated().sorted { ($0.element.rank, $0.offset) < ($1.element.rank, $1.offset) }.map(\.element)
-        let days = PROJECTS_CFG.hideDoneAfterDays
         let sorted = snap.groupSorted(showDone ? items : items.filter { !snap.isHiddenDone($0, afterDays: days) })
-        var out = opts.map { o in (o, sorted.filter { $0.statusOptionId == o.id }) }
+        var out = opts.map { o in (o, sorted.filter { snap.listStateId($0) == o.id }) }
         let known = Set(opts.map(\.id))
-        let rest = sorted.filter { !known.contains($0.statusOptionId ?? "") }
+        let rest = sorted.filter { !known.contains(snap.listStateId($0) ?? "") }
         if !rest.isEmpty { out.append((StatusOption(id: "", name: "No status", color: "GRAY"), rest)) }
         return out
     }

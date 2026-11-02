@@ -293,6 +293,15 @@ public struct ProjectSnapshot: Codable, Sendable {
     /// Closed in the tracker, but some sub-items are open. OverSire counts it as not finished.
     public func isDoneWithOpenSubItems(_ item: Item) -> Bool { isClosed(item.statusOptionId) && openSubItems(of: item.id) > 0 }
 
+    /// No sub-item at any level is open. A parent must not close before this is true.
+    public func canClose(_ item: Item) -> Bool { openSubItems(of: item.id) == 0 }
+
+    /// The state of the list group that shows the item. A Done item with open sub-items shows with the first started state.
+    public func listStateId(_ item: Item) -> String? {
+        guard isDoneWithOpenSubItems(item), let s = firstState(group: "started", else: .progress) else { return item.statusOptionId }
+        return s.id
+    }
+
     /// The parent is open and has sub-items, and all of them are finished.
     public func canCloseParent(_ item: Item) -> Bool {
         guard !isClosed(item.statusOptionId), openSubItems(of: item.id) == 0 else { return false }
