@@ -506,7 +506,8 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     private func agentChip() -> NSView {
         let book = AgentModelBook.shared, a = model.agent, p = PROJECTS_CFG.runtime.profile(a)
         if let c = p.cli, !p.model.isEmpty { book.load(c) }
-        let warn = book.warning(p)
+        let on = MACHINES.sessions ?? (NSApp?.delegate as? AppData)?.agentPlaces.this ?? ""
+        let warn = PROJECTS_CFG.runtime.refusal(a, on: on) ?? book.warning(p)
         let chip = ActionButton((warn == nil ? "" : "△ ") + book.label(a, p) + "  ⌄")
         chip.isEnabled = !model.isStarting
         chip.onClick = { [weak self, weak chip] in

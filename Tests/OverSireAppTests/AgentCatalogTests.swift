@@ -204,6 +204,22 @@ final class AgentCatalogTests: XCTestCase {
         XCTAssertEqual(l.refusal(on: "mba"), "claude-max runs only on mini. Run sessions on is mba.")
         XCTAssertNil(l.withoutEnv.refusal(on: "mini"))
         XCTAssertFalse(l.withoutEnv.hasEnv)
+        XCTAssertEqual(mba.cfg.refusal("claude-max", on: "mba"), "claude-max runs only on mini. Run sessions on is mba.")
+        mba.cfg.add("pi-fast", cli: "pi")
+        mba.cfg.runsOn["pi-fast"] = ["mba"]
+        XCTAssertNil(mba.cfg.refusal("pi-fast", on: "mba"))
+        XCTAssertNotNil(mba.cfg.refusal("pi-fast", on: "mini"))
+    }
+
+    func testShareSomeNames() throws {
+        let mba = try app("mba")
+        try mba.catalog.save(maxDef, scope: .local)
+        mba.cfg.add("pi-fast", cli: "pi")
+        let again = try mba.catalog.share(["claude-max"])
+        XCTAssertEqual(again, ["claude-max": ["PLANE_API_TOKEN"]])
+        XCTAssertEqual(mba.catalog.shared.map(\.name), ["claude-max"])
+        XCTAssertTrue(mba.cfg.isLocal("pi-fast"), "an agent that was not picked stays on this Mac")
+        XCTAssertFalse(mba.catalog.needsShareOffer, "a pick closes the offer")
     }
 
     func testTheSharedCommandIsUsed() throws {

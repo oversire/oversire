@@ -91,7 +91,10 @@ final class AgentCatalog {
     }
 
     /// The banner offers Share all while the user has local agents and did not close it.
-    var needsShareOffer: Bool { !config().shareOfferClosed && local.contains { !isPlainBuiltIn($0.def) } }
+    var needsShareOffer: Bool { !offerNames.isEmpty }
+
+    /// The local agents that the banner offers to share.
+    var offerNames: [String] { config().shareOfferClosed ? [] : local.filter { !isPlainBuiltIn($0.def) }.map(\.name) }
 
     func closeShareOffer() {
         var cfg = config()
@@ -153,10 +156,19 @@ final class AgentCatalog {
         return d.env.filter(\.secret).map(\.key)
     }
 
-    func shareAll() throws {
-        for a in local { try share(a.name) }
+    /// Shares the agents. The result names the secret keys of each agent that need a value again.
+    func share(_ names: [String]) throws -> [String: [String]] {
+        var out: [String: [String]] = [:]
+        for n in names {
+            let keys = try share(n)
+            if !keys.isEmpty { out[n] = keys }
+        }
         closeShareOffer()
+        return out
     }
+
+    @discardableResult
+    func shareAll() throws -> [String: [String]] { try share(local.map(\.name)) }
 
     /// Moves a shared agent to this Mac only. The other Macs lose it. Secret keys need a value again.
     @discardableResult

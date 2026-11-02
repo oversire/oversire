@@ -32,6 +32,10 @@ protocol AppData: AnyObject {
     var cloudSetup: CloudSetup { get }
     var repoCatalog: RepoCatalog { get }
     var projectCatalog: ProjectCatalog { get }
+    var agentCatalog: AgentCatalog { get }
+    var agentSecrets: AgentSecrets { get }
+    /// The machines of the agents and the home of the secrets.
+    var agentPlaces: AgentPlaces { get }
     /// Nil in tests: only the app writes logs.
     var logs: LogStore? { get }
     /// The changes of the data. Pages and windows observe it.

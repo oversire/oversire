@@ -154,6 +154,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return c
     }()
     lazy var agentSecrets = AgentSecrets { [weak self] in self?.relay.group?.secretsHome() ?? .failure(.noHome) }
+    var agentPlaces: AgentPlaces {
+        relay.group?.places(sessions: MACHINES.sessions) ?? AgentPlaces(this: ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac")
+    }
     lazy var stats = WorkStats(path: WORK_STATS_PATH)
     lazy var appWindow: AppWindow = {
         AppWindow(data: self)

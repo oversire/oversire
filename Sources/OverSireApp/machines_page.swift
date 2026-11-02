@@ -26,6 +26,8 @@ struct MachinesSnapshot: Equatable {
     var runtimes: [String: [DaemonRuntime]] = [:]
     /// The role of this app for the automations. nil: no automation owner.
     var automations: AutomationRole?
+    /// machine → the features of its daemon. A machine without an entry gave no answer.
+    var features: [String: [String]] = [:]
 }
 
 /// The rows of the page. It has no AppKit types, so tests compare it.
@@ -50,6 +52,8 @@ struct MachinesModel: Equatable {
         var version: String?
         /// The machine runs an older CLI than the newest in the group or on GitHub.
         var behind: Bool
+        /// The features of its daemon. nil: not read.
+        var features: [String]? = nil
 
         var hostText: String { "\(host) · oversire \(version ?? "before 0.2.2")" }
 
@@ -249,7 +253,7 @@ struct MachinesModel: Equatable {
                            home: s.group?.home == m.machine || (s.group == nil && isThis), runner: m.roles.contains("runner"), online: online,
                            status: online ? "Online" : Self.offline(m.lastSeen, now: now), sessions: active.count,
                            waiting: active.filter { $0.state == .waiting }.count, runsSessions: runs, muted: config.muted.contains(name),
-                           version: version, behind: false)
+                           version: version, behind: false, features: isThis ? s.info.map { $0.features ?? [] } : s.features[name])
         }
         let newest = ([s.latest] + machines.map(\.version)).compactMap { $0 }.max { Updater.isNewer($1, than: $0) }
         if let newest {
@@ -282,6 +286,13 @@ struct MachinesModel: Equatable {
     static func ago(_ d: Date, now: Date) -> String {
         let s = max(0, now.timeIntervalSince(d))
         return s < 3600 ? "\(max(1, Int(s / 60))) min ago" : s < 172_800 ? "\(Int(s / 3600)) h ago" : "\(Int(s / 86400)) d ago"
+    }
+
+    /// The machines for "Agents on each machine" (OVERSIRE-399).
+    var agentPlaces: AgentPlaces {
+        let home = machines.first(where: \.home)
+        return AgentPlaces(this: machines.first(where: \.isThis)?.name ?? "", home: daemon == nil ? nil : home?.name, homeOnline: home?.online ?? false,
+                           machines: machines.map { AgentPlace(name: $0.name, home: $0.home, sessions: $0.runsSessions, online: $0.online, features: $0.features) })
     }
 
     /// The note of the Updates row.
@@ -399,6 +410,7 @@ final class MachinesController {
                 let client = l.client(http: hub.http)
                 if let list = try? await client.sessions() { s.sessions[l.machine] = list.sessions }
                 if let page = try? await client.runtimes() { s.runtimes[l.machine] = page.runtimes }
+                if let i = try? await client.whoami() { s.features[l.machine] = i.features ?? [] }
             }
         }
         snapshot = s
@@ -604,7 +616,7 @@ extension SettingsPage {
         if m.state == .solo && !m.found.isEmpty { machineFound(b, m) }
         if m.state != .noDaemon || !m.machines.isEmpty { machineList(b, m) }
         machineRuntimes(b, m)
-        if m.state != .noDaemon { machineHooks(b, m); machineDaemon(b, m) }
+        if m.state != .noDaemon { machineAgents(b, m); machineHooks(b, m); machineDaemon(b, m) }
         if c.wantsConsent, MachineSheets.open == nil {
             DispatchQueue.main.async { [weak self] in
                 guard let w = self?.view.window, MachineSheets.open == nil, c.wantsConsent else { return }
@@ -812,6 +824,45 @@ extension SettingsPage {
         v.addFull(NSTextField.text("Each daemon drives the runtimes of its own machine. Live: the session view has color and keys. "
                                    + "Text only: the daemon reads the screen as text.", size: 11.5, color: Palette.dim, lines: 2))
         v.identifier = SettingsAnchor.runtimes.id
+        b.addFull(v)
+    }
+
+    // Agents on each machine: can each agent start there, and can each machine get the secrets from home.
+    private func machineAgents(_ b: NSStackView, _ m: MachinesModel) {
+        let catalog = data.agentCatalog
+        let places = m.agentPlaces
+        let table = AgentMachineTable(agents: catalog.agents, defaults: PROJECTS_CFG.runtime.agents.filter { a in !catalog.agents.contains { $0.name == a } },
+                                      places: places, this: places.this)
+        guard !table.lines.isEmpty, !table.columns.isEmpty else { return }
+        var cells: [[NSView]] = []
+        var head: [NSView] = [NSTextField.text("", size: 11)]
+        for c in table.columns {
+            head.append(NSStackView(v: [NSTextField.text(c.name, size: 12, weight: .semibold), NSTextField.text(c.note, size: 11, color: Palette.dim)], spacing: 1))
+        }
+        cells.append(head)
+        for l in table.lines {
+            var name: [NSView] = [NSTextField.text(l.name, size: 12, weight: .medium, mono: true)]
+            if let n = l.note { name.append(NSTextField.text(n, size: 11, color: Palette.dim)) }
+            var row: [NSView] = [NSStackView(v: name, spacing: 1)]
+            for (c, cell) in zip(table.columns, l.cells) {
+                let color: NSColor = cell.hasPrefix("✓") ? Palette.ok : cell.hasPrefix("✕") ? Palette.bad : cell.hasPrefix("△") ? Palette.warn : Palette.dim
+                let t = NSTextField.text(cell, size: 11.5, color: color)
+                t.setAccessibilityLabel("\(l.name) on \(c.name): \(cell)")
+                row.append(t)
+            }
+            cells.append(row)
+        }
+        let grid = NSGridView(views: cells)
+        grid.rowSpacing = 10
+        grid.columnSpacing = 18
+        grid.yPlacement = NSGridCell.Placement.center
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        let card = Card(spacing: 8)
+        card.add(grid)
+        let v = NSStackView(v: [SectionTitle("Agents on each machine")], spacing: 6)
+        v.addFull(card)
+        v.addFull(NSTextField.text("Work, Intake and cleanup start on the Run sessions on machine. The start menu shows an agent dim when it cannot run there. "
+                                   + "Settings › Agents sets the machines of each agent.", size: 11.5, color: Palette.dim, lines: 2))
         b.addFull(v)
     }
 

@@ -44,7 +44,8 @@ extension SettingsPage {
         promptRow.addArrangedSubview(NSTextField.text("Prompt", size: 13, weight: .medium))
         promptRow.addFull(prompt)
         promptRow.addArrangedSubview(NSTextField.text("Placeholders: {url} {key} {KEY} {title}. Keep {url} first.", size: 11.5, color: Palette.dim))
-        let n = Set(r.commands.keys).union(r.profiles.keys).subtracting([RuntimeConfig.intakeKey]).count
+        let n = Set(r.commands.keys).union(r.profiles.keys).union(r.env.keys).union(r.runsOn.keys).union(RuntimeConfig.shared.defs.keys)
+            .subtracting([RuntimeConfig.intakeKey]).count
         let open = Self.commandsOpen
         let edit = ActionButton(open ? "Done" : "Edit") { [weak self] in
             Self.commandsOpen.toggle()
@@ -57,7 +58,10 @@ extension SettingsPage {
             Row([TwoLine("Agents", "\(n == 0 ? "Default agents" : n == 1 ? "1 custom agent" : "\(n) custom agents") · command, model and effort · used by ▶, the queue and intake"),
                  Spacer(), edit], height: 52, label: "Agents"),
         ]))
-        if open { b.addFull(AgentCommandsCard(examples: commandExamples, usedBy: commandUsers)) }
+        if open {
+            b.addFull(AgentCommandsCard(examples: commandExamples, usedBy: commandUsers, catalog: data.agentCatalog,
+                                        secrets: data.agentSecrets, places: data.agentPlaces))
+        }
     }
 
     // The last started item, then a sample key of the first tracked project.

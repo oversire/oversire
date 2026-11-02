@@ -728,6 +728,11 @@ struct RuntimeConfig: Codable, Equatable {
     /// The shared record of the name, when no local entry hides it.
     func sharedDef(_ agent: String) -> AgentDef? { isLocal(agent) ? nil : Self.shared.defs[agent] }
 
+    /// nil: the agent can run on the machine. Else the reason, for the start menu.
+    func refusal(_ agent: String, on machine: String) -> String? {
+        AgentLaunch(profile: agent, cli: agent, runsOn: sharedDef(agent)?.runsOn ?? runsOn[agent]).refusal(on: machine)
+    }
+
     /// The local entry as a record. nil: no local entry.
     func localDef(_ agent: String) -> AgentDef? {
         guard isLocal(agent) else { return nil }
@@ -833,7 +838,7 @@ struct RuntimeConfig: Codable, Equatable {
     // A hand-edited bad template falls back to the default.
     private func saved(_ key: String) -> LaunchCommand? { commands[key].flatMap { Self.valid($0, key) } }
 
-    private static func valid(_ t: String, _ key: String) -> LaunchCommand? {
+    static func valid(_ t: String, _ key: String) -> LaunchCommand? {
         let c = LaunchCommand(t)
         do { try c.validate() } catch {
             log.error("The command of agent \(key, privacy: .public) is not valid (\(String(describing: error), privacy: .public)). OverSire uses the default.")

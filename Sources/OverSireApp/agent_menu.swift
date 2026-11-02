@@ -94,8 +94,11 @@ final class AgentModelBook {
 // The agent menu of the launch chip and of "Start in Orca with": the agents under each base CLI, then Edit agents….
 enum AgentMenu {
     /// `picked` gets a check mark. `standard` gets the "default" mark.
-    static func build(into menu: NSMenu, picked: String?, standard: String, pick: @escaping (String) -> Void) {
+    /// An agent that cannot run on `machine` (Run sessions on) shows dim, with the reason (OVERSIRE-399).
+    static func build(into menu: NSMenu, picked: String?, standard: String, machine: String? = nil, pick: @escaping (String) -> Void) {
         let r = PROJECTS_CFG.runtime, book = AgentModelBook.shared
+        let on = machine ?? MACHINES.sessions ?? (NSApp?.delegate as? AppData)?.agentPlaces.this ?? ""
+        menu.autoenablesItems = false
         for g in r.agentGroups {
             let head = NSMenuItem(title: (g.cli ?? "Other CLIs").uppercased(), action: nil, keyEquivalent: "")
             head.attributedTitle = NSAttributedString(string: head.title, attributes: [
@@ -112,6 +115,12 @@ enum AgentMenu {
                 t.append(NSAttributedString(string: "   " + book.detail(p), attributes: [
                     .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor,
                 ]))
+                let refusal = r.refusal(a, on: on)
+                if let list = r.sharedDef(a)?.runsOn ?? r.runsOn[a], refusal != nil {
+                    t.append(NSAttributedString(string: " · only on \(list.joined(separator: ", "))", attributes: [
+                        .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor,
+                    ]))
+                }
                 if a == standard {
                     t.append(NSAttributedString(string: "   default", attributes: [
                         .font: NSFont.systemFont(ofSize: 10.5, weight: .medium), .foregroundColor: NSColor.tertiaryLabelColor,
@@ -119,8 +128,9 @@ enum AgentMenu {
                 }
                 mi.attributedTitle = t
                 mi.state = a == picked ? .on : .off
-                mi.toolTip = book.warning(p) ?? (p.cli == nil ? "No base CLI. Only a terminal runtime (Orca) can start it." : nil)
-                mi.setAccessibilityLabel([a, book.detail(p), a == standard ? "default" : nil].compactMap { $0 }.joined(separator: ", "))
+                mi.isEnabled = refusal == nil
+                mi.toolTip = refusal ?? book.warning(p) ?? (p.cli == nil ? "No base CLI. Only a terminal runtime (Orca) can start it." : nil)
+                mi.setAccessibilityLabel([a, book.detail(p), a == standard ? "default" : nil, refusal].compactMap { $0 }.joined(separator: ", "))
                 menu.addItem(mi)
             }
         }

@@ -25,6 +25,20 @@ An agent is a name, a base CLI, a command, a model and an effort. Examples: `cla
 - An agent with no base CLI is "terminal only". Only a terminal runtime (Orca) can start it.
 - The Session tab of an item shows the agent, the model and the effort of a session that OverSire started.
 
+### Shared agents, env and secrets (OVERSIRE-399)
+
+Settings › Agents and queue › Agents has two lists:
+
+- **Shared · all my Macs**: the home store keeps these agents. Each Mac of the group gets them.
+- **This Mac only**: only this app sees these agents. A dashed box marks them. When a name is in both lists, the agent of this Mac wins on this Mac.
+
+Each agent has env rows, and **Env for all agents** has rows for each agent. The env of an agent wins on the same key. A value takes `{name}`, `{KEY}`, `{key}` and `{title}`.
+
+- A **Secret** row keeps its value only on the home daemon. The app can set, replace or remove the value. It cannot read the value back. The start sends a reference, and the runner gets the value from home.
+- **Runs on** is **Any machine** or a list of machines. The start menu shows an agent dim when it cannot run on the Run sessions on machine.
+- **Share** and **Keep on this Mac only** move an agent between the lists. Type the secret values again after a move.
+- Settings › Machines › Agents on each machine shows which machine can start each agent, and which machine can get the secrets from home.
+
 ## The two routes
 
 | Intake | Result |

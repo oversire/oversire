@@ -37,6 +37,13 @@ final class TestAppData: AppData {
     lazy var cloudSetup = CloudSetup()
     lazy var repoCatalog = RepoCatalog(path: tmp + "/repo-cache.json")
     lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: tmp + "/plane-cache.json")
+    lazy var agentCatalog: AgentCatalog = {
+        let c = AgentCatalog(writes: writes)
+        c.record = { _, _ in }
+        return c
+    }()
+    lazy var agentSecrets = AgentSecrets(device: "app-tests") { .failure(.noHome) }
+    var agentPlaces = AgentPlaces(this: "mbp")
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)

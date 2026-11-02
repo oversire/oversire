@@ -28,6 +28,16 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var cloudSetup = UIShots.sampleSetup()
     lazy var repoCatalog = RepoCatalog(path: UIShots.tmp + "/repo-cache.json")
     lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: UIShots.tmp + "/plane-cache.json")
+    lazy var agentCatalog: AgentCatalog = {
+        let c = AgentCatalog(writes: writes)
+        c.record = { _, _ in }
+        c.machine = { "mba" }
+        return c
+    }()
+    lazy var agentSecrets = AgentSecrets(device: "app-uishots") { .failure(.homeOffline("mini")) }
+    var agentPlaces = AgentPlaces(this: "mbp", home: "mini", homeOnline: true, machines: [
+        AgentPlace(name: "mbp"), AgentPlace(name: "mba", sessions: true), AgentPlace(name: "mini", home: true),
+    ])
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
@@ -884,6 +894,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             PROJECTS_CFG.runtime.commands = ["claude": "claude -n {name} --dangerously-skip-permissions"]
             AgentCommandsCard.drafts = ["codex": "codex --full-auto; echo done"]
             Self.seedAgents()
+            seedSharedAgents()
             SettingsPage.commandsOpen = true
         }
         useSampleMachines()
@@ -960,6 +971,18 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         } else { print("UISHOTS no field \(p)") }
                     } else if p == "end" {
                         w.page?.scroll.toEnd()
+                    } else if p.hasPrefix("down:"), let root = w.window?.contentView {
+                        // down:<points>: each tall scroll view (the page, a settings pane) shows its content from that offset.
+                        let to = Double(p.dropFirst(5)) ?? 600
+                        func walk(_ v: NSView) {
+                            if let s = v as? NSScrollView, s.bounds.height > 300, let doc = s.documentView {
+                                let y = min(to, max(0, doc.frame.height - s.contentView.bounds.height))
+                                s.contentView.scroll(to: NSPoint(x: 0, y: y))
+                                s.reflectScrolledClipView(s.contentView)
+                            }
+                            v.subviews.forEach(walk)
+                        }
+                        walk(root)
                     } else if p.hasPrefix("glance:") {
                         GlanceVC.tab = GlanceVC.Tab.allCases.first { $0.title.lowercased() == p.dropFirst(7) } ?? .now
                         let g = NSWindow(contentRect: NSRect(origin: NSPoint(x: 1360, y: 200), size: GlanceVC.size), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -1202,6 +1225,39 @@ extension UIShots {
         lists["codex"] = .init(models: [AgentModel(id: "gpt-5.5", name: "gpt-5.5"), AgentModel(id: "gpt-5.5-mini", name: "gpt-5.5-mini")],
                                warning: "mbp cannot list the models: the daemon is older than 0.9. The list is from this Mac.")
         AgentModelBook.shared.seed(lists)
+    }
+
+    /// Shared claude, codex and claude-fast; claude-max, gemini-work, claude-local (only on mbp) and a claude-fast of this Mac.
+    /// One secret on home, set 3 days ago. The claude row is open.
+    func seedSharedAgents() {
+        var r = PROJECTS_CFG.runtime
+        let claudeCommand = r.commands["claude"]
+        r.remove("claude")
+        r.remove("codex")
+        r.add("claude-local", cli: "claude")
+        r.runsOn["claude-local"] = ["mbp"]
+        r.env["claude-local"] = [EnvVar(key: "ANTHROPIC_BASE_URL", value: "http://localhost:4000"), EnvVar(key: "LOG_LEVEL", value: "debug")]
+        r.shareOfferClosed = false
+        PROJECTS_CFG.runtime = r
+        let c = agentCatalog
+        c.now = { Date().addingTimeInterval(-7200) }
+        try? c.save(AgentDef(name: "claude", cli: "claude", command: claudeCommand, model: "claude-opus-5-5", effort: "high", env: [
+            EnvVar(key: "ANTHROPIC_BASE_URL", value: "https://llm-gateway.lan/anthropic"),
+            EnvVar(key: "ANTHROPIC_AUTH_TOKEN", secret: true),
+            EnvVar(key: "OTEL_RESOURCE_ATTRIBUTES", value: "item={KEY}"),
+        ]), scope: .shared)
+        c.machine = { "mini" }
+        c.now = { Date().addingTimeInterval(-86400) }
+        try? c.save(AgentDef(name: "codex", cli: "codex", command: "codex --full-auto"), scope: .shared)
+        try? c.save(AgentDef(name: "claude-fast", cli: "claude", model: "claude-sonnet-5-5", effort: "low"), scope: .shared)
+        try? c.saveAllEnv([EnvVar(key: "GIT_AUTHOR_NAME", value: "OverSire agent")])
+        c.now = Date.init
+        c.machine = { "mbp" }
+        AgentCommandsCard.keys = [AgentSecretKey(scope: AgentSecretRef.shared, agent: "claude", key: "ANTHROPIC_AUTH_TOKEN",
+                                                 setAt: Date().addingTimeInterval(-3 * 86400))]
+        AgentCommandsCard.keysAt = Date().addingTimeInterval(3600)
+        AgentCommandsCard.open = ["shared/claude"]
+        MACHINES.sessions = "mba"
     }
 
     /// session:<frame>: the New panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast, intake, intakeoff, item, itemtoast,
@@ -1604,6 +1660,8 @@ extension MachinesSnapshot {
                                   member("mba", "100.71.4.12", roles: ["serve"], seen: 20, version: "0.3.2"),
                                   member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
         s.health = ["mba": .live, "devbox": .failed("no answer")]
+        s.info?.features = [DaemonInfo.launchEnv, DaemonInfo.agentSecrets]
+        s.features["mba"] = []
         s.latest = "0.4.1"
         s.info?.update = DaemonUpdate(checkedAt: now.addingTimeInterval(-7200), latest: "0.4.1",
                                       error: "update: no write access to /usr/local/bin. Give your user write access to it, or remove /usr/local/bin/oversire and install the CLI again from the OverSire app")

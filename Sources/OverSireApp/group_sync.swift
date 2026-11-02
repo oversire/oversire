@@ -69,6 +69,21 @@ final class GroupSync {
         }
     }
 
+    /// The members of the group, with the home and the Run sessions on machine. No group: this Mac and its daemon.
+    func places(sessions: String?) -> AgentPlaces {
+        let me = selfName
+        let on = sessions ?? me
+        guard let group else {
+            let local = hub.links.first(where: \.local)
+            return AgentPlaces(this: me, home: local?.machine, homeOnline: local.map { hub.isLive($0.machine) } ?? false,
+                               machines: [AgentPlace(name: me, home: local != nil, sessions: true, online: true)])
+        }
+        let home = group.home.rawValue
+        return AgentPlaces(this: me, home: home, homeOnline: hub.isLive(home), machines: group.members.map(\.machine.rawValue).map {
+            AgentPlace(name: $0, home: $0 == home, sessions: $0 == on, online: $0 == me || hub.isLive($0))
+        })
+    }
+
     /// A {"type":"group"} frame: Machines reads the group from the daemons, then it applies.
     func reread() { load(again: true) }
 
