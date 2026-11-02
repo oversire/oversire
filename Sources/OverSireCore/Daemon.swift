@@ -179,11 +179,17 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
     public var update: DaemonUpdate?
+    public var features: [String]?          // launch-env, agent-secrets
     public var listen: Listen
+
+    public static let launchEnv = "launch-env"
+    public static let agentSecrets = "agent-secrets"
+
+    public func has(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 
     public init(machine: MachineName, version: String, contract: Int, roles: [String], runtimes: [ProviderID],
                 harnesses: [HarnessHooks], group: String? = nil, home: MachineName? = nil, device: String? = nil,
-                update: DaemonUpdate? = nil, listen: Listen) {
+                update: DaemonUpdate? = nil, features: [String]? = nil, listen: Listen) {
         self.machine = machine
         self.version = version
         self.contract = contract
@@ -194,6 +200,7 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
         self.home = home
         self.device = device
         self.update = update
+        self.features = features
         self.listen = listen
     }
 }

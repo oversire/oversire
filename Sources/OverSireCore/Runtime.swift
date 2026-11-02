@@ -192,11 +192,14 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
     public var model: String?            // the vendor model id; nil: the CLI default
     public var effort: String?           // low, medium, high, max; nil: the CLI default
     public var profile: String?          // the OverSire agent name, display only; agent stays the base CLI
+    public var env: [String: String]?    // plain env of the agent process
+    public var envSecrets: [String: AgentSecretRef]?   // secret env: the runner gets the values from home
 
     public init(repo: String, item: ItemRef? = nil, name: String? = nil, note: String? = nil, branch: String? = nil,
                 agent: AgentName, prompt: String, environment: String? = nil, command: String? = nil, title: String? = nil,
                 baseBranch: String? = nil, inPlace: Bool? = nil, key: String? = nil,
-                model: String? = nil, effort: String? = nil, profile: String? = nil) {
+                model: String? = nil, effort: String? = nil, profile: String? = nil,
+                env: [String: String]? = nil, envSecrets: [String: AgentSecretRef]? = nil) {
         self.repo = repo
         self.item = item
         self.name = name
@@ -213,6 +216,8 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
         self.model = model
         self.effort = effort
         self.profile = profile
+        self.env = env
+        self.envSecrets = envSecrets
     }
 
     public var workspaceName: String? { name ?? item?.key }

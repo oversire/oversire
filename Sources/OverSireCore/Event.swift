@@ -207,6 +207,9 @@ extension Event {
         public static let runbookStepEnded: Kind = "runbook.step_ended"
         public static let jobRan: Kind = "job.ran"
         public static let automationRan: Kind = "automation.ran"
+        public static let agentChanged: Kind = "agent.changed"
+        public static let secretSet: Kind = "secret.set"
+        public static let secretResolved: Kind = "secret.resolved"
     }
 
     /// The answer of GET /v1/items/{key}/events (event.json EventPage).
