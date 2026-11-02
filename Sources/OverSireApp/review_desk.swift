@@ -88,6 +88,17 @@ final class ReviewDesk {
     var editing: String?
     var unfolded: Set<String> = []
     var view = FileView.saved { didSet { FileView.saved = view } }
+    /// Long diff lines wrap. Off by default: the diff scrolls horizontally (OVERSIRE-392). One choice for all reviews, kept across launches.
+    var wrap: Bool {
+        get { Self.wraps }
+        set {
+            Self.wraps = newValue
+            if !UIShots.shooting { UserDefaults.standard.set(newValue, forKey: "review.wrap") }
+        }
+    }
+    /// The diff scrolls horizontally: a unified diff with no wrap.
+    var scrolls: Bool { !wrap && !split }
+    private static var wraps = !UIShots.shooting && UserDefaults.standard.bool(forKey: "review.wrap")
     var filter = FileFilter()
     var collapsed: Set<String> = []
     /// The comment to scroll to after the next build of the diff.

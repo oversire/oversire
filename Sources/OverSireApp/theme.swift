@@ -21,6 +21,7 @@ enum Palette {
     static let intake = pair(0xB98AD6, 0x8A55AE)
     static let term = pair(0x0F1013, 0xFBFBFC)
     static let termFg = pair(0xD9DBE0, 0x1E2024)
+    static let codeType = pair(0xE6D45A, 0x7A6A00)   // types in the diff (OVERSIRE-392)
 
     static func isDark(_ a: NSAppearance) -> Bool { a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
 

@@ -1068,7 +1068,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         // journey:full, folded, noai (Status recap) or timeline, real, tip-mark, tip-bar, tip-cut: uishots_journey.swift.
                         self.journeyState(String(p.dropFirst(8)), in: w)
                     } else if p.hasPrefix("review:") {
-                        // review:list, changes, split, plan, submit, approve, merge, conflict or empty: the samples of uishots_review.swift.
+                        // review:list, changes, split, wrap, plan, submit, approve, merge, conflict or empty: the samples of uishots_review.swift.
                         self.reviewState(String(p.dropFirst(7)), in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)

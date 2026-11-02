@@ -57,9 +57,13 @@ final class DiffGutter: NSView {
 
 /// A diff line that shows a "+" on hover. A click on the "+" starts a comment on the line.
 /// The keyboard path is the line number (`DiffGutter`), so the "+" is not an accessibility element.
+/// One line at a time shows its "+". A scroll moves the lines under a still mouse, and AppKit does not always
+/// send `mouseExited` then, so the line under the mouse is found again after each scroll (OVERSIRE-392).
 final class DiffLineBox: Box {
     private var plus: NSView?
     private var tracking: NSTrackingArea?
+    private static weak var hovered: DiffLineBox?
+    private static var scrolled: NSObjectProtocol?
 
     func addPlus(at anchor: NSView, onPick: @escaping (_ shift: Bool) -> Void) {
         let p = PlusMark(onPick)
@@ -80,10 +84,27 @@ final class DiffLineBox: Box {
         }
         super.updateTrackingAreas()
     }
-    override func mouseEntered(with event: NSEvent) { plus?.isHidden = false }
+    override func mouseEntered(with event: NSEvent) { Self.hover(self) }
+    override func mouseExited(with event: NSEvent) { if Self.hovered === self { Self.hover(nil) } }
     /// For `--uishots`: the hover look with no mouse.
     func showPlus() { plus?.isHidden = false }
-    override func mouseExited(with event: NSEvent) { plus?.isHidden = true }
+
+    private static func hover(_ box: DiffLineBox?) {
+        guard hovered !== box else { return }
+        hovered?.plus?.isHidden = true
+        hovered = box
+        box?.plus?.isHidden = false
+        if let scrolled { NotificationCenter.default.removeObserver(scrolled) }
+        scrolled = nil
+        guard let clip = box?.enclosingScrollView?.contentView else { return }
+        clip.postsBoundsChangedNotifications = true
+        scrolled = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak clip] _ in
+            guard let window = clip?.window else { hover(nil); return }
+            var v = window.contentView?.hitTest(window.mouseLocationOutsideOfEventStream)
+            while let x = v, !(x is DiffLineBox) { v = x.superview }
+            hover(v as? DiffLineBox)
+        }
+    }
 
     private final class PlusMark: Box {
         private let onPick: (_ shift: Bool) -> Void
@@ -206,7 +227,7 @@ final class ReviewChangesTab {
             pane.side.set(header: p.head, body: p.body(), place: "files")
             if let file {
                 let (head, body) = self.diffPanel(desk, file: file, diff: diff, threads: t)
-                pane.main.set(header: head, body: body, place: file.id)
+                pane.main.set(header: head, body: body, place: file.id, wide: desk.scrolls)
             } else {
                 pane.main.set(header: nil, body: EmptyNote("No changed files."), place: "")
             }
@@ -217,7 +238,7 @@ final class ReviewChangesTab {
             }
         }
         out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos,
-                           desk.filter, desk.view, desk.collapsed, desk.reveal, update: fill) {
+                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, update: fill) {
             let pane = TwoPane(sideWidth: 300, keep: "changes")
             fill(pane)
             return pane
@@ -326,14 +347,21 @@ final class ReviewChangesTab {
             desk.split = i == 1
             self?.reload()
         }
+        let wrap = ToggleChip("Wrap", on: desk.wrap, icon: desk.wrap ? nil : Glyph("arrow.turn.down.left", color: Palette.mut, size: 10)) { [weak self] in
+            desk.wrap.toggle()
+            self?.reload()
+        }
+        wrap.setAccessibilityLabel("Wrap long lines")
         let viewed = CheckBox("Viewed", on: f.viewed, label: "Mark \(f.path) as viewed") { on in Task { _ = await desk.setViewed(f, on) } }
+        wrap.toolTip = desk.wrap ? "Long lines wrap. Click to keep each line on one row." : "Long lines scroll. Click to wrap them."
+        [wrap, viewed].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
         var parts: [NSView] = [NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: Self.color(f.status), mono: true), pathField, Spacer()]
         if let n = desk.pendingByFile[f.id] {
             let chip = Chiplet("\(n) pending", symbol: "text.bubble", color: Palette.warn)
             chip.setAccessibilityLabel("\(n) pending comment\(n == 1 ? "" : "s") in this file")
             parts.append(chip)
         }
-        let head = NSStackView(h: parts + [mode, viewed], spacing: 8)
+        let head = NSStackView(h: parts + [wrap, mode, viewed], spacing: 8)
         head.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         let body = NSStackView(v: [], spacing: 0)
         body.alignment = .leading
@@ -353,9 +381,16 @@ final class ReviewChangesTab {
         if diff.hunks.isEmpty { note("No line changes.") }
         let notes = desk.comments(in: f)
         let marks = Self.marks(notes)
+        let language = SyntaxLanguage.of(f.path)
         var shown = 0
         for h in diff.hunks {
             guard shown < Self.lineLimit else { break }
+            var colors: [Place: [SyntaxLanguage.Token]] = [:]
+            if let language {
+                for (l, t) in zip(h.lines, language.tokens(of: h.lines)) {
+                    if let p = LinePick.place(l) { colors[Place(side: p.side, line: p.line)] = t }
+                }
+            }
             let range = "@@ −\(h.oldStart),\(h.oldLines) +\(h.newStart),\(h.newLines) @@" + (h.header.isEmpty ? "" : " " + h.header)
             let hl = NSTextField.text(range, size: 11, color: Palette.acc, mono: true)
             let hv = Box(fill: Palette.acc.withAlphaComponent(0.08), border: nil, radius: 0)
@@ -367,7 +402,7 @@ final class ReviewChangesTab {
             body.addFull(hv)
             if desk.split {
                 for (l, r) in Self.pairs(h.lines) {
-                    body.addFull(splitRow(desk, file: f, marks, l, r))
+                    body.addFull(splitRow(desk, file: f, marks, colors, l, r))
                     shown += 1
                     for p in (l == r ? [l] : [l, r]).compactMap({ $0.flatMap(LinePick.place) }) {
                         after(p, desk: desk, file: f, notes: notes, threads: t, into: body)
@@ -375,7 +410,7 @@ final class ReviewChangesTab {
                 }
             } else {
                 for l in h.lines {
-                    body.addFull(unifiedRow(desk, file: f, marks, l))
+                    body.addFull(unifiedRow(desk, file: f, marks, colors, l))
                     shown += 1
                     if let p = LinePick.place(l) { after(p, desk: desk, file: f, notes: notes, threads: t, into: body) }
                 }
@@ -417,7 +452,7 @@ final class ReviewChangesTab {
         guard !parts.isEmpty else { return }
         let s = NSStackView(v: parts, spacing: 6)
         s.edgeInsets = NSEdgeInsets(top: 6, left: 40, bottom: 8, right: 12)
-        body.addFull(s)
+        if desk.scrolls { body.addArrangedSubview(ViewportWidth(s)) } else { body.addFull(s) }
     }
 
     private func picked(_ desk: ReviewDesk, _ f: ReviewFile, _ p: (side: ReviewAnchor.Side, line: Int)) -> Bool {
@@ -451,7 +486,10 @@ final class ReviewChangesTab {
         }
     }
 
-    private func line(_ desk: ReviewDesk, _ f: ReviewFile, _ l: DiffLine?, gutters: [NSView]) -> NSView {
+    /// The longest text that a line shows with no wrap. A very long line (minified code) would make a huge view.
+    static let nowrapLimit = 1000
+
+    private func line(_ desk: ReviewDesk, _ f: ReviewFile, _ l: DiffLine?, tokens: [SyntaxLanguage.Token], gutters: [NSView]) -> NSView {
         guard let l else {
             let empty = Box(fill: Palette.raise.withAlphaComponent(0.5), border: nil, radius: 0)
             empty.heightAnchor.constraint(equalToConstant: 18).isActive = true
@@ -463,10 +501,15 @@ final class ReviewChangesTab {
         let box = DiffLineBox(fill: fill, border: nil, radius: 0)
         let markField = NSTextField.text(m, size: 11.5, weight: .bold, color: color ?? Palette.dim, mono: true)
         markField.setAccessibilityLabel(l.kind == .add ? "added" : l.kind == .del ? "removed" : "")
-        let text = NSTextField.text(l.text.isEmpty ? " " : l.text, size: 11.5, color: Palette.fg, lines: 0, mono: true)
-        text.lineBreakMode = .byCharWrapping
-        text.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        // The text takes the free width, so it wraps at the edge of the card.
+        var shown = l.text.isEmpty ? " " : l.text
+        if !desk.wrap, shown.utf16.count > Self.nowrapLimit { shown = String(shown.prefix(Self.nowrapLimit)) + " …" }
+        let text = NSTextField.text("", size: 11.5, lines: desk.wrap ? 0 : 1, mono: true)
+        text.lineBreakMode = desk.wrap ? .byCharWrapping : .byClipping
+        text.attributedStringValue = SyntaxLanguage.styled(shown, tokens: tokens, font: text.font ?? .monospacedSystemFont(ofSize: 11.5, weight: .regular), wraps: desk.wrap)
+        // With wrap, the text takes the free width and wraps at the edge of the card. A unified diff with no wrap keeps the full width
+        // and scrolls. A split diff with no wrap clips each side at its column, so both sides stay in sight.
+        text.setContentCompressionResistancePriority(desk.scrolls ? .required : .init(1), for: .horizontal)
+        if !desk.wrap, desk.split { text.toolTip = l.text }
         text.setContentHuggingPriority(.init(1), for: .horizontal)
         let s = NSStackView(h: gutters + [markField, text], spacing: 4)
         s.alignment = .top
@@ -483,7 +526,7 @@ final class ReviewChangesTab {
     }
 
     /// The old and the new number. The number of the side that a comment takes is the button.
-    private func unifiedRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ l: DiffLine) -> NSView {
+    private func unifiedRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ colors: [Place: [SyntaxLanguage.Token]], _ l: DiffLine) -> NSView {
         func plain(_ n: Int?) -> NSView {
             let t = NSTextField.text(n.map(String.init) ?? "", size: 11, color: Palette.dim, mono: true)
             t.alignment = .right
@@ -495,12 +538,18 @@ final class ReviewChangesTab {
         let numbers = l.kind == .del
             ? [gutter(desk, f, marks, l, text: l.old.map(String.init) ?? "", width: 40), plain(nil)]
             : [plain(l.old), gutter(desk, f, marks, l, text: l.new.map(String.init) ?? "", width: 40)]
-        return line(desk, f, l, gutters: numbers)
+        return line(desk, f, l, tokens: Self.tokens(colors, l), gutters: numbers)
     }
 
-    private func splitRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ l: DiffLine?, _ r: DiffLine?) -> NSView {
-        let left = line(desk, f, l, gutters: l.map { [gutter(desk, f, marks, $0, text: $0.old.map(String.init) ?? $0.new.map(String.init) ?? "", width: 40)] } ?? [])
-        let right = line(desk, f, r, gutters: r.map { [gutter(desk, f, marks, $0, text: $0.new.map(String.init) ?? "", width: 40)] } ?? [])
+    private static func tokens(_ colors: [Place: [SyntaxLanguage.Token]], _ l: DiffLine?) -> [SyntaxLanguage.Token] {
+        guard let l, let p = LinePick.place(l) else { return [] }
+        return colors[Place(side: p.side, line: p.line)] ?? []
+    }
+
+    private func splitRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ colors: [Place: [SyntaxLanguage.Token]],
+                          _ l: DiffLine?, _ r: DiffLine?) -> NSView {
+        let left = line(desk, f, l, tokens: Self.tokens(colors, l), gutters: l.map { [gutter(desk, f, marks, $0, text: $0.old.map(String.init) ?? $0.new.map(String.init) ?? "", width: 40)] } ?? [])
+        let right = line(desk, f, r, tokens: Self.tokens(colors, r), gutters: r.map { [gutter(desk, f, marks, $0, text: $0.new.map(String.init) ?? "", width: 40)] } ?? [])
         let rule = Box(fill: Palette.line, border: nil, radius: 0)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         let h = NSStackView(h: [left, rule, right], spacing: 0)

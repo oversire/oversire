@@ -1614,6 +1614,13 @@ final class ScrollCard: Box {
     private let rule = Box(fill: Palette.line, border: nil, radius: 0)
     private let doc = Flipped()
     private var place: String?
+    private lazy var fixed = doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
+    private lazy var fit: NSLayoutConstraint = {
+        let c = doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
+        c.priority = .defaultHigh
+        return c
+    }()
+    private lazy var least = doc.widthAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.widthAnchor)
 
     init(keep: String) {
         super.init(fill: Palette.panel, border: Palette.line, radius: 10)
@@ -1635,26 +1642,33 @@ final class ScrollCard: Box {
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.topAnchor.constraint(equalTo: rule.bottomAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
             doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            fixed,
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
     /// The same header view stays in place, so a search field in it keeps the focus.
-    func set(header: NSView?, body: NSView, place: String) {
+    /// A `wide` body can be wider than the card. It then scrolls horizontally.
+    func set(header: NSView?, body: NSView, place: String, wide: Bool = false) {
         if header == nil || header?.superview !== head {
             head.subviews.forEach { $0.removeFromSuperview() }
             if let header { Self.pin(header, in: head) }
         }
         rule.isHidden = header == nil
-        let y = scroll.contentView.bounds.origin.y
+        let at = scroll.contentView.bounds.origin
         doc.subviews.forEach { $0.removeFromSuperview() }
+        if wide != fit.isActive {
+            NSLayoutConstraint.deactivate(wide ? [fixed] : [fit, least])
+            NSLayoutConstraint.activate(wide ? [fit, least] : [fixed])
+            scroll.hasHorizontalScroller = wide
+        }
         Self.pin(body, in: doc)
         SidePane.fitLabels(doc)
         layoutSubtreeIfNeeded()
-        let keepY = place == self.place ? y : 0
+        let keep = place == self.place ? at : .zero
         self.place = place
-        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(keepY, max(0, doc.frame.height - scroll.contentView.bounds.height))))
+        scroll.contentView.scroll(to: NSPoint(x: wide ? min(keep.x, max(0, doc.frame.width - scroll.contentView.bounds.width)) : 0,
+                                              y: min(keep.y, max(0, doc.frame.height - scroll.contentView.bounds.height))))
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 
@@ -1685,6 +1699,30 @@ final class ScrollCard: Box {
     override func layout() {
         super.layout()
         if SidePane.fitLabels(doc) { doc.needsLayout = true }
+    }
+}
+
+/// A view in a wide `ScrollCard` body that keeps the width of the visible card, such as a comment thread beside long code lines.
+final class ViewportWidth: NSView {
+    private var width: NSLayoutConstraint?
+
+    init(_ content: NSView) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor), content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor), content.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        width?.isActive = false
+        width = enclosingScrollView.map { widthAnchor.constraint(equalTo: $0.contentView.widthAnchor) }
+        width?.isActive = true
     }
 }
 

@@ -6,7 +6,7 @@ import OverSireCore
 // so the samples go straight into REVIEWS, with no daemon reads.
 
 extension UIShots {
-    /// review:list, changes, split, plan, submit, approve, merge, conflict or empty.
+    /// review:list, changes, split, wrap, plan, submit, approve, merge, conflict or empty.
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         Self.seedReviews(empty: scene == "empty")
@@ -16,6 +16,7 @@ extension UIShots {
             return
         }
         code.split = scene == "split"
+        code.wrap = scene == "wrap"
         code.view = scene == "files" ? .list : .tree
         if scene == "search" { code.filter.query = "review" }
         if scene == "filters" {
@@ -25,7 +26,7 @@ extension UIShots {
         code.pick = scene == "changes" ? LinePick(repo: "oversire", path: "Sources/OverSireApp/review_tab.swift", side: .new, line: 41).click(43, side: .new, shift: true) : nil
         plan.block = scene == "plan" ? "risks" : nil
         switch scene {
-        case "changes", "split", "files", "search", "filters": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters": w.router.go(.item("FRITZ-17", .changes))
         case "pending", "hover":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -131,7 +132,7 @@ extension UIShots {
                 DiffLine(kind: .ctx, old: 31, new: 38, text: "    func view(size: CGFloat = 12.5) -> NSTextField {"),
                 DiffLine(kind: .del, old: 32, text: "        NSTextField.text(glyph, size: size, color: color)"),
                 DiffLine(kind: .add, new: 39, text: "        let f = NSTextField.text(glyph, size: size, weight: .bold, color: color)"),
-                DiffLine(kind: .add, new: 40, text: "        f.setAccessibilityLabel(word)"),
+                DiffLine(kind: .add, new: 40, text: "        f.setAccessibilityLabel(word) // The word reads the state, so color is never the only signal. A long line shows the wrap toggle."),
                 DiffLine(kind: .add, new: 41, text: "        return f"),
                 DiffLine(kind: .ctx, old: 33, new: 42, text: "    }"),
                 DiffLine(kind: .add, new: 43, text: ""),
