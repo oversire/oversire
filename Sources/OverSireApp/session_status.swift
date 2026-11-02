@@ -164,8 +164,8 @@ final class StatusJob {
         self.queue = queue
         load()
         agents.blocked = { [weak self] key, a in
-            guard let s = self?.status(key) else { return false }
-            return s.state == .blocked && s.message == a.messageHash
+            guard let self, let s = self.status(key) else { return false }
+            return s.state == .blocked && s.message == a.messageHash && !self.itemDone(key)
         }
     }
 
@@ -185,10 +185,15 @@ final class StatusJob {
         return statuses.first { $0.key == k }
     }
 
-    /// Why the status is older than the screen, or nil while it holds.
+    /// True when the tracker item is Completed or Cancelled, and its sub-items are closed.
+    private func itemDone(_ key: String) -> Bool { agents.tracked(key) && !agents.open(key) }
+
+    /// Why the status is older than the screen or the item, or nil while it holds.
     func outOfDate(_ s: SessionStatus) -> String? {
         let clock = DateFormatter()
         clock.dateFormat = "HH:mm"
+        // The status job does not read a done item again, so only "Looks done" holds.
+        if s.state != .done, itemDone(s.key) { return "Out of date: the item is done" }
         guard let st = agents.state(s.key) else { return "Session closed" }
         if let w = agents.watch(s.key), let screen = s.screen, w.fingerprint != screen {
             return "Out of date: the screen changed at \(clock.string(from: w.changedAt))"

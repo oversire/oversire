@@ -147,6 +147,14 @@ final class StatusJobTests: XCTestCase {
         XCTAssertEqual(agents.state("A-1"), .blocked, "the status feeds the session state")
         XCTAssertEqual(job.blocking.map(\.key), ["A-1"])
 
+        agents.tracked = { _ in true }
+        agents.open = { _ in false }
+        XCTAssertEqual(job.outOfDate(s!), "Out of date: the item is done", "the user closed the item after the read")
+        XCTAssertNotEqual(agents.state("A-1"), .blocked)
+        XCTAssertTrue(job.blocking.isEmpty)
+        XCTAssertNotEqual(job.item("A-1")?.text, "Blocked on you")
+        agents.open = { _ in true }
+
         job.toggle(s!.id, step: 1)
         XCTAssertEqual(job.status("A-1")?.report, "Manual check: 1 of 2 pass.\n- [ ] Take a capture on 2 displays\n- [x] Send it to Orca")
         job.snooze(s!.id)
