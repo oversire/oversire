@@ -266,6 +266,14 @@ final class RowCommander {
             go(.item(found.item.key, .overview))
             return
         }
+        if case .status(let itemId, let optionId) = c, let key = store.item(itemId)?.item.key {
+            let window = anchor?.window
+            CloseGuard(actions: data.actions, store: store).setStatus(key: key, status: optionId, in: window) { r in
+                if case .ok = r { return }
+                AlertConfirm.tell("Set status did not work", info: r.summary, in: window)
+            }
+            return
+        }
         if let (id, args) = c.action(key: { store.item($0)?.item.key }) {
             data.actions.click(id, args, in: anchor?.window)
             return

@@ -702,7 +702,11 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
             }
             return
         case "assignees": run("item.assign", ["key": key, "people": .array(toggled(options?.members ?? [], found.item.assignees).map(JSONValue.string))], done)
-        case "state": run("item.setStatus", ["key": key, "status": .string(value)], done)
+        case "state":
+            guard let actions = (NSApp.delegate as? AppData)?.actions else { done(false, "The app is closing."); return }
+            CloseGuard(actions: actions, store: store).setStatus(key: found.item.key, status: value, in: window) { r in
+                if case .ok = r { done(true, nil) } else { done(false, r.summary) }
+            }
         case "priority": run("item.setPriority", ["key": key, "priority": .string(value)], done)
         default: done(true, nil)
         }

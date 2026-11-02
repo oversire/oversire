@@ -1070,6 +1070,13 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("review:") {
                         // review:list, changes, split, wrap, plan, submit, approve, merge, conflict or empty: the samples of uishots_review.swift.
                         self.reviewState(String(p.dropFirst(7)), in: w)
+                    } else if p.hasPrefix("close-guard:") {
+                        // close-guard:<KEY>: the item page with the dialog of a close with 3 open sub-items (OVERSIRE-396).
+                        let k = String(p.dropFirst(12)).uppercased()
+                        w.router.go(.item(k, .overview))
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            AlertConfirm.show(CloseGuard.spec(key: k, state: "Done", open: 3), in: w.window)
+                        }
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {
@@ -1083,7 +1090,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:"), let s = w.window?.attachedSheet { w.window?.endSheet(s) }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }

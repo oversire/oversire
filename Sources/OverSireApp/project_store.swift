@@ -266,7 +266,9 @@ final class ProjectStore {
         publish(DataChange(.projects, origin: .user))
     }
 
-    func setStatus(itemId: String, optionId: String, done: @escaping (Bool) -> Void) {
+    /// Refuses to close a parent with open sub-items, unless `force` (OVERSIRE-396).
+    func setStatus(itemId: String, optionId: String, force: Bool = false, done: @escaping (Bool) -> Void) {
+        if !force, refusesClose(itemId, to: optionId) { done(false); return }
         let before = item(itemId)
         let done = { (ok: Bool) in
             if ok, let b = before { EVENTS.stateSet(b.item, in: b.snap, to: optionId) }
@@ -280,6 +282,7 @@ final class ProjectStore {
     func tracker(of p: ProjectRef) -> (any Tracker)? { trackers.tracker(p.workspace) }
 
     func update(itemId: String, _ patch: ItemPatch, failure: String, done: @escaping (Bool) -> Void) {
+        if refusesClose(itemId, to: patch.status) { done(false); return }
         write(itemId, failure: failure, done: done) { c, ref in
             try await c.update(ref, patch)
         }
@@ -430,6 +433,19 @@ final class ProjectStore {
     }
 
     // Runs one change off the main queue, then reloads the project. A change made here is not news.
+    /// True, with `lastError` set, when the state closes an item that has open sub-items.
+    private func refusesClose(_ itemId: String, to stateId: String?) -> Bool {
+        guard let stateId, let found = item(itemId) else { return false }
+        let n = found.snap.blockingSubItems(found.item, to: stateId)
+        guard n > 0 else { return false }
+        lastError = Self.openSubItemsReason(found.item.key, n)
+        return true
+    }
+
+    static func openSubItemsReason(_ key: String, _ n: Int) -> String {
+        "\(key) has \(n) open sub-item\(n == 1 ? "" : "s"). Close \(n == 1 ? "it" : "them") first."
+    }
+
     private func write(_ itemId: String, failure: String?, done: @escaping (Bool) -> Void,
                        _ op: @escaping @Sendable (any Tracker, ItemRef) async throws -> Void) {
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),

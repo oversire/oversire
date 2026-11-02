@@ -13,14 +13,22 @@ struct ItemActions {
     var specs: [ActionSpec] {
         let link = link
         return [
-            ActionSpec(id: "item.setStatus", title: "Set status", help: "Sets the status of an item. Give the status name or id.", kind: .change,
-                       input: ActionSpec.args(["key": Self.key, "status": ("string", "The status name, for example In Progress.")], required: ["key", "status"])) { a in
+            ActionSpec(id: "item.setStatus", title: "Set status", help: "Sets the status of an item. Give the status name or id. "
+                           + "A parent with open sub-items does not close without `force`.", kind: .change,
+                       input: ActionSpec.args(["key": Self.key, "status": ("string", "The status name, for example In Progress."),
+                                               "force": ("boolean", "True closes a parent that has open sub-items.")], required: ["key", "status"])) { a in
                 await link.item(a) { d, f, done in
                     guard let o = f.snap.statusOptions.find(a.string("status") ?? "") else {
                         done(.notAllowed("\(f.snap.summary.identifier) has no status \(a.string("status") ?? ""). It has: \(f.snap.statusOptions.names)."))
                         return
                     }
-                    d.projectStore.setStatus(itemId: f.item.id, optionId: o.id) { done(ActionLink.stored(d, $0, "\(f.item.key) is \(o.name).")) }
+                    let force = a.bool("force") ?? false
+                    let n = f.snap.blockingSubItems(f.item, to: o.id)
+                    guard force || n == 0 else {
+                        done(.notAllowed(ProjectStore.openSubItemsReason(f.item.key, n) + " Use item.closeSubItems, or set force to true."))
+                        return
+                    }
+                    d.projectStore.setStatus(itemId: f.item.id, optionId: o.id, force: force) { done(ActionLink.stored(d, $0, "\(f.item.key) is \(o.name).")) }
                 }
             },
             ActionSpec(id: "item.setPriority", title: "Set priority", help: "Sets the priority of an item. Give the priority name or id.", kind: .change,

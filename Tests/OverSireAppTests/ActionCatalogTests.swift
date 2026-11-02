@@ -118,6 +118,21 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(action, .notAllowed("No action no.such."))
     }
 
+    func testSetStatusRefusesAParentWithOpenSubItems() async {
+        let d = seeded()
+        let snap = d.projectStore.snapshots.values.first!
+        let child = Item(id: "i9", key: "SLING-9", title: "Child", url: "", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
+                         author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false,
+                         parentId: "i1")
+        d.projectStore.seed(ProjectSnapshot(summary: snap.summary, statusOptions: snap.statusOptions, items: snap.items + [child], fetchedAt: Date()))
+        let r = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Done")])))
+        XCTAssertEqual(r, .notAllowed("SLING-1 has 1 open sub-item. Close it first. Use item.closeSubItems, or set force to true."))
+        let forced = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Done"), "force": .bool(true)])))
+        if case .notAllowed = forced { XCTFail("force passes the check: \(forced)") }
+        let open = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Todo")])))
+        if case .notAllowed = open { XCTFail("an open state passes the check: \(open)") }
+    }
+
     func testPageActionsMapToSpecs() {
         let catalog = TestAppData().actions
         let pr: [ChangeAction] = [.approve(nil), .approve("ok"), .requestChanges("fix"), .comment("hi"), .merge(.rebase), .close]

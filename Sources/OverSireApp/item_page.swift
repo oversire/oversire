@@ -546,7 +546,11 @@ final class ItemPage: Page, NSTextFieldDelegate {
         saving = what
         note = nil
         reload()
-        data.actions.run(action, ["key": .string(key), what == "status" ? "status" : "priority": .string(option)]) { [weak self] in self?.saved($0) }
+        if what == "status" {
+            CloseGuard(actions: data.actions, store: data.projectStore).setStatus(key: key, status: option, in: view.window) { [weak self] in self?.saved($0) }
+            return
+        }
+        data.actions.run(action, ["key": .string(key), "priority": .string(option)]) { [weak self] in self?.saved($0) }
     }
 
     // MARK: Overview

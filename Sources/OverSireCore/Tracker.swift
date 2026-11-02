@@ -296,6 +296,9 @@ public struct ProjectSnapshot: Codable, Sendable {
     /// No sub-item at any level is open. A parent must not close before this is true.
     public func canClose(_ item: Item) -> Bool { openSubItems(of: item.id) == 0 }
 
+    /// The open sub-items that block a change of the item to the state. 0 when the state is open.
+    public func blockingSubItems(_ item: Item, to stateId: String?) -> Int { isClosed(stateId) ? openSubItems(of: item.id) : 0 }
+
     /// The state of the list group that shows the item. A Done item with open sub-items shows with the first started state.
     public func listStateId(_ item: Item) -> String? {
         guard isDoneWithOpenSubItems(item), let s = firstState(group: "started", else: .progress) else { return item.statusOptionId }

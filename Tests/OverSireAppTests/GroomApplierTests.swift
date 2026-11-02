@@ -72,6 +72,15 @@ final class GroomApplierTests: XCTestCase {
         XCTAssertEqual(fake.triages.filter { if case .duplicate = $0.action { return true } else { return false } }.count, 1)
     }
 
+    func testDoneSkipsAParentWithOpenSubItems() async throws {
+        refs["FAKE-7"] = try await fake.create(ItemDraft(title: "Child", parent: refs["FAKE-4"]!.id), in: fake.project)
+        let line = P(kind: .done, keys: ["FAKE-4"], reason: "Shipped.")
+        let out = try await applier().apply([line])
+        XCTAssertEqual(out.failed[line.id], "FAKE-4 has 1 open sub-item. Close it first.")
+        let s = try await item("FAKE-4").statusOptionId
+        XCTAssertEqual(s, "s-todo")
+    }
+
     func testEachKind() async throws {
         let lines = [P(kind: .done, keys: ["FAKE-4"], reason: "The ring shows.", evidence: ["a41f9c2"]),
                      P(kind: .obsolete, keys: ["FAKE-3"], reason: "No remote Orca."),

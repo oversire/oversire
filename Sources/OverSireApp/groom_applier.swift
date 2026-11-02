@@ -170,6 +170,10 @@ struct GroomApplier {
             pending.remove(i.id)
         } else {
             guard let state else { throw ProviderError.vendor(code: "groom", message: "The project has no closed state.") }
+            if let item = snapshot.items.first(where: { $0.id == t.ref.id }) {
+                let n = snapshot.blockingSubItems(item, to: state)
+                if n > 0 { throw ProviderError.vendor(code: "groom", message: ProjectStore.openSubItemsReason(item.key, n)) }
+            }
             let old = try await tracker.detail(t.ref).item.statusOptionId
             guard old != state else { return }
             e.status = old
