@@ -132,6 +132,17 @@ final class EventDesk: @unchecked Sendable {
                          actor: actor, onBehalf: email(), via: via, summary: summary, payload: payload)])
     }
 
+    /// ParentGuard moved a Done parent with open sub-items back to an open state (OVERSIRE-397).
+    func reopened(_ i: Item, in snap: ProjectSnapshot, to optionId: String, open n: Int) {
+        guard let to = snap.option(optionId) else { return }
+        var p: [String: JSONValue] = ["to": .string(to.name), "reason": .string("open-sub-items")]
+        let from = snap.statusName(i.statusOptionId)
+        if let from { p["from"] = .string(from) }
+        if let g = to.group { p["group"] = .string(g) }
+        system(.itemStateChanged, item: i.key, project: snap.summary.identifier, actor: "parent-guard", verb: "reopen",
+               "\(from ?? "None") → \(to.name): \(n) sub-item\(n == 1 ? " is" : "s are") open", payload: p)
+    }
+
     /// You opened an item page or acted on an item. At most one row each 10 min for each item.
     func viewed(_ key: String, page: String) {
         let k = key.uppercased(), at = now()

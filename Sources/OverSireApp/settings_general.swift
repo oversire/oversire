@@ -86,6 +86,8 @@ extension SettingsPage {
                 PROJECTS_CFG.showSubItems = $0
                 self?.app?.applyProjectSelection()
             },
+            SwitchRow("Reopen a Done parent with open sub-items", note: "Moves it back to its last open state, with a comment. One time for each close.",
+                      on: PROJECTS_CFG.reopenOpenParents) { PROJECTS_CFG.reopenOpenParents = $0 },
         ]
     }
 

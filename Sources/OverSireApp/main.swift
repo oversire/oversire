@@ -125,6 +125,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         w.onError = { log.error("\($0)") }
         return w
     }()
+    lazy var parentGuard: ParentGuard = {
+        let g = ParentGuard(path: PARENT_GUARD_PATH, store: projectStore)
+        g.onError = { log.error("\($0)") }
+        return g
+    }()
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
     lazy var groomAgent: GroomAgent = {
         let g = GroomAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, queue: queue, enhance: enhanceAgent,
@@ -939,6 +944,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         enhanceAgent.mayAct = may
         cleaner.mayAct = may
         writeBack.mayAct = may
+        parentGuard.mayAct = may
         sessions.mayAct = may
         ciAssist.mayAct = may
         itemSummaries.mayAct = may
@@ -985,6 +991,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             ciAssist.makeDigest(facts: CIAssist.digestFacts(runs: grouped, agents: Array(agentIndex.agents.values), queued: queue.count, intake: intake))
         }
         writeBack.sync(Array(workstreams.streams.values))
+        parentGuard.check(Array(projectStore.snapshots.values))
         var c = change ?? DataChange([], origin: origin)
         let runs = RunDiff.repos(postedRuns, grouped), prs = RunDiff.repos(postedPRs, prGrouped)
         postedRuns = grouped

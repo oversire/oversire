@@ -8,6 +8,7 @@ When you use OverSire on two or more Macs of one group, only one app runs the au
 - **Enhance vague items**: the auto start of Enhance on a new intake item.
 - **Cleanup**: the automatic removal of done worktrees.
 - **Plane write-back**: the status, the session comment and the PR links that OverSire writes to Plane.
+- **Parent guard**: a Done parent with open sub-items goes back to its last open state, with one comment (Settings › General). The guard does this one time for each close. If you close the parent again, it stays Done.
 - **AI jobs**: item summaries, the CI failure reason, the CI digest and the session status.
 
 An action that you start with a click runs on the Mac where you click. A click is never an automatic action.

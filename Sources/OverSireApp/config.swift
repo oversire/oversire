@@ -229,6 +229,7 @@ struct ProjectsConfig: Codable {
     var itemsPerProject = 10          // 0 = all
     var hideDoneAfterDays = 1         // 0 = never hide, -1 = always hide
     var showSubItems = false          // also list sub-items as rows. An open item always shows its sub-items
+    var reopenOpenParents = true      // ParentGuard: a Done parent with open sub-items goes back to an open state
     var defaultView = ProjectView.board
     var menuDot = true
     var showTab = true
@@ -257,6 +258,7 @@ struct ProjectsConfig: Codable {
         itemsPerProject = try c.decodeIfPresent(Int.self, forKey: .itemsPerProject) ?? 10
         hideDoneAfterDays = try c.decodeIfPresent(Int.self, forKey: .hideDoneAfterDays) ?? 1
         showSubItems = try c.decodeIfPresent(Bool.self, forKey: .showSubItems) ?? false
+        reopenOpenParents = try c.decodeIfPresent(Bool.self, forKey: .reopenOpenParents) ?? true
         defaultView = try c.decodeIfPresent(ProjectView.self, forKey: .defaultView) ?? .board
         menuDot = try c.decodeIfPresent(Bool.self, forKey: .menuDot) ?? true
         showTab = try c.decodeIfPresent(Bool.self, forKey: .showTab) ?? true
@@ -957,6 +959,7 @@ let PROJECT_CACHE_PATH = (CONFIG_DIR as NSString).appendingPathComponent("plane-
 let PROJECT_STATE_PATH = (CONFIG_DIR as NSString).appendingPathComponent("plane-state.json")
 let QUEUE_PATH = (CONFIG_DIR as NSString).appendingPathComponent("queue.json")
 let WRITEBACK_PATH = (CONFIG_DIR as NSString).appendingPathComponent("writeback.json")
+let PARENT_GUARD_PATH = (CONFIG_DIR as NSString).appendingPathComponent("parent-guard.json")
 let STATUS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("session-status.json")
 let SESSIONS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("sessions.json")
 let CI_ASSIST_PATH = (CONFIG_DIR as NSString).appendingPathComponent("ci-assist.json")
