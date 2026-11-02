@@ -52,6 +52,20 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var timelineReal = false
     private var timelineFilter = TimelineFilter.all
     private var timelinePin: TimelineGraphView.Target?
+    /// The open row of the Timeline table, and the row that gets focus after the rebuild (OVERSIRE-398).
+    private var timelineOpen: String?
+    private var timelineFocus: String?
+    /// The open row that shows itself again when its comment gets its height.
+    private var timelineReveal: String?
+    private weak var timelineDetail: NSView?
+    /// For `--uishots`: the row that opens first.
+    static var presetOpen: String?
+    static var payloadMode = EventDetailCard.Mode.rendered
+    private let eventMarkdown = MarkdownView(width: 600)
+    private lazy var comments = CommentBook { [weak self] key, done in
+        guard let self else { return done(.failure(.notFound)) }
+        self.data.projectStore.comments(key: key, done: done)
+    }
     private var replyField: NSTextField?
     private var commentField: NSTextField?
     private var askField: NSTextField?
@@ -102,6 +116,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 openedAt = Date()
                 recapOpen = false
                 timelinePin = nil
+                timelineOpen = nil
                 JOURNAL.look(k, at: openedAt)
             }
             tailAt = .distantPast
@@ -1260,6 +1275,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let preset = TimelineGraphView.preset
         let real = preset?.real ?? timelineReal, filter = timelineFilter, pin = timelinePin, pending = pendingComment
         let shown = Array(rows.filter { filter.matches($0) }.reversed().prefix(300))
+        if let o = Self.presetOpen { timelineOpen = o; timelineFocus = o; timelineReveal = o; Self.presetOpen = nil }
+        let open = shown.first { $0.id == timelineOpen }
+        let body = open?.commentID.map { comments.body(key: open?.item ?? item.key, id: $0) { [weak self] in self?.reload() } }
+        let mode = Self.payloadMode
         let head = "\(spanText(model.end.timeIntervalSince(model.start))) · \(Int((model.active / 3600).rounded())) active hours"
         var out: [PageRow] = [
             PageRow("tl-head", head, real) { [unowned self] in
@@ -1289,13 +1308,35 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 } + [Spacer()], spacing: 6)
             },
             PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
-            PageRow("tl-rows", Self.sig(shown.map(\.id)), pending) { [unowned self] in self.eventList(shown, pending: pending, now: now) },
+            PageRow("tl-rows", Self.sig(shown.map(\.id)), pending, open?.id, body, mode) { [unowned self] in
+                self.eventList(shown, pending: pending, open: open.map { ($0, body, mode) }, now: now)
+            },
         ]
         return out
     }
 
-    private func eventList(_ shown: [OverSireCore.Event], pending: String?, now: Date) -> NSView {
+    /// The Timeline table. A click, Return or Space opens a row in place. Esc closes it.
+    private func eventList(_ shown: [OverSireCore.Event], pending: String?, open: (OverSireCore.Event, CommentBook.Body?, EventDetailCard.Mode)?,
+                           now: Date) -> NSView {
         let list = ListCard()
+        func fixed(_ v: NSView, _ w: CGFloat) -> NSView {
+            let box = NSView()
+            box.translatesAutoresizingMaskIntoConstraints = false
+            box.addSubview(v)
+            NSLayoutConstraint.activate([
+                box.widthAnchor.constraint(equalToConstant: w), box.heightAnchor.constraint(equalTo: v.heightAnchor),
+                v.leadingAnchor.constraint(equalTo: box.leadingAnchor), v.topAnchor.constraint(equalTo: box.topAnchor),
+                v.trailingAnchor.constraint(lessThanOrEqualTo: box.trailingAnchor),
+            ])
+            return box
+        }
+        let widths: [CGFloat] = [96, 64, 120, 84]
+        let head = zip(["TIME", "ITEM", "AUTHOR", "TYPE"], widths).map { fixed(NSTextField.text($0, size: 10.5, weight: .semibold, color: Palette.dim), $1) }
+        let event = NSTextField.text("EVENT", size: 10.5, weight: .semibold, color: Palette.dim)
+        event.setContentHuggingPriority(.init(1), for: .horizontal)
+        let header = Row(head + [event, Spacer(14)], height: 22, label: "Columns: time, item, author, type, event")
+        header.setAccessibilityRole(.row)
+        list.add(header)
         if let pending {
             list.add(Row([Spinner(size: .mini), NSTextField.text(pending, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
                          height: 34, label: "Sending comment: \(pending)"))
@@ -1303,21 +1344,66 @@ final class ItemPage: Page, NSTextFieldDelegate {
         for e in shown {
             let item = TimelineGraphView.short(e.item ?? key)
             let who = TimelineGraphView.who(e)
+            let tag = EventTag(e.kind)
+            let isOpen = open?.0.id == e.id
             // Private text stays on your Macs. This app runs on one of them.
-            let text = (e.isPrivate ? "Private · " : "") + e.summary
-            let time = NSTextField.text(dayTime(e.at, now: now), size: 11, color: Palette.dim, mono: true)
-            time.widthAnchor.constraint(equalToConstant: 92).isActive = true
-            let chip = Chiplet(item)
+            let text = (e.isPrivate ? "Private · " : "") + e.headline
             let actor = NSTextField.text(who, size: 11.5, color: Palette.dim)
-            actor.widthAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
             let body = NSTextField.text(text, size: 12.5, lines: 2)
             body.setContentHuggingPriority(.init(1), for: .horizontal)
-            var open: (() -> Void)?
-            if let k = e.item, k.uppercased() != key.uppercased() { open = { [weak self] in self?.go(.item(k, .activity)) } }
-            list.add(Row([time, chip, actor, body], height: 30, label: "\(dayTime(e.at, now: now)), \(item), \(who): \(text)", onClick: open))
+            let chevron = Glyph(isOpen ? "chevron.down" : "chevron.right", color: Palette.dim, size: 10)
+            chevron.widthAnchor.constraint(equalToConstant: 14).isActive = true
+            let cols = [NSTextField.text(dayTime(e.at, now: now), size: 11, color: Palette.dim, mono: true), Chiplet(item), actor, tag.view()]
+            let id = e.id
+            let row = EventRow(zip(cols, widths).map { fixed($0, $1) } + [body, chevron], height: 30,
+                               label: "\(dayTime(e.at, now: now)), \(item), \(who), \(tag.word): \(text). \(isOpen ? "Open" : "Closed")") { [weak self] in
+                self?.toggleEvent(id)
+            }
+            row.selected = isOpen
+            if isOpen { row.onEscape = { [weak self] in self?.toggleEvent(id) } }
+            list.add(row)
+            var detail: NSView?
+            if timelineFocus == id {
+                timelineFocus = nil
+                DispatchQueue.main.async {
+                    row.window?.makeFirstResponder(row)
+                    let v = detail ?? row
+                    v.scrollToVisible(v.bounds)
+                }
+            }
+            if isOpen, let (e, body, mode) = open {
+                let card = EventDetailCard(e, pageKey: key, body: body, mode: mode, markdown: eventMarkdown, now: now,
+                                           go: { [weak self] r in self?.go(r) },
+                                           onMode: { [weak self] m in Self.payloadMode = m; self?.reload() },
+                                           onClose: { [weak self] in self?.toggleEvent(id) },
+                                           onSized: { [weak self] in self?.revealOpen(id) })
+                let pad = NSView()
+                pad.translatesAutoresizingMaskIntoConstraints = false
+                pad.addSubview(card)
+                NSLayoutConstraint.activate([
+                    card.leadingAnchor.constraint(equalTo: pad.leadingAnchor, constant: 8), card.trailingAnchor.constraint(equalTo: pad.trailingAnchor, constant: -8),
+                    card.topAnchor.constraint(equalTo: pad.topAnchor, constant: 4), card.bottomAnchor.constraint(equalTo: pad.bottomAnchor, constant: -8),
+                ])
+                list.list.addFull(pad)
+                detail = pad
+                timelineDetail = pad
+            }
         }
-        if list.isEmpty { list.add(EmptyNote("No rows for this filter.")) }
+        if shown.isEmpty { list.add(EmptyNote("No rows for this filter.")) }
         return list
+    }
+
+    /// Opens a row of the Timeline table, or closes the open row. The row keeps the focus.
+    private func toggleEvent(_ id: String) {
+        timelineOpen = timelineOpen == id ? nil : id
+        timelineFocus = id
+        timelineReveal = timelineOpen
+        reload()
+    }
+
+    private func revealOpen(_ id: String) {
+        guard timelineReveal == id, let pad = timelineDetail else { return }
+        pad.scrollToVisible(pad.bounds)
     }
 
     private func composeRow() -> NSView {

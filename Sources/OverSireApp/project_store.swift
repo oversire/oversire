@@ -185,6 +185,19 @@ final class ProjectStore {
         refresh(keys, force: true, done: done)
     }
 
+    /// The comments of an item from its tracker, on the main thread.
+    func comments(key: String, done: @escaping (Result<[Comment], ProviderError>) -> Void) {
+        guard let found = item(key: key), let client = trackers.tracker(found.snap.summary.ref.workspace),
+              let ref = found.item.ref(in: found.snap.summary.ref) else {
+            done(.failure(.notFound))
+            return
+        }
+        Task {
+            let r = await Result(awaiting: { try await client.comments(ref) })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
     func timeline(itemId: String, done: @escaping ([ActivityEntry]) -> Void) {
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace) else { done([]); return }
         let stamp = isoFmt.string(from: found.item.activityAt)
