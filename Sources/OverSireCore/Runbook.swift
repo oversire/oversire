@@ -57,13 +57,18 @@ public struct AgentLaunchSpec: Codable, Hashable, Sendable {
     public var model: String?
     public var effort: String?
     public var profile: String
+    public var env: [String: String]?
+    public var envSecrets: [String: AgentSecretRef]?
 
-    public init(cli: String, command: String? = nil, model: String? = nil, effort: String? = nil, profile: String) {
+    public init(cli: String, command: String? = nil, model: String? = nil, effort: String? = nil, profile: String,
+                env: [String: String]? = nil, envSecrets: [String: AgentSecretRef]? = nil) {
         self.cli = cli
         self.command = command
         self.model = model
         self.effort = effort
         self.profile = profile
+        self.env = env
+        self.envSecrets = envSecrets
     }
 }
 

@@ -155,7 +155,7 @@ final class ReviewBook {
             let rt = PROJECTS_CFG.runtime
             guard let command = try? rt.command(for: rt.agent).resolve(name: key, key: key, title: key) else { return nil }
             let l = rt.launch(rt.agent, name: key, key: key, title: key)
-            return AgentLaunchSpec(cli: l.cli, command: command, model: l.model, effort: l.effort, profile: l.profile)
+            return l.spec(command: command)
         }
         desks[s.id] = d
         return d

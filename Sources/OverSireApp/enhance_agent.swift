@@ -235,8 +235,9 @@ final class EnhanceAgent {
         if let old { forget(old) }
         let vision = memory.vision(of: s.ref.project)?.text
         let path = AGENTS.intakeScratch ? root + "/.wt/enhance-" + s.ref.key.lowercased() : root
-        let req = LaunchRequest(repo: path, agent: .claude, prompt: spec(s.kind, key: s.ref.key, title: s.title, url: s.url, body: s.body, vision: vision),
+        var req = LaunchRequest(repo: path, agent: .claude, prompt: spec(s.kind, key: s.ref.key, title: s.title, url: s.url, body: s.body, vision: vision),
                                 title: "Enhance " + s.ref.key, inPlace: true, key: Self.startKey(target, ref: s.ref))
+        req.applyEnv(PROJECTS_CFG.runtime.launch("claude", name: s.ref.key, key: s.ref.key, title: s.title))
         Task {
             // The stop frees the key, so the start makes a new session.
             if let t = old?.session { _ = try? await rt.close(t) }

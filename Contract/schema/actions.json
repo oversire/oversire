@@ -54,23 +54,25 @@
         "model": { "description": "The vendor model id, for example claude-opus-5-5. Missing: the CLI default. A terminal runtime adds it as a flag, unless command has the flag already.", "type": "string", "minLength": 1, "maxLength": 200 },
         "effort": { "description": "The reasoning effort. Open set: low, medium, high, max. Missing: the CLI default.", "type": "string", "minLength": 1, "maxLength": 40 },
         "profile": { "description": "The OverSire agent name, for example claude-max. Display only: agent stays the base CLI.", "type": "string", "minLength": 1, "maxLength": 200 },
-        "env": {
-          "description": "Plain env of the agent process, with the placeholders filled. The daemon sets it before the command runs. Keys follow store.json AgentEnvVar. A daemon without the launch-env feature ignores it.",
-          "type": "object",
-          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
-          "additionalProperties": { "type": "string", "maxLength": 8192 },
-          "maxProperties": 64
-        },
-        "envSecrets": {
-          "description": "Secret env: env key to the secret on the home daemon. The runner gets the values from home at start (POST /v1/agent-secrets/resolve). The order never holds a value.",
-          "type": "object",
-          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
-          "additionalProperties": { "$ref": "#/$defs/AgentSecretRef" },
-          "maxProperties": 64
-        }
+        "env": { "$ref": "#/$defs/LaunchEnv" },
+        "envSecrets": { "$ref": "#/$defs/LaunchEnvSecrets" }
       },
       "required": ["repo", "agent", "prompt"],
       "additionalProperties": false
+    },
+    "LaunchEnv": {
+      "description": "Plain env of the agent process, with the placeholders filled. The daemon sets it before the command runs. Keys follow store.json AgentEnvVar. A daemon without the launch-env feature ignores it.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "type": "string", "maxLength": 8192 },
+      "maxProperties": 64
+    },
+    "LaunchEnvSecrets": {
+      "description": "Secret env: env key to the secret on the home daemon. The runner gets the values from home at start (POST /v1/agent-secrets/resolve). The order never holds a value.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/AgentSecretRef" },
+      "maxProperties": 64
     },
     "AgentSecretRef": {
       "description": "One secret value on the home daemon. The value has the key of its env row.",

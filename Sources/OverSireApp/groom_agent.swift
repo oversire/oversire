@@ -261,8 +261,10 @@ final class GroomAgent {
                 if !o.stale { note.append("Do not do step 2: the user turned off the stale check.") }
                 let input = GroomPrompt.input(project: snap.summary.identifier, file: file, scope: o.scope, staleDays: o.staleDays,
                                               vision: vision, note: note.joined(separator: " "))
-                let req = LaunchRequest(repo: root, agent: .claude, prompt: GroomPrompt.render(template, input),
+                var req = LaunchRequest(repo: root, agent: .claude, prompt: GroomPrompt.render(template, input),
                                         title: "Groom " + snap.summary.identifier, inPlace: true, key: StartKey.groom(snap.summary.identifier))
+                let id = snap.summary.identifier
+                req.applyEnv(await MainActor.run { PROJECTS_CFG.runtime.launch("claude", name: id, key: id, title: "Groom " + id) })
                 let l = try await rt.launch(req)
                 await MainActor.run {
                     let session = SessionRef(workspace: WorkspaceRef(account: rt.account, id: l.card), id: l.handle)

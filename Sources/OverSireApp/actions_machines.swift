@@ -69,7 +69,10 @@ struct MachineActions {
                 }
                 guard let (ref, l) = found else { return .notAllowed("No loaded item \(a.string("key") ?? "").") }
                 var launch = LaunchRequest(repo: repo, item: ref, agent: AgentName(rawValue: l.agent.cli), prompt: a.string("prompt").flatMap { $0.isEmpty ? nil : $0 } ?? l.prompt)
-                launch.apply(AgentLaunch(profile: l.agent.profile, cli: l.agent.cli, model: l.agent.model, effort: l.agent.effort))
+                if let why = l.agent.refusal(on: link.machine) { return .notAllowed(why) }
+                var agent = l.agent
+                agent.command = nil
+                launch.apply(agent)
                 let o = try await RUNNER_DESK.send(WorkOrderDraft(runtime: "oversire", runner: link.machine, order: .start(launch)), on: link)
                 return .ok(summary: "Order \(o.id) starts \(ref.key) on \(link.machine). Read it with order.get.", data: .object(["id": .string(o.id)]))
             },

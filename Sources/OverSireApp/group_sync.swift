@@ -55,6 +55,20 @@ final class GroupSync {
     /// Reads the group that Machines knows, then applies it.
     func refresh() { load(again: false) }
 
+    /// The machine name of this Mac.
+    var selfName: String { leases.selfName }
+
+    /// The daemon that keeps the agent secrets: the home of the group, else the daemon of this Mac (OVERSIRE-399).
+    func secretsHome() -> Result<(machine: String, client: DaemonClient), AgentSecrets.Failure> {
+        switch leases.home(nil) {
+        case .member(let m, let c as DaemonClient): return .success((m, c))
+        case .member(let m, _), .unreachable(let m): return .failure(.homeOffline(m.isEmpty ? "home" : m))
+        case .none:
+            guard let l = hub.links.first(where: \.local) else { return .failure(.noHome) }
+            return .success((l.machine, l.client(http: http)))
+        }
+    }
+
     /// A {"type":"group"} frame: Machines reads the group from the daemons, then it applies.
     func reread() { load(again: true) }
 

@@ -27,13 +27,18 @@ struct RunbookStarter {
         do { command = try rt.command(for: name).resolve(name: key, key: key, title: title) } catch {
             throw SessionStartError.badCommand(String(describing: error))
         }
-        return AgentLaunchSpec(cli: l.cli, command: command, model: l.model, effort: l.effort, profile: l.profile)
+        return l.spec(command: command)
     }
 
     func start(_ book: Runbook, item: Item, in summary: ProjectSummary, at step: String? = nil) async throws -> RunbookRun {
         let s = try request(book, item: item, in: summary, at: step)
         guard let rt = runtime() else { throw SessionStartError.noRuntime }
         guard rt.capabilities.contains(.runbooks) else { throw SessionStartError.noRunbooks }
+        for name in Set(book.steps.map(\.agent)).sorted() {
+            if let why = cfg().runtime.launch(name, name: item.key, key: item.key, title: item.title).refusal(on: rt.account.id) {
+                throw SessionStartError.runsOn(why)
+            }
+        }
         let run = try await rt.startRunbook(s)
         await MainActor.run { RUNBOOKS.apply(run) }
         return run

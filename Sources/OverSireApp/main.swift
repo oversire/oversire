@@ -148,6 +148,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }()
     lazy var itemSummaries = ItemSummaries(path: ITEM_SUMMARIES_PATH)
     lazy var aiOutputs = AIOutputBook(writes: STORE_WRITES)
+    lazy var agentCatalog: AgentCatalog = {
+        let c = AgentCatalog(writes: STORE_WRITES)
+        c.machine = { [weak self] in self?.relay.group?.selfName ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac" }
+        return c
+    }()
+    lazy var agentSecrets = AgentSecrets { [weak self] in self?.relay.group?.secretsHome() ?? .failure(.noHome) }
     lazy var stats = WorkStats(path: WORK_STATS_PATH)
     lazy var appWindow: AppWindow = {
         AppWindow(data: self)
@@ -949,6 +955,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         ciAssist.mayAct = may
         itemSummaries.mayAct = may
         statusJob.mayAct = may
+        _ = agentCatalog
         itemSummaries.outputs = aiOutputs
         ciAssist.outputs = aiOutputs
         statusJob.outputs = aiOutputs

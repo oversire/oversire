@@ -111,6 +111,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
 
     /// Starts the session on the first reachable runtime with workspaces, else on the first reachable runtime.
     public func launch(_ r: LaunchRequest) async throws -> Launch {
+        try await checkEnv(plain: r.env?.isEmpty == false, secrets: r.envSecrets?.isEmpty == false)
         let rts = try await refresh().filter(\.reachable)
         guard let rt = (rts.first { $0.capabilities.contains("workspaces") } ?? rts.first)?.id else {
             throw ProviderError.transport("\(machine) has no agent runtime that runs")
@@ -121,6 +122,22 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
         let owner = rts.contains { $0.id == s.workspace.account.provider.rawValue } ? s.workspace.account.provider.rawValue : rt
         lock.withLock { runtimeOf[s.workspace.id] = owner }
         return Launch(card: s.workspace.id, handle: s.id, paneKey: res.paneKey ?? "", turnStarted: res.turnStarted ?? false, reused: res.reused ?? false)
+    }
+
+    /// The error codes of a start with env on an old daemon.
+    public static let noLaunchEnv = "no_launch_env"
+    public static let noAgentSecrets = "no_agent_secrets"
+
+    /// An old daemon drops the env with no word. A start with env asks it first (OVERSIRE-399).
+    func checkEnv(plain: Bool, secrets: Bool) async throws {
+        guard plain || secrets else { return }
+        let me = try await client.whoami()
+        if secrets, !me.has(DaemonInfo.agentSecrets) {
+            throw ProviderError.vendor(code: Self.noAgentSecrets, message: "\(machine) cannot get secret env from home. Update oversire on \(machine).")
+        }
+        if !me.has(DaemonInfo.launchEnv) {
+            throw ProviderError.vendor(code: Self.noLaunchEnv, message: "\(machine) does not know agent env. Update oversire on \(machine).")
+        }
     }
 
     // MARK: SessionIO

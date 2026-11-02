@@ -233,6 +233,44 @@ final class MachineRuntimeTests: XCTestCase {
         XCTAssertEqual([r.agent.rawValue, r.model, r.effort, r.profile], ["claude", "claude-opus-5-5", "max", "claude-max"])
     }
 
+    func testALaunchWithEnvAsksTheDaemonFeatures() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        try await rt.refresh()
+        let plain = LaunchRequest(repo: repo, name: "TOWERTAIL-9", agent: .claude, prompt: "Go", env: ["A": "1"])
+        let secret = LaunchRequest(repo: repo, name: "TOWERTAIL-9", agent: .claude, prompt: "Go",
+                                   envSecrets: ["T": AgentSecretRef(agent: "claude", scope: "shared")])
+        for (req, code) in [(plain, MachineRuntime.noLaunchEnv), (secret, MachineRuntime.noAgentSecrets)] {
+            do {
+                _ = try await rt.launch(req)
+                XCTFail("an old daemon drops the env")
+            } catch ProviderError.vendor(let c, let m) {
+                XCTAssertEqual(c, code)
+                XCTAssertTrue(m.contains("mba"), m)
+            }
+        }
+        XCTAssertTrue(d.runtime.orders.isEmpty, "no start")
+
+        d.info.features = [DaemonInfo.launchEnv]
+        _ = try await rt.launch(plain)
+        guard case .start(let r) = try XCTUnwrap(d.runtime.orders.last).order else { return XCTFail() }
+        XCTAssertEqual(r.env, ["A": "1"])
+        do { _ = try await rt.launch(secret); XCTFail() } catch ProviderError.vendor(let c, _) { XCTAssertEqual(c, MachineRuntime.noAgentSecrets) }
+
+        d.info.features = [DaemonInfo.launchEnv, DaemonInfo.agentSecrets]
+        _ = try await rt.launch(secret)
+        guard case .start(let r2) = try XCTUnwrap(d.runtime.orders.last).order else { return XCTFail() }
+        XCTAssertEqual(r2.envSecrets?["T"], AgentSecretRef(agent: "claude", scope: "shared"), "the order holds the ref, not the value")
+    }
+
+    func testALaunchWithNoEnvDoesNotAskTheFeatures() async throws {
+        let d = FakeDaemon()
+        let rt = local(d)
+        try await rt.refresh()
+        _ = try await rt.launch(LaunchRequest(repo: repo, name: "TOWERTAIL-9", agent: .claude, prompt: "Go"))
+        XCTAssertFalse(d.calls.contains("GET /v1/whoami"))
+    }
+
     func testModelsReadTheAgentRoute() async throws {
         let d = FakeDaemon()
         d.models["claude"] = try contract(AgentModels.self, "agent-models", "claude")

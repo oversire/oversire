@@ -583,16 +583,41 @@ struct AgentProfile: Codable, Equatable {
     }
 }
 
-/// What one start sends: the agent, its base CLI, the model, the effort and the resolved command.
+/// What one start sends: the agent, its base CLI, the model, the effort, the resolved command and the env.
 struct AgentLaunch: Equatable {
     var profile: String     // the agent name
     var cli: String         // the base CLI, or the program of a terminal-only agent
     var model: String?
     var effort: String?
     var command: String?
+    var env: [String: String] = [:]
+    var envSecrets: [String: AgentSecretRef] = [:]
+    var runsOn: [String]?   // nil: any machine
 
     /// Only the terminal runtime can start an agent with no base CLI.
     var terminalOnly: Bool { RuntimeConfig.baseCLI(cli) == nil }
+
+    var hasEnv: Bool { !env.isEmpty || !envSecrets.isEmpty }
+
+    /// The same start with no env, after the user said yes to an old daemon.
+    var withoutEnv: AgentLaunch {
+        var l = self
+        l.env = [:]
+        l.envSecrets = [:]
+        return l
+    }
+
+    /// The runbook form of the start. `command` is the resolved command of the step.
+    func spec(command: String?) -> AgentLaunchSpec {
+        AgentLaunchSpec(cli: cli, command: command, model: model, effort: effort, profile: profile,
+                        env: env.isEmpty ? nil : env, envSecrets: envSecrets.isEmpty ? nil : envSecrets)
+    }
+
+    /// nil: the agent can run on the machine. Else the reason, for the start menu and the error.
+    func refusal(on machine: String) -> String? {
+        guard let runsOn, !runsOn.contains(machine) else { return nil }
+        return "\(profile) runs only on \(runsOn.joined(separator: ", ")). Run sessions on is \(machine)."
+    }
 }
 
 extension LaunchRequest {
@@ -602,6 +627,26 @@ extension LaunchRequest {
         effort = l.effort
         profile = l.profile
         if let c = l.command { command = c }
+        applyEnv(l)
+    }
+
+    /// Only the env of the agent: a start with its own command and CLI, as Enhance and Groom.
+    mutating func applyEnv(_ l: AgentLaunch) {
+        env = l.env.isEmpty ? nil : l.env
+        envSecrets = l.envSecrets.isEmpty ? nil : l.envSecrets
+    }
+}
+
+/// The shared agents of the home store, as the catalog read them last. The id `*` gives the env for all agents.
+struct SharedAgents: Equatable {
+    var defs: [String: AgentDef] = [:]
+    var allEnv: [EnvVar] = []
+    var all: AgentDef?
+
+    init(_ records: [AgentDef] = []) {
+        for r in records {
+            if r.name == AgentDef.allAgents { all = r; allEnv = r.env } else { defs[r.name] = r }
+        }
     }
 }
 
@@ -616,6 +661,11 @@ struct RuntimeConfig: Codable, Equatable {
     var prompt = RuntimeConfig.defaultPrompt
     var commands: [String: String] = [:]
     var profiles: [String: AgentProfile] = [:]
+    /// The env and the machines of the agents of this Mac only (OVERSIRE-399). Shared agents are in the home store.
+    var env: [String: [EnvVar]] = [:]
+    var runsOn: [String: [String]] = [:]
+    /// The user closed the banner that offers to share the local agents.
+    var shareOfferClosed = false
     var snapPrompt = SnapTicket.defaultPrompt   // the prompt of a sent snap basket
     var sessionIntakePrompt = SessionPrompt.intakeDefault
     var sessionFilesPrompt = SessionPrompt.filesDefault
@@ -632,6 +682,9 @@ struct RuntimeConfig: Codable, Equatable {
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? RuntimeConfig.defaultPrompt
         commands = try c.decodeIfPresent([String: String].self, forKey: .commands) ?? [:]
         profiles = try c.decodeIfPresent([String: AgentProfile].self, forKey: .profiles) ?? [:]
+        env = try c.decodeIfPresent([String: [EnvVar]].self, forKey: .env) ?? [:]
+        runsOn = try c.decodeIfPresent([String: [String]].self, forKey: .runsOn) ?? [:]
+        shareOfferClosed = try c.decodeIfPresent(Bool.self, forKey: .shareOfferClosed) ?? false
         snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
         sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
@@ -655,8 +708,40 @@ struct RuntimeConfig: Codable, Equatable {
 
     /// A built-in CLI is its own agent with Auto values. An agent from before OVERSIRE-317 has no profile:
     /// the first word of its command gives the base CLI. The first edit saves the profile.
+    /// A local entry wins over a shared agent of the same name.
     func profile(_ agent: String) -> AgentProfile {
-        profiles[agent] ?? AgentProfile(cli: Self.baseCLI(agent) ?? Self.baseCLI(command(for: agent).program))
+        if let p = profiles[agent] { return p }
+        if let d = sharedDef(agent) { return AgentProfile(cli: d.cli, model: d.model ?? "", effort: d.effort ?? "") }
+        return AgentProfile(cli: Self.baseCLI(agent) ?? Self.baseCLI(command(for: agent).program))
+    }
+
+    // MARK: Shared agents (OVERSIRE-399)
+
+    /// The catalog sets it from the `agents` collection of the store.
+    static var shared = SharedAgents()
+
+    /// The agent has an entry on this Mac. It then hides a shared agent of the same name.
+    func isLocal(_ agent: String) -> Bool {
+        commands[agent] != nil || profiles[agent] != nil || env[agent] != nil || runsOn[agent] != nil
+    }
+
+    /// The shared record of the name, when no local entry hides it.
+    func sharedDef(_ agent: String) -> AgentDef? { isLocal(agent) ? nil : Self.shared.defs[agent] }
+
+    /// The local entry as a record. nil: no local entry.
+    func localDef(_ agent: String) -> AgentDef? {
+        guard isLocal(agent) else { return nil }
+        let p = profiles[agent] ?? AgentProfile(cli: Self.baseCLI(agent) ?? commands[agent].flatMap { Self.baseCLI(LaunchCommand($0).program) })
+        return AgentDef(name: agent, cli: p.cli, command: commands[agent], model: p.model.isEmpty ? nil : p.model,
+                        effort: p.effort.isEmpty ? nil : p.effort, runsOn: runsOn[agent], env: env[agent] ?? [], updatedAt: .distantPast)
+    }
+
+    /// Writes a record as the local entry of its name.
+    mutating func setLocal(_ d: AgentDef) {
+        profiles[d.name] = AgentProfile(cli: d.cli, model: d.model ?? "", effort: d.effort ?? "")
+        commands[d.name] = d.command
+        env[d.name] = d.env.isEmpty ? nil : d.env
+        runsOn[d.name] = d.runsOn
     }
 
     /// A built-in CLI at Auto values removes the entry. An added agent keeps its entry.
@@ -679,23 +764,35 @@ struct RuntimeConfig: Codable, Equatable {
     mutating func remove(_ name: String) {
         commands[name] = nil
         profiles[name] = nil
+        env[name] = nil
+        runsOn[name] = nil
     }
 
-    /// The agent with its resolved command. A bad template gives a nil command, as before.
-    func launch(_ agent: String, name: String, key: String, title: String) -> AgentLaunch {
+    /// The agent with its resolved command and env. A bad template gives a nil command, as before.
+    /// `device` is the secret scope of an agent of this Mac only.
+    func launch(_ agent: String, name: String, key: String, title: String, device: String = AppEnvironment.appDevice) -> AgentLaunch {
         let p = profile(agent)
         let c = command(for: agent)
+        let shared = sharedDef(agent)
+        let own = shared?.env ?? env[agent] ?? []
+        let ref = AgentSecretRef(agent: agent, scope: shared == nil ? device : AgentSecretRef.shared)
+        let e = AgentEnv.merged(shared: Self.shared.allEnv, agent: own, agentRef: ref, name: name, key: key, title: title)
         return AgentLaunch(profile: agent, cli: p.cli ?? c.program, model: p.cli == nil || p.model.isEmpty ? nil : p.model,
                            effort: p.hasEffort && !p.effort.isEmpty ? p.effort : nil,
-                           command: try? c.resolve(name: name, key: key, title: title))
+                           command: try? c.resolve(name: name, key: key, title: title),
+                           env: e.env, envSecrets: e.secrets, runsOn: shared?.runsOn ?? runsOn[agent])
     }
 
-    func command(for agent: String) -> LaunchCommand { saved(agent) ?? .defaultFor(AgentName(rawValue: profiles[agent]?.cli ?? agent)) }
+    func command(for agent: String) -> LaunchCommand {
+        if let s = saved(agent) { return s }
+        if let t = sharedDef(agent)?.command, let c = Self.valid(t, agent) { return c }
+        return defaultCommand(agent)
+    }
 
     var intakeCommand: LaunchCommand { saved(Self.intakeKey) ?? .intakeDefault }
 
     func defaultCommand(_ key: String) -> LaunchCommand {
-        key == Self.intakeKey ? .intakeDefault : .defaultFor(AgentName(rawValue: profiles[key]?.cli ?? key))
+        key == Self.intakeKey ? .intakeDefault : .defaultFor(AgentName(rawValue: profiles[key]?.cli ?? sharedDef(key)?.cli ?? key))
     }
 
     // Saves a template. A template at its default removes the entry, except for an added agent: its entry is the agent.
@@ -728,16 +825,18 @@ struct RuntimeConfig: Codable, Equatable {
     // The known agents, then the added agents and the default agent.
     var agents: [String] {
         var out = Self.knownAgents
-        for k in (Array(commands.keys) + Array(profiles.keys) + [agent]).sorted() where k != Self.intakeKey && !out.contains(k) { out.append(k) }
+        let names = Array(commands.keys) + Array(profiles.keys) + Array(Self.shared.defs.keys) + [agent]
+        for k in names.sorted() where k != Self.intakeKey && !out.contains(k) { out.append(k) }
         return out
     }
 
     // A hand-edited bad template falls back to the default.
-    private func saved(_ key: String) -> LaunchCommand? {
-        guard let t = commands[key] else { return nil }
+    private func saved(_ key: String) -> LaunchCommand? { commands[key].flatMap { Self.valid($0, key) } }
+
+    private static func valid(_ t: String, _ key: String) -> LaunchCommand? {
         let c = LaunchCommand(t)
         do { try c.validate() } catch {
-            log.error("runtime.commands.\(key, privacy: .public) is not valid (\(String(describing: error), privacy: .public)). OverSire uses the default.")
+            log.error("The command of agent \(key, privacy: .public) is not valid (\(String(describing: error), privacy: .public)). OverSire uses the default.")
             return nil
         }
         return c

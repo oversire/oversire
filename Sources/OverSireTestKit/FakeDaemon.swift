@@ -32,6 +32,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _models: [String: AgentModels] = [:]
     private var _rows: [Event] = []
     private var _links: [String: String] = [:]
+    private var _secrets: [String: (value: String, at: Date)] = [:]   // "scope/agent/key"
     private var sockets: [FakeDaemonSocket] = []
 
     /// The credential that a call must carry. nil: no check (loopback).
@@ -78,6 +79,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     public var hooks: [HarnessHooks] { get { with { _hooks } } set { with { _hooks = newValue } } }
     /// The codes that POST /v1/group/join and POST /v1/group/enter accept. A code works once.
     public var codes: Set<String> { get { with { _codes } } set { with { _codes = newValue } } }
+    /// The agent secrets, as "scope/agent/key" to the value. Only a test reads a value.
+    public var secrets: [String: String] { with { _secrets.mapValues(\.value) } }
     /// GET /v1/group/requests.
     public var pending: [JoinRequestFrame] { get { with { _pending } } set { with { _pending = newValue } } }
     /// The answer of POST /v1/group/ask. nil: 502, the host does not answer.
@@ -193,6 +196,19 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         switch (method, parts) {
         case ("GET", ["v1", "whoami"]): return try ok(_info)
         case ("GET", ["v1", "health"]): return (200, Data(#"{"ok":true}"#.utf8))
+        case ("PUT", let p) where p.count == 5 && p[1] == "agent-secrets":
+            let v = try Self.decoder.decode(AgentSecretSet.self, from: body ?? Data())
+            _secrets[p[2...].joined(separator: "/")] = (v.value, Date())
+            return (204, Data())
+        case ("DELETE", let p) where p.count == 5 && p[1] == "agent-secrets":
+            _secrets[p[2...].joined(separator: "/")] = nil
+            return (204, Data())
+        case ("GET", ["v1", "agent-secrets"]):
+            let keys = _secrets.keys.sorted().map { k in
+                let f = k.split(separator: "/", maxSplits: 2).map(String.init)
+                return AgentSecretKey(scope: f[0], agent: f[1], key: f[2], setAt: _secrets[k]!.at)
+            }
+            return try ok(AgentSecretList(secrets: keys))
         case ("POST", ["v1", "update"]):
             guard let u = _update else { return missing }
             return try ok(u)

@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import RuntimeDaemon
 
 /// The runtime calls of the agent index.
 typealias AgentHost = AgentRuntime & SessionIO
@@ -120,6 +121,13 @@ final class AgentIndex: NSObject {
     var tracked: (String) -> Bool = { _ in false }
 
     var runtime: () -> (any AgentHost)? = { ENV.runtime as? any AgentHost }
+    /// A daemon with no launch-env feature drops the env. The user says if the agent starts without it.
+    var confirmNoEnv: (_ machine: String, _ answer: @escaping (Bool) -> Void) -> Void = { machine, answer in
+        let a = AlertConfirm.run(AlertConfirm.Spec(title: "\(machine) does not know agent env. Start with no env?",
+                                                   info: "Update oversire on \(machine) to start agents with their env.",
+                                                   buttons: ["Start with no env", "Cancel"]))
+        answer(a.button == 0)
+    }
 
     static let linkAge: TimeInterval = 30 * 86400
 
@@ -298,6 +306,11 @@ final class AgentIndex: NSObject {
         let name = key
         let key = key.uppercased()
         guard let rt = runtime() else { done(.failure(.unsupported(.sessionInput))); return }
+        if let why = agent.refusal(on: rt.account.id) {
+            fail(key, why)
+            done(.failure(.vendor(code: "runs_on", message: why)))
+            return
+        }
         launches[key] = PendingLaunch(at: now())
         agents[key] = AgentSession(phase: .starting, since: now(), agent: AgentName(rawValue: agent.cli), repo: (root as NSString).lastPathComponent, prompt: prompt,
                                    profile: agent.profile, model: agent.model, effort: agent.effort)
@@ -315,6 +328,17 @@ final class AgentIndex: NSObject {
                     let link = AgentLink(key: key, workspace: WorkspaceRef(account: rt.account, id: l.card), pane: l.paneKey, at: self.now())
                     self.links[key] = link
                     self.writes?.put(link)
+                case .failure(.vendor(MachineRuntime.noLaunchEnv, _)) where agent.hasEnv && agent.envSecrets.isEmpty:
+                    self.confirmNoEnv(rt.account.id) { yes in
+                        guard yes else {
+                            self.fail(key, "\(rt.account.id) does not know agent env. Update oversire on \(rt.account.id).")
+                            done(r)
+                            return
+                        }
+                        self.launch(key: name, note: note, root: root, agent: agent.withoutEnv, prompt: prompt, title: title,
+                                    inPlace: inPlace, startKey: startKey, done: done)
+                    }
+                    return
                 case .failure(let e): self.fail(key, e.message)
                 }
                 self.publish()

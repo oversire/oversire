@@ -299,6 +299,24 @@ public final class DaemonClient: Sendable {
 
     private static func reviewPath(_ key: String, _ tail: String = "") -> String { "/v1/reviews/\(escape(key))\(tail)" }
 
+    // MARK: Agent secrets (home only, OVERSIRE-399)
+
+    /// The home keeps the value. No call gives it back to the app.
+    public func setAgentSecret(scope: String, agent: String, key: String, value: String) async throws {
+        _ = try await send(try json("PUT", Self.secretPath(scope, agent, key), AgentSecretSet(value: value)))
+    }
+
+    public func removeAgentSecret(scope: String, agent: String, key: String) async throws {
+        _ = try await send(try json("DELETE", Self.secretPath(scope, agent, key), Optional<AgentSecretSet>.none))
+    }
+
+    /// The keys and their set times, never the values.
+    public func agentSecrets() async throws -> AgentSecretList { try await get("/v1/agent-secrets") }
+
+    private static func secretPath(_ scope: String, _ agent: String, _ key: String) -> String {
+        "/v1/agent-secrets/\(escape(scope))/\(escape(agent))/\(escape(key))"
+    }
+
     // MARK: Events (member routes, event.json)
 
     /// A member daemon keeps the rows and sends them home through its outbox.
