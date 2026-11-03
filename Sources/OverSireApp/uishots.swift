@@ -155,6 +155,14 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let groom = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_GROOM"]
     // OVERSIRE_UISHOTS_FILES=folded or open: FRITZ-17 has four images and one PDF.
     static let files = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FILES"]
+    // OVERSIRE_UISHOTS_AUTO=other or paused: the Queue page tells that auto start runs on mba, or waits for the home.
+    static let autoRole: AutomationRole? = {
+        switch ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AUTO"] {
+        case "other": return .other(Lease(name: AutomationOwner.leaseName, holder: "app-mba", holderName: "mba", epoch: 3, until: Date().addingTimeInterval(60)))
+        case "paused": return .paused("devbox")
+        default: return nil
+        }
+    }()
 
     static func sampleSetup() -> CloudSetup {
         let s = CloudSetup()

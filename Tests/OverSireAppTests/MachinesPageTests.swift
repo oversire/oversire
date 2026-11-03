@@ -671,3 +671,17 @@ final class MachinesLoadingTests: XCTestCase {
         XCTAssertEqual(during, ["mba"])
     }
 }
+
+// OVERSIRE-412: the Queue page tells why auto start does not run on this Mac.
+final class AutoStartNoteTests: XCTestCase {
+    func testNote() {
+        let l = Lease(name: AutomationOwner.leaseName, holder: "app-mba", holderName: "mba", epoch: 3, until: Date())
+        XCTAssertEqual(QueuePage.autoStartNote(.other(l), device: "app-mbp")?.title, "Auto start runs on mba, not on this Mac.")
+        XCTAssertEqual(QueuePage.autoStartNote(.other(l), device: "app-mbp")?.action, "Run them here")
+        XCTAssertNil(QueuePage.autoStartNote(.other(l), device: "app-mba"), "a lease that this app gave up is no note")
+        XCTAssertEqual(QueuePage.autoStartNote(.paused("devbox"), device: "app-mbp")?.action, "Retry")
+        XCTAssertNil(QueuePage.autoStartNote(.owner(l), device: "app-mba"))
+        XCTAssertNil(QueuePage.autoStartNote(.solo, device: "app-mbp"))
+        XCTAssertNil(QueuePage.autoStartNote(nil, device: "app-mbp"))
+    }
+}

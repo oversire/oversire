@@ -44,6 +44,8 @@ public final class AutomationOwner: @unchecked Sendable {
     public static let leaseName = "automations"
     /// mayAct is false this long before the end of the lease, so a late renew does not overlap a new owner.
     public static let margin: TimeInterval = 10
+    /// An owner that cannot start agent sessions this long gives the lease up once (OVERSIRE-412).
+    public static let yieldAfter: TimeInterval = 60
 
     private let home: @Sendable (_ hint: String?) -> LeaseHome
     public let device: String
@@ -55,6 +57,9 @@ public final class AutomationOwner: @unchecked Sendable {
     private var current: AutomationRole = .paused("")
     private var tail: Task<Void, Never>?
     private var loop: Task<Void, Never>?
+    private var runs = true
+    private var noRunSince: Date?
+    private var yielded = false
 
     /// home: the home of the lease. hint: the home that a 409 named, else nil. name: the machine name that the other apps show.
     public init(home: @escaping @Sendable (_ hint: String?) -> LeaseHome, device: String, name: @escaping @Sendable () -> String,
@@ -77,8 +82,24 @@ public final class AutomationOwner: @unchecked Sendable {
         }
     }
 
-    /// Gets or renews the lease.
-    public func refresh() async { await serial { await self.acquire(take: false) } }
+    /// False when this app cannot start agent sessions (no runtime). The app sets it at each change.
+    public var canRun: Bool {
+        get { lock.withLock { runs } }
+        set {
+            lock.withLock {
+                runs = newValue
+                if newValue { noRunSince = nil; yielded = false } else if noRunSince == nil { noRunSince = clock() }
+            }
+        }
+    }
+
+    /// Gets or renews the lease. An owner with no runtime gives it up once, so that a Mac with a runtime takes it.
+    public func refresh() async {
+        await serial {
+            if await self.yieldWithoutRuntime() { return }
+            await self.acquire(take: false)
+        }
+    }
 
     /// Run them here: takes the lease also when another app has it.
     public func take() async { await serial { await self.acquire(take: true) } }
@@ -148,6 +169,20 @@ public final class AutomationOwner: @unchecked Sendable {
             }
         }
         if case .member(let m, _) = target { failed(m) }
+    }
+
+    // The next refresh of this app takes the lease again when no other app took it. Then it keeps the lease.
+    private func yieldWithoutRuntime() async -> Bool {
+        let now = clock()
+        let due: Bool = lock.withLock {
+            guard !yielded, let since = noRunSince, now.timeIntervalSince(since) >= Self.yieldAfter else { return false }
+            return true
+        }
+        guard due, case .owner(let l) = role, case .member(_, let c) = home(nil) else { return false }
+        lock.withLock { yielded = true }
+        do { try await c.release(Self.leaseName, holder: device) } catch { return false }
+        set(.other(Lease(name: l.name, holder: l.holder, holderName: l.holderName, epoch: l.epoch, until: now)))
+        return true
     }
 
     // A failed call keeps a lease that has not ended. Past its end, the automations pause.

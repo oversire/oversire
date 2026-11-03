@@ -36,7 +36,22 @@ final class QueuePage: Page {
         DispatchQueue.main.async { [weak self] in self?.reload() }
     }
 
-    override var watches: DataDomains { [.queue, .agents, .projects, .relations, .planner, .summaries, .questions, .config, .runbooks] }
+    override var watches: DataDomains { [.queue, .agents, .projects, .relations, .planner, .summaries, .questions, .config, .runbooks, .connection] }
+
+    /// Why auto start does not run on this Mac (OVERSIRE-412). nil: it runs here. device: the id of this app.
+    static func autoStartNote(_ r: AutomationRole?, device: String) -> (title: String, body: String, action: String)? {
+        switch r {
+        case .other(let l)? where l.holder != device:
+            let m = l.holderName.isEmpty ? l.holder : l.holderName
+            return ("Auto start runs on \(m), not on this Mac.",
+                    "One Mac runs the automations. If \(m) has no runtime, run them here.", "Run them here")
+        case .paused(let h)?:
+            return ("Auto start waits for \(h.isEmpty ? "the home Mac" : h).",
+                    "The home Mac gives the automations to one Mac. It is offline now.", "Retry")
+        default:
+            return nil
+        }
+    }
 
     override func sections() -> [PageSection]? {
         let mode = AGENTS.aiMode, board = board, auto = AGENTS.autoStart
@@ -74,6 +89,15 @@ final class QueuePage: Page {
             rows.append(PageRow("orca", 0) { [weak self] in
                 Banner(.warning, title: "Orca is off or not installed.", body: "The queue starts items in Orca.",
                        actions: [ActionButton("Runtime settings") { self?.go(.settings(.agents)) }])
+            })
+        }
+        let owner = MachinesController.shared.owner()
+        if auto, let note = Self.autoStartNote(UIShots.autoRole ?? owner?.role, device: owner?.device ?? AppEnvironment.appDevice) {
+            rows.append(PageRow("auto", note.title, note.action) {
+                let c = MachinesController.shared
+                let b = ActionButton(note.action) { if note.action == "Retry" { c.retryAutomations() } else { c.takeAutomations() } }
+                b.setAccessibilityLabel(note.action == "Retry" ? "Retry the automations" : "Run the automations on this Mac")
+                return Banner(.info, title: note.title, body: note.body, actions: [b])
             })
         }
         // The checks moved to Work › Worktrees. One line links there.

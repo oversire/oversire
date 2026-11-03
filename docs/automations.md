@@ -22,6 +22,7 @@ The home daemon of the group (Settings › Machines, the HOME chip) keeps the le
 3. Each automatic action asks the owner first. An app that is not the owner does nothing. The owner stops 10 s before the end of its lease, so that a late renew does not overlap a new owner.
 4. A Mac that sleeps or quits gives the lease back. The next app that asks gets it.
 5. When the owner does not renew, the lease ends after 90 s. Then another app gets it.
+6. An owner with no agent runtime (no Run sessions on machine, or the runtime is off) gives the lease back one time after 60 s. An app that asks in the next 30 s gets it. If no app asks, the owner gets the lease again and keeps it. A runtime that comes back and goes off again gives one more yield (OVERSIRE-412).
 
 An action that started before a change of the owner runs to its end.
 
@@ -36,6 +37,8 @@ The last row of the My machines card tells which Mac runs the automations. The r
 | Run on this Mac | | This app is the owner. |
 | Run on mbp | Run them here | The app on mbp is the owner. **Run them here** takes the lease to this Mac. |
 | Paused · home offline | Retry | The app cannot reach the home daemon. No app runs the automations, so that two Macs do not do the same work. They start again when the home is online. **Retry** asks the home daemon now. |
+
+When **Auto start** is on and another Mac runs the automations, the Queue page tells it: **Auto start runs on mbp, not on this Mac.** with **Run them here**. When the home daemon is offline, it tells **Auto start waits for devbox.** with **Retry**. An app of an old version can keep the lease. Use **Run them here** then.
 
 Before the first read of the group, the automations also wait. A Mac with no group (one machine) is always the owner.
 

@@ -157,6 +157,45 @@ final class AutomationOwnerTests: XCTestCase {
         XCTAssertEqual(b.role.lease?.epoch, 2)
     }
 
+    // OVERSIRE-412: an owner with no runtime gives the lease up once. A Mac with a runtime takes it.
+    func testOwnerWithNoRuntimeYields() async {
+        let w = World()
+        let a = w.owner("app-1", "mbp"), b = w.owner("app-2", "mba")
+        await a.refresh()
+        a.canRun = false
+        w.clock.add(30)
+        await a.refresh()
+        XCTAssertTrue(a.mayAct, "no yield before yieldAfter")
+        w.clock.add(AutomationOwner.yieldAfter)
+        await a.refresh()
+        XCTAssertFalse(a.mayAct)
+        await b.refresh()
+        XCTAssertTrue(b.mayAct)
+        await a.refresh()
+        XCTAssertFalse(a.mayAct)
+    }
+
+    // With no other app, the owner takes the lease again at its next refresh and keeps it.
+    func testOwnerWithNoRuntimeYieldsOnce() async {
+        let w = World()
+        let a = w.owner("app-1", "mbp")
+        await a.refresh()
+        a.canRun = false
+        w.clock.add(AutomationOwner.yieldAfter)
+        await a.refresh()
+        XCTAssertFalse(a.mayAct)
+        await a.refresh()
+        XCTAssertTrue(a.mayAct)
+        w.clock.add(AutomationOwner.yieldAfter)
+        await a.refresh()
+        XCTAssertTrue(a.mayAct, "one yield only")
+        a.canRun = true
+        a.canRun = false
+        w.clock.add(AutomationOwner.yieldAfter)
+        await a.refresh()
+        XCTAssertFalse(a.mayAct, "a new loss of the runtime yields again")
+    }
+
     func testRenewDoesNotPost() async {
         let w = World()
         let a = w.owner("app-1", "mbp")

@@ -987,6 +987,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     /// Rebuilds the derived state and posts what changed: `change` plus the repos whose runs or PRs differ.
     func reloadList(_ change: DataChange? = nil, origin: DataChange.Origin = .poll) {
+        automations?.canRun = agentIndex.ready != nil
         workstreams.rebuild(store: projectStore, agents: agentIndex, runs: grouped, prs: prGrouped)
         queue.tick(workstreams: workstreams)
         statusJob.tick(workstreams: workstreams, store: projectStore)
