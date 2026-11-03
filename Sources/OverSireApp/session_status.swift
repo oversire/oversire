@@ -5,11 +5,11 @@ import OverSireAI
 // ─── Session status ──────────────────────────────────────────────────────────
 // The Status of a session comes from its history (a SessionDigest), the item and the screen.
 // Triggers: a turn end (once for each agent message), N min idle (each screen change starts the
-// wait again), and Refresh. The same screen gets no second call. Without AI, only the blocked
+// wait again), a decision of the user after the status (OVERSIRE-410), and Refresh. The same screen gets no second call. Without AI, only the blocked
 // heuristics of BlockedText run, at a turn end.
 
 struct SessionStatus: Codable, Equatable {
-    enum Trigger: String, Codable { case turnEnd, idle, manual }
+    enum Trigger: String, Codable { case turnEnd, idle, manual, decision }
     enum Handled: String, Codable { case open, approved, held }
 
     let id: String
@@ -50,6 +50,7 @@ struct SessionStatus: Codable, Equatable {
         case .turnEnd: return "at the turn end"
         case .idle: return "after \(Int(AGENTS.quietMinutes)) min with the same screen"
         case .manual: return "on Refresh"
+        case .decision: return "after your decision"
         }
     }
 
@@ -154,6 +155,8 @@ final class StatusJob {
     var ai: () -> AIClient? = { AIClient.current }
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
+    /// The event rows of the item tree. The decisions of the user come from them.
+    var rows: (String) -> [Event]? = { JOURNAL.rows($0) }
     /// The statuses that the Macs of the user share. The ticks, holds and snoozes stay on each Mac.
     var outputs: AIOutputBook? { didSet { attach() } }
     private var outputsObserver: NSObjectProtocol?
@@ -165,7 +168,7 @@ final class StatusJob {
         load()
         agents.blocked = { [weak self] key, a in
             guard let self, let s = self.status(key) else { return false }
-            return s.state == .blocked && s.message == a.messageHash && !self.itemDone(key)
+            return s.state == .blocked && s.message == a.messageHash && !self.itemDone(key) && self.decided(after: s) == nil
         }
     }
 
@@ -188,6 +191,19 @@ final class StatusJob {
     /// True when the tracker item is Completed or Cancelled, and its sub-items are closed.
     private func itemDone(_ key: String) -> Bool { agents.tracked(key) && !agents.open(key) }
 
+    /// The decisions of the user on the key after its last turn, oldest first: an answer or an approval.
+    static func decisions(_ rows: [Event], key: String) -> [Event] {
+        let k = key.uppercased()
+        let own = rows.filter { $0.item?.uppercased() == k }.sorted { ($0.at, $0.seq) < ($1.at, $1.seq) }
+        let start = own.lastIndex { [.turnEnded, .turnInterrupted].contains($0.kind) }.map { $0 + 1 } ?? 0
+        return own[start...].filter { $0.actorType == .human && [.questionAnswered, .reviewApproved].contains($0.kind) }
+    }
+
+    func decisions(_ key: String) -> [Event] { Self.decisions(rows(key) ?? [], key: key) }
+
+    /// The last decision that is newer than the status.
+    func decided(after s: SessionStatus) -> Event? { decisions(s.key).last { $0.at > s.at } }
+
     /// Why the status is older than the screen or the item, or nil while it holds.
     func outOfDate(_ s: SessionStatus) -> String? {
         let clock = DateFormatter()
@@ -195,6 +211,7 @@ final class StatusJob {
         // The status job does not read a done item again, so only "Looks done" holds.
         if s.state != .done, itemDone(s.key) { return "Out of date: the item is done" }
         guard let st = agents.state(s.key) else { return "Session closed" }
+        if let d = decided(after: s) { return "Out of date: you decided at \(clock.string(from: d.at))" }
         if let w = agents.watch(s.key), let screen = s.screen, w.fingerprint != screen {
             return "Out of date: the screen changed at \(clock.string(from: w.changedAt))"
         }
@@ -215,7 +232,7 @@ final class StatusJob {
     var blocking: [SessionStatus] {
         agents.agents.compactMap { k, a -> SessionStatus? in
             guard agents.state(k) == .blocked, let s = status(k), s.message == a.messageHash,
-                  (s.snoozedUntil ?? .distantPast) < now() else { return nil }
+                  (s.snoozedUntil ?? .distantPast) < now(), decided(after: s) == nil else { return nil }
             return s
         }.sorted { $0.at > $1.at }
     }
@@ -225,17 +242,20 @@ final class StatusJob {
 
     // MARK: Triggers
 
-    /// Reads each session that is due: once at a turn end, then after N min with the same screen.
+    /// Reads each session that is due: once at a turn end, once after a decision, then after N min with the same screen.
     func tick(workstreams: WorkstreamIndex, store: ProjectStore) {
         world = (workstreams, store)
         guard mayAct() else { return }
         for (key, a) in agents.agents where !reading.contains(key) {
             guard let st = agents.state(key), st != .closed, !store.isDone(key: key), let w = agents.watch(key) else { continue }
-            let mark = w.fingerprint + "|" + a.messageHash
-            guard tried[key] != mark, status(key).map({ $0.screen != w.fingerprint || $0.message != a.messageHash }) ?? true else { continue }
+            let fresh = status(key).flatMap { decided(after: $0) }
+            guard tried[key] != mark(key, a, w),
+                  fresh != nil || status(key).map({ $0.screen != w.fingerprint || $0.message != a.messageHash }) ?? true else { continue }
             let ended = (a.phase == .done || a.phase == .waiting) && w.readAt >= a.since
             if ended && status(key)?.message != a.messageHash {
                 run(key, trigger: .turnEnd)
+            } else if on, fresh != nil {
+                run(key, trigger: .decision)
             } else if on, now().timeIntervalSince(w.changedAt) >= AGENTS.quietMinutes * 60 {
                 run(key, trigger: .idle)
             }
@@ -265,9 +285,14 @@ final class StatusJob {
 
     // MARK: Read
 
+    /// The facts of the last call: the screen, the agent message and the last decision.
+    private func mark(_ key: String, _ a: AgentSession, _ w: SessionWatch) -> String {
+        w.fingerprint + "|" + a.messageHash + "|" + (decisions(key).last?.id ?? "")
+    }
+
     private func run(_ key: String, trigger: SessionStatus.Trigger) {
         guard let a = agents.agent(key), let st = agents.state(key), let w = agents.watch(key) else { changed(); return }
-        tried[key] = w.fingerprint + "|" + a.messageHash
+        tried[key] = mark(key, a, w)
         let found = world?.store.item(key: key)
         let status = found.flatMap { $0.snap.option($0.item.statusOptionId)?.category }
         let facts = { (r: StatusReply, byAI: Bool, read: String) -> SessionStatus in
@@ -309,7 +334,8 @@ final class StatusJob {
             let input = AgentPrompts.statusInput(
                 key: key, title: found?.item.title ?? "", status: status?.label ?? "unknown", description: body, digest: digest,
                 screen: live ? w.turn : "", state: st.label, idleMinutes: Int(self.now().timeIntervalSince(w.changedAt) / 60),
-                ci: ws?.ci?.word ?? "none", pr: pr, previous: self.status(key)?.reply.headline ?? "")
+                ci: ws?.ci?.word ?? "none", pr: pr, previous: self.status(key)?.reply.headline ?? "",
+                decisions: self.decisions(key).map { "\(dayTime($0.at, now: self.now())): \($0.summary)" })
             let read = SessionStatus.readText(digest, description: !body.isEmpty, screen: live)
             ai.run(.status, input, id: "status:\(key)", subject: found.flatMap { f in f.item.ref(in: f.snap.summary.ref).map { .item($0) } }) { [weak self] r in
                 guard let self else { return }

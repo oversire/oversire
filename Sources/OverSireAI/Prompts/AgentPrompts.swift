@@ -25,9 +25,10 @@ public enum AgentPrompts {
 
     /// The facts of one session for the Status job. A nil `digest` means the screen is the only record.
     /// `screen`: the live screen tail while the session works. `previous`: the last status headline.
+    /// `decisions`: the decisions of the developer after the last turn, oldest first.
     public static func statusInput(key: String, title: String, status: String, description: String, digest: SessionDigest?,
                                    screen: String, state: String, idleMinutes: Int, ci: String, pr: String,
-                                   previous: String) -> AIInput {
+                                   previous: String, decisions: [String] = []) -> AIInput {
         let flat = { (s: String) in s.replacingOccurrences(of: "\n", with: " ") }
         var earlier = "(none)", last = "(no history: the screen only)", turns = "0"
         if let d = digest {
@@ -49,6 +50,7 @@ public enum AgentPrompts {
             "key": key, "title": title, "status": status, "description": String(description.prefix(8000)), "turns": turns,
             "earlier": earlier, "last": last, "screen": String(screen.suffix(2000)), "state": state, "idle": "\(idleMinutes)",
             "ci": ci, "pr": pr, "previous": previous,
+            "decisions": decisions.suffix(6).map { "- " + $0.replacingOccurrences(of: "\n", with: " ").prefix(300) }.joined(separator: "\n"),
         ])
     }
 

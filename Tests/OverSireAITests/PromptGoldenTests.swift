@@ -39,6 +39,9 @@ final class PromptGoldenTests: XCTestCase {
                                   earlier: [.init(prompt: "start\nnow", closing: "Read the code."), .init(prompt: "go", closing: "x", interrupted: true)],
                                   last: [.init(prompt: "ship", text: "Shipped v2.", tools: 3), .init(prompt: "?", text: "Test it on the Mac.", tools: 0)]),
             screen: "", state: "done", idleMinutes: 2, ci: "passed", pr: "#12 open", previous: "Ships the retry.")),
+        ("status-decisions", .status, AgentPrompts.statusInput(
+            key: "D-7", title: "Plan", status: "Todo", description: "", digest: nil, screen: "", state: "done", idleMinutes: 3,
+            ci: "none", pr: "none", previous: "The plan waits.", decisions: ["Tue 10:05: You approved the plan", "x\ny"])),
         ("status-screen-only", .status, AgentPrompts.statusInput(
             key: "D-6", title: "T", status: "Todo", description: "", digest: nil, screen: "⏺ Building…",
             state: "working", idleMinutes: 11, ci: "none", pr: "none", previous: "")),

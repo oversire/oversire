@@ -208,6 +208,50 @@ final class StatusJobTests: XCTestCase {
         XCTAssertEqual(job.pending.count, 1)
     }
 
+    private func row(_ id: String, _ kind: Event.Kind, _ at: Date, item: String = "A-1", actor: ActorType = .human) -> Event {
+        Event(seq: 0, seenAt: at, draft: EventDraft(id: id, at: at, kind: kind, item: item, actorType: actor, actor: "u", via: "app",
+                                                     summary: kind == .reviewApproved ? "You approved the plan" : "You answered: Which source?"))
+    }
+
+    func testDecisionsAreTheOnesAfterTheLastTurn() {
+        let rows = [row("q1", .questionAnswered, t0), row("t1", .turnEnded, t0.addingTimeInterval(60), actor: .agent),
+                    row("r1", .reviewApproved, t0.addingTimeInterval(120)), row("x1", .reviewApproved, t0.addingTimeInterval(130), item: "A-2"),
+                    row("a1", .questionAnswered, t0.addingTimeInterval(140), actor: .agent)]
+        XCTAssertEqual(StatusJob.decisions(rows, key: "a-1").map(\.id), ["r1"], "only human answers and approvals of the key after its last turn")
+        XCTAssertEqual(StatusJob.decisions(Array(rows.prefix(1)), key: "A-1").map(\.id), ["q1"], "no turn row: each decision counts")
+    }
+
+    // OVERSIRE-410: a plan approval after a Blocked on you status puts it out of date and reads the session again.
+    func testADecisionAfterTheStatusReadsTheSessionAgain() {
+        var rows: [Event] = []
+        job.rows = { _ in rows }
+        engine.on(.status, .success(#"{"state":"blocked","headline":"The plan waits.","needsYou":[{"text":"Approve the plan","kind":"approval"}]}"#))
+        seed(.done, message: "The plan is ready. Approve it.")
+        tick()
+        settle()
+        XCTAssertEqual(engine.tasks.count, 1)
+        let s = job.status("A-1")!
+        XCTAssertEqual(job.blocking.map(\.key), ["A-1"])
+        XCTAssertNil(job.outOfDate(s))
+
+        clock = clock.addingTimeInterval(60)
+        rows = [row("r1", .reviewApproved, clock)]
+        XCTAssertEqual(job.outOfDate(s)?.hasPrefix("Out of date: you decided at"), true)
+        XCTAssertTrue(job.blocking.isEmpty, "the user acted, so the session does not wait for them")
+        XCTAssertNotEqual(agents.state("A-1"), .blocked)
+
+        engine.on(.status, .success(#"{"state":"unfinished","headline":"The plan is approved.","next":["Build it"]}"#))
+        tick()
+        settle()
+        XCTAssertEqual(engine.tasks.count, 2)
+        XCTAssertEqual(engine.tasks.last?.input.context["decisions"]?.hasSuffix(": You approved the plan"), true)
+        XCTAssertEqual(job.status("A-1")?.trigger, .decision)
+        XCTAssertEqual(job.status("A-1")?.state, .unfinished)
+
+        tick()
+        XCTAssertEqual(engine.tasks.count, 2, "the same decision gets no second call")
+    }
+
     func testTheStatusesStayOnDisk() {
         job.ai = { nil }
         seed(.done, message: "I need you to set the API key.")
