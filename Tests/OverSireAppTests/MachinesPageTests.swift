@@ -41,7 +41,7 @@ final class JoinFlowTests: XCTestCase {
         local.asked = JoinPending(request: "r-1", confirm: "4821", expiresAt: now.addingTimeInterval(300))
         let f = flow(local: local)
         var joined = 0
-        f.onJoined = { joined += 1 }
+        f.onJoined = { _ in joined += 1 }
         await f.join(found: info("mbp", "100.97.81.23"))
         XCTAssertEqual(f.phase, .waiting(confirm: "4821", host: "mbp"))
         XCTAssertEqual(local.body(of: "POST /v1/group/ask")?["host"] as? String, "100.97.81.23:7690")
@@ -98,8 +98,11 @@ final class JoinFlowTests: XCTestCase {
         let local = FakeDaemon(machine: "mba", group: group([member("mbp", "100.97.81.23"), member("mba", "100.71.4.12")]))
         local.codes = ["K7Q2-M9XD"]
         let f = flow(local: local)
+        var app: Bool?
+        f.onJoined = { app = $0 }
         await f.join(host: "100.97.81.23", code: " k7q2-m9xd ")
         XCTAssertEqual(f.phase, .joined(machine: "mbp"))
+        XCTAssertEqual(app, false, "the daemon of this Mac joined")
         XCTAssertEqual(local.body(of: "POST /v1/group/enter")?["code"] as? String, "K7Q2-M9XD")
     }
 
@@ -109,8 +112,11 @@ final class JoinFlowTests: XCTestCase {
         let mbp = FakeDaemon(machine: "mbp", group: group([member("mbp", "100.97.81.23")]))
         mbp.codes = ["K7Q2-M9XD"]
         let f = flow(local: local, remote: ["mbp": mbp])
+        var app: Bool?
+        f.onJoined = { app = $0 }
         await f.join(host: "mbp", code: "K7Q2-M9XD")
         XCTAssertEqual(f.phase, .joined(machine: "mbp"))
+        XCTAssertEqual(app, true, "the hub then adopts a sessions machine")
         let body = try XCTUnwrap(mbp.body(of: "POST /v1/group/join"))
         XCTAssertEqual(body["kind"] as? String, "app")
         XCTAssertEqual(body["machine"] as? String, "mba")

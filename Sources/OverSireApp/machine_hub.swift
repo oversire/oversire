@@ -27,6 +27,8 @@ final class MachineHub {
     var read = false
 
     var config: () -> MachinesConfig = { MACHINES }
+    /// Keeps a new sessions machine in config.json.
+    var keepSessions: (String) -> Void = { MACHINES.sessions = $0; saveConfig() }
     /// The links changed: the sources and the question channels start again.
     var onLinks: () -> Void = {}
     /// The sessions of the account changed, or its daemon came or went.
@@ -44,7 +46,10 @@ final class MachineHub {
 
     @MainActor lazy var joins: JoinFlow = {
         let f = JoinFlow(local: local, machines: machines, http: http)
-        f.onJoined = { [weak self] in self?.refresh() }
+        f.onJoined = { [weak self] app in
+            if app { self?.repairSessions(adopt: true) }
+            self?.refresh()
+        }
         return f
     }()
 
@@ -95,6 +100,7 @@ final class MachineHub {
             await MainActor.run {
                 guard let self else { return }
                 self.groupName = name
+                if read { self.repairSessions(adopt: false) }
                 guard read, !self.read else { return }
                 self.read = true
                 NotificationCenter.default.post(name: Self.changed, object: self)
@@ -130,6 +136,23 @@ final class MachineHub {
 
     /// The runtime of the sessions machine (Settings › Machines). nil: the machine has no link.
     var sessions: MachineRuntime? { config().sessionsLink(links).flatMap { runtime($0.machine) } }
+
+    /// Sets the sessions machine when the pick names no member: a stale name, or an empty pick after this app
+    /// joined without a daemon.
+    func repairSessions(adopt: Bool) {
+        Task { [weak self, machines] in
+            guard let g = await machines.group else { return }
+            await MainActor.run {
+                guard let self, let to = self.config().repaired(in: g, adopt: adopt) else { return }
+                let from = self.config().sessions ?? "this Mac"
+                self.keepSessions(to)
+                APP_LOG.write(LogEntry(level: .ok, area: .sessions, job: "Run sessions on", subject: to,
+                                       message: "Run sessions on \(to). It was \(from), which has no daemon in the group."))
+                self.onLinks()
+                NotificationCenter.default.post(name: Self.changed, object: self)
+            }
+        }
+    }
 
     /// The first read found no daemon on this Mac.
     var noLocalDaemon: Bool { read && !links.contains { $0.local } }

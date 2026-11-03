@@ -81,6 +81,19 @@ public struct MachinesConfig: Codable, Equatable, Sendable {
         guard let sessions else { return links.first { $0.local } }
         return links.first { $0.machine == sessions }
     }
+
+    /// A new sessions machine when the pick names no member of the group. A stale name (an old config, a machine
+    /// that left) gets the member with the same short name, else the home. With `adopt`, an empty pick also gets
+    /// the home: this Mac joined without a daemon. nil: keep the pick.
+    public func repaired(in group: Group, adopt: Bool) -> String? {
+        let names = group.members.map(\.machine.rawValue)
+        guard let first = names.first else { return nil }
+        let home = names.contains(group.home.rawValue) ? group.home.rawValue : first
+        guard let sessions else { return adopt ? home : nil }
+        guard !names.contains(sessions) else { return nil }
+        let short = { (n: String) in n.split(separator: ".").first.map(String.init) ?? n }
+        return names.first { short($0) == short(sessions) } ?? home
+    }
 }
 
 public actor Machines {

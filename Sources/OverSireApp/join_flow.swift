@@ -35,8 +35,8 @@ import UserNotifications
     let thisMachine: String
     var pollEvery: Duration = .seconds(3)
     var now: () -> Date = Date.init
-    /// The group changed: the hub reads it again.
-    var onJoined: () -> Void = {}
+    /// The group changed: the hub reads it again. True: this app joined as a device of kind app (no daemon here).
+    var onJoined: (_ app: Bool) -> Void = { _ in }
 
     init(local: DaemonClient, machines: Machines?, http: any HTTPTransport,
          thisMachine: String = ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "mac",
@@ -84,7 +84,7 @@ import UserNotifications
                                                                 nonce: nonce.map { String(format: "%02x", $0) }.joined()))
                 guard phase == .sending(host: host) else { return }
                 await machines?.joined(r)
-                finish(host)
+                finish(host, app: true)
             }
         } catch {
             if phase == .sending(host: host) { phase = .failed(reason(error, host: host)) }
@@ -118,9 +118,9 @@ import UserNotifications
         phase = .sending(host: host)
     }
 
-    private func finish(_ machine: String) {
+    private func finish(_ machine: String, app: Bool = false) {
         end(.joined(machine: machine))
-        onJoined()
+        onJoined(app)
     }
 
     private func end(_ p: Phase) {

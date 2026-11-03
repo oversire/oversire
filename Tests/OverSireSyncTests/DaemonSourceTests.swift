@@ -250,4 +250,20 @@ final class DaemonSourceTests: XCTestCase {
         XCTAssertEqual(again, picked)
         XCTAssertFalse(String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("runtimeAccounts"))
     }
+
+    func testRepairedSessionsMachine() {
+        let m = { (n: MachineName) in GroupMember(machine: n, host: n.rawValue, addrs: [], port: 7690, roles: ["serve"], joinedAt: Date()) }
+        let g = Group(id: "g", name: "My machines", home: "mini.ts.net", version: 1, members: [m("mbp.ts.net"), m("mini.ts.net")], devices: [])
+        var c = MachinesConfig()
+        XCTAssertNil(c.repaired(in: g, adopt: false), "this Mac keeps an empty pick")
+        XCTAssertEqual(c.repaired(in: g, adopt: true), "mini.ts.net", "an app join adopts the home")
+        c.sessions = "mbp.ts.net"
+        XCTAssertNil(c.repaired(in: g, adopt: true), "a member stays")
+        c.sessions = "mbp.local"
+        XCTAssertEqual(c.repaired(in: g, adopt: false), "mbp.ts.net", "a stale name gets the same short name")
+        c.sessions = "gone"
+        XCTAssertEqual(c.repaired(in: g, adopt: false), "mini.ts.net", "else the home")
+        let empty = Group(id: "g", name: "My machines", home: "mini.ts.net", version: 1, members: [], devices: [])
+        XCTAssertNil(c.repaired(in: empty, adopt: true))
+    }
 }
