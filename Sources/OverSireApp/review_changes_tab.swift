@@ -163,6 +163,8 @@ final class ReviewChangesTab {
     var go: (Route) -> Void = { _ in }
     private var threads: [String: ReviewThreads] = [:]
     private var panels: [String: FilePanel] = [:]
+    /// The body of the diff while it is built. Each line joins its selection.
+    private var building: DiffBody?
     /// The most diff lines that the tab shows for one file.
     static let lineLimit = 1500
 
@@ -261,13 +263,15 @@ final class ReviewChangesTab {
         let card = Card(padding: 12, spacing: 8)
         for r in s.repos {
             let mark = ReviewMark(r)
-            var parts: [NSView] = [
+            let texts = [
                 NSTextField.text(r.name, size: 12.5, weight: .semibold, mono: true),
                 NSTextField.text("\(r.branch) → \(r.base)", size: 12, color: Palette.mut, mono: true),
                 NSTextField.text("·  \(r.ahead) commit\(r.ahead == 1 ? "" : "s")", size: 12, color: Palette.mut),
                 NSTextField.text("·  " + (r.dirty ? "Uncommitted files" : "No uncommitted files"), size: 12, color: r.dirty ? Palette.warn : Palette.mut),
-                Spacer(),
             ]
+            // A row with a click keeps its text plain: the menu copies it.
+            if s.repos.count < 2 { texts.forEach { $0.isSelectable = true } }
+            var parts: [NSView] = texts + [Spacer()]
             switch r.merge {
             case .fastForward: parts.append(mark.line("Can fast-forward"))
             case .rebase: parts.append(mark.line("\(r.base) has \(r.behind) new commit\(r.behind == 1 ? "" : "s")"))
@@ -288,12 +292,20 @@ final class ReviewChangesTab {
                 self?.reload()
             }
             row.stack.spacing = 8
+            row.menuItems = {
+                [MenuAction("Copy Repo Name") { RowActions.copy(r.name) }.item,
+                 MenuAction("Copy Branch Name") { RowActions.copy(r.branch) }.item]
+            }
             row.restBorder = on ? Palette.acc : nil
             row.selected = on
             card.add(row)
         }
         var foot: [NSView] = []
-        if let note = s.note { foot.append(NSTextField.text("Agent: " + note, size: 12, color: Palette.mut, lines: 2)) }
+        if let note = s.note {
+            let n = NSTextField.text("Agent: " + note, size: 12, color: Palette.mut, lines: 2)
+            n.isSelectable = true
+            foot.append(n)
+        }
         foot.append(Spacer())
         if s.state == .conflict {
             foot.append(ActionButton("Fix with agent", style: .primary) { [weak self] in
@@ -341,8 +353,7 @@ final class ReviewChangesTab {
     /// The fixed header and the body of the diff of one file.
     private func diffPanel(_ desk: ReviewDesk, file f: ReviewFile, diff: FileDiff?, threads t: ReviewThreads) -> (NSView, NSView) {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
-        let pathField = NSTextField.text(path, size: 12, weight: .semibold, mono: true)
-        pathField.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f))
         let mode = Segmented(["Unified", "Split"], selected: desk.split ? 1 : 0, label: "Diff view") { [weak self] i in
             desk.split = i == 1
             self?.reload()
@@ -363,11 +374,14 @@ final class ReviewChangesTab {
         }
         let head = NSStackView(h: parts + [wrap, mode, viewed], spacing: 8)
         head.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-        let body = NSStackView(v: [], spacing: 0)
+        let body = DiffBody(v: [], spacing: 0)
         body.alignment = .leading
         body.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 0)
+        building = body
+        defer { building = nil }
         func note(_ s: String) {
             let n = NSTextField.text(s, size: 12, color: Palette.dim, lines: 3)
+            n.isSelectable = true
             let w = NSStackView(h: [n, Spacer()])
             w.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
             body.addFull(w)
@@ -393,6 +407,7 @@ final class ReviewChangesTab {
             }
             let range = "@@ −\(h.oldStart),\(h.oldLines) +\(h.newStart),\(h.newLines) @@" + (h.header.isEmpty ? "" : " " + h.header)
             let hl = NSTextField.text(range, size: 11, color: Palette.acc, mono: true)
+            hl.isSelectable = true
             let hv = Box(fill: Palette.acc.withAlphaComponent(0.08), border: nil, radius: 0)
             hv.addSubview(hl)
             NSLayoutConstraint.activate([
@@ -489,7 +504,7 @@ final class ReviewChangesTab {
     /// The longest text that a line shows with no wrap. A very long line (minified code) would make a huge view.
     static let nowrapLimit = 1000
 
-    private func line(_ desk: ReviewDesk, _ f: ReviewFile, _ l: DiffLine?, tokens: [SyntaxLanguage.Token], gutters: [NSView]) -> NSView {
+    private func line(_ desk: ReviewDesk, _ f: ReviewFile, _ l: DiffLine?, tokens: [SyntaxLanguage.Token], gutters: [NSView], column: Int = 0) -> NSView {
         guard let l else {
             let empty = Box(fill: Palette.raise.withAlphaComponent(0.5), border: nil, radius: 0)
             empty.heightAnchor.constraint(equalToConstant: 18).isActive = true
@@ -503,7 +518,14 @@ final class ReviewChangesTab {
         markField.setAccessibilityLabel(l.kind == .add ? "added" : l.kind == .del ? "removed" : "")
         var shown = l.text.isEmpty ? " " : l.text
         if !desk.wrap, shown.utf16.count > Self.nowrapLimit { shown = String(shown.prefix(Self.nowrapLimit)) + " …" }
-        let text = NSTextField.text("", size: 11.5, lines: desk.wrap ? 0 : 1, mono: true)
+        let text = DiffText(labelWithString: "")
+        text.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        text.textColor = Palette.fg
+        text.maximumNumberOfLines = desk.wrap ? 0 : 1
+        text.translatesAutoresizingMaskIntoConstraints = false
+        if desk.wrap { text.preferredMaxLayoutWidth = 0 }
+        text.code = l.text
+        building?.adopt(text, column: column)
         text.lineBreakMode = desk.wrap ? .byCharWrapping : .byClipping
         text.attributedStringValue = SyntaxLanguage.styled(shown, tokens: tokens, font: text.font ?? .monospacedSystemFont(ofSize: 11.5, weight: .regular), wraps: desk.wrap)
         // With wrap, the text takes the free width and wraps at the edge of the card. A unified diff with no wrap keeps the full width
@@ -549,7 +571,7 @@ final class ReviewChangesTab {
     private func splitRow(_ desk: ReviewDesk, file f: ReviewFile, _ marks: [Place: DiffGutter.Mark], _ colors: [Place: [SyntaxLanguage.Token]],
                           _ l: DiffLine?, _ r: DiffLine?) -> NSView {
         let left = line(desk, f, l, tokens: Self.tokens(colors, l), gutters: l.map { [gutter(desk, f, marks, $0, text: $0.old.map(String.init) ?? $0.new.map(String.init) ?? "", width: 40)] } ?? [])
-        let right = line(desk, f, r, tokens: Self.tokens(colors, r), gutters: r.map { [gutter(desk, f, marks, $0, text: $0.new.map(String.init) ?? "", width: 40)] } ?? [])
+        let right = line(desk, f, r, tokens: Self.tokens(colors, r), gutters: r.map { [gutter(desk, f, marks, $0, text: $0.new.map(String.init) ?? "", width: 40)] } ?? [], column: 1)
         let rule = Box(fill: Palette.line, border: nil, radius: 0)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         let h = NSStackView(h: [left, rule, right], spacing: 0)

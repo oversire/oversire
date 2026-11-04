@@ -237,6 +237,18 @@ public struct FileDiff: Codable, Hashable, Sendable {
         self.truncated = truncated
         self.hunks = hunks
     }
+
+    /// The diff as a unified patch, as `git diff` writes it.
+    public var patch: String {
+        let from = status == .added ? "/dev/null" : "a/" + (oldPath ?? path)
+        let to = status == .deleted ? "/dev/null" : "b/" + path
+        var out = "--- \(from)\n+++ \(to)\n"
+        for h in hunks {
+            out += "@@ -\(h.oldStart),\(h.oldLines) +\(h.newStart),\(h.newLines) @@" + (h.header.isEmpty ? "" : " " + h.header) + "\n"
+            for l in h.lines { out += (l.kind == .add ? "+" : l.kind == .del ? "-" : " ") + l.text + "\n" }
+        }
+        return out
+    }
 }
 
 /// A line or the lines from...line of a file, or one block of a plan.

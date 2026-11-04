@@ -103,6 +103,8 @@ final class ReviewDesk {
     var collapsed: Set<String> = []
     /// The comment to scroll to after the next build of the diff.
     var reveal: String?
+    /// The review runs on this Mac, so its files are on this disk.
+    var local = false
 
     init(summary: ReviewSummary, source: (any ReviewSource)?, tracker: (any ReviewTracking)?, bus: ChangeBus = .shared) {
         machine = summary.machine
@@ -232,6 +234,12 @@ final class ReviewDesk {
         guard let source else { return false }
         let list = pending
         return await run { for c in list { try await source.deleteComment(self.key, id: c.id, kind: self.kind) } }
+    }
+
+    /// The path of the file on the disk of the machine of the review.
+    func absolutePath(_ f: ReviewFile) -> String {
+        let group = summary.group.map { $0.hasPrefix("/") ? $0 : (summary.root as NSString).appendingPathComponent($0) } ?? summary.root
+        return ((group as NSString).appendingPathComponent(f.repo) as NSString).appendingPathComponent(f.path)
     }
 
     func setViewed(_ f: ReviewFile, _ on: Bool) async -> Bool {

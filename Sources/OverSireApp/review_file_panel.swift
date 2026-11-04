@@ -286,7 +286,52 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         }
         row.stack.spacing = 5
         row.selected = f.id == desk.file
+        row.copyID = f.path
+        row.menuItems = { [weak self, weak desk] in
+            guard let self, let desk else { return [] }
+            return self.menu(f, desk: desk)
+        }
         return row
+    }
+
+    /// The right-click menu of a file row.
+    private func menu(_ f: ReviewFile, desk: ReviewDesk) -> [NSMenuItem] {
+        func item(_ title: String, _ symbol: String, key: String = "", mods: NSEvent.ModifierFlags = .command, _ run: @escaping () -> Void) -> NSMenuItem {
+            let i = MenuAction(title, run).item
+            i.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            i.keyEquivalent = key
+            i.keyEquivalentModifierMask = mods
+            return i
+        }
+        let full = desk.absolutePath(f)
+        var out = [
+            item("Copy Path", "doc.on.doc", key: "c") { RowActions.copy(f.path) },
+            item("Copy File Name", "textformat") { RowActions.copy(FileTree.base(f.path)) },
+            item("Copy Absolute Path", "folder") { RowActions.copy(full) },
+            .separator(),
+            item("Copy Diff", "plusminus") { [weak desk] in
+                guard let desk else { return }
+                if let d = desk.diffs[f.id] { return RowActions.copy(d.patch) }
+                Task { @MainActor in
+                    await desk.diff(f)
+                    if let d = desk.diffs[f.id] { RowActions.copy(d.patch) } else { NSSound.beep() }
+                }
+            },
+            .separator(),
+            item(f.viewed ? "Mark as Not Viewed" : "Mark as Viewed", f.viewed ? "eye.slash" : "eye") { [weak desk] in
+                Task { _ = await desk?.setViewed(f, !f.viewed) }
+            },
+        ]
+        out[4].isEnabled = !f.binary
+        if desk.local, FileManager.default.fileExists(atPath: full) {
+            let url = URL(fileURLWithPath: full)
+            out += [
+                .separator(),
+                item("Open in Editor", "square.and.pencil") { NSWorkspace.shared.open(url) },
+                item("Reveal in Finder", "folder.badge.gearshape") { NSWorkspace.shared.activateFileViewerSelecting([url]) },
+            ]
+        }
+        return out
     }
 
     private func badge(_ symbol: String, _ n: Int, _ color: NSColor) -> [NSView] {
@@ -304,6 +349,7 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
             list.addFull(h)
             for c in commits.prefix(8) {
                 let l = NSTextField.text("\(c.sha.prefix(7))  \(c.subject)", size: 11, color: Palette.mut, mono: true)
+                l.isSelectable = true
                 l.lineBreakMode = .byTruncatingTail
                 l.setContentCompressionResistancePriority(.init(1), for: .horizontal)
                 l.toolTip = c.subject

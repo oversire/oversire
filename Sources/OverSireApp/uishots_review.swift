@@ -6,7 +6,7 @@ import OverSireCore
 // so the samples go straight into REVIEWS, with no daemon reads.
 
 extension UIShots {
-    /// review:list, changes, split, wrap, plan, submit, approve, merge, conflict or empty.
+    /// review:list, changes, select, menu, split, wrap, plan, submit, approve, merge, conflict or empty.
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         Self.seedReviews(empty: scene == "empty")
@@ -27,6 +27,22 @@ extension UIShots {
         plan.block = scene == "plan" ? "risks" : nil
         switch scene {
         case "changes", "split", "wrap", "files", "search", "filters": w.router.go(.item("FRITZ-17", .changes))
+        case "select":
+            w.router.go(.item("FRITZ-17", .changes))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard let root = w.window?.contentView else { return }
+                (Self.find(root) { $0 is DiffBody } as? DiffBody)?.show(from: (2, 4), to: (5, 20))
+                (Self.find(root) { $0 is PathHead } as? PathHead)?.showButton()
+            }
+        case "menu":
+            w.router.go(.item("FRITZ-17", .changes))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard let root = w.window?.contentView, let row = Self.find(root, { ($0 as? TreeRow)?.selected == true }) as? TreeRow,
+                      let items = row.menuItems?() else { return }
+                let menu = NSMenu()
+                items.forEach { menu.addItem($0) }
+                self.shootMenu(menu, under: row, name: "review-file-menu")
+            }
         case "pending", "hover":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
