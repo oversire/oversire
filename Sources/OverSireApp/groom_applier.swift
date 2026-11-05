@@ -126,7 +126,7 @@ struct GroomApplier {
             await journal.record(before: e, in: projectKey)
             try await it.triage(i, in: project, .update(IntakeEdit(patch: ItemPatch(bodyMarkdown: body))))
         } else {
-            let old = try await tracker.detail(t.ref).item.body ?? ""
+            let old = try await ProjectStore.item(tracker, t.ref).body ?? ""
             let body = Self.keepingBlock(of: old, text)
             guard body != old else { return }
             e.body = old
@@ -174,7 +174,7 @@ struct GroomApplier {
                 let n = snapshot.blockingSubItems(item, to: state)
                 if n > 0 { throw ProviderError.vendor(code: "groom", message: ProjectStore.openSubItemsReason(item.key, n)) }
             }
-            let old = try await tracker.detail(t.ref).item.statusOptionId
+            let old = try await ProjectStore.item(tracker, t.ref).statusOptionId
             guard old != state else { return }
             e.status = old
             await journal.record(before: e, in: projectKey)
@@ -196,7 +196,7 @@ struct GroomApplier {
             try await it.triage(i, in: project, .accept)
             pending.remove(i.id)
         } else {
-            let old = try await tracker.detail(t.ref).item.parentId
+            let old = try await ProjectStore.item(tracker, t.ref).parentId
             guard old != parent.id else { return }
             e.parent = .init(id: old)
             await journal.record(before: e, in: projectKey)

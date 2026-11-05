@@ -21,7 +21,9 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     private var itemCache: [String: [String: Item]] = [:]               // project id → the last items
     private var fullAt: [String: Date] = [:]                            // project id → the last full list
     private var refCache: [String: ItemRef] = [:]                       // item id → ref, for relations
+    private var statusCache: [String: (options: [StatusOption], at: Date)] = [:]
     static let fullEvery: TimeInterval = 600
+    static let statusMaxAge: TimeInterval = 600
     var indexMaxAge: TimeInterval = 10
 
     public init(workspace: PlaneWorkspace, token: String, http: any HTTPTransport) {
@@ -88,13 +90,17 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         return out.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
+    /// Kept for 10 minutes. The states of a project seldom change.
     public func statuses(_ p: ProjectRef) async throws -> [StatusOption] {
+        if let c = lock.withLock({ statusCache[p.id] }), -c.at.timeIntervalSinceNow < Self.statusMaxAge { return c.options }
         let rows = try await api.list("\(ws)/projects/\(p.id)/states/", max: 200)
-        return rows.sorted { (($0["sequence"] as? NSNumber)?.doubleValue ?? 0) < (($1["sequence"] as? NSNumber)?.doubleValue ?? 0) }
+        let out: [StatusOption] = rows.sorted { (($0["sequence"] as? NSNumber)?.doubleValue ?? 0) < (($1["sequence"] as? NSNumber)?.doubleValue ?? 0) }
             .compactMap { r in
                 guard let id = PlaneAPI.id(r["id"]), let name = r["name"] as? String else { return nil }
                 return StatusOption(id: id, name: name, color: r["color"] as? String ?? "#9CA3AF", group: r["group"] as? String)
             }
+        lock.withLock { statusCache[p.id] = (out, Date()) }
+        return out
     }
 
     /// The items with the newest activity, and the parents and sub-items that complete each tree.
@@ -113,7 +119,9 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
             kept = top.compactMap { need.contains($0.id) ? nil : previous[$0.id] }
             // Changed items have the newest activity, so they are near the top of the list.
             let depth = (top.lastIndex { need.contains($0.id) } ?? 0) + 10
-            rows = try await load(p, need, depth: depth)
+            let (got, old) = try await load(p, need, depth: depth, previous: previous)
+            rows = got
+            kept += old
             loaded = Set(top.map(\.id))
         } else {
             let query = [URLQueryItem(name: "expand", value: "assignees,labels"),
@@ -134,13 +142,19 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         return items
     }
 
-    public func detail(_ i: ItemRef) async throws -> ItemDetail {
+    /// One item with no comments and no links: one call.
+    public func item(_ i: ItemRef) async throws -> Item {
         let names = await memberNames()
         let obj = try await api.send("GET", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/",
                                      query: [URLQueryItem(name: "expand", value: "assignees,labels")])
         guard let r = obj as? [String: Any], let item = parseItem(r, identifier: try await identifier(of: i.project), names: names) else {
             throw ProviderError.decoding("no work item in the answer")
         }
+        return item
+    }
+
+    public func detail(_ i: ItemRef) async throws -> ItemDetail {
+        let item = try await item(i)
         async let comments = comments(i)
         async let links = links(i)
         return ItemDetail(item: item, comments: try await comments, links: (try? await links) ?? [])
@@ -239,7 +253,14 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         for id in tree.subtracting(loaded) {
             if let prev = previous[id], prev.activityAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
         }
-        return ((try? await load(p, need, depth: 2000)) ?? [], kept)
+        do {
+            let (rows, old) = try await load(p, need, depth: 2000, previous: previous)
+            return (rows, kept + old)
+        } catch ProviderError.rateLimited(let after) {
+            throw ProviderError.rateLimited(retryAfter: after)
+        } catch {
+            return ([], kept + need.compactMap { previous[$0] })
+        }
     }
 
     // Plane ignores order_by=-last_activity_at and sorts by creation. It obeys -updated_at.
@@ -247,20 +268,30 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
 
     // More than a few items load from the list, `depth` rows deep. The others load one by one.
     // The list order is not the activity order, so an item can be below `depth`. It then loads alone.
-    private func load(_ p: ProjectRef, _ need: Set<String>, depth: Int) async throws -> [[String: Any]] {
-        if need.isEmpty { return [] }
+    // An item that fails to load stays as in `previous`, so it does not drop out. A rate limit stops the load.
+    private func load(_ p: ProjectRef, _ need: Set<String>, depth: Int,
+                      previous: [String: Item]) async throws -> (rows: [[String: Any]], kept: [Item]) {
+        if need.isEmpty { return ([], []) }
         let expand = URLQueryItem(name: "expand", value: "assignees,labels")
         var rows: [[String: Any]] = []
         if need.count > 3 {
             let all = try await api.list("\(ws)/projects/\(p.id)/issues/", query: [expand, Self.newestFirst], max: depth)
             rows = all.filter { PlaneAPI.id($0["id"]).map(need.contains) ?? false }
         }
+        var kept: [Item] = []
         for id in need.subtracting(rows.compactMap { PlaneAPI.id($0["id"]) }).sorted() {
-            if let r = try? await api.send("GET", "\(ws)/projects/\(p.id)/issues/\(id)/", query: [expand]) as? [String: Any] {
-                rows.append(r)
+            do {
+                if let r = try await api.send("GET", "\(ws)/projects/\(p.id)/issues/\(id)/", query: [expand]) as? [String: Any] {
+                    rows.append(r)
+                }
+            } catch ProviderError.rateLimited(let after) {
+                throw ProviderError.rateLimited(retryAfter: after)
+            } catch ProviderError.notFound {
+            } catch {
+                if let old = previous[id] { kept.append(old) }
             }
         }
-        return rows
+        return (rows, kept)
     }
 
     private func identifier(of p: ProjectRef) async throws -> String {

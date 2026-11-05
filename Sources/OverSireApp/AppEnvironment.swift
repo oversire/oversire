@@ -183,7 +183,7 @@ extension AppEnvironment: RepoAccounts {}
 
 // ─── Optional features of the adapters ───────────────────────────────────────
 
-extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeListing, LabelIdReading {}
+extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeListing, LabelIdReading, ItemReading {}
 
 extension PlaneTracker: OwnerEmail {
     func ownerEmail() async -> String? {

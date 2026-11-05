@@ -22,6 +22,8 @@ protocol StatusTimeline: Tracker { func timeline(_ i: ItemRef, statuses: [Status
 protocol IntakeKeying: Tracker { func intakeSequences(_ p: ProjectRef) async throws -> [String: Int] }
 /// All pending intake bodies in one listing. Work item id → detail.
 protocol IntakeListing: Tracker { func intakeDetails(_ p: ProjectRef) async throws -> [String: IntakeDetail] }
+/// One item without comments and links, for a read that needs only the fields.
+protocol ItemReading: Tracker { func item(_ i: ItemRef) async throws -> Item }
 /// A tracker whose Markdown names uploaded files by id.
 protocol AssetLinking: AssetResolving { func assetIds(in markdown: String) -> Set<String> }
 
@@ -64,6 +66,18 @@ final class ProjectStore {
         tracker: { [weak self] in self?.trackers.tracker($0.project.workspace) as? any RelationManaging },
         ref: { [weak self] key in self?.item(key: key).flatMap { $0.item.ref(in: $0.snap.summary.ref) } })
     var relayIsLive: () -> Bool = { false }
+    /// True on the Mac that leads the automations. The other Mac refreshes later on cloud events.
+    var leads: () -> Bool = { true }
+    var now: () -> Date = Date.init
+    /// A forced refresh of a key during its refresh runs once more after it. The callers wait for that run.
+    private var again: [String: [(Bool) -> Void]] = [:]
+    /// Workspace → the end of the pause after a rate limit.
+    private(set) var cooldown: [String: Date] = [:]
+    /// Keys that wait for a pause or a delay, by the time of their refresh.
+    private var waiting: [Date: Set<String>] = [:]
+    /// The shortest pause after a rate limit, and the wait of the Mac that does not lead.
+    var cooldownMin: TimeInterval = 60
+    var otherMacDelay: TimeInterval = 60
     var onChange: ((DataChange) -> Void)?
     var busy: BusyTracker?
     var hold = false   // `--uishots` loading mode: fetches never end
@@ -108,15 +122,30 @@ final class ProjectStore {
         refresh(keys, force: false) { _ in }
     }
 
+    /// One refresh of a project at a time. A forced refresh of a running project runs once more after it.
+    /// A workspace in its rate limit pause refreshes after the pause.
     func refresh(_ keys: [String], force: Bool, done: @escaping (Bool) -> Void) {
-        let todo = keys.filter { force || !refreshing.contains($0) }
-        guard !todo.isEmpty else { done(true); return }
+        let running = keys.filter { refreshing.contains($0) }
+        var todo = keys.filter { !refreshing.contains($0) }
+        var done = done
+        if force, let first = running.first {
+            for k in running where again[k] == nil { again[k] = [] }
+            again[first]?.append(done)
+            done = { _ in }
+        }
+        let paused = todo.filter { k in workspace(of: k).flatMap { cooldown[$0] }.map { $0 > now() } ?? false }
+        if !paused.isEmpty {
+            todo.removeAll { paused.contains($0) }
+            for k in paused { later(k, at: cooldown[workspace(of: k)!]!) }
+        }
+        guard !todo.isEmpty else { done(paused.isEmpty); return }
         for k in todo { refreshing.insert(k) }
+        for at in waiting.keys { waiting[at]?.subtract(todo) }
         publish(force ? DataChange(.projects, projects: Set(todo), origin: .user) : nil)
         let jobs = tracked.filter { todo.contains($0.ref.storeKey) }.map { p in
             (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey])
         }
-        let limit = snapshotLimit
+        let limit = snapshotLimit, minPause = cooldownMin
         let label = { (n: Int) in jobs.count == 1 ? "Loading \(jobs[0].0.identifier)" : "Loading projects: \(n) of \(jobs.count)" }
         let token = busy?.begin(label(0))
         if hold { return }
@@ -126,7 +155,10 @@ final class ProjectStore {
             var gone: [String: Set<String>] = [:]
             var error: String?
             var errors: [String: String] = [:]
+            var limited: [String: TimeInterval] = [:]   // workspace → the pause
+            var skipped: [String] = []
             for (n, (p, client, previous)) in jobs.enumerated() {
+                if limited[p.ref.workspace] != nil { skipped.append(p.ref.storeKey); continue }
                 if n > 0, let token { await MainActor.run { self.busy?.update(token, label(n)) } }
                 let started = Date()
                 let line = { (level: LogLevel, msg: String) in
@@ -150,13 +182,19 @@ final class ProjectStore {
                     error = "\(p.ref.workspace): " + e.message
                     errors[p.ref.storeKey] = e.message
                     line(.error, e.message)
+                    if case .rateLimited(let after) = e {
+                        limited[p.ref.workspace] = max(minPause, after.map { Double($0.components.seconds) } ?? 0)
+                        skipped.append(p.ref.storeKey)
+                    }
                 }
             }
             let failed = error != nil
             DispatchQueue.main.async {
                 if let token { self.busy?.end(token) }
-                for k in todo { self.refreshing.remove(k); self.errors[k] = errors[k] }
+                for k in todo { self.refreshing.remove(k); self.errors[k] = errors[k] ?? (skipped.contains(k) ? self.errors[k] : nil) }
                 self.lastError = error
+                for (ws, pause) in limited { self.cooldown[ws] = self.now().addingTimeInterval(pause) }
+                for k in skipped { if let ws = self.workspace(of: k), let end = self.cooldown[ws] { self.later(k, at: end) } }
                 var changed = Set<String>()
                 var projects = force ? Set(todo) : []
                 for snap in fresh {
@@ -172,7 +210,29 @@ final class ProjectStore {
                 self.relations.refresh(changed: changed)
                 self.publish(projects.isEmpty ? nil : DataChange([.projects, .intake], projects: projects, origin: force ? .user : .poll))
                 done(!failed)
+                self.runAgain(todo)
             }
+        }
+    }
+
+    /// The forced refreshes that came during the refresh of `keys`: one more run for all of them.
+    private func runAgain(_ keys: [String]) {
+        let next = keys.filter { again[$0] != nil }
+        guard !next.isEmpty else { return }
+        let waiters = next.flatMap { again.removeValue(forKey: $0) ?? [] }
+        refresh(next, force: true) { ok in waiters.forEach { $0(ok) } }
+    }
+
+    private func workspace(of key: String) -> String? { tracked.first { $0.ref.storeKey == key }?.ref.workspace }
+
+    /// Refreshes the key at `at`. Keys with the same time share one refresh.
+    private func later(_ key: String, at: Date) {
+        if waiting.values.contains(where: { $0.contains(key) }) { return }
+        if waiting[at] != nil { waiting[at]?.insert(key); return }
+        waiting[at] = [key]
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, at.timeIntervalSince(now()))) { [weak self] in
+            guard let self, let keys = self.waiting.removeValue(forKey: at) else { return }
+            self.refresh(Array(keys), force: false) { _ in }
         }
     }
 
@@ -182,6 +242,13 @@ final class ProjectStore {
             events.isEmpty || events.contains { $0.workspace == ref.workspace && ($0.project == nil || $0.project == ref.id) }
         }.map(\.storeKey)
         if keys.isEmpty { done(true); return }
+        // Both Macs get the same cloud events. The Mac that does not lead waits, so the two do not load at once.
+        guard leads() else {
+            let at = now().addingTimeInterval(otherMacDelay)
+            for k in keys { later(k, at: at) }
+            done(true)
+            return
+        }
         refresh(keys, force: true, done: done)
     }
 
@@ -675,10 +742,16 @@ final class ProjectStore {
     }
 
     /// The items that left the snapshot and that the tracker does not find. Other items only fell out of the item limit.
-    /// Only a "not found" reply counts as removed; at most 20 checks for each poll.
+    /// A tracker with an index: an item that is not in the index is gone, with no call. With no index, nothing is gone.
+    /// Else only a "not found" reply counts as removed; at most 20 checks for each poll.
     static func gone(_ client: Tracker, _ old: ProjectSnapshot?, _ new: ProjectSnapshot) async -> Set<String> {
         guard let old else { return [] }
         let ids = Set(new.items.map(\.id))
+        if client is any ItemIndexing {
+            guard let index = new.index else { return [] }
+            let all = Set(index.map(\.id))
+            return Set(old.items.filter { !ids.contains($0.id) && !all.contains($0.id) }.map(\.id))
+        }
         var out = Set<String>()
         for item in old.items.filter({ !ids.contains($0.id) }).prefix(20) {
             guard let ref = item.ref(in: new.summary.ref) else { continue }
@@ -835,7 +908,15 @@ extension ProjectStore {
                 item.commentCount = prev.commentCount
                 item.lastComment = prev.lastComment
                 item.mentionsMe = prev.mentionsMe
-            } else if previous != nil, let iref = item.ref(in: ref), let list = try? await t.comments(iref) {
+            } else if previous != nil, let iref = item.ref(in: ref) {
+                let list: [Comment]
+                do { list = try await t.comments(iref) } catch ProviderError.rateLimited(let after) {
+                    throw ProviderError.rateLimited(retryAfter: after)
+                } catch {
+                    // Keep the old item, so its comments load again at the next refresh.
+                    items.append(prev ?? item)
+                    continue
+                }
                 item.commentCount = list.count
                 item.lastComment = list.last
                 let since = previous?.fetchedAt ?? .distantPast
@@ -858,6 +939,12 @@ extension ProjectStore {
     static func timeline(_ t: any Tracker, _ i: ItemRef, statuses: [StatusOption], current: String?) async throws -> [ActivityEntry] {
         if let t = t as? any StatusTimeline { return try await t.timeline(i, statuses: statuses, current: current) }
         return try await (t as? any TimelineReading)?.timeline(i) ?? []
+    }
+
+    /// The fields of one item. A tracker with ItemReading loads no comments and no links.
+    static func item(_ t: any Tracker, _ i: ItemRef) async throws -> Item {
+        if let r = t as? any ItemReading { return try await r.item(i) }
+        return try await t.detail(i).item
     }
 
     /// Adds me and keeps the other assignees.

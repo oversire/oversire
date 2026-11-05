@@ -334,12 +334,13 @@ final class LiveSync {
         scheduleFlush()
     }
 
-    // A burst of events gives one refresh.
+    // A burst of events gives one refresh. Plane sends a burst over some seconds, so Plane events wait longer.
     private func scheduleFlush() {
         flushWork?.cancel()
         let w = DispatchWorkItem { [weak self] in self?.flush() }
         flushWork = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: w)
+        let plane = !buffer.isEmpty && buffer.allSatisfy { $0.provider == .plane }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (plane ? 3 : 0.5), execute: w)
     }
 
     private func flush() {

@@ -99,8 +99,8 @@ actor GroomJournal {
         guard let r = await last(projectKey) else { return [] }
         var out: [String] = []
         for e in r.entries {
-            guard let at = e.writtenAt, let d = try? await tracker.detail(e.ref) else { continue }
-            if d.item.updatedAt.timeIntervalSince(at) > Self.grace { out.append(e.key) }
+            guard let at = e.writtenAt, let item = try? await ProjectStore.item(tracker, e.ref) else { continue }
+            if item.updatedAt.timeIntervalSince(at) > Self.grace { out.append(e.key) }
         }
         return out
     }
