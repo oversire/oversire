@@ -109,4 +109,15 @@ final class CleanupPlanTests: XCTestCase {
         XCTAssertFalse(c.runHooks)
         XCTAssertEqual(CleanupConfig.waits.map(CleanupConfig.waitText), ["15 minutes", "1 hour", "1 day", "1 week"])
     }
+
+    /// No git for the folders of another Mac (OVERSIRE-430).
+    func testPathsOnlyOnThisMac() {
+        let here = "/Users/me/.wt/oversire-196/oversire", there = "/Users/other/.wt/oversire-196/cli"
+        let co = Checkout(path: here, repo: "o/oversire", branch: "oversire-196", head: "", key: "OVERSIRE-196", cardId: nil)
+        let paths = Cleaner.paths(keys: ["OVERSIRE-196"], checkouts: [co], cards: [card("c1", path: there)],
+                                  key: { _ in "OVERSIRE-196" }, exists: { $0 == here })
+        XCTAssertEqual(paths, [here: "o/oversire"])
+        XCTAssertTrue(Cleaner.paths(keys: ["OVERSIRE-196"], checkouts: [], cards: [card("c1", path: there)],
+                                    key: { _ in "OVERSIRE-196" }, exists: { _ in true }).keys.contains(there))
+    }
 }

@@ -67,10 +67,11 @@ public struct GitCheckout: Sendable {
         return "master"
     }
 
+    /// The status call goes first: a gone folder then fails after one git call.
     public func state() async throws -> CheckoutState {
+        let status = try await run(["status", "--porcelain"])
         let base = await baseBranch()
         let branch = (try? await run(["symbolic-ref", "--short", "HEAD"])) ?? ""
-        let status = try await run(["status", "--porcelain"])
         let dirty = status.split(separator: "\n").count
         let ahead = Int(try await run(["rev-list", "--count", base + "..HEAD"])) ?? 0
         return CheckoutState(branch: branch, dirty: dirty, ahead: ahead, base: base)

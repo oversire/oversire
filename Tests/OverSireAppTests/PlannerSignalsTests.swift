@@ -1,5 +1,6 @@
 import OverSireCore
 import OverSireSync
+import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
@@ -91,5 +92,16 @@ final class PlannerSignalsTests: XCTestCase {
         let s = PlannerSignals(commands: r, writes: StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: dir + "-store"))))
         let paths = await s.changedPaths(dir)
         XCTAssertEqual(paths, ["edit.txt", "gone.txt", "new.txt"])
+    }
+
+    func testNoGitCallOutsideARepo() async {
+        let r = ReplayCommandRunner(dir: FileManager.default.temporaryDirectory.appendingPathComponent("no-fixtures-\(UUID().uuidString)"), record: false)
+        let dir = "/Users/other/Projects/towertail"
+        let s = PlannerSignals(commands: r, writes: StoreWrites(store: LocalStore(dir: FileManager.default.temporaryDirectory.appendingPathComponent("st-\(UUID().uuidString)"))))
+        let paths = await s.changedPaths(dir)
+        let found = await s.candidates(project: "p", dir: dir, now: Date())
+        XCTAssertNil(paths)
+        XCTAssertNil(found)
+        XCTAssertTrue(r.missing.isEmpty, "\(r.missing)")
     }
 }

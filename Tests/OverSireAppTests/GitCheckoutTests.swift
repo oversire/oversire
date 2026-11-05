@@ -65,4 +65,20 @@ final class GitCheckoutTests: XCTestCase {
             XCTFail("git must refuse a branch that is not merged")
         } catch {}
     }
+
+    /// A folder that is gone fails after one git call (OVERSIRE-430).
+    func testGoneFolderFailsAfterOneCall() async throws {
+        final class Count: CommandRunner, @unchecked Sendable {
+            let lock = NSLock()
+            var n = 0
+            func run(_ exe: String, _ args: [String], stdin: Data?, timeout: Duration) async throws -> CommandOutput {
+                lock.withLock { n += 1 }
+                return try await ProcessRunner().run(exe, args, stdin: stdin, timeout: timeout)
+            }
+        }
+        let c = Count()
+        let g = GitCheckout(path: root.appendingPathComponent("gone").path, commands: c)
+        do { _ = try await g.state(); XCTFail("a gone folder has no state") } catch {}
+        XCTAssertEqual(c.n, 1)
+    }
 }

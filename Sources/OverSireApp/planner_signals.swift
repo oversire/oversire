@@ -161,8 +161,12 @@ final class PlannerSignals {
         self.writes = writes
     }
 
+    /// A path of another Mac, or a gone folder, gets no git call (OVERSIRE-430).
+    static func isRepo(_ dir: String) -> Bool { FileManager.default.fileExists(atPath: (dir as NSString).appendingPathComponent(".git")) }
+
     /// The changed paths of a worktree against the merge base with the default branch, plus the untracked files.
     func changedPaths(_ dir: String) async -> [String]? {
+        guard Self.isRepo(dir) else { return nil }
         func git(_ args: [String]) async -> String? {
             guard let r = try? await commands.run(Self.git, ["-C", dir] + args, stdin: nil, timeout: .seconds(20)), r.ok else { return nil }
             return String(decoding: r.stdout, as: UTF8.self)
@@ -207,7 +211,7 @@ final class PlannerSignals {
     }
 
     func candidates(project: String, dir: String, now: Date) async -> AreaCandidates? {
-        guard let r = try? await commands.run(Self.git, ["-C", dir, "ls-files"], stdin: nil, timeout: .seconds(30)), r.ok else { return nil }
+        guard Self.isRepo(dir), let r = try? await commands.run(Self.git, ["-C", dir, "ls-files"], stdin: nil, timeout: .seconds(30)), r.ok else { return nil }
         let paths = String(decoding: r.stdout, as: UTF8.self).split(separator: "\n").map(String.init)
             .filter { ImportGraph.exts.contains(($0 as NSString).pathExtension) && !$0.contains("node_modules/") }
             .prefix(ImportGraph.maxFiles)

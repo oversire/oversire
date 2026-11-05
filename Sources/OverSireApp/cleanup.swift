@@ -98,6 +98,7 @@ final class Cleaner {
     var runtime: () -> (any WorkspaceRemoving)? = { ENV.runtime as? any WorkspaceRemoving }
     var branchHost: (String) -> (host: any BranchDeleting, ref: RepoRef)? = { REPO_CLIENT.branchHost($0) }
     var now: () -> Date = Date.init
+    var exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
 
@@ -245,15 +246,24 @@ final class Cleaner {
         return out
     }
 
+    /// The checkout paths of the finished items, to their owner/name. Only paths on this Mac: the cards of a remote runtime
+    /// are folders of another Mac, and its daemon owns them (OVERSIRE-430).
+    static func paths(keys: Set<String>, checkouts: [Checkout], cards: [Workspace], key: (Workspace) -> String?,
+                      exists: (String) -> Bool) -> [String: String] {
+        var paths: [String: String] = [:]
+        for co in checkouts where co.key.map(keys.contains) == true { paths[co.path] = co.repo }
+        for c in cards where c.kind == .worktree {
+            if let k = key(c), keys.contains(k), paths[c.path] == nil { paths[c.path] = "" }
+        }
+        return paths.filter { exists($0.key) }
+    }
+
     /// Reads the git state of the checkouts of finished items, and the changes of their branches.
     func refresh(_ data: AppData, done: (() -> Void)? = nil) {
         guard !refreshing else { done?(); return }
         let keys = Self.attachedKeys(data).filter { Self.finished($0, data: data) != nil }
-        var paths: [String: String] = [:]   // checkout path → owner/name
-        for co in data.workstreams.checkouts where co.key.map(keys.contains) == true { paths[co.path] = co.repo }
-        for c in data.agentIndex.cards where c.kind == .worktree {
-            if let k = AgentsPage.cardKey(c, data: data), keys.contains(k), paths[c.path] == nil { paths[c.path] = "" }
-        }
+        let paths = Self.paths(keys: keys, checkouts: data.workstreams.checkouts, cards: data.agentIndex.remote ? [] : data.agentIndex.cards,
+                               key: { AgentsPage.cardKey($0, data: data) }, exists: exists)
         let known = Self.known(data)
         let old = facts
         let pullsAt = self.pullsAt
