@@ -34,8 +34,8 @@ final class MachineHub {
     /// The sessions of the account changed, or its daemon came or went.
     var onSessions: (AccountID) -> Void = { _ in }
 
-    init(local: DaemonClient = DaemonClient(base: DaemonClient.loopback, token: nil, http: URLSessionTransport()),
-         keychain: any CredentialKeeping = SecretStore(), http: any HTTPTransport = URLSessionTransport(),
+    init(local: DaemonClient = DaemonClient(base: DaemonClient.loopback, token: nil, http: DaemonTransport.shared),
+         keychain: any CredentialKeeping = SecretStore(), http: any HTTPTransport = DaemonTransport.shared,
          cache: URL? = URL(fileURLWithPath: (CONFIG_DIR as NSString).appendingPathComponent("machines-group.json"))) {
         self.http = http
         self.local = local

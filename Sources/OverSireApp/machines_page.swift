@@ -324,7 +324,7 @@ final class MachinesController {
     static let shared = MachinesController()
 
     weak var hub: MachineHub?
-    var local = DaemonClient(base: DaemonClient.loopback, token: nil, http: URLSessionTransport())
+    var local = DaemonClient(base: DaemonClient.loopback, token: nil, http: DaemonTransport.shared)
     var installed: () -> Bool = { DaemonSetup.shared.installer.isInstalled }
     var path: () -> String = { (DaemonSetup.shared.installer.exe.path as NSString).abbreviatingWithTildeInPath }
     /// One HEAD request to github.com. The page asks at most once in one hour.

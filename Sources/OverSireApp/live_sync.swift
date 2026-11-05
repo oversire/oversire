@@ -229,8 +229,8 @@ final class LiveSync {
         guard let hub = machines else { return [] }
         return links.map { l in
             let machine = l.machine
-            let s = CloudSource(base: l.base, token: l.token, name: machine, cursorKey: l.cursorKey, http: URLSessionTransport(),
-                                socket: URLSessionWebSockets(), cursors: cursors, onResync: { _ in
+            let s = CloudSource(base: l.base, token: l.token, name: machine, cursorKey: l.cursorKey, http: DaemonTransport.shared,
+                                socket: URLSessionWebSockets.daemon, cursors: cursors, onResync: { _ in
                 DispatchQueue.main.async { [weak self] in
                     if self?.generation == gen { hub.logGap(machine) }
                 }

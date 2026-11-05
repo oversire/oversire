@@ -979,7 +979,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let runtime = own ? "OverSire" : "Orca"
         let pop = ActionButton("Pop out", symbol: "macwindow") {
             LiveTerminalWindow.show(sessionID: id, title: "\(k) terminal",
-                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()), runtime: runtime, place: place)
+                                    stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets.daemon), runtime: runtime, place: place)
         }
         pop.setAccessibilityLabel("Open the terminal in its own window")
         var trailing: [NSView] = [pop]
@@ -991,7 +991,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             // Only a session on this Mac opens in Orca. A remote session uses Pop out.
             trailing.append(ActionButton("Open in Orca ↗", action: "session.reveal", ["key": .string(k)]))
         }
-        let c = LiveTerminalCard(sessionID: id, stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets()),
+        let c = LiveTerminalCard(sessionID: id, stream: SessionStream(request: request, view: .terminal, socket: URLSessionWebSockets.daemon),
                                  runtime: runtime, place: place, trailing: trailing)
         c.onDetails = { [weak self] in self?.go(.settings(.machines)) }
         c.onRetry = { [weak self] in self?.retryLive(k) }
@@ -1018,7 +1018,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         open.setAccessibilityLabel("Resume the session in a terminal")
         let stop = ActionButton("Stop session", style: .link) { [weak self] in self?.confirmStop(k) }
         stop.setAccessibilityLabel("Stop the session")
-        return SessionChatCard(sessionID: id, agent: a.agent.rawValue, stream: SessionStream(request: request, view: .chat, socket: URLSessionWebSockets()),
+        return SessionChatCard(sessionID: id, agent: a.agent.rawValue, stream: SessionStream(request: request, view: .chat, socket: URLSessionWebSockets.daemon),
                                trailing: [open, stop])
     }
 

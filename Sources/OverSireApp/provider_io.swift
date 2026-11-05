@@ -107,6 +107,46 @@ extension URLSessionTransport: HTTPStreaming {
     }
 }
 
+/// The HTTP of the daemons, on sessions of their own (OVERSIRE-426). `URLSession.shared` opens at most 6 connections to one
+/// host, and the timeout of a request counts the wait for a connection. Slow calls then made the fast calls fail.
+/// A request with a timeout over `shortLimit` (an ask, the workspaces, a stream) goes on the long session.
+struct DaemonTransport: HTTPTransport, HTTPStreaming {
+    static let shared = DaemonTransport()
+    static let shortLimit: TimeInterval = 10
+    static let connections = 16
+
+    let short: any HTTPTransport
+    let long: any HTTPTransport & HTTPStreaming
+    /// The session of the long calls. The sockets of the daemons use it too.
+    let longSession: URLSession
+
+    init() {
+        let longSession = Self.session()
+        self.init(short: URLSessionTransport(session: Self.session()), long: URLSessionTransport(session: longSession), longSession: longSession)
+    }
+
+    init(short: any HTTPTransport, long: any HTTPTransport & HTTPStreaming, longSession: URLSession = .shared) {
+        self.short = short
+        self.long = long
+        self.longSession = longSession
+    }
+
+    static func session() -> URLSession {
+        let c = URLSessionConfiguration.ephemeral
+        c.httpMaximumConnectionsPerHost = connections
+        c.urlCache = nil
+        return URLSession(configuration: c)
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try await (request.timeoutInterval > Self.shortLimit ? long : short).send(request)
+    }
+
+    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+        try await long.stream(request)
+    }
+}
+
 final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest) async -> URLRequest? { nil }
@@ -219,11 +259,12 @@ struct KeychainSecrets: SecretReader {
 
 /// The cloud socket over URLSessionWebSocketTask.
 struct URLSessionWebSockets: WebSocketConnecting {
+    var session = URLSession.shared
     var log = IOLog()
 
     func connect(_ request: URLRequest) async throws -> any WebSocketConnection {
         let t0 = Date()
-        let socket = URLSessionWebSocket(task: URLSession.shared.webSocketTask(with: request))
+        let socket = URLSessionWebSocket(task: session.webSocketTask(with: request))
         socket.task.resume()
         // A ping waits for the handshake, so a bad token fails here.
         do {
@@ -283,4 +324,9 @@ final class URLSessionWebSocket: WebSocketConnection, @unchecked Sendable {
         if task.closeCode.rawValue == 4001 || (task.response as? HTTPURLResponse)?.statusCode == 401 { return .unauthorized }
         return .transport(error.localizedDescription)
     }
+}
+
+extension URLSessionWebSockets {
+    /// The sockets of the daemons: the event log and the live view of a session.
+    static let daemon = URLSessionWebSockets(session: DaemonTransport.shared.longSession)
 }

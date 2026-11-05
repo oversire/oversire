@@ -306,7 +306,7 @@ final class IntakeDetailPage: Page {
             guard let self else { return }
             if let t, t.view == .terminal, let id = agents.agent(key)?.paneKey {
                 LiveTerminalWindow.show(sessionID: id, title: "\(key) terminal",
-                                        stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets()), runtime: "Orca", place: agents.place)
+                                        stream: SessionStream(request: t.request, view: .terminal, socket: URLSessionWebSockets.daemon), runtime: "Orca", place: agents.place)
             } else if agents.canReveal {
                 self.data.actions.click("session.reveal", ["key": .string(key)], in: self.view.window)
             } else {

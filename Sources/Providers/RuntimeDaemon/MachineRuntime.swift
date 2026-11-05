@@ -30,6 +30,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     private let lock = NSLock()
     private var known: [DaemonRuntime] = []
     private var runtimeOf: [String: String] = [:]   // workspace id → runtime id
+    private var pageCall: Task<DaemonWorkspacesPage, Error>?
 
     /// `pushes` wakes the question board when an event of the machine names a question.
     public init(machine: String, client: DaemonClient, pushes: Pushes? = nil, now: @escaping @Sendable () -> Date = Date.init,
@@ -82,13 +83,12 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
 
     /// The workspaces with their agent sessions. A runtime that fails drops out; all of them failing is an error.
     public func workspaces() async throws -> [Workspace] {
-        async let pageCall = client.workspaces()
+        async let pageCall = workspacePage()
         async let sessionsCall = client.sessions()
         let (page, live) = try await (pageCall, sessionsCall)
         if page.workspaces.isEmpty, let errs = page.errors, !errs.isEmpty {
             throw ProviderError.transport(errs.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }.joined(separator: "; "))
         }
-        remember(page)
         let byWorkspace = Dictionary(grouping: live.sessions.filter { $0.workspace != nil }, by: { $0.workspace! })
         return page.workspaces.map { w in
             let repo = w.repo ?? ""
@@ -103,8 +103,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     }
 
     public func sessions(_ w: WorkspaceRef) async throws -> [RuntimeSession] {
-        let page = try await client.workspaces()
-        remember(page)
+        let page = try await workspacePage()
         let terminals = page.workspaces.first { $0.id == w.id }?.terminals ?? []
         return terminals.map { RuntimeSession(ref: SessionRef(workspace: w, id: $0.id), title: $0.title, paneKey: $0.session ?? "", orphaned: $0.orphaned) }
     }
@@ -283,8 +282,22 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
     /// The runtime of a workspace. An unknown workspace reads the list once.
     func runtime(of workspace: String) async -> String {
         if let rt = lock.withLock({ runtimeOf[workspace] }) { return rt }
-        if let page = try? await client.workspaces() { remember(page) }
+        _ = try? await workspacePage()
         return lock.withLock { runtimeOf[workspace] } ?? Self.defaultRuntime
+    }
+
+    /// GET /v1/workspaces. A caller that comes while a read is in flight gets the answer of that read (OVERSIRE-426).
+    func workspacePage() async throws -> DaemonWorkspacesPage {
+        let call = lock.withLock {
+            if let pageCall { return pageCall }
+            let t = Task { [client] in try await client.workspaces() }
+            pageCall = t
+            return t
+        }
+        defer { lock.withLock { if pageCall == call { pageCall = nil } } }
+        let page = try await call.value
+        remember(page)
+        return page
     }
 
     private func remember(_ page: DaemonWorkspacesPage) {

@@ -35,7 +35,7 @@ final class GroupSync {
         didSet { if cloud != oldValue { apply() } }
     }
 
-    init(hub: MachineHub, writes: StoreWrites = STORE_WRITES, desk: RunnerDesk = RUNNER_DESK, http: any HTTPTransport = URLSessionTransport()) {
+    init(hub: MachineHub, writes: StoreWrites = STORE_WRITES, desk: RunnerDesk = RUNNER_DESK, http: any HTTPTransport = DaemonTransport.shared) {
         self.hub = hub
         self.writes = writes
         self.desk = desk
