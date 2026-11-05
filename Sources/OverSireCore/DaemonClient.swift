@@ -250,8 +250,11 @@ public final class DaemonClient: Sendable {
 
     // MARK: Reviews (member routes, review.json)
 
+    /// A background read. A daemon with many groups can need more than the default timeout.
     public func reviews(kind: ReviewKind?) async throws -> ReviewsPage {
-        try await get("/v1/reviews" + Self.query(["kind": kind?.rawValue]))
+        var r = request("/v1/reviews" + Self.query(["kind": kind?.rawValue]))
+        r.timeoutInterval = 30
+        return try Self.decode(try await send(r))
     }
 
     public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail {

@@ -47,6 +47,7 @@ final class MachineRuntimeReviewTests: XCTestCase {
             "GET /v1/reviews/SLING-170/diff?repo=sling-cli&path=core/dbio/database/database.go",
         ])
         XCTAssertEqual(http.requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer t")
+        XCTAssertEqual(http.requests.map(\.timeoutInterval), [30, 5, 5, 5])
     }
 
     func testCommentRoutes() async throws {
