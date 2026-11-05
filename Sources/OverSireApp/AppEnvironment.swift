@@ -21,6 +21,8 @@ final class AppEnvironment: @unchecked Sendable {
     private var configs: [AccountConfig] = []
     private var made: [AccountID: (config: AccountConfig, provider: any Provider)] = [:]
     private var failed: [AccountID: String] = [:]
+    private var gates: [AccountID: RateGate] = [:]
+    private weak var owner: AutomationOwner?
 
     init(secrets: KeychainSecrets = KeychainSecrets()) {
         self.secrets = secrets
@@ -30,10 +32,34 @@ final class AppEnvironment: @unchecked Sendable {
     }
 
     /// GitHub adapters get the gh environment and no redirects, as the gh CLI does.
-    func io(_ p: ProviderID, secrets other: (any SecretReader)? = nil) -> ProviderEnvironment {
+    /// A Plane account sends through its rate gate.
+    func io(_ p: ProviderID, account: AccountID? = nil, secrets other: (any SecretReader)? = nil) -> ProviderEnvironment {
         let gh = p == .github || p == .githubActions
-        return ProviderEnvironment(http: gh ? URLSessionTransport.noRedirects : URLSessionTransport(),
-                                   commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil), secrets: other ?? secrets, log: AppLog())
+        var http: any HTTPTransport = gh ? URLSessionTransport.noRedirects : URLSessionTransport()
+        if p == .plane, let account { http = GatedTransport(http, gate: gate(account), log: AppLog(), host: account.id) }
+        return ProviderEnvironment(http: http, commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil),
+                                   secrets: other ?? secrets, log: AppLog())
+    }
+
+    /// Plane calls a minute for each token. Both Macs share the token, and Plane allows 60.
+    static let planeBudget = (lead: 40, other: 15)
+
+    /// The app that holds the automation lease. The Mac that leads gets the larger Plane budget.
+    var automationOwner: AutomationOwner? {
+        get { lock.withLock { owner } }
+        set { lock.withLock { owner = newValue } }
+    }
+
+    /// One gate for each account. It stays when the adapter is made again.
+    private func gate(_ a: AccountID) -> RateGate {
+        lock.withLock {
+            if let g = gates[a] { return g }
+            let g = RateGate(perMinute: { [weak self] in
+                (self?.automationOwner?.leads ?? true) ? Self.planeBudget.lead : Self.planeBudget.other
+            })
+            gates[a] = g
+            return g
+        }
     }
 
     /// Runs after the Providers page removes an account, for example to delete its webhook.
@@ -72,7 +98,7 @@ final class AppEnvironment: @unchecked Sendable {
     private func provider(_ c: AccountConfig) -> (any Provider)? {
         if let p = lock.withLock({ made[c.account].flatMap { $0.config == c ? $0.provider : nil } }) { return p }
         do {
-            let p = try registry.make(c, environment: io(c.account.provider))
+            let p = try registry.make(c, environment: io(c.account.provider, account: c.account))
             lock.withLock {
                 made[c.account] = (c, p)
                 failed[c.account] = nil

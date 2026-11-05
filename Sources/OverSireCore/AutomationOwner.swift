@@ -82,6 +82,14 @@ public final class AutomationOwner: @unchecked Sendable {
         }
     }
 
+    /// True when this app owns the automations or has no group. A paused app does not lead.
+    public var leads: Bool {
+        switch role {
+        case .solo, .owner: return true
+        case .other, .paused: return false
+        }
+    }
+
     /// False when this app cannot start agent sessions (no runtime). The app sets it at each change.
     public var canRun: Bool {
         get { lock.withLock { runs } }

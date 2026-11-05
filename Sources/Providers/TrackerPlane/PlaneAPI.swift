@@ -95,7 +95,7 @@ struct PlaneAPI: Sendable {
         }
     }
 
-    /// On 429 waits for Retry-After (at most 10 s) and tries again, two times.
+    /// A 429 throws rateLimited. The transport of the app waits and tries again (GatedTransport, OVERSIRE-428).
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil) async throws -> Any? {
         guard var comps = URLComponents(string: workspace.host.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path) else {
             throw ProviderError.transport("Bad Plane host: \(workspace.host)")
@@ -111,30 +111,24 @@ struct PlaneAPI: Sendable {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         }
-        for attempt in 0..<3 {
-            let (data, resp): (Data, HTTPURLResponse)
-            do { (data, resp) = try await http.send(req) }
-            catch let e as ProviderError { throw e }
-            catch { throw ProviderError.transport(error.localizedDescription) }
+        let (data, resp): (Data, HTTPURLResponse)
+        do { (data, resp) = try await http.send(req) }
+        catch let e as ProviderError { throw e }
+        catch { throw ProviderError.transport(error.localizedDescription) }
+        let obj = data.isEmpty ? nil : try? JSONSerialization.jsonObject(with: data)
+        switch resp.statusCode {
+        case 200..<300: return obj
+        case 401: throw ProviderError.unauthorized
+        case 403: throw ProviderError.forbidden
+        case 404: throw ProviderError.notFound
+        case 429:
             let wait = Double(resp.value(forHTTPHeaderField: "Retry-After") ?? "")
-            if resp.statusCode == 429, attempt < 2 {
-                try await Task.sleep(nanoseconds: UInt64(min(10, Swift.max(1, wait ?? 2)) * 1e9))
-                continue
-            }
-            let obj = data.isEmpty ? nil : try? JSONSerialization.jsonObject(with: data)
-            switch resp.statusCode {
-            case 200..<300: return obj
-            case 401: throw ProviderError.unauthorized
-            case 403: throw ProviderError.forbidden
-            case 404: throw ProviderError.notFound
-            case 429: throw ProviderError.rateLimited(retryAfter: wait.map { .seconds($0) })
-            default:
-                let o = obj as? [String: Any]
-                let text = (o?["detail"] as? String) ?? (o?["error"] as? String) ?? (o?["message"] as? String) ?? ""
-                throw ProviderError.vendor(code: String(resp.statusCode),
-                                           message: text.isEmpty ? "Plane gave HTTP \(resp.statusCode)" : "Plane: \(text.prefix(160))")
-            }
+            throw ProviderError.rateLimited(retryAfter: wait.map { .seconds($0) })
+        default:
+            let o = obj as? [String: Any]
+            let text = (o?["detail"] as? String) ?? (o?["error"] as? String) ?? (o?["message"] as? String) ?? ""
+            throw ProviderError.vendor(code: String(resp.statusCode),
+                                       message: text.isEmpty ? "Plane gave HTTP \(resp.statusCode)" : "Plane: \(text.prefix(160))")
         }
-        throw ProviderError.rateLimited(retryAfter: nil)
     }
 }

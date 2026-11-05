@@ -19,7 +19,7 @@ This guide is for the adapter in the app. The cloud has its own guide for webhoo
 - An adapter target imports only `OverSireCore` (and `GitHubKit` for a GitHub adapter). It does not import AppKit.
 - All calls are `async throws`. All types are `Sendable`.
 - All HTTP goes through the `HTTPTransport` that you get. All child processes go through the `CommandRunner` that you get. Do not use `URLSession` or `Process` directly. The tests replace them.
-- Map each vendor error to `ProviderError`. A refused token is `.unauthorized`. A 429 is `.rateLimited(retryAfter:)`.
+- Map each vendor error to `ProviderError`. A refused token is `.unauthorized`. A 429 is `.rateLimited(retryAfter:)`. Do not sleep and try again in the adapter. The app sends Plane calls through a `GatedTransport`: one `RateGate` for each token, with a budget a minute and one shared pause after a 429.
 - An adapter must poll. Webhooks are an option on top of the poll.
 - Events are hints. An event tells the app what to read again. The app does not show the event data as the truth.
 
