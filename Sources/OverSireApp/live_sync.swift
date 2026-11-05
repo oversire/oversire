@@ -111,6 +111,7 @@ final class LiveSync {
     private var consumer: Task<Void, Never>?
     private var watching = false
     private var buffer: [ProviderEvent] = []
+    private var burstStart: Date?
     private var resyncs: [AccountID] = []
     private var fullResync = false
     private var flushWork: DispatchWorkItem?
@@ -335,15 +336,20 @@ final class LiveSync {
     }
 
     // A burst of events gives one refresh. Plane sends a burst over some seconds, so Plane events wait longer.
+    // A burst waits at most 10 s after its first event.
     private func scheduleFlush() {
         flushWork?.cancel()
         let w = DispatchWorkItem { [weak self] in self?.flush() }
         flushWork = w
+        let start = burstStart ?? Date()
+        burstStart = start
         let plane = !buffer.isEmpty && buffer.allSatisfy { $0.provider == .plane }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (plane ? 3 : 0.5), execute: w)
+        let wait = min(plane ? 3 : 0.5, max(0, 10 - Date().timeIntervalSince(start)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: w)
     }
 
     private func flush() {
+        burstStart = nil
         guard let sink else { return }
         let events = buffer, accounts = resyncs, full = fullResync
         buffer = []
