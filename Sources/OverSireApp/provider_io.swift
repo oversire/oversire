@@ -24,7 +24,7 @@ struct IOLog {
             msg += ": " + Self.bodyText(body)
         }
         let host = r.url.map { u in (u.host ?? "") + (u.port.map { ":\($0)" } ?? "") }
-        var e = LogEntry(level: failed ? .warn : .ok, area: .net, job: "HTTP", host: host, message: msg, ms: ms)
+        var e = LogEntry(level: failed ? .warn : .ok, area: .net, job: "HTTP", subject: "\(method) \(Self.route(path))", host: host, message: msg, ms: ms)
         e.verbose = quiet || held || (!failed && method == "GET")
         sink.write(e)
     }
@@ -42,6 +42,14 @@ struct IOLog {
         if failed, !stderr.isEmpty { e.outputTail = String(stderr.suffix(300)) }
         e.verbose = !failed
         sink.write(e)
+    }
+
+    /// The path with each id as {id}: a segment with a digit (not v1) or of 24 or more characters. The problem key of a net line.
+    static func route(_ path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: false).map { s in
+            let version = s.count > 1 && s.first == "v" && s.dropFirst().allSatisfy(\.isNumber)
+            return !version && (s.contains(where: \.isNumber) || s.count >= 24) ? "{id}" : String(s)
+        }.joined(separator: "/")
     }
 
     /// The text of an error body. An HTML error page (for example of a proxy) gives its title only.

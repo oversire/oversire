@@ -1444,6 +1444,10 @@ extension UIShots {
                 $0.exit = 127; $0.outputTail = "bash: python3: command not found\n(no OVERSIRE-DIGEST-END marker)"
             }
         }
+        // OVERSIRE-432: three timeouts of one daemon route open a net problem.
+        for m in [8.0, 6, 4] {
+            line(m, .warn, .net, "HTTP", "GET /v1/workspaces", "127.0.0.1:7690", "GET /v1/workspaces id=7c1e09ab: The request timed out.", 30_000)
+        }
         line(3, .ok, .ai, "Summary", "OVERSIRE-150", "local-cli", "Done", 4800) {
             $0.engine = "local-cli"; $0.model = "claude"; $0.reason = "Auto: updated in the last 7 days"; $0.tokensIn = 1020; $0.tokensOut = 188
             $0.output = "gist: Logs page and problem marks for background jobs."

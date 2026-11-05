@@ -83,6 +83,52 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(s.entries.count, 2)
     }
 
+    private func http(_ method: String, _ url: String, status: Int? = nil, error: String? = nil, quiet: Bool = false, to s: LogStore) {
+        var r = URLRequest(url: URL(string: url)!)
+        r.httpMethod = method
+        IOLog(sink: s).request(r, status: status, ms: 5000, error: error, quiet: quiet)
+    }
+
+    func testThreeFailuresOfOneRouteOpenAProblem() throws {
+        let s = store()
+        for id in ["s-mbp-1", "s-mbp-2"] { http("GET", "http://127.0.0.1:7690/v1/sessions/\(id)/tail", error: "The request timed out.", to: s) }
+        XCTAssertTrue(s.problems.open.isEmpty)
+        http("GET", "http://127.0.0.1:7690/v1/sessions/s-mbp-3/tail", error: "The request timed out.", to: s)
+        let p = try XCTUnwrap(s.problems.open.first)
+        XCTAssertEqual(p.key, "net|HTTP|127.0.0.1:7690|GET /v1/sessions/{id}/tail")
+        XCTAssertEqual(p.count, 3)
+        XCTAssertEqual(p.name, "HTTP 127.0.0.1:7690")
+        http("GET", "http://127.0.0.1:7690/v1/sessions/s-mbp-1/tail", status: 200, to: s)
+        XCTAssertTrue(s.problems.open.isEmpty, "an ok line of the route clears it")
+    }
+
+    func testAnOkLineOfAnotherRouteDoesNotClearTheStreak() {
+        let s = store()
+        for _ in 0..<2 {
+            http("GET", "http://127.0.0.1:7690/v1/workspaces", error: "The request timed out.", to: s)
+            http("GET", "http://127.0.0.1:7690/v1/sessions", status: 200, to: s)
+            http("POST", "http://127.0.0.1:7690/v1/workspaces", status: 201, to: s)
+            http("GET", "http://100.97.81.23:7690/v1/workspaces", status: 200, to: s)
+        }
+        http("GET", "http://127.0.0.1:7690/v1/workspaces", error: "The request timed out.", to: s)
+        XCTAssertEqual(s.problems.open.map(\.key), ["net|HTTP|127.0.0.1:7690|GET /v1/workspaces"])
+    }
+
+    func testAQuietFailureDoesNotCount() {
+        let s = store()
+        for _ in 0..<5 { http("GET", "https://api.plane.so/api/v1/workspaces/ocral/projects/", error: "offline", quiet: true, to: s) }
+        XCTAssertTrue(s.problems.open.isEmpty)
+        XCTAssertTrue(s.entries.isEmpty)
+    }
+
+    func testTheRouteHidesTheIDs() {
+        XCTAssertEqual(IOLog.route("/v1/sessions/s-mbp-12/stream"), "/v1/sessions/{id}/stream")
+        XCTAssertEqual(IOLog.route("/api/v1/workspaces/ocral/projects/9f3c1a2b-7d4e-5f60-a1b2-c3d4e5f60718/issues/"),
+                       "/api/v1/workspaces/ocral/projects/{id}/issues/")
+        XCTAssertEqual(IOLog.route("/repos/oversire/oversire/actions/runs/123456"), "/repos/oversire/oversire/actions/runs/{id}")
+        XCTAssertEqual(IOLog.route("/v1/leases/automations"), "/v1/leases/automations")
+    }
+
     func testClearRemovesTheFiles() {
         let s = store()
         s.write(line())

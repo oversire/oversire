@@ -75,8 +75,8 @@ public struct LogEntry: Codable, Hashable, Sendable {
         self.ms = ms
     }
 
-    /// The problem key: the area, the job and the host or account.
-    public var problemKey: String { [area.rawValue, job, host ?? ""].joined(separator: "|") }
+    /// The problem key: the area, the job and the host or account. A net line adds its route (the subject).
+    public var problemKey: String { ([area.rawValue, job, host ?? ""] + (area == .net ? [subject ?? ""] : [])).joined(separator: "|") }
 }
 
 /// Where adapters and jobs write their log lines. Defined small, so a target with no AppKit can write.

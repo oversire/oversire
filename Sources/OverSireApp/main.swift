@@ -1077,7 +1077,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let problems = ProblemTracker(path: PROBLEMS_PATH)
         problems.opened = { [weak self] p in
             guard NOTIFICATIONS.problems else { return }
-            self?.notify(title: "OverSire problem", subtitle: p.job + (p.host.map { " · \($0)" } ?? ""), body: p.message, id: "problem-" + p.key)
+            self?.notify(title: "OverSire problem", subtitle: p.job + (p.host.map { " · \($0)" } ?? "") + (p.area == .net ? p.subject.map { " · \($0)" } ?? "" : ""), body: p.message, id: "problem-" + p.key)
         }
         let store = LogStore(dir: LOGS_DIR, problems: problems)
         store.secrets = [AIClient.keyStore.get(AIClient.keyName)].compactMap { $0 }

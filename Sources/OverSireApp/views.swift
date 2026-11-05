@@ -218,7 +218,7 @@ class Footer: NSView {
     // "▲ 2 problems · History read, Status   View". View opens Settings › Logs.
     private func problemLine(_ problems: [Problem], w: CGFloat) -> NSView {
         let line = NSView(frame: NSRect(x: 0, y: FTR_H, width: w, height: Self.problemH))
-        let jobs = Array(NSOrderedSet(array: problems.map(\.job))).compactMap { $0 as? String }.joined(separator: ", ")
+        let jobs = Array(NSOrderedSet(array: problems.map(\.name))).compactMap { $0 as? String }.joined(separator: ", ")
         let n = problems.count
         let text = NSMutableAttributedString(string: "▲ ", attributes: [.foregroundColor: C_QUEUED, .font: NSFont.systemFont(ofSize: 11)])
         text.append(NSAttributedString(string: "\(n) problem\(n == 1 ? "" : "s")",

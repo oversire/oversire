@@ -88,11 +88,14 @@ final class LogStore: LogSink, @unchecked Sendable {
                 append(e)
             }
         }
+        // An HTTP route that fails 3 times in a row opens a problem, and its next ok line clears it (OVERSIRE-432).
+        // A quiet failure (verbose) does not count.
+        let net = e.area == .net && (e.level == .ok || e.verbose != true)
         // A poll that the log does not keep changes nothing on screen.
-        guard keep || !e.area.isRecord else { return }
+        guard keep || !e.area.isRecord || net else { return }
         let post = { [problems] in
-            if !e.area.isRecord { problems.record(e) }
-            NotificationCenter.default.post(name: Self.changed, object: self)
+            if !e.area.isRecord || net { problems.record(e) }
+            if keep || !e.area.isRecord { NotificationCenter.default.post(name: Self.changed, object: self) }
         }
         if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }
     }
@@ -205,6 +208,9 @@ struct Problem: Codable, Equatable {
     var first: Date
     var last: Date
     var dismissed = false
+
+    /// The name in the menu: "HTTP 127.0.0.1:7690" for a net problem, else the job.
+    var name: String { area == .net ? [job, host].compactMap { $0 }.joined(separator: " ") : job }
 }
 
 final class ProblemTracker {

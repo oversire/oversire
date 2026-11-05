@@ -109,20 +109,23 @@ final class IOLogTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
-    func testARecordLineOpensNoProblemAndAHiddenPollPostsNothing() {
+    func testNetFailuresOpenAProblemAndAHiddenPollPostsNoLogChange() {
         let dir = NSTemporaryDirectory() + "oversire-logs-\(UUID().uuidString)"
         defer { try? FileManager.default.removeItem(atPath: dir) }
         let now = Date(timeIntervalSince1970: 1_790_000_000)
         let t = ProblemTracker(path: nil, now: { now })
         let s = LogStore(dir: dir, problems: t, now: { now })
         for _ in 0..<4 { s.write(LogEntry(at: now, level: .warn, area: .net, job: "HTTP", host: "mbp:7690", message: "GET /v1/sessions: timed out")) }
+        XCTAssertEqual(t.open.first?.count, 4, "OVERSIRE-432: an HTTP route opens a problem")
+        s.write(LogEntry(at: now, level: .warn, area: .cmd, job: "git", message: "git status: exit 128"))
+        XCTAssertEqual(t.open.count, 1, "a cmd line is still a record")
         let exp = expectation(forNotification: LogStore.changed, object: s)
         exp.isInverted = true
         var poll = LogEntry(at: now, level: .ok, area: .net, job: "HTTP", host: "mbp:7690", message: "GET /v1/sessions 200")
         poll.verbose = true
         s.write(poll)
         wait(for: [exp], timeout: 0.2)
-        XCTAssertTrue(t.open.isEmpty)
-        XCTAssertEqual(s.entries.count, 4, "the log keeps the failures, not the poll")
+        XCTAssertTrue(t.open.isEmpty, "the ok poll clears it")
+        XCTAssertEqual(s.entries.count, 5, "the log keeps the failures, not the poll")
     }
 }
