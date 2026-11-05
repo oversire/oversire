@@ -60,6 +60,59 @@ final class ReviewTabTests: XCTestCase {
         XCTAssertEqual(b.rows.map(\.key), ["A-1"])
     }
 
+    func testAFailedReadTellsTheErrorAndTheAgeOfTheRows() async {
+        let mba = FakeReviewSource(machine: "mba")
+        mba.seed([ReviewDetail(summary: summary("A-1", ready: 1))])
+        var clock = t0
+        let b = ReviewBook(sources: { [mba] }, bus: ChangeBus(schedule: { _, _ in }), log: IOLogTests.Lines(), now: { clock })
+        await b.refresh()
+        XCTAssertEqual(b.health("mba"), ReviewHealth(read: t0))
+        XCTAssertNil(b.health("mba").notice(machine: "mba", now: t0))
+        XCTAssertTrue(b.failureRows().isEmpty)
+
+        mba.failure = ProviderError.transport("The request timed out.")
+        clock = t0.addingTimeInterval(3 * 3600)
+        await b.refresh()
+        XCTAssertEqual(b.health("mba"), ReviewHealth(read: t0, error: "The request timed out."), "the time of the last good read stays")
+        XCTAssertEqual(b.failing, ["mba"])
+        let n = try? XCTUnwrap(b.health("mba").notice(machine: "mba", now: clock))
+        XCTAssertEqual(n?.title, "The reviews of mba did not load: the request timed out.")
+        XCTAssertEqual(n?.body, "This data is from 3 h ago. OverSire tries again each minute.")
+        XCTAssertEqual(b.failureRows().count, 1)
+        XCTAssertEqual(b.rows.map(\.key), ["A-1"])
+
+        mba.failure = nil
+        await b.refresh(machine: "mba")
+        XCTAssertEqual(b.health("mba"), ReviewHealth(read: clock))
+        XCTAssertEqual(b.failing, [])
+    }
+
+    func testAMachineWithNoGoodReadSaysSo() {
+        let h = ReviewHealth(read: nil, error: "Could not connect to the server.")
+        XCTAssertEqual(h.notice(machine: "mbp", now: t0)?.body, "No read worked yet. OverSire tries again each minute.")
+    }
+
+    func testThreeFailedReadsInARowOpenAProblemAndAGoodReadClearsIt() async {
+        let mba = FakeReviewSource(machine: "mba")
+        mba.seed([ReviewDetail(summary: summary("A-1", ready: 1))])
+        let lines = IOLogTests.Lines()
+        let b = ReviewBook(sources: { [mba] }, bus: ChangeBus(schedule: { _, _ in }), log: lines)
+        mba.failure = ProviderError.transport("The request timed out.")
+        for _ in 0..<3 { await b.refresh() }
+        let problems = ProblemTracker(path: nil)
+        for e in lines.all { problems.record(e) }
+        // A good HTTP line of an other route of the same daemon does not touch the job.
+        problems.record(LogEntry(level: .ok, area: .net, job: "HTTP", host: "mba", message: "POST /v1/leases/automations 200"))
+        XCTAssertEqual(problems.open.map(\.job), ["Reviews read"])
+        XCTAssertEqual(problems.open.first?.host, "mba")
+        XCTAssertEqual(problems.open.first?.message, "The request timed out.")
+
+        mba.failure = nil
+        await b.refresh()
+        problems.record(try! XCTUnwrap(lines.all.last))
+        XCTAssertTrue(problems.open.isEmpty)
+    }
+
     func testAMachineThatLeftLosesItsRows() async {
         let mba = FakeReviewSource(machine: "mba"), mini = FakeReviewSource(machine: "mini")
         mba.seed([ReviewDetail(summary: summary("A-1", ready: 1))])

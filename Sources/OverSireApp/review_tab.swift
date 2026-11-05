@@ -47,6 +47,20 @@ struct ReviewMark: Hashable {
     }
 }
 
+extension ReviewBook {
+    /// A warning row for each machine whose last read failed. nil: all machines that failed.
+    func failureRows(_ machines: [String]? = nil) -> [PageRow] {
+        let t = now()
+        return (machines ?? failing).compactMap { m in
+            guard let n = health(m).notice(machine: m, now: t) else { return nil }
+            return PageRow("read-failed-\(m)", n.title, n.body) { [weak self] in
+                Banner(.warning, title: n.title, body: n.body,
+                       actions: [ActionButton("Retry", symbol: "arrow.clockwise") { Task { await self?.refresh(machine: m) } }])
+            }
+        }
+    }
+}
+
 final class ReviewPage: Page {
     override var watches: DataDomains { [.reviews, .projects, .config] }
 
@@ -67,7 +81,7 @@ final class ReviewPage: Page {
             })
             for s in list { rows.append(row(s)) }
         }
-        var out = [PageSection("top", rows: top)]
+        var out = [PageSection("top", rows: top + book.failureRows())]
         if rows.isEmpty {
             out.append(PageSection("empty", rows: [PageRow("empty", 0) {
                 EmptyNote("Nothing to review. A row shows when an agent hands off a plan, or commits in a worktree group and stops.")

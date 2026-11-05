@@ -35,9 +35,28 @@ enum ReviewGroup: String, CaseIterable {
     }
 }
 
+/// The read state of the reviews of one machine. A failed read keeps the old rows, so the page tells their age.
+struct ReviewHealth: Equatable {
+    /// The time of the last read that worked.
+    var read: Date?
+    /// The error of the last read. nil: the last read worked.
+    var error: String?
+
+    /// The banner text when the last read failed.
+    func notice(machine: String, now: Date) -> (title: String, body: String)? {
+        guard let error else { return nil }
+        let age = read.map { "This data is from \(MachinesModel.ago($0, now: now))." } ?? "No read worked yet."
+        return ("The reviews of \(machine) did not load: \(error.lowercasedFirst)", age + " OverSire tries again each minute.")
+    }
+}
+
+private extension String {
+    var lowercasedFirst: String { prefix(1).lowercased() + dropFirst() }
+}
+
 /// The reviews of all machines of the group (OVERSIRE-371). Each row keeps its machine, so each call goes to the right daemon.
 /// A review frame of a daemon reads that machine again. A read on start, on a log gap and each 60 s catches what a frame missed.
-/// A failed read keeps the last rows of the machine. Use it on the main thread.
+/// A failed read keeps the last rows of the machine and sets its health. Use it on the main thread.
 final class ReviewBook {
     static let changed = Notification.Name("ReviewBook.changed")
 
@@ -45,15 +64,21 @@ final class ReviewBook {
     private let bus: ChangeBus
     private var pages: [String: ReviewsPage] = [:]   // machine → page
     private var desks: [String: ReviewDesk] = [:]    // ReviewSummary.id → desk
+    private var healths: [String: ReviewHealth] = [:] // machine → last read
+    private let sink: any LogSink
+    let now: () -> Date
     private var timer: Timer?
     /// The tracker writes of the desks.
     var tracker: (any ReviewTracking)? = nil
     /// False for `--uishots`: the seeded rows stay.
     var reads = true
 
-    init(sources: @escaping () -> [any ReviewSource] = ReviewBook.groupSources, bus: ChangeBus = .shared) {
+    init(sources: @escaping () -> [any ReviewSource] = ReviewBook.groupSources, bus: ChangeBus = .shared,
+         log: any LogSink = AppLog(), now: @escaping () -> Date = Date.init) {
         self.sources = sources
         self.bus = bus
+        self.sink = log
+        self.now = now
     }
 
     /// The daemons of the active machines.
@@ -94,6 +119,11 @@ final class ReviewBook {
 
     static func since(_ s: ReviewSummary) -> Date { s.readyAt ?? s.updatedAt }
 
+    func health(_ machine: String) -> ReviewHealth { healths[machine] ?? ReviewHealth() }
+
+    /// The machines whose last read failed, by name.
+    var failing: [String] { healths.filter { $0.value.error != nil }.keys.sorted() }
+
     // MARK: Reads
 
     func start() {
@@ -106,27 +136,34 @@ final class ReviewBook {
     func refresh() async {
         guard reads else { return }
         let list = await MainActor.run { sources() }
-        let got = await withTaskGroup(of: (String, ReviewsPage?).self) { g in
-            for s in list { g.addTask { (s.machine, await Self.read(s)) } }
-            var out: [(String, ReviewsPage?)] = []
+        let got = await withTaskGroup(of: (String, Result<ReviewsPage, ProviderError>).self) { g in
+            for s in list { g.addTask { [self] in (s.machine, await read(s)) } }
+            var out: [(String, Result<ReviewsPage, ProviderError>)] = []
             for await r in g { out.append(r) }
             return out
         }
         await MainActor.run {
             let machines = Set(list.map(\.machine))
             var next = pages.filter { machines.contains($0.key) }
-            for (m, p) in got { if let p { next[m] = p } }
-            set(next)
+            var health = healths.filter { machines.contains($0.key) }
+            for (m, r) in got {
+                if case .success(let p) = r { next[m] = p }
+                health[m] = Self.health(health[m], r, at: now())
+            }
+            set(next, health: health)
         }
     }
 
     /// Reads one machine again.
     func refresh(machine: String) async {
-        guard reads, let s = await MainActor.run(body: { source(machine) }), let p = await Self.read(s) else { return }
+        guard reads, let s = await MainActor.run(body: { source(machine) }) else { return }
+        let r = await read(s)
         await MainActor.run {
             var next = pages
-            next[machine] = p
-            set(next)
+            if case .success(let p) = r { next[machine] = p }
+            var health = healths
+            health[machine] = Self.health(health[machine], r, at: now())
+            set(next, health: health)
         }
     }
 
@@ -138,10 +175,26 @@ final class ReviewBook {
         await desk?.load()
     }
 
-    private static func read(_ s: any ReviewSource) async -> ReviewsPage? {
-        do { return try await s.reviews(kind: nil) } catch {
-            log.info("Reviews: the read of \(s.machine, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-            return nil
+    /// One job line for each read: 3 failures in a row open a problem, a read that works clears it.
+    private func read(_ s: any ReviewSource) async -> Result<ReviewsPage, ProviderError> {
+        let t0 = Date()
+        let r = await Result<ReviewsPage, ProviderError>(awaiting: { try await s.reviews(kind: nil) })
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        switch r {
+        case .success(let p):
+            var e = LogEntry(level: .ok, area: .sync, job: "Reviews read", host: s.machine, message: "\(p.reviews.count) reviews", ms: ms)
+            e.verbose = true
+            sink.write(e)
+        case .failure(let err):
+            sink.write(LogEntry(level: .warn, area: .sync, job: "Reviews read", host: s.machine, message: err.message, ms: ms))
+        }
+        return r
+    }
+
+    private static func health(_ old: ReviewHealth?, _ r: Result<ReviewsPage, ProviderError>, at t: Date) -> ReviewHealth {
+        switch r {
+        case .success: return ReviewHealth(read: t)
+        case .failure(let e): return ReviewHealth(read: old?.read, error: e.message)
         }
     }
 
@@ -167,10 +220,12 @@ final class ReviewBook {
     func put(_ d: ReviewDesk) { desks[d.id] = d }
 
     /// For tests and `--uishots`.
-    func set(_ next: [String: ReviewsPage]) {
-        guard next != pages else { return }
+    func set(_ next: [String: ReviewsPage], health: [String: ReviewHealth]? = nil) {
+        let health = health ?? healths
+        guard next != pages || health != healths else { return }
         let keys = Set(pages.values.flatMap(\.reviews).map(\.key)).union(next.values.flatMap(\.reviews).map(\.key))
         pages = next
+        healths = health
         bus.post(DataChange(.reviews, items: keys, origin: .event))
         NotificationCenter.default.post(name: Self.changed, object: self)
     }

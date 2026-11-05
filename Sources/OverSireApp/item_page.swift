@@ -202,8 +202,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         case .session: rows = session(stream: stream)
         case .subitems: rows = subItems(snap: snap, item: item)
         case .activity: rows = activity(item: item, stream: stream)
-        case .plan: rows = reviewDesk(.plan).map { planTab.rows($0) } ?? noReview(.plan)
-        case .changes: rows = reviewDesk(.code).map { changesTab.rows($0) } ?? noReview(.code)
+        case .plan: rows = reviewRows(.plan) { planTab.rows($0) }
+        case .changes: rows = reviewRows(.code) { changesTab.rows($0) }
         }
         return [PageSection("top", rows: top), PageSection(tab.rawValue, rows: rows)]
     }
@@ -220,6 +220,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
         guard tab == .plan || tab == .changes, let desk = reviewDesk(tab == .plan ? .plan : .code) else { return }
         if desk.detail == nil, !desk.loading, desk.error == nil { Task { await desk.load() } }
         if tab == .changes, let f = desk.files.first(where: { $0.id == desk.file }), desk.diffs[f.id] == nil { Task { await desk.diff(f) } }
+    }
+
+    /// The rows of a review tab, after a warning when the last read of its machine failed.
+    private func reviewRows(_ kind: ReviewKind, _ tab: (ReviewDesk) -> [PageRow]) -> [PageRow] {
+        guard let desk = reviewDesk(kind) else { return REVIEWS.failureRows() + noReview(kind) }
+        return REVIEWS.failureRows([desk.summary.machine]) + tab(desk)
     }
 
     private func noReview(_ kind: ReviewKind) -> [PageRow] {

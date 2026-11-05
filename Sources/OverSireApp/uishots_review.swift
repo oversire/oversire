@@ -7,9 +7,11 @@ import OverSireCore
 
 extension UIShots {
     /// review:list, changes, select, menu, split, wrap, plan, submit, approve, merge, conflict or empty.
+    /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
-        Self.seedReviews(empty: scene == "empty")
+        let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
+        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:])
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
               let plan = REVIEWS.review("OVERSIRE-349", kind: .plan).flatMap({ REVIEWS.desk($0) }) else {
             w.router.go(.work(.review))
@@ -26,7 +28,7 @@ extension UIShots {
         code.pick = scene == "changes" ? LinePick(repo: "oversire", path: "Sources/OverSireApp/review_tab.swift", side: .new, line: 41).click(43, side: .new, shift: true) : nil
         plan.block = scene == "plan" ? "risks" : nil
         switch scene {
-        case "changes", "split", "wrap", "files", "search", "filters": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters", "stale": w.router.go(.item("FRITZ-17", .changes))
         case "select":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -73,10 +75,10 @@ extension UIShots {
     }
 
     /// The sample rows and desks. They replace the rows of the last scene.
-    static func seedReviews(empty: Bool = false) {
+    static func seedReviews(empty: Bool = false, health: [String: ReviewHealth] = [:]) {
         REVIEWS.reads = false
         guard !empty else {
-            REVIEWS.set([:])
+            REVIEWS.set([:], health: health)
             return
         }
         let now = Date()
@@ -190,7 +192,7 @@ extension UIShots {
         REVIEWS.set([
             "mba": ReviewsPage(reviews: [fritz, plan], notPushed: [NotPushed(root: "/Users/ada/src/oversire", repo: "oversire", base: "main", ahead: 4)]),
             "mini": ReviewsPage(reviews: [waiting, conflict, older]),
-        ])
+        ], health: health)
         for d in [fritzDesk, planDesk, ReviewDesk(detail: ReviewDetail(summary: conflict)), ReviewDesk(detail: ReviewDetail(summary: older))] { REVIEWS.put(d) }
     }
 }
