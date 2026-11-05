@@ -409,6 +409,14 @@ final class MachinesModelTests: XCTestCase {
         XCTAssertEqual(SettingsIndex.search("automations").first?.anchor, .machines)
     }
 
+    func testAnAppOnlyMacNamesTheMachineOfItsSessions() {
+        let m = MachinesModel(MachinesSnapshot.sample("machines-app-only", now: now), config: MachinesConfig(sessions: "mbp"), now: now)
+        XCTAssertEqual(m.state, .noDaemon)
+        XCTAssertEqual(m.setupTitle, "No daemon on this Mac. Sessions run on mbp.")
+        let none = MachinesModel(MachinesSnapshot(), config: MachinesConfig(), now: now)
+        XCTAssertEqual(none.setupTitle, "Run the OverSire daemon on this Mac")
+    }
+
     func testSampleScenesBuildTheirState() {
         let states = ["machines-empty", "machines-found", "machines-group"].map {
             MachinesModel(MachinesSnapshot.sample($0, now: now), config: MachinesConfig(), now: now).state

@@ -229,6 +229,42 @@ final class DaemonSourceTests: XCTestCase {
         try? FileManager.default.removeItem(at: cache)
     }
 
+    func testAnAppOnlyMacProbesLoopbackEachHalfHour() async {
+        let daemon = FakeDaemon(machine: "mba")
+        daemon.online = false
+        let now = Locked(Date(timeIntervalSince1970: 1_800_000_000))
+        let states = Locked<[LocalDaemon]>([])
+        let m = Machines(local: DaemonClient(base: loopback, token: nil, http: daemon), keychain: MemoryKeychain(), http: daemon,
+                         appOnly: { true }, now: { now.get() }, onLocal: { s in states.with { $0.append(s) } })
+        let probes = { daemon.requests.filter { $0.url?.path == "/v1/whoami" }.count }
+        for _ in 0..<10 {
+            await m.refresh()
+            now.with { $0 += 170 }
+        }
+        XCTAssertEqual(probes(), 1, "one probe in 30 min")
+        XCTAssertEqual(states.get(), [.absent(since: Date(timeIntervalSince1970: 1_800_000_000))], "one change: one warning")
+        now.with { $0 += 200 }
+        await m.refresh()
+        XCTAssertEqual(probes(), 2, "the next probe after 30 min")
+        await m.refresh(probe: true)
+        XCTAssertEqual(probes(), 3, "a wake or Settings › Machines probes at once")
+        XCTAssertEqual(states.get().count, 1)
+        daemon.online = true
+        await m.refresh(probe: true)
+        let state = await m.localState
+        XCTAssertEqual(state, .present)
+        XCTAssertEqual(states.get().count, 2)
+    }
+
+    func testAMacWithADaemonProbesAtEachRead() async {
+        let daemon = FakeDaemon(machine: "mba")
+        daemon.online = false
+        let m = Machines(local: DaemonClient(base: loopback, token: nil, http: daemon), keychain: MemoryKeychain(), http: daemon)
+        await m.refresh()
+        await m.refresh()
+        XCTAssertEqual(daemon.requests.filter { $0.url?.path == "/v1/whoami" }.count, 2)
+    }
+
     func testMachinesConfigDefaults() throws {
         let c = MachinesConfig()
         let local = MachineLink(machine: "mba", base: loopback, token: nil, local: true)

@@ -242,7 +242,7 @@ class Footer: NSView {
     func showUpdated(_ updated: Date) {
         let f = DateFormatter(); f.dateFormat = "h:mm:ss a"
         let version = (NSApp.delegate as? GHActionsBar).map { "v\($0.updater.current) · " } ?? ""
-        stamp.stringValue = "\(version)Updated \(f.string(from: updated))"
+        stamp.stringValue = version + (NetworkPath.shared.offlineSince.map(NetworkPath.offlineText) ?? "Updated \(f.string(from: updated))")
     }
 
     func showQuota(_ rl: RateLimit?) {

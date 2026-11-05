@@ -1067,7 +1067,11 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         default: state = .off
                         }
                         w.sidebar.live.set(LiveLineModel(state: state, lastBurst: state == .live ? Date() : nil, pollEvery: POLL_NORMAL))
-                    } else if p == "popover" {
+                    } else if p == "popover" || p == "popover:offline" {
+                        // popover:offline: the footer of a Mac with no network path (OVERSIRE-431).
+                        if p == "popover:offline" { NetworkPath.shared.update(satisfied: false) } else if NetworkPath.shared.offlineSince != nil {
+                            NetworkPath.shared.update(satisfied: true)
+                        }
                         self.glance = self.popoverSample()
                     } else if p == "groom:sheet", let win = w.window, let snap = self.projectStore.snapshot("TREBI") {
                         let labels = Set(snap.items.flatMap(\.labels)).sorted()
@@ -1632,15 +1636,26 @@ extension UIShots {
 
 extension MachinesSnapshot {
     static let scenes: Set<String> = ["machines-loading", "machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine",
-                                         "machines-auto-owner", "machines-auto-other", "machines-auto-paused"]
+                                         "machines-auto-owner", "machines-auto-other", "machines-auto-paused", "machines-app-only"]
 
     /// mbp is this Mac. mba and devbox are members, or found on the tailnet when this Mac is alone.
     static func sample(_ scene: String, now: Date = Date()) -> MachinesSnapshot {
         var s = MachinesSnapshot()
-        s.installed = scene != "machines-empty"
+        s.installed = scene != "machines-empty" && scene != "machines-app-only"
         s.onPath = scene != "machines-found"
         s.latest = scene == "machines-found" ? "0.5.0" : "0.4.0"
         guard scene != "machines-empty" else { return s }
+        if scene == "machines-app-only" {
+            // mba has no daemon: the cache of the group gives the members (OVERSIRE-431).
+            func member(_ m: MachineName, _ ip: String, seen: TimeInterval) -> GroupMember {
+                GroupMember(machine: m, host: m.rawValue, addrs: [ip], port: 7690, roles: ["serve"], joinedAt: now.addingTimeInterval(-86400 * 9),
+                            lastSeen: now.addingTimeInterval(-seen), version: "0.4.0")
+            }
+            s.group = Group(id: "g-mbp", name: "My machines", home: "mbp", version: 4,
+                            members: [member("mbp", "100.97.81.23", seen: 0), member("devbox", "100.88.20.3", seen: 7300)], devices: [])
+            s.health = ["mbp": .live, "devbox": .failed("no answer")]
+            return s
+        }
         func info(_ m: MachineName, _ ip: String, roles: [String]) -> DaemonInfo {
             DaemonInfo(machine: m, version: "0.4.0", contract: 1, roles: roles, runtimes: ["orca"], harnesses: [],
                        listen: .init(loopback: "127.0.0.1:7690", tailscale: ip + ":7690"))
@@ -1702,7 +1717,7 @@ extension UIShots {
         c.frozen = true
         c.config = { MachinesConfig(sessions: "mbp", hooksConsent: true) }
         c.owner = { nil }
-        c.installed = { scene != "machines-empty" }
+        c.installed = { scene != "machines-empty" && scene != "machines-app-only" }
         c.use(MachinesSnapshot.sample(scene), loaded: scene != "machines-loading")
         w.router.go(.settings(.general))   // a fresh page, so the pane takes the new height
         w.router.go(.settings(.machines))

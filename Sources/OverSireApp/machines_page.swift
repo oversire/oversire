@@ -217,6 +217,12 @@ struct MachinesModel: Equatable {
         }
     }
 
+    /// The setup title of a Mac with no daemon. An app-only Mac names the machine of its sessions (OVERSIRE-431).
+    var setupTitle: String {
+        guard state == .noDaemon, let m = sessionsMachine else { return "Run the OverSire daemon on this Mac" }
+        return "No daemon on this Mac. Sessions run on \(m)."
+    }
+
     /// Hooks that the consent installs.
     var missingHooks: [String] { hooks.filter { $0.state == .missing || $0.state == .outdated }.map(\.name) }
 
@@ -396,6 +402,7 @@ final class MachinesController {
         }
         s.latest = latestVersion
         s.info = try? await local.whoami()
+        if s.info != nil, hub?.localAbsent == true { hub?.refresh(probe: true) }
         if s.info != nil { s.group = try? await local.group() } else if let hub { s.group = await hub.machines.group }
         if let me = s.info {
             if (s.group?.members.count ?? 0) <= 1 { s.peers = (try? await local.peers()) ?? [] }
@@ -438,7 +445,7 @@ final class MachinesController {
             notice = failed
             log.error("Machines: \(failed ?? "", privacy: .public)")
         }
-        hub?.refresh()
+        hub?.refresh(probe: true)
         await load()
         return failed
     }
@@ -450,7 +457,7 @@ final class MachinesController {
             setupObserver = NotificationCenter.default.addObserver(forName: DaemonSetup.changed, object: nil, queue: .main) { [weak self] _ in
                 self?.notice = DaemonSetup.shared.error
                 self?.changed()
-                if !DaemonSetup.shared.busy { Task { @MainActor in await self?.load(); self?.hub?.refresh() } }
+                if !DaemonSetup.shared.busy { Task { @MainActor in await self?.load(); self?.hub?.refresh(probe: true) } }
             }
         }
         DaemonSetup.shared.install(keepAwake: false, pair: false)
@@ -498,7 +505,7 @@ final class MachinesController {
             }
             if installed { try? await Task.sleep(nanoseconds: self.restartWait) }
             self.updating.remove(machine)
-            self.hub?.refresh()
+            self.hub?.refresh(probe: true)
             await self.load()
         }
     }
@@ -652,8 +659,10 @@ extension SettingsPage {
         install.isEnabled = !busy
         let note = m.installed
             ? "The oversire CLI is at \(m.path), but the daemon does not answer on loopback :7690."
+            : m.sessionsMachine != nil
+            ? "OverSire shows the agent sessions of your machines. Install the daemon to run sessions on this Mac too."
             : "The daemon sends session state the moment an agent stops or asks a question. Without it, OverSire shows no agent sessions."
-        let text = NSStackView(v: [NSTextField.text("Run the OverSire daemon on this Mac", size: 13.5, weight: .semibold),
+        let text = NSStackView(v: [NSTextField.text(m.setupTitle, size: 13.5, weight: .semibold),
                                    NSTextField.text(note, size: 12, color: Palette.dim, lines: 3),
                                    NSTextField.text("Installs \(m.path) from the GitHub release, checks the signature, then runs oversire daemon install. No password.",
                                                     size: 11.5, color: Palette.dim, lines: 3, mono: true)], spacing: 5)

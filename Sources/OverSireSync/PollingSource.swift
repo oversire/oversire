@@ -17,12 +17,15 @@ public actor PollingSource: EventSource {
     private var continuation: AsyncStream<ProviderEvent>.Continuation?
     private var generation = 0
     private let onPolled: @Sendable (AccountID) -> Void
+    private let isOnline: @Sendable () -> Bool
 
-    /// onPolled runs after each poll that succeeds.
+    /// onPolled runs after each poll that succeeds. While `isOnline` is false, no poll runs: call `wake()` when the path comes back.
     public init(providers: [any Provider], cursors: CursorStore, clock: any Clock<Duration> = ContinuousClock(),
-                intervals: PollIntervals = PollIntervals(), onPolled: @escaping @Sendable (AccountID) -> Void = { _ in }) {
+                intervals: PollIntervals = PollIntervals(), isOnline: @escaping @Sendable () -> Bool = { true },
+                onPolled: @escaping @Sendable (AccountID) -> Void = { _ in }) {
         self.providers = providers
         self.onPolled = onPolled
+        self.isOnline = isOnline
         self.cursors = cursors
         self.clock = clock
         self.intervals = intervals
@@ -63,6 +66,9 @@ public actor PollingSource: EventSource {
         sleepers[account]?.cancel()
     }
 
+    /// The network path came back: each account polls now.
+    public func wake() { providers.map(\.account).forEach(pollNow) }
+
     public func stop() {
         loops.forEach { $0.cancel() }
         sleepers.values.forEach { $0.cancel() }
@@ -90,10 +96,12 @@ public actor PollingSource: EventSource {
     }
 
     private func loop(_ p: any Provider, generation gen: Int) async {
-        var plan = PollScheduler(policy: p.pollPolicy, intervals: intervals)
+        var plan = PollScheduler(policy: p.pollPolicy, intervals: intervals, isOnline: isOnline)
         while !Task.isCancelled {
             var budget: RateBudget?
             do {
+                // Offline: no poll. The sleep below ends at wake().
+                guard isOnline() else { throw Offline() }
                 let page = try await p.poll(since: cursors[p.account])
                 guard !Task.isCancelled, gen == generation else { return }
                 page.events.forEach { continuation?.yield($0) }
@@ -106,6 +114,7 @@ public actor PollingSource: EventSource {
                 onPolled(p.account)
             } catch is CancellationError {
                 return
+            } catch is Offline {
             } catch {
                 plan.failed(error)
                 errors[p.account] = (error as? ProviderError)?.message ?? error.localizedDescription
@@ -122,3 +131,5 @@ public actor PollingSource: EventSource {
         }
     }
 }
+
+private struct Offline: Error {}

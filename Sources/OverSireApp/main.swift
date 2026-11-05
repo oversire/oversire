@@ -1088,6 +1088,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.updateIcon()
         }
         Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in problems.expire() }
+        NetworkPath.shared.start()
+        NotificationCenter.default.addObserver(forName: NetworkPath.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.popover.isShown else { return }
+            (self.popover.contentViewController as? GlanceVC)?.rebuild()
+            (self.popover.contentViewController as? TabVC)?.update(grouped: self.grouped, prGrouped: self.reviewPRs, updated: self.lastUpdate,
+                                                                    loading: self.firstLoad)
+        }
     }
 
     func notify(title: String, subtitle: String, body: String, id: String) {

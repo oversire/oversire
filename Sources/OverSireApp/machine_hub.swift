@@ -25,6 +25,9 @@ final class MachineHub {
     private var watcher: Task<Void, Never>?
     /// True after the first read of the group. Before it, the app does not know if this Mac has a daemon.
     var read = false
+    /// No daemon answered on loopback at the last probe.
+    private(set) var localAbsent = false
+    private var pathWatch: UUID?
 
     var config: () -> MachinesConfig = { MACHINES }
     /// Keeps a new sessions machine in config.json.
@@ -39,7 +42,16 @@ final class MachineHub {
          cache: URL? = URL(fileURLWithPath: (CONFIG_DIR as NSString).appendingPathComponent("machines-group.json"))) {
         self.http = http
         self.local = local
-        machines = Machines(local: local, keychain: keychain, http: http, cache: cache)
+        weak var me: MachineHub?
+        machines = Machines(local: local, keychain: keychain, http: http, cache: cache, appOnly: { !DaemonSetup.shared.installer.isInstalled }) { state in
+            DispatchQueue.main.async { me?.local(state) }
+        }
+        me = self
+    }
+
+    private func local(_ state: LocalDaemon) {
+        if case .absent = state { localAbsent = true } else { localAbsent = false }
+        NetworkPath.shared.localAbsent = localAbsent && machines.appOnly()
     }
 
     // MARK: Joins
@@ -81,16 +93,21 @@ final class MachineHub {
             }
         }
         Task { await m.start() }
+        // A wake or a new network: probe loopback at once, also on an app-only Mac.
+        if pathWatch == nil { pathWatch = NetworkPath.shared.watch { [weak self] in self?.refresh(probe: true) } }
     }
 
     func stop() {
         watcher?.cancel()
         watcher = nil
+        pathWatch.map(NetworkPath.shared.remove)
+        pathWatch = nil
         Task { [machines] in await machines.stop() }
     }
 
     /// A {"type":"group"} frame: the roster changed.
-    func refresh() { Task { [machines] in await machines.refresh() } }
+    /// `probe`: ask loopback also on an app-only Mac that probed a short time ago.
+    func refresh(probe: Bool = false) { Task { [machines] in await machines.refresh(probe: probe) } }
 
     /// For tests and `--uishots`: links without a daemon.
     func use(_ links: [MachineLink]) {

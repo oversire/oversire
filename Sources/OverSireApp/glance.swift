@@ -73,7 +73,8 @@ final class GlanceVC: NSViewController {
         }
 
         foot.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let when = data.firstLoad ? "Loading…" : "Updated \(relativeTime(data.lastUpdate))"
+        let when = NetworkPath.shared.offlineSince.map(NetworkPath.offlineText)
+            ?? (data.firstLoad ? "Loading…" : "Updated \(relativeTime(data.lastUpdate))")
         foot.addArrangedSubview(NSTextField.text(when, size: 11.5, color: Palette.dim))
         foot.addArrangedSubview(Spacer())
         foot.addArrangedSubview(ActionButton("Refresh", symbol: "arrow.clockwise") { [weak self] in self?.data.refresh(force: true, completion: nil) })

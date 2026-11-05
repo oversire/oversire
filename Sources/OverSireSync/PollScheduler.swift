@@ -27,10 +27,13 @@ public struct PollScheduler: Sendable {
     public var intervals: PollIntervals
     public private(set) var failures = 0
     private var retryAfter: Duration?
+    /// False while this Mac has no network path. A failure then does not back off: the path is the fault, not the vendor.
+    public var isOnline: @Sendable () -> Bool
 
-    public init(policy: PollPolicy, intervals: PollIntervals = PollIntervals()) {
+    public init(policy: PollPolicy, intervals: PollIntervals = PollIntervals(), isOnline: @escaping @Sendable () -> Bool = { true }) {
         self.policy = policy
         self.intervals = intervals
+        self.isOnline = isOnline
     }
 
     public mutating func succeeded(retryAfter: Duration? = nil) {
@@ -39,6 +42,7 @@ public struct PollScheduler: Sendable {
     }
 
     public mutating func failed(_ error: Error) {
+        guard isOnline() else { return }
         failures += 1
         if case ProviderError.rateLimited(let after) = error { retryAfter = after } else { retryAfter = nil }
     }

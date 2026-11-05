@@ -96,7 +96,16 @@ public struct MachinesConfig: Codable, Equatable, Sendable {
     }
 }
 
+/// The daemon on this Mac at the last probe of loopback (OVERSIRE-431).
+public enum LocalDaemon: Equatable, Sendable {
+    case unknown, present
+    case absent(since: Date)
+}
+
 public actor Machines {
+    /// An app-only Mac probes loopback only this often, when no daemon answered.
+    public static let absentProbe: TimeInterval = 1800
+
     public static let defaultName = "OverSire on " + (ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac")
 
     public static func credentialKey(_ group: String) -> String { "daemon.group.\(group)" }
@@ -118,10 +127,21 @@ public actor Machines {
     public private(set) var checkedAt: Date?
     /// True after the first read. The first read gives the links also when they did not change.
     public private(set) var refreshed = false
+    public private(set) var localState: LocalDaemon = .unknown
+    private var probedAt: Date?
+    /// True on a Mac with no daemon installed. Its probe of loopback then repeats each `absentProbe`, not at each read.
+    public nonisolated let appOnly: @Sendable () -> Bool
+    private let now: @Sendable () -> Date
+    private let onLocal: @Sendable (LocalDaemon) -> Void
 
     /// cache: a file that keeps the last group, so an app without a local daemon finds the members after a restart.
+    /// onLocal gets each new localState.
     public init(local: DaemonClient, keychain: any CredentialKeeping, http: any HTTPTransport, deviceName: String = Machines.defaultName,
-                cache: URL? = nil) {
+                cache: URL? = nil, appOnly: @escaping @Sendable () -> Bool = { false }, now: @escaping @Sendable () -> Date = Date.init,
+                onLocal: @escaping @Sendable (LocalDaemon) -> Void = { _ in }) {
+        self.appOnly = appOnly
+        self.now = now
+        self.onLocal = onLocal
         self.local = local
         self.keychain = keychain
         self.http = http
@@ -167,9 +187,10 @@ public actor Machines {
         await refresh()
     }
 
-    /// Reads the local daemon and the group, and makes the links again.
-    public func refresh() async {
-        if let me = try? await local.whoami() {
+    /// Reads the local daemon and the group, and makes the links again. `probe` asks loopback also on an app-only Mac
+    /// that probed less than `absentProbe` ago: at a wake, on Settings › Machines, after an install.
+    public func refresh(probe: Bool = false) async {
+        if probe || shouldProbe(), let me = await probeLocal() {
             info = me
             checkedAt = Date()
             guard let gid = me.group else { publish([localLink(me.machine.rawValue)]); return }
@@ -191,6 +212,28 @@ public actor Machines {
             break
         }
         publish(group?.members.compactMap { remoteLink($0, token: token) } ?? [])
+    }
+
+    private func shouldProbe() -> Bool {
+        guard case .absent = localState, appOnly(), let probedAt else { return true }
+        return now().timeIntervalSince(probedAt) >= Self.absentProbe
+    }
+
+    private func probeLocal() async -> DaemonInfo? {
+        probedAt = now()
+        let me = try? await local.whoami()
+        switch (me, localState) {
+        case (nil, .absent): break
+        case (nil, _): setLocal(.absent(since: now()))
+        case (_?, .present): break
+        case (_?, _): setLocal(.present)
+        }
+        return me
+    }
+
+    private func setLocal(_ s: LocalDaemon) {
+        localState = s
+        onLocal(s)
     }
 
     /// The credential of the group in the Keychain. The local daemon issues one at the first need.

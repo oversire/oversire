@@ -9,7 +9,8 @@ import OverSireSync
 struct IOLog {
     var sink: any LogSink = AppLog()
 
-    func request(_ r: URLRequest, status: Int?, ms: Int, body: Data? = nil, error: String? = nil) {
+    /// `quiet`: a failure that is no fault to show (NetworkPath.quiet). Its line is verbose.
+    func request(_ r: URLRequest, status: Int?, ms: Int, body: Data? = nil, error: String? = nil, quiet: Bool = false) {
         let method = r.httpMethod ?? "GET"
         let path = r.url.map { $0.path.isEmpty ? "/" : $0.path } ?? "?"
         // A lease 409 names the other holder. It is an answer, not a fault, and it comes every 30 s.
@@ -20,11 +21,11 @@ struct IOLog {
         if let error {
             msg += ": " + error
         } else if failed, let body, !body.isEmpty {
-            msg += ": " + Self.excerpt(String(decoding: body.prefix(1024), as: UTF8.self))
+            msg += ": " + Self.bodyText(body)
         }
         let host = r.url.map { u in (u.host ?? "") + (u.port.map { ":\($0)" } ?? "") }
         var e = LogEntry(level: failed ? .warn : .ok, area: .net, job: "HTTP", host: host, message: msg, ms: ms)
-        e.verbose = held || (!failed && method == "GET")
+        e.verbose = quiet || held || (!failed && method == "GET")
         sink.write(e)
     }
 
@@ -41,6 +42,14 @@ struct IOLog {
         if failed, !stderr.isEmpty { e.outputTail = String(stderr.suffix(300)) }
         e.verbose = !failed
         sink.write(e)
+    }
+
+    /// The text of an error body. An HTML error page (for example of a proxy) gives its title only.
+    static func bodyText(_ body: Data) -> String {
+        let s = String(decoding: body.prefix(4096), as: UTF8.self)
+        guard s.drop { $0.isWhitespace }.hasPrefix("<") else { return excerpt(String(s.prefix(1024))) }
+        let title = s.firstMatch(of: #/(?is)<title[^>]*>(.*?)</title>/#).map { excerpt(String($0.1), 120) }
+        return "(error page" + (title.map { $0.isEmpty ? "" : ": " + $0 } ?? "") + ")"
     }
 
     static func excerpt(_ s: String, _ n: Int = 300) -> String {
@@ -64,7 +73,7 @@ struct URLSessionTransport: HTTPTransport {
         let t0 = Date()
         let (data, resp): (Data, URLResponse)
         do { (data, resp) = try await session.data(for: request) } catch {
-            log.request(request, status: nil, ms: IOLog.ms(since: t0), error: error.localizedDescription)
+            log.request(request, status: nil, ms: IOLog.ms(since: t0), error: error.localizedDescription, quiet: NetworkPath.shared.quiet(request, error))
             throw ProviderError.transport(error.localizedDescription)
         }
         guard let http = resp as? HTTPURLResponse else { throw ProviderError.transport("No HTTP answer") }
@@ -79,7 +88,7 @@ extension URLSessionTransport: HTTPStreaming {
         let t0 = Date()
         let (bytes, resp): (URLSession.AsyncBytes, URLResponse)
         do { (bytes, resp) = try await session.bytes(for: request) } catch {
-            log.request(request, status: nil, ms: IOLog.ms(since: t0), error: error.localizedDescription)
+            log.request(request, status: nil, ms: IOLog.ms(since: t0), error: error.localizedDescription, quiet: NetworkPath.shared.quiet(request, error))
             throw ProviderError.transport(error.localizedDescription)
         }
         guard let http = resp as? HTTPURLResponse else { throw ProviderError.transport("No HTTP answer") }
@@ -269,11 +278,12 @@ struct URLSessionWebSockets: WebSocketConnecting {
         // A ping waits for the handshake, so a bad token fails here.
         do {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
-                socket.task.sendPing { e in e.map { c.resume(throwing: socket.mapped($0)) } ?? c.resume() }
+                socket.task.sendPing { e in e.map { c.resume(throwing: $0) } ?? c.resume() }
             }
         } catch {
-            log.request(request, status: (socket.task.response as? HTTPURLResponse)?.statusCode, ms: IOLog.ms(since: t0), error: "\(error)")
-            throw error
+            log.request(request, status: (socket.task.response as? HTTPURLResponse)?.statusCode, ms: IOLog.ms(since: t0),
+                        error: error.localizedDescription, quiet: NetworkPath.shared.quiet(request, error))
+            throw socket.mapped(error)
         }
         log.request(request, status: (socket.task.response as? HTTPURLResponse)?.statusCode ?? 101, ms: IOLog.ms(since: t0))
         return socket

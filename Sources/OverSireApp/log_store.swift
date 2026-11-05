@@ -79,7 +79,8 @@ final class LogStore: LogSink, @unchecked Sendable {
             e.input = nil
             e.output = nil
         }
-        let keep = e.verbose != true || e.level != .ok || c.debug
+        // A verbose warning is a quiet failure: a cancel, or a network error while this Mac is offline (OVERSIRE-431).
+        let keep = e.verbose != true || c.debug
         if keep {
             lock.withLock {
                 lines.append(e)

@@ -106,6 +106,26 @@ final class PollingSourceTests: XCTestCase {
         _ = stream
     }
 
+    func testNoPollWhileOfflineAndOnePollAtWake() async throws {
+        let clock = ManualClock()
+        let p = CountingProvider(account: acme)
+        let online = Locked(false)
+        let source = PollingSource(providers: [p], cursors: CursorStore(url: nil), clock: clock, isOnline: { online.get() })
+        let stream = source.events()
+        try await clock.waitForSleepers()
+        clock.advance(by: .seconds(30))
+        await eventually("second tick") { clock.sleeps.count == 2 }
+        XCTAssertEqual(p.cursorsSeen.get().count, 0, "no poll while offline")
+        XCTAssertEqual(clock.sleeps, [.seconds(30), .seconds(30)], "no backoff while offline")
+        let h = await source.health()
+        XCTAssertEqual(h, .live, "offline is no failure")
+        online.with { $0 = true }
+        await source.wake()
+        await eventually("poll at wake") { p.cursorsSeen.get().count == 1 }
+        await source.stop()
+        _ = stream
+    }
+
     func testOneLoopForEachAccount() async throws {
         let clock = ManualClock()
         let a = CountingProvider(account: acme), b = CountingProvider(account: AccountID(provider: "github-actions", id: "beta"))

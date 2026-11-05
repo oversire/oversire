@@ -1,7 +1,6 @@
 import Cocoa
 import OverSireCore
 import OverSireSync
-import Network
 
 // ─── Live sync ───────────────────────────────────────────────────────────────
 // Polling, the cloud and the daemons give one event stream. The events are hints: they name
@@ -115,7 +114,7 @@ final class LiveSync {
     private var resyncs: [AccountID] = []
     private var fullResync = false
     private var flushWork: DispatchWorkItem?
-    private var pathMonitor: NWPathMonitor?
+    private var pathWatch: UUID?
     private var plan: Plan?
     // Callbacks of stopped sources can still come. They carry an old generation.
     private var generation = 0
@@ -162,12 +161,13 @@ final class LiveSync {
         let onPolled: @Sendable (AccountID) -> Void = { _ in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.lastPoll = Date() } }
         }
-        let polling = PollingSource(providers: ENV.pollers(repos: polled), cursors: cursors, intervals: intervals, onPolled: onPolled)
+        let online: @Sendable () -> Bool = { NetworkPath.shared.isOnline }
+        let polling = PollingSource(providers: ENV.pollers(repos: polled), cursors: cursors, intervals: intervals, isOnline: online, onPolled: onPolled)
         // Their own cursor file: two pollers of one account must not write the same cursor.
         let fallback = p.fallback.isEmpty ? nil
             : PollingSource(providers: ENV.pollers(repos: p.fallback),
                             cursors: CursorStore(url: URL(fileURLWithPath: FALLBACK_CURSORS_PATH)),
-                            intervals: PollIntervals(normal: .seconds(POLL_NORMAL), active: .seconds(POLL_NORMAL)), onPolled: onPolled)
+                            intervals: PollIntervals(normal: .seconds(POLL_NORMAL), active: .seconds(POLL_NORMAL)), isOnline: online, onPolled: onPolled)
         let cloud = makeCloud(generation: gen)
         let daemons = makeDaemons(p.links, generation: gen)
         let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons, onCloudHealth: { h in
@@ -179,7 +179,7 @@ final class LiveSync {
         self.daemons = daemons
         self.merger = merger
         if cloud == nil { state = .off }
-        if cloud != nil || !daemons.isEmpty { watchNetwork() }
+        watchNetwork()
         let stream = merger.events()
         consumer = Task { @MainActor [weak self] in
             for await e in stream { self?.received(e) }
@@ -203,8 +203,8 @@ final class LiveSync {
         plan = nil
         generation += 1
         stopSources()
-        pathMonitor?.cancel()
-        pathMonitor = nil
+        pathWatch.map(NetworkPath.shared.remove)
+        pathWatch = nil
         state = .off
     }
 
@@ -276,20 +276,16 @@ final class LiveSync {
         if let group { group.cloud = link } else { STORE_WRITES.use(link.map { .cloud($0) } ?? .local) }
     }
 
+    /// The network path came back: the polls and the store run now, and a source that is down starts again.
     private func watchNetwork() {
-        guard pathMonitor == nil else { return }
-        let m = NWPathMonitor()
-        m.pathUpdateHandler = { [weak self] path in
-            guard path.status == .satisfied else { return }
-            DispatchQueue.main.async {
-                STORE_WRITES.syncNow()
-                guard let self else { return }
-                let daemonDown = self.machines.map { hub in self.daemons.contains { !hub.isLive($0.name) } } ?? false
-                if (self.cloud != nil && self.state != .live) || daemonDown { self.start() }
-            }
+        guard pathWatch == nil else { return }
+        pathWatch = NetworkPath.shared.watch { [weak self] in
+            STORE_WRITES.syncNow()
+            guard let self else { return }
+            Task { [polling = self.polling, fallback = self.fallback] in await polling?.wake(); await fallback?.wake() }
+            let daemonDown = self.machines.map { hub in self.daemons.contains { !hub.isLive($0.name) } } ?? false
+            if (self.cloud != nil && self.state != .live) || daemonDown { self.start() }
         }
-        m.start(queue: .main)
-        pathMonitor = m
     }
 
     @objc private func didWake() { if merger != nil { start() } }
