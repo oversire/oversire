@@ -52,13 +52,15 @@ final class AppEnvironment: @unchecked Sendable {
 
     /// One gate for each account. It stays when the adapter is made again.
     private func gate(_ a: AccountID) -> RateGate {
-        lock.withLock {
+        if let g = lock.withLock({ gates[a] }) { return g }
+        // Make the gate outside the lock: its init reads the budget, and the budget takes the lock.
+        let made = RateGate(perMinute: { [weak self] in
+            (self?.automationOwner?.leads ?? true) ? Self.planeBudget.lead : Self.planeBudget.other
+        })
+        return lock.withLock {
             if let g = gates[a] { return g }
-            let g = RateGate(perMinute: { [weak self] in
-                (self?.automationOwner?.leads ?? true) ? Self.planeBudget.lead : Self.planeBudget.other
-            })
-            gates[a] = g
-            return g
+            gates[a] = made
+            return made
         }
     }
 
