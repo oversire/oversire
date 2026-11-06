@@ -814,7 +814,8 @@ extension TabVC {
                 continue
             }
             var items = snap.sorted(snap.listed(subItems: PROJECTS_CFG.showSubItems))
-            items = items.filter { !snap.isHiddenDone($0, afterDays: PROJECTS_CFG.hideDoneAfterDays) && $0.matches(query) }
+            if !PROJECTS_CFG.showSubItems { items += snap.items.filter { $0.parentId != nil && FAVORITES.contains($0.key) } }
+            items = items.filter { (FAVORITES.contains($0.key) || !snap.isHiddenDone($0, afterDays: PROJECTS_CFG.hideDoneAfterDays)) && $0.matches(query) }
             if assignedOnly { items = items.filter { $0.isMine(snap.me) } }
             if unreadOnly { items = items.filter { store.isUnread(itemId: $0.id) } }
             if let fid = statusFilter[key] { items = items.filter { $0.statusOptionId == fid } }
@@ -842,12 +843,18 @@ extension TabVC {
             header.onDrag = { [weak self] phase, event in self?.dragProject(key, phase: phase, event: event) }
             rows.append(header)
             if folded { continue }
+            // Favorites first, also when Done. The cap counts only the other items.
+            let split = FAVORITES.first(items, key: \.key)
+            let favs = snap.groupSorted(split.favorites)
             let cap = PROJECTS_CFG.itemsPerProject
-            let limited = (cap > 0 && !showAllProjects.contains(key)) ? Array(items.prefix(cap)) : items
+            let capped = cap > 0 && !showAllProjects.contains(key) && split.rest.count > cap
+            let limited = favs + (capped ? Array(split.rest.prefix(cap)) : split.rest)
             if limited.isEmpty {
                 rows.append(EmptyRow("No items match these filters", w: w))
             }
-            for item in limited {
+            for (n, item) in limited.enumerated() {
+                if n == 0 && !favs.isEmpty { rows.append(FavoritesLabel(w: w)) }
+                if n == favs.count && n > 0 { rows.append(FavoritesLabel.end(w: w)) }
                 let progress = snap.progress(of: item.id)
                 let last = store.activity(limit: 20, project: key).first { $0.itemId == item.id }?.text
                 let row = ProjectItemRow(item: item, snap: snap, unread: store.isUnread(itemId: item.id),
@@ -866,7 +873,7 @@ extension TabVC {
                 row.identifier = NSUserInterfaceItemIdentifier("item:" + item.id)
                 rows.append(row)
             }
-            if cap > 0 && items.count > cap && !showAllProjects.contains(key) {
+            if capped {
                 let more = NSButton(title: "\(limited.count) of \(items.count) items · Show all", target: self, action: #selector(showAll(_:)))
                 more.identifier = NSUserInterfaceItemIdentifier(key)
                 more.bezelStyle = .inline; more.font = .systemFont(ofSize: 11)

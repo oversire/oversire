@@ -205,6 +205,8 @@ final class ProjectPage: Page {
         }
         let ws = data.workstreams, job = data.statusJob
         var items = snap.listed(subItems: showSubItems)
+        // A favorite sub-item shows also without Sub-items.
+        if !showSubItems { items += snap.items.filter { $0.parentId != nil && FAVORITES.contains($0.key) && !items.contains($0) } }
         if onlyAgent { items = items.filter { ws.stream($0.key)?.agent != nil } }
         if onlyFailing { items = items.filter { ws.stream($0.key)?.ci?.word == Tone.bad.word } }
         if onlyMine { items = items.filter { $0.isMine(snap.me) } }
@@ -237,7 +239,7 @@ final class ProjectPage: Page {
                 ToggleChip("Sub-items", on: flags[3]) { self?.flip(\.showSubItems) },
                 ToggleChip("Show done", on: flags[4]) { self?.flip(\.showDone) },
                 Spacer(),
-                NSTextField.text("Grouped by status · sorted by priority, Done by last change", size: 12, color: Palette.dim),
+                NSTextField.text("Favorites first · grouped by status · sorted by priority, Done by last change", size: 12, color: Palette.dim),
             ], spacing: 6)
         }
         let top = PageSection("top", rows: [header, filters])
@@ -251,8 +253,8 @@ final class ProjectPage: Page {
         }
         var rows: [PageRow] = []
         for (opt, its) in groups where !its.isEmpty {
-            rows.append(StickyListCard.group(opt.id, opt.name, count: its.count, extra: [opt.rank, opt.color] as [AnyHashable]) {
-                [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16)]
+            rows.append(StickyListCard.group(opt.id, opt.name, count: its.count, extra: [opt.rank, opt.color] as [AnyHashable]) { [weak self] in
+                [self?.groupGlyph(opt) ?? NSView()]
             })
             let m = more[opt.id] ?? MoreRows()
             more[opt.id] = m
@@ -269,25 +271,33 @@ final class ProjectPage: Page {
     }
 
     private func statusGroups(_ snap: ProjectSnapshot, _ items: [Item]) -> [(StatusOption, [Item])] {
-        Self.statusGroups(snap, items, showDone: showDone, hideDoneAfterDays: PROJECTS_CFG.hideDoneAfterDays)
+        Self.statusGroups(snap, items, showDone: showDone, hideDoneAfterDays: PROJECTS_CFG.hideDoneAfterDays, favorite: FAVORITES.contains)
     }
 
-    // Plane states in their rank order. Without Show done, Done items follow the "Hide Done items" setting.
-    // A Done item with open sub-items goes in the first started group (`listStateId`).
-    static func statusGroups(_ snap: ProjectSnapshot, _ items: [Item], showDone: Bool, hideDoneAfterDays days: Int) -> [(StatusOption, [Item])] {
+    private func groupGlyph(_ opt: StatusOption) -> NSView {
+        opt.id == Favorites.groupId ? Favorites.glyph(size: 13) : StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16)
+    }
+
+    // Favorites first, also when Done. Then the Plane states in their rank order. Without Show done, Done items follow
+    // the "Hide Done items" setting. A Done item with open sub-items goes in the first started group (`listStateId`).
+    static func statusGroups(_ snap: ProjectSnapshot, _ items: [Item], showDone: Bool, hideDoneAfterDays days: Int,
+                             favorite: (String) -> Bool = { _ in false }) -> [(StatusOption, [Item])] {
         let opts = snap.statusOptions.enumerated().sorted { ($0.element.rank, $0.offset) < ($1.element.rank, $1.offset) }.map(\.element)
-        let sorted = snap.groupSorted(showDone ? items : items.filter { !snap.isHiddenDone($0, afterDays: days) })
+        let favs = snap.groupSorted(items.filter { favorite($0.key) })
+        let others = items.filter { !favorite($0.key) }
+        let sorted = snap.groupSorted(showDone ? others : others.filter { !snap.isHiddenDone($0, afterDays: days) })
         var out = opts.map { o in (o, sorted.filter { snap.listStateId($0) == o.id }) }
         let known = Set(opts.map(\.id))
         let rest = sorted.filter { !known.contains(snap.listStateId($0) ?? "") }
         if !rest.isEmpty { out.append((StatusOption(id: "", name: "No status", color: "GRAY"), rest)) }
+        if !favs.isEmpty { out.insert((StatusOption(id: Favorites.groupId, name: Favorites.title, color: "YELLOW"), favs), at: 0) }
         return out
     }
 
     private func boardView(_ groups: [(StatusOption, [Item])], _ ws: WorkstreamIndex, _ snap: ProjectSnapshot) -> NSView {
         let cols: [NSView] = groups.filter { !$0.1.isEmpty || ![.done, .blocked].contains($0.0.category) }.map { opt, its in
             let c = Card(padding: 10, spacing: 8)
-            c.add(NSStackView(h: [StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16),
+            c.add(NSStackView(h: [groupGlyph(opt),
                                   NSTextField.text(opt.name, size: 12.5, weight: .semibold),
                                   NSTextField.text("\(its.count)", size: 12, color: Palette.dim)], spacing: 6))
             for i in its.prefix(25) { c.add(BoardCard(i, snap: snap, stream: ws.stream(i.key), status: data.statusJob.item(i.key), commands: commands) { [weak self] in self?.go($0) }) }

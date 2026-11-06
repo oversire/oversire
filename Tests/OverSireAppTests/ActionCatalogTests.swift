@@ -58,7 +58,7 @@ final class ActionCatalogTests: XCTestCase {
             .startSession(key: "SLING-1"), .run(repo: "o/r", runId: "9", .rerun), .run(repo: "o/r", runId: "9", .rerunFailed),
             .run(repo: "o/r", runId: "9", .cancel), .ignoreFailure(repo: "o/r", runId: "9", true),
             .rerunJob(repo: "o/r", runId: "9", jobId: "3"), .approve(repo: "o/r", number: 1), .merge(repo: "o/r", number: 1),
-            .revealCard("c1"), .refreshProject("k"),
+            .revealCard("c1"), .refreshProject("k"), .favorite(key: "SLING-1", true),
         ]
         for c in commands {
             guard let (id, args) = c.action(key: { _ in "SLING-1" }) else { XCTFail("\(c) has no action"); continue }

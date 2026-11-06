@@ -917,6 +917,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedSummaries()
         seedSessions()
         seedCleanup()
+        // OVERSIRE_UISHOTS_FAVORITES=FRITZ-17,FRITZ-12: these items are favorites.
+        if let f = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FAVORITES"] { FAVORITES.seed(f.split(separator: ",").map(String.init)) }
         Self.seedReviews()
         MainActor.assumeIsolated { seedFiles() }
         // The seeded sessions join their items.

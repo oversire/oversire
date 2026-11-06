@@ -264,6 +264,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         REVIEWS.tracker = projectStore
         NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: REVIEWS, queue: .main) { [weak self] _ in self?.updateIcon() }
         REVIEWS.start()
+        NotificationCenter.default.addObserver(forName: Favorites.changed, object: FAVORITES, queue: .main) { [weak self] _ in
+            (self?.popover.contentViewController as? TabVC)?.rebuildContent()
+            self?.bus.post(DataChange(.projects, origin: .user))
+        }
         startEvents()
         DaemonSetup.shared.offerUpdateOnce()
         relay.start()

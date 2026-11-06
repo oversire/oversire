@@ -1,7 +1,7 @@
 import AppKit
 import OverSireCore
 
-// Work: your items, the queue and the worktrees. The Items tab shows In progress, Done, Up next (the queue) and Not started.
+// Work: your items, the queue and the worktrees. The Items tab shows Favorites, In progress, Done, Up next (the queue) and Not started.
 final class WorkPage: Page {
     typealias Entry = (item: Item, snap: ProjectSnapshot, stream: Workstream?)
     typealias Lane = (priority: String, entries: [Entry])
@@ -57,7 +57,15 @@ final class WorkPage: Page {
     }
 
     /// The sections of the Items tab, top to bottom. The ids are the fold keys in `PROJECTS_CFG.workFolded`.
-    enum Section: String, CaseIterable { case progress, done, upNext = "upnext", todo }
+    enum Section: String, CaseIterable { case favorites, progress, done, upNext = "upnext", todo }
+
+    /// The favorites of all projects, also sub-items, Done items and items of other people. Open items first.
+    static func favorites(_ snaps: [ProjectSnapshot], favorite: (String) -> Bool) -> [(item: Item, snap: ProjectSnapshot)] {
+        let all = snaps.flatMap { snap in snap.items.filter { favorite($0.key) }.map { (item: $0, snap: snap) } }
+        let open = all.filter { !$0.snap.isFinished($0.item) }.sorted { $0.item.activityAt > $1.item.activityAt }
+        let done = all.filter { $0.snap.isFinished($0.item) }.sorted { $0.item.updatedAt > $1.item.updatedAt }
+        return open + done
+    }
 
     /// Your finished root items: finished in the "Hide Done items after" window, or with cleanup left at any age. Newest first.
     static func done(_ data: AppData, now: Date = Date()) -> [Entry] {
@@ -123,10 +131,11 @@ final class WorkPage: Page {
         })
 
         let job = data.statusJob
-        let groups = WorkPage.itemGroups(list, queued: q.contains, status: job.item)
+        let groups = WorkPage.itemGroups(list.filter { !FAVORITES.contains($0.item.key) }, queued: q.contains, status: job.item)
         var rows: [PageRow] = []
         for section in Section.allCases {
             switch section {
+            case .favorites: rows += favoritesGroup()
             case .progress: if let g = groups.first(where: { $0.title == "In progress" }) { rows += group(g, id: section, queue: false) }
             case .done: rows += doneGroup()
             case .upNext: rows += upNext()
@@ -177,10 +186,28 @@ final class WorkPage: Page {
         return rows
     }
 
+    private func favoritesGroup() -> [PageRow] {
+        let list = WorkPage.favorites(Array(data.projectStore.snapshots.values), favorite: FAVORITES.contains)
+        guard !list.isEmpty else { return [] }
+        let job = data.statusJob, ws = data.workstreams
+        let fold = fold(.favorites)
+        var rows = [StickyListCard.group(Section.favorites.rawValue, Favorites.title, count: list.count, fold: fold) { [Favorites.glyph(size: 13)] }]
+        guard fold.expanded else { return rows }
+        let m = more["Favorites"] ?? MoreRows()
+        more["Favorites"] = m
+        rows += PageRow.limited(list, more: m, reload: { [weak self] in self?.reload() }) { [weak self, table, commands] e in
+            let stream = ws.stream(e.item.key), st = job.item(e.item.key)
+            return PageRow("fav." + e.item.key, hash: ItemLine.hash(e.item, snap: e.snap, stream: stream, status: st)) {
+                ItemLine(e.item, snap: e.snap, stream: stream, status: st, layout: table, commands: commands) { self?.go($0) }
+            }
+        }.map { r in r.id == "more" ? PageRow("more.favorites", hash: r.hash, make: r.make) : r }
+        return rows
+    }
+
     // Finished items. A row with cleanup left shows the "Done · cleanup" chip. The cleanup actions are on the item page.
     // The header shows the cleanup count also when the group is folded.
     private func doneGroup() -> [PageRow] {
-        let list = WorkPage.done(data)
+        let list = WorkPage.done(data).filter { !FAVORITES.contains($0.item.key) }
         guard !list.isEmpty else { return [] }
         let job = data.statusJob
         let cleanups = Dictionary(list.map { ($0.item.key, data.cleaner.lines($0.item.key, data: data)) }, uniquingKeysWith: { a, _ in a })

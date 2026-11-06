@@ -66,7 +66,7 @@ final class MyItemsOrderTests: XCTestCase {
     }
 
     func testSectionOrder() {
-        XCTAssertEqual(WorkPage.Section.allCases, [.progress, .done, .upNext, .todo])
+        XCTAssertEqual(WorkPage.Section.allCases, [.favorites, .progress, .done, .upNext, .todo])
         XCTAssertTrue(ProjectsConfig().workFolded.contains(WorkPage.Section.done.rawValue))
     }
 

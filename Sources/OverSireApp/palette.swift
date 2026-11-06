@@ -8,9 +8,15 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         let title: String
         let detail: String
         let symbol: String
-        let kind: String         // "Page", "Item", "Intake", "Run", "Action"
+        let kind: String         // "Page", "Item", "Intake", "Run", "Action", or "Label" for a section label
         var key = ""             // the item key, for kind "Item" and "Intake"
+        var favorite = false
         let run: () -> Void
+
+        static func label(_ title: String, star: Bool = false) -> Entry {
+            Entry(title: title, detail: "", symbol: star ? "star.fill" : "", kind: "Label") {}
+        }
+        var isLabel: Bool { kind == "Label" }
     }
 
     private static var current: CommandPalette?
@@ -31,7 +37,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         p.field.placeholderString = prompt
         p.field.setAccessibilityLabel(prompt)
         p.all = p.all.filter { $0.kind == "Item" && !exclude.contains($0.key) }.map { e in
-            Entry(title: e.title, detail: e.detail, symbol: e.symbol, kind: e.kind, key: e.key) { chosen(e.key) }
+            Entry(title: e.title, detail: e.detail, symbol: e.symbol, kind: e.kind, key: e.key, favorite: e.favorite) { chosen(e.key) }
         }
         p.filter("")
         p.open()
@@ -163,7 +169,8 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         for s in data.projectStore.snapshots.values {
             for i in s.sortedItems {
                 let st = s.statusName(i.statusOptionId) ?? ""
-                out.append(Entry(title: "\(i.key)  \(i.title)", detail: st, symbol: "circle.dashed", kind: "Item", key: i.key, run: go(.item(i.key, .overview))))
+                out.append(Entry(title: "\(i.key)  \(i.title)", detail: st, symbol: "circle.dashed", kind: "Item", key: i.key,
+                                 favorite: FAVORITES.contains(i.key), run: go(.item(i.key, .overview))))
             }
         }
         out += Self.intakeEntries(data.projectStore.snapshots, keys: data.projectStore.intakeKeys) { pk, id in
@@ -205,31 +212,41 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         return out
     }
 
-    // Every word must appear in the title or the detail. Items whose key starts with the query come first.
+    // Every word must appear in the title or the detail. Favorites come first, then items whose key starts with the query.
+    // The empty query shows the favorites, the pages, the projects and the actions.
     static func match(_ all: [Entry], query q: String, picking: Bool) -> [Entry] {
         let words = q.lowercased().split(separator: " ").map(String.init)
         var shown: [Entry]
         if words.isEmpty && picking {
             shown = all
         } else if words.isEmpty {
-            shown = all.filter { $0.kind == "Page" || $0.kind == "Action" || $0.kind == "Project" }
+            shown = all.filter { $0.favorite || $0.kind == "Page" || $0.kind == "Action" || $0.kind == "Project" }
         } else {
             shown = all.filter { e in
                 let hay = (e.title + " " + e.detail + " " + e.kind).lowercased()
                 return words.allSatisfy { hay.contains($0) }
             }
-            shown.sort { a, b in
-                let pa = a.title.lowercased().hasPrefix(words[0]), pb = b.title.lowercased().hasPrefix(words[0])
-                return pa && !pb
-            }
         }
+        let first = words.first
+        shown = shown.enumerated().sorted { a, b in
+            func rank(_ e: Entry) -> Int { (e.favorite ? 0 : 2) + (first.map { e.title.lowercased().hasPrefix($0) } == true ? 0 : 1) }
+            return (rank(a.element), a.offset) < (rank(b.element), b.offset)
+        }.map(\.element)
         return Array(shown.prefix(60))
     }
 
+    /// The FAVORITES and RESULTS labels around the favorites. No labels without a favorite.
+    static func labeled(_ list: [Entry]) -> [Entry] {
+        guard list.first?.favorite == true else { return list }
+        let n = list.firstIndex { !$0.favorite } ?? list.count
+        let rest = list[n...]
+        return [.label(Favorites.title.uppercased(), star: true)] + list[..<n] + (rest.isEmpty ? [] : [.label("RESULTS")] + rest)
+    }
+
     private func filter(_ q: String) {
-        shown = Self.match(all, query: q, picking: picking)
+        shown = Self.labeled(Self.match(all, query: q, picking: picking))
         table.reloadData()
-        if !shown.isEmpty { table.selectRowIndexes([0], byExtendingSelection: false) }
+        if let i = shown.firstIndex(where: { !$0.isLabel }) { table.selectRowIndexes([i], byExtendingSelection: false) }
     }
 
     func controlTextDidChange(_ obj: Notification) { filter(field.stringValue) }
@@ -246,14 +263,16 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
     private func move(_ d: Int) {
         guard !shown.isEmpty else { return }
-        let i = max(0, min(shown.count - 1, table.selectedRow + d))
+        var i = max(0, min(shown.count - 1, table.selectedRow + d))
+        while shown[i].isLabel, i + d >= 0, i + d < shown.count { i += d }
+        guard !shown[i].isLabel else { return }
         table.selectRowIndexes([i], byExtendingSelection: false)
         table.scrollRowToVisible(i)
     }
 
     @objc private func pick() {
         let i = table.selectedRow
-        guard i >= 0, i < shown.count else { return }
+        guard i >= 0, i < shown.count, !shown[i].isLabel else { return }
         let e = shown[i]
         close()
         e.run()
@@ -264,6 +283,17 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let e = shown[row]
         let v = NSTableCellView()
+        if e.isLabel {
+            let lead: [NSView] = e.symbol.isEmpty ? [] : [Favorites.glyph(size: 10)]
+            let s = NSStackView(h: lead + [NSTextField.text(e.title, size: 10.5, weight: .semibold, color: Palette.dim)], spacing: 5)
+            v.addSubview(s)
+            NSLayoutConstraint.activate([
+                s.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 8),
+                s.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -3),
+            ])
+            v.setAccessibilityLabel(e.title)
+            return v
+        }
         let s = NSStackView(h: [Glyph(e.symbol, color: Palette.mut, size: 13),
                                 NSTextField.text(e.title, size: 13),
                                 NSTextField.text(e.detail, size: 11.5, color: Palette.dim),
@@ -279,5 +309,6 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         return v
     }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { true }
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { !shown[row].isLabel }
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { shown[row].isLabel ? 24 : 34 }
 }

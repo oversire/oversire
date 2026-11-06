@@ -35,7 +35,7 @@ final class RowMenuTests: XCTestCase {
         var local = ProjectLocalSettings()
         local.branchTemplate = "{KEY}-{slug}"
         let m = RowMenu.item(item(), snap: snap, stream: nil, local: local, caps: all)
-        XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Copy ID", "Copy link", "Copy ID and title", "Copy branch name",
+        XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Copy ID", "Copy link", "Copy ID and title", "Copy branch name", "Add to Favorites",
                                   "Status", "Assign to me", "Priority", "Start session in Orca…", "Plan…"])
         XCTAssertEqual(m.command("Plan…"), .refine(key: "SLING-7"))
         XCTAssertEqual(m.command("Copy branch name"), .copy("SLING-7-fix-the-sync"))

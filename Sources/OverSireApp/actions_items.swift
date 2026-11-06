@@ -78,6 +78,18 @@ struct ItemActions {
                     d.projectStore.assignMe(itemId: f.item.id) { done(ActionLink.stored(d, $0, "\(f.item.key) is assigned to you.")) }
                 }
             },
+            ActionSpec(id: "item.favorite", title: "Favorite", help: "Adds the item to Favorites, or removes it. Favorites show first in each list.", kind: .change,
+                       input: ActionSpec.args(["key": Self.key, "on": ("boolean", "False removes the item from Favorites. Default true.")], required: ["key"])) { a in
+                await link.item(a) { _, f, done in
+                    let on = a.bool("on") ?? true
+                    guard let ref = f.item.ref(in: f.snap.summary.ref) else { done(.failed("The item \(f.item.key) has no link.")); return }
+                    if FAVORITES.set(ref, on: on) {
+                        EVENTS.action(on ? .itemFavorited : .itemUnfavorited, item: f.item.key, project: f.snap.summary.identifier, verb: "favorite",
+                                      on ? "Added to Favorites" : "Removed from Favorites")
+                    }
+                    done(.ok(summary: on ? "\(f.item.key) is in Favorites." : "\(f.item.key) is not in Favorites."))
+                }
+            },
             ActionSpec(id: "item.assign", title: "Assign", help: "Sets the assignees of an item. Give person ids from people.list.", kind: .change,
                        input: ActionSpec.args(["key": Self.key, "people": ("array", "Person ids. An empty list removes all assignees.")], required: ["key", "people"])) { a in
                 await link.item(a) { d, f, done in

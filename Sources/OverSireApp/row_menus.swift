@@ -30,6 +30,7 @@ enum RowCommand: Equatable {
     case useTrackerIcon(String)
     case hideProject(String)
     case removeWorktree(card: String)
+    case favorite(key: String, Bool)
 
     /// The catalog action of a domain command. nil for a UI command. `key` gives the item key of an item id.
     func action(key: (String) -> String?) -> (id: String, args: [String: JSONValue])? {
@@ -50,6 +51,7 @@ enum RowCommand: Equatable {
         case .merge(let repo, let n): return ("pr.merge", ["repo": .string(repo), "number": .int(n)])
         case .revealCard(let card): return ("session.reveal", ["card": .string(card)])
         case .refreshProject(let k): return ("project.refresh", ["project": .string(k)])
+        case .favorite(let k, let on): return ("item.favorite", ["key": .string(k), "on": .bool(on)])
         case .open, .openURL, .copy, .finder, .terminal, .copyJobLog, .explain, .sendInput, .triage, .onlyProject,
              .useTrackerIcon, .hideProject, .removeWorktree, .enhance, .refine, .refineIntake:
             return nil
@@ -97,7 +99,7 @@ enum RowMenu {
         var out: [MenuEntry] = [.action("Open", .open(.item(item.key, .overview))), .action("Open in \(tracker)", .openURL(item.url)), .separator,
                                 .action("Copy ID", .copy(item.key)), .action("Copy link", .copy(item.url)),
                                 .action("Copy ID and title", .copy("\(item.key) \(item.title)")), .action("Copy branch name", .copy(local.branch(for: item))),
-                                .separator]
+                                .separator, favorite(item.key), .separator]
         if !snap.statusOptions.isEmpty {
             out.append(.submenu("Status", snap.statusOptions.map {
                 .action($0.name, .status(itemId: item.id, optionId: $0.id), checked: $0.id == item.statusOptionId)
@@ -118,6 +120,11 @@ enum RowMenu {
         if let pr = stream?.prs.first { out.append(.action("Open pull request", .openURL(pr.pr.url))) }
         if let r = stream?.runs.first { out.append(.action("Open latest run", .open(.run(repo: r.repo, id: r.run.id)))) }
         return out.tidy
+    }
+
+    static func favorite(_ key: String, favorites: Favorites = FAVORITES) -> MenuEntry {
+        let on = favorites.contains(key)
+        return .action(on ? "Remove from Favorites" : "Add to Favorites", .favorite(key: key, !on))
     }
 
     static func run(repo: String, run r: Run, linkedKey: String?, ignored: Bool, caps: Set<Capability>) -> [MenuEntry] {
@@ -228,6 +235,7 @@ final class RowCommander {
             case .action(let t, let c, let checked):
                 let i = MenuAction(t) { [weak self, weak anchor] in self?.run(c, anchor: anchor) }.item
                 i.state = checked ? .on : .off
+                if case .favorite = c { i.keyEquivalent = "d"; i.keyEquivalentModifierMask = .command }
                 return i
             case .submenu(let t, let list):
                 let i = NSMenuItem(title: t, action: nil, keyEquivalent: "")

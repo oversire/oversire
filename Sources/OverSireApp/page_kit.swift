@@ -456,8 +456,15 @@ class Row: Box {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard window?.firstResponder === self, event.charactersIgnoringModifiers?.lowercased() == "c" else { return super.performKeyEquivalent(with: event) }
+        guard window?.firstResponder === self else { return super.performKeyEquivalent(with: event) }
         let mods = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        // A row menu entry with a key, for example Command-D for Favorites.
+        if mods == .command, let ch = event.charactersIgnoringModifiers?.lowercased(), ch != "c",
+           let i = menuItems?().first(where: { $0.keyEquivalent == ch && $0.keyEquivalentModifierMask == .command }), let a = i.action {
+            NSApp.sendAction(a, to: i.target, from: i)
+            return true
+        }
+        guard event.charactersIgnoringModifiers?.lowercased() == "c" else { return super.performKeyEquivalent(with: event) }
         if mods == [.command, .shift], let copyLink { RowActions.copy(copyLink); return true }
         if mods == .command, let copyID { RowActions.copy(copyID); return true }
         return super.performKeyEquivalent(with: event)
