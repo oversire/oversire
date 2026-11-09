@@ -172,6 +172,7 @@ extension Event {
         public static let contextCompacted: Kind = "context.compacted"
         public static let subagentEnded: Kind = "subagent.ended"
         public static let reviewReady: Kind = "review.ready"
+        public static let groomApplied: Kind = "groom.applied"
         public static let promptSubmitted: Kind = "prompt.submitted"
         public static let questionAnswered: Kind = "question.answered"
         public static let reviewSubmitted: Kind = "review.submitted"

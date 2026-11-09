@@ -70,6 +70,15 @@ A merge does not delete or archive an item. The other items stay as Cancelled du
 
 Groom needs a daemon with the capabilities `sessionKey` and `hostFiles`. With an older daemon, a start asks you to update the daemon.
 
+## In the agent skill
+
+- `/oversire groom` runs Groom in the agent session. The body is `cli/ticket/skill/groom.md`.
+- The skill uses the kinds table above and the rules of `Contract/prompts/groom.md`.
+- It writes to Plane only after a yes in the chat.
+- `oversire ticket groom <PROJECT>` stops when a Groom of the app runs on this machine. It sets no key.
+- The skill writes one `groom.applied` row for each item that it changes.
+- The Groom panel and **Undo last Groom** do not show the Groom of the skill.
+
 ## The prompt
 
 `Contract/prompts/groom.md` holds the default prompt. Settings › Agents › **Edit Groom prompt** can change it. The values `{{project}}`, `{{file}}`, `{{scope}}` and `{{staleDays}}` come from the run. A saved prompt with no `oversire-result` block gets a warning.
