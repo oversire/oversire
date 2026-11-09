@@ -8,7 +8,8 @@ public protocol ReviewSource: Sendable {
     /// `kind` nil: code and plan.
     func reviews(kind: ReviewKind?) async throws -> ReviewsPage
     func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail
-    func diff(_ key: String, repo: String, path: String) async throws -> FileDiff
+    /// `full`: ask for the whole file. The reply sets `full` only when the daemon sent it.
+    func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff
     func addComment(_ key: String, _ d: CommentDraft) async throws -> ReviewComment
     /// 409: the comment is not pending.
     func editComment(_ key: String, id: String, _ e: CommentEdit) async throws

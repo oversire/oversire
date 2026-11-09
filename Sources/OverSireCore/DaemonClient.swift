@@ -261,8 +261,8 @@ public final class DaemonClient: Sendable {
         try await get(Self.reviewPath(key) + Self.query(["kind": kind.rawValue]))
     }
 
-    public func diff(_ key: String, repo: String, path: String) async throws -> FileDiff {
-        try await get(Self.reviewPath(key, "/diff") + Self.query(["repo": repo, "path": path]))
+    public func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff {
+        try await get(Self.reviewPath(key, "/diff") + Self.query(["repo": repo, "path": path, "context": full ? "full" : nil]))
     }
 
     public func addComment(_ key: String, _ d: CommentDraft) async throws -> ReviewComment {

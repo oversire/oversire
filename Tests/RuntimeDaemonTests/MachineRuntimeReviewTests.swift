@@ -37,8 +37,9 @@ final class MachineRuntimeReviewTests: XCTestCase {
         let plan = try await rs.review("OVERSIRE-371", kind: .plan)
         XCTAssertEqual(plan.plan?.blocks.map(\.id), ["goal", "tests"])
 
-        let diff = try await rs.diff("SLING-170", repo: "sling-cli", path: "core/dbio/database/database.go")
+        let diff = try await rs.diff("SLING-170", repo: "sling-cli", path: "core/dbio/database/database.go", full: false)
         XCTAssertEqual(diff.hunks.first?.lines.count, 7)
+        XCTAssertNil(diff.full)
 
         XCTAssertEqual(http.requests.map(line), [
             "GET /v1/reviews",
@@ -48,6 +49,14 @@ final class MachineRuntimeReviewTests: XCTestCase {
         ])
         XCTAssertEqual(http.requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer t")
         XCTAssertEqual(http.requests.map(\.timeoutInterval), [30, 5, 5, 5])
+    }
+
+    func testTheFullDiffAsksForTheWholeFile() async throws {
+        let (rt, http) = runtime([.init(body: try fixture("file-diff", "full"))])
+        let diff = try await rt.diff("OVERSIRE-436", repo: "oversire", path: "demo/hello.go", full: true)
+        XCTAssertEqual(diff.full, true)
+        XCTAssertEqual(diff.hunks.count, 1)
+        XCTAssertEqual(http.requests.map(line), ["GET /v1/reviews/OVERSIRE-436/diff?repo=oversire&path=demo/hello.go&context=full"])
     }
 
     func testCommentRoutes() async throws {

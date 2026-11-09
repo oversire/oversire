@@ -226,15 +226,18 @@ public struct FileDiff: Codable, Hashable, Sendable {
     public var status: FileStatus
     public var binary: Bool
     public var truncated: Bool
+    /// The whole file as one hunk. nil or false: a `-U3` diff (older daemon).
+    public var full: Bool?
     public var hunks: [DiffHunk]
 
-    public init(repo: String, path: String, oldPath: String? = nil, status: FileStatus, binary: Bool = false, truncated: Bool = false, hunks: [DiffHunk]) {
+    public init(repo: String, path: String, oldPath: String? = nil, status: FileStatus, binary: Bool = false, truncated: Bool = false, full: Bool? = nil, hunks: [DiffHunk]) {
         self.repo = repo
         self.path = path
         self.oldPath = oldPath
         self.status = status
         self.binary = binary
         self.truncated = truncated
+        self.full = full
         self.hunks = hunks
     }
 

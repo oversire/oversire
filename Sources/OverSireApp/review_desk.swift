@@ -199,7 +199,7 @@ final class ReviewDesk {
         guard let source, diffs[f.id] == nil, !asked.contains(f.id) else { return }
         asked.insert(f.id)
         do {
-            let d = try await source.diff(key, repo: f.repo, path: f.path)
+            let d = try await source.diff(key, repo: f.repo, path: f.path, full: false)
             await MainActor.run {
                 diffs[f.id] = d
                 changed()

@@ -7,8 +7,8 @@ extension MachineRuntime: ReviewSource {
 
     public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail { try await client.review(key, kind: kind) }
 
-    public func diff(_ key: String, repo: String, path: String) async throws -> FileDiff {
-        try await client.diff(key, repo: repo, path: path)
+    public func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff {
+        try await client.diff(key, repo: repo, path: path, full: full)
     }
 
     public func addComment(_ key: String, _ d: CommentDraft) async throws -> ReviewComment { try await client.addComment(key, d) }

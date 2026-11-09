@@ -65,9 +65,9 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
         }
     }
 
-    public func diff(_ key: String, repo: String, path: String) async throws -> FileDiff {
+    public func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff {
         try with {
-            try call("diff \(key) \(repo)/\(path)")
+            try call("diff \(key) \(repo)/\(path)" + (full ? " full" : ""))
             guard let d = diffs["\(key)/\(repo)/\(path)"] else { throw ProviderError.notFound }
             return d
         }
