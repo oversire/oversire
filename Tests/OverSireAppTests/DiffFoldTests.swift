@@ -106,6 +106,8 @@ final class DiffFoldTests: XCTestCase {
         XCTAssertNil(DiffKey(key: 125, shift: false, option: true, command: false, inText: true))
         XCTAssertNil(DiffKey(key: 126, shift: true, option: true, command: false, inText: true))
         XCTAssertEqual(DiffKey(key: 53, shift: false, option: false, command: false, inText: false), .close)
+        XCTAssertEqual(DiffKey(key: 9, shift: false, option: true, command: false, inText: false), .viewedNext)
+        XCTAssertNil(DiffKey(key: 9, shift: false, option: true, command: false, inText: true), "⌥V types a letter in a comment")
         XCTAssertEqual(DiffKey(key: 125, shift: false, option: true, command: false, inText: false), .nextChange)
         XCTAssertEqual(DiffKey(key: 126, shift: true, option: true, command: false, inText: false), .previousFile)
         XCTAssertEqual(DiffKey(key: 35, shift: false, option: false, command: true, inText: true), .files, "⌘P works in a field")

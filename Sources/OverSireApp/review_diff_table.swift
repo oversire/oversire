@@ -84,8 +84,23 @@ final class DiffPanel: NSView {
             guard desk.maximized else { return false }
             toggleSize()
         case .nextChange, .previousChange: stepChange(key == .nextChange ? 1 : -1)
+        case .viewedNext: viewedNext()
         }
         return true
+    }
+
+    /// Marks the file as viewed and opens the next file that is not viewed (OVERSIRE-447).
+    func viewedNext() {
+        guard let id = desk.file, let f = desk.files.first(where: { $0.id == id }) else { return NSSound.beep() }
+        let next = desk.nextUnviewed(after: id)?.id
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !f.viewed, !(await self.desk.setViewed(f, true)) { return }
+            if let next, let n = self.desk.files.first(where: { $0.id == next }) { return self.open(n) }
+            self.reload()
+            NSAccessibility.post(element: self, notification: .announcementRequested,
+                                 userInfo: [.announcement: "All files are viewed.", .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        }
     }
 
     /// Goes to the next or the previous change (OVERSIRE-442). Past the last change of a file it opens the next file.
@@ -211,6 +226,7 @@ final class DiffPanel: NSView {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
         let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f), open: { [weak self] in self?.showFiles() })
         pathView = pathField
+        pathField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         let mode = Segmented(["Unified", "Split"], selected: desk.split ? 1 : 0, label: "Diff view") { [weak self] i in
             self?.desk.split = i == 1
             self?.reload()
@@ -232,7 +248,14 @@ final class DiffPanel: NSView {
         let viewed = CheckBox("Viewed", on: f.viewed, label: "Mark \(f.path) as viewed") { on in Task { _ = await desk.setViewed(f, on) } }
         [wrap, whole, viewed].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
         var parts: [NSView] = [NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: ReviewChangesTab.color(f.status), mono: true), pathField, Spacer()]
-        if let n = desk.pendingByFile[f.id] {
+        if f.isStale {
+            let tag = Chiplet(desk.maximized ? "Changed since viewed" : "", symbol: "arrow.clockwise", color: Palette.warn)
+            tag.setAccessibilityLabel("This file changed after you marked it as viewed")
+            tag.toolTip = "The file changed after you marked it as viewed."
+            parts.append(tag)
+        }
+        // The normal view is narrow. The file row shows the pending count there.
+        if desk.maximized, let n = desk.pendingByFile[f.id] {
             let chip = Chiplet("\(n) pending", symbol: "text.bubble", color: Palette.warn)
             chip.setAccessibilityLabel("\(n) pending comment\(n == 1 ? "" : "s") in this file")
             parts.append(chip)
@@ -254,7 +277,10 @@ final class DiffPanel: NSView {
             let up = IconButton("chevron.up", label: "Previous change", tip: "Previous change ⌥↑") { [weak self] in self?.stepChange(-1) }
             let down = IconButton("chevron.down", label: "Next change", tip: "Next change ⌥↓") { [weak self] in self?.stepChange(1) }
             let c = desk.change.flatMap { $0 < n ? $0 : nil }
-            let chip = Chiplet(c.map { "\($0 + 1) / \(n)" } ?? (n == 0 ? "No changes" : "\(n) change\(n == 1 ? "" : "s")"), mono: c != nil)
+            // The normal view is narrow, so it shows the count only.
+            let word = desk.maximized ? (n == 0 ? "No changes" : "\(n) change\(n == 1 ? "" : "s")") : "\(n)"
+            let chip = Chiplet(c.map { "\($0 + 1) / \(n)" } ?? word, mono: c != nil || !desk.maximized)
+            chip.toolTip = "\(n) change\(n == 1 ? "" : "s") in this file"
             chip.setAccessibilityLabel(c.map { "Change \($0 + 1) of \(n)" } ?? (n == 0 ? "No changes in this file" : "\(n) change\(n == 1 ? "" : "s") in this file"))
             [up, chip, down].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
             counter = chip
@@ -263,7 +289,22 @@ final class DiffPanel: NSView {
         let size = desk.maximized
             ? IconButton("arrow.down.right.and.arrow.up.left", label: "Restore", tip: "Restore ⇧⌘M") { [weak self] in self?.toggleSize() }
             : IconButton("arrow.up.left.and.arrow.down.right", label: "Maximize", tip: "Maximize ⇧⌘M") { [weak self] in self?.toggleSize() }
-        let row = NSStackView(h: parts + [wrap, whole, mode, viewed, size], spacing: 8)
+        var tail: [NSView] = [wrap, whole, mode, viewed]
+        if desk.maximized {
+            if desk.allViewed {
+                let done = Chiplet("All viewed", symbol: "checkmark.circle", color: Palette.ok)
+                done.setAccessibilityLabel("All files are viewed")
+                tail.append(done)
+            } else {
+                let to = desk.nextUnviewed(after: f.id).map { FileTree.base($0.path) }
+                let next = ActionButton("Next", symbol: "checkmark", style: .primary) { [weak self] in self?.viewedNext() }
+                next.toolTip = "Mark as viewed" + (to.map { " and open \($0)" } ?? "") + " ⌥V"
+                next.setAccessibilityLabel("Mark \(f.path) as viewed" + (to.map { " and open \($0)" } ?? ""))
+                tail.append(next)
+            }
+            tail.last?.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        let row = NSStackView(h: parts + tail + [size], spacing: 8)
         row.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         head.subviews.forEach { $0.removeFromSuperview() }
         head.addSubview(row)

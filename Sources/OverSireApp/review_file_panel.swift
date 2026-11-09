@@ -102,6 +102,9 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
     private var repoNames: [String] = []
     private let repoSlot = NSStackView(h: [], spacing: 0)
     private var chips: [FileGroup: SwitchChip] = [:]
+    private lazy var notViewedChip = SwitchChip("○", "Not viewed", color: Palette.acc) { [weak self] in self?.flipViewed(false) }
+    private lazy var viewedChip = SwitchChip("✓", "Viewed", color: Palette.ok) { [weak self] in self?.flipViewed(true) }
+    private let progress = NSTextField.text("", size: 11, color: Palette.dim)
 
     init(_ desk: ReviewDesk) {
         self.desk = desk
@@ -130,14 +133,25 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         row.setAccessibilityElement(true)
         row.setAccessibilityRole(.group)
         row.setAccessibilityLabel("Show files")
+        let seen = NSStackView(h: [notViewedChip, viewedChip], spacing: 4)
+        seen.distribution = .fillEqually
+        seen.setAccessibilityElement(true)
+        seen.setAccessibilityRole(.group)
+        seen.setAccessibilityLabel("Show files by viewed state")
         head.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-        [top, search, repoSlot, row].forEach { head.addFull($0) }
+        [top, search, repoSlot, row, seen, progress].forEach { head.addFull($0) }
         update()
     }
 
     private func flip(_ g: FileGroup) {
         guard let desk else { return }
         if desk.filter.hidden.contains(g) { desk.filter.hidden.remove(g) } else { desk.filter.hidden.insert(g) }
+        changed()
+    }
+
+    private func flipViewed(_ viewed: Bool) {
+        guard let desk else { return }
+        if viewed { desk.filter.hideViewed.toggle() } else { desk.filter.hideNotViewed.toggle() }
         changed()
     }
 
@@ -199,6 +213,11 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         scoped.repo = desk.filter.repo
         let inScope = desk.files.filter(scoped.matches)
         for (g, c) in chips { c.set(on: !desk.filter.hidden.contains(g), count: inScope.filter { FileGroup($0.status) == g }.count) }
+        let seen = inScope.filter(\.viewed).count
+        notViewedChip.set(on: !desk.filter.hideNotViewed, count: inScope.count - seen)
+        viewedChip.set(on: !desk.filter.hideViewed, count: seen)
+        progress.stringValue = "\(desk.files.filter(\.viewed).count) of \(all) viewed"
+        progress.isHidden = all == 0
     }
 
     // MARK: Rows
@@ -278,9 +297,10 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         if r.pending > 0 { views += badge("text.bubble", r.pending, Palette.warn) }
         if answered > 0 { views += badge("checkmark", answered, Palette.ok) }
         if f.viewed { views.append(Glyph("eye", color: Palette.dim, size: 10, label: "Viewed")) }
+        if f.isStale { views.append(Glyph("arrow.clockwise", color: Palette.warn, size: 10, label: "Changed since viewed")) }
         views.append(NSTextField.text(f.binary ? "bin" : deleted ? "−\(f.removed)" : "+\(f.added) −\(f.removed)", size: 10.5, color: Palette.dim, mono: true))
         let label = "\(ReviewChangesTab.word(f.status)) \(f.path), \(f.added) added, \(f.removed) removed"
-            + (r.pending > 0 ? ", \(r.pending) pending comments" : "") + (answered > 0 ? ", \(answered) answered" : "") + (f.viewed ? ", viewed" : "")
+            + (r.pending > 0 ? ", \(r.pending) pending comments" : "") + (answered > 0 ? ", \(answered) answered" : "") + (f.viewed ? ", viewed" : f.isStale ? ", changed since viewed" : "")
         let row = TreeRow(views, height: desk.view == .list ? 34 : 26, inset: desk.view == .list ? 6 : 8 + CGFloat(r.depth) * 14, label: label) { [weak self] in
             self?.open(f)
         }

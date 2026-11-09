@@ -35,7 +35,7 @@ Each row shows the key, the title, the machine, the round, the number of pending
 The Changes page of an item shows the files of each repository of the group: added, modified, deleted and renamed files, and the files that are not committed yet.
 
 - Click a line, or drag over lines, to add a comment. The comment goes to the pending batch.
-- Mark a file as viewed. The mark stays until the file changes.
+- Mark a file as viewed. The mark stays until the file changes. See "Viewed files".
 - A binary file and a very large diff show a note in place of the lines.
 
 ### Folds
@@ -67,6 +67,17 @@ An older daemon gives only the changed hunks. Then the fold rows have no buttons
 - Past the last change of a file, ⌥↓ opens the next file of the file panel at its first change. Before the first change, ⌥↑ opens the previous file at its last change. A file with no changes is a stop too.
 - At the end of the review the app beeps, and the counter shows "Last change" or "First change". VoiceOver reads "This is the last change of the review."
 - The current change has a 3 px blue bar at the left and a stronger fill. A new file has no current change.
+
+### Viewed files
+
+- **Next** in the header of the large view marks the file as viewed. Then it opens the next file of the file panel that is not viewed. It skips the viewed files and wraps at the end.
+- ⌥V does the same in the normal view and in the large view. In a comment field, ⌥V types a letter.
+- When all files are viewed, the large view shows "All viewed" in place of Next.
+- The daemon keeps a hash of the file with the mark. When the file changes, the mark goes. The file then shows "Changed since viewed" in the header and an orange ↻ in the file panel. A new mark or an unmark clears it.
+- The "Not viewed" and "Viewed" chips in the file panel hide or show each group. A file that changed since the mark counts as not viewed.
+- The file panel shows "3 of 10 viewed".
+- Each mark writes a `review.viewed` row. An unmark writes a `review.unviewed` row. When a change clears the mark, the actor of the `review.unviewed` row is `system`.
+- In the normal view the header is narrow. It shows the change count as a number, the ↻ as an icon only, and no pending chip.
 
 ### Ruler
 

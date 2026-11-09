@@ -50,12 +50,16 @@ struct FileFilter: Hashable {
     var repo: String?
     var query = ""
     var hidden: Set<FileGroup> = []
+    var hideViewed = false
+    /// A file that changed since the mark counts as not viewed.
+    var hideNotViewed = false
 
     var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     func matches(_ f: ReviewFile) -> Bool {
         if let repo, f.repo != repo { return false }
         if hidden.contains(FileGroup(f.status)) { return false }
+        if f.viewed ? hideViewed : hideNotViewed { return false }
         let q = query.trimmingCharacters(in: .whitespaces)
         return q.isEmpty || f.id.localizedCaseInsensitiveContains(q)
     }

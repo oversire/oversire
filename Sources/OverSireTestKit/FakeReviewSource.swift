@@ -100,6 +100,7 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
         try change(key, .code, "viewed", event: nil) { d in
             guard let i = d.files.firstIndex(where: { $0.repo == m.repo && $0.path == m.path }) else { throw ProviderError.notFound }
             d.files[i].viewed = m.viewed
+            d.files[i].viewedStale = nil
         }
     }
 

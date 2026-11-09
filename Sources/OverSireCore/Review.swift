@@ -167,11 +167,14 @@ public struct ReviewFile: Codable, Hashable, Sendable, Identifiable {
     public var binary: Bool
     public var untracked: Bool?
     public var viewed: Bool
+    /// The file changed after the reviewer marked it viewed.
+    public var viewedStale: Bool?
 
     public var id: String { repo + "/" + path }
+    public var isStale: Bool { viewedStale == true }
 
     public init(repo: String, path: String, oldPath: String? = nil, status: FileStatus, added: Int, removed: Int, binary: Bool = false,
-                untracked: Bool? = nil, viewed: Bool = false) {
+                untracked: Bool? = nil, viewed: Bool = false, viewedStale: Bool? = nil) {
         self.repo = repo
         self.path = path
         self.oldPath = oldPath
@@ -181,6 +184,7 @@ public struct ReviewFile: Codable, Hashable, Sendable, Identifiable {
         self.binary = binary
         self.untracked = untracked
         self.viewed = viewed
+        self.viewedStale = viewedStale
     }
 }
 

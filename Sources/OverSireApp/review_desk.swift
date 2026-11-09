@@ -294,6 +294,15 @@ final class ReviewDesk {
         return ((group as NSString).appendingPathComponent(f.repo) as NSString).appendingPathComponent(f.path)
     }
 
+    /// The next file after id that is not viewed, in the order of the file panel. It wraps.
+    func nextUnviewed(after id: String) -> ReviewFile? {
+        let order = tree.steps(view)
+        guard let i = order.firstIndex(where: { $0.id == id }) else { return order.first { !$0.viewed && $0.id != id } }
+        return (order[(i + 1)...] + order[..<i]).first { !$0.viewed }
+    }
+
+    var allViewed: Bool { !files.isEmpty && files.allSatisfy(\.viewed) }
+
     func setViewed(_ f: ReviewFile, _ on: Bool) async -> Bool {
         guard let source else { return false }
         return await run { try await source.markViewed(self.key, ViewedMark(repo: f.repo, path: f.path, viewed: on)) }

@@ -10,12 +10,13 @@ extension UIShots {
     /// max: the large view (OVERSIRE-440). switch: the file switch from the path, in the large view.
     /// full: a full diff with fold buttons. expand: the same after "Show 20 lines below". old-daemon: a partial diff (OVERSIRE-441).
     /// steps: the second change of a full diff is the current change. ruler: the full file in the large view, with the ruler (OVERSIRE-442).
+    /// viewed: the large view of a file that changed since it was viewed, with Next. unviewed: the Viewed chip hides the viewed files (OVERSIRE-447).
     /// long: a file of 4000 lines, with the widest line at line 3938 (OVERSIRE-439).
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
-        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: ["full", "expand", "steps", "ruler"].contains(scene))
+        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: ["full", "expand", "steps", "ruler", "viewed"].contains(scene), stale: scene == "viewed")
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
               let plan = REVIEWS.review("OVERSIRE-349", kind: .plan).flatMap({ REVIEWS.desk($0) }) else {
             w.router.go(.work(.review))
@@ -23,10 +24,12 @@ extension UIShots {
         }
         code.split = scene == "split"
         code.wrap = scene == "wrap"
-        code.maximized = ["max", "switch", "ruler"].contains(scene)
+        code.maximized = ["max", "switch", "ruler", "viewed"].contains(scene)
         code.wholeFile = scene == "ruler"
         code.view = scene == "files" ? .list : .tree
         if scene == "search" { code.filter.query = "review" }
+        if scene == "unviewed" { code.filter.hideViewed = true }
+        if scene == "viewed" { code.file = "cli/review/routes.go" }
         if scene == "filters" {
             code.filter.repo = "oversire"
             code.filter.hidden = [.changed]
@@ -46,7 +49,7 @@ extension UIShots {
                 guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
-        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "viewed", "unviewed", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
         case "switch":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -99,7 +102,7 @@ extension UIShots {
     }
 
     /// The sample rows and desks. They replace the rows of the last scene.
-    static func seedReviews(empty: Bool = false, health: [String: ReviewHealth] = [:], long: Bool = false, full: Bool = false) {
+    static func seedReviews(empty: Bool = false, health: [String: ReviewHealth] = [:], long: Bool = false, full: Bool = false, stale: Bool = false) {
         REVIEWS.reads = false
         guard !empty else {
             REVIEWS.set([:], health: health)
@@ -124,12 +127,12 @@ extension UIShots {
         let files = [
             ReviewFile(repo: "oversire", path: tab, status: .added, added: 180, removed: 0),
             ReviewFile(repo: "oversire", path: "Sources/OverSireApp/work_page.swift", status: .modified, added: 22, removed: 30, viewed: true),
-            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/status_icon.swift", status: .modified, added: 12, removed: 8),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/status_icon.swift", status: .modified, added: 12, removed: 8, viewedStale: true),
             ReviewFile(repo: "oversire", path: "Sources/OverSireApp/review_list.swift", status: .deleted, added: 0, removed: 64),
             ReviewFile(repo: "oversire", path: "Sources/OverSireCore/Review.swift", status: .added, added: 96, removed: 0),
             ReviewFile(repo: "oversire", path: "Tests/OverSireAppTests/ReviewTabTests.swift", status: .added, added: 58, removed: 0),
             ReviewFile(repo: "oversire", path: "docs/reviews.md", status: .modified, added: 14, removed: 2),
-            ReviewFile(repo: "cli", path: "review/routes.go", status: .modified, added: 41, removed: 6),
+            ReviewFile(repo: "cli", path: "review/routes.go", status: .modified, added: 41, removed: 6, viewedStale: stale ? true : nil),
             ReviewFile(repo: "cli", path: "review/routes_test.go", status: .added, added: 33, removed: 0),
             ReviewFile(repo: "cli", path: "server/old_review.go", status: .deleted, added: 0, removed: 21),
         ]

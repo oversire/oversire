@@ -213,11 +213,12 @@ final class DiffFileSwitch: NSViewController, NSTableViewDataSource, NSTableView
         counts.setContentCompressionResistancePriority(.required, for: .horizontal)
         var parts: [NSView] = [letter, path, Spacer(), counts]
         if f.viewed { parts.append(Glyph("checkmark", color: Palette.ok, size: 10)) }
+        if f.isStale { parts.append(Glyph("arrow.clockwise", color: Palette.warn, size: 10)) }
         let s = NSStackView(h: parts, spacing: 8)
         s.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
         s.setAccessibilityElement(true)
         s.setAccessibilityRole(.row)
-        s.setAccessibilityLabel("\(ReviewChangesTab.word(f.status)) \(f.path), \(f.added) added, \(f.removed) removed" + (f.viewed ? ", viewed" : ""))
+        s.setAccessibilityLabel("\(ReviewChangesTab.word(f.status)) \(f.path), \(f.added) added, \(f.removed) removed" + (f.viewed ? ", viewed" : f.isStale ? ", changed since viewed" : ""))
         return s
     }
 }

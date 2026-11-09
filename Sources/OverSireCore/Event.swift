@@ -176,6 +176,8 @@ extension Event {
         public static let questionAnswered: Kind = "question.answered"
         public static let reviewSubmitted: Kind = "review.submitted"
         public static let reviewApproved: Kind = "review.approved"
+        public static let reviewViewed: Kind = "review.viewed"
+        public static let reviewUnviewed: Kind = "review.unviewed"
         public static let itemShipped: Kind = "item.shipped"
         public static let planStarted: Kind = "plan.started"
         public static let itemStateChanged: Kind = "item.state_changed"

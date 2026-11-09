@@ -317,6 +317,35 @@ final class ReviewTabTests: XCTestCase {
 
     // MARK: Steps (OVERSIRE-442)
 
+    func testNextMarksTheFileAndFindsTheNextFileThatIsNotViewed() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        let s = summary("A-1", ready: 1, repos: [repo("oversire", .fastForward)])
+        let files = ["a.go", "b.go", "c.go"].map { ReviewFile(repo: "oversire", path: $0, status: .modified, added: 1, removed: 0) }
+        var stale = files
+        stale[0].viewed = false
+        stale[1].viewed = true
+        stale[2].viewedStale = true
+        src.seed([ReviewDetail(summary: s, files: stale)])
+        let d = ReviewDesk(summary: s, source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }))
+        await d.load()
+
+        XCTAssertEqual(d.nextUnviewed(after: "oversire/a.go")?.path, "c.go", "It skips a viewed file")
+        XCTAssertEqual(d.nextUnviewed(after: "oversire/c.go")?.path, "a.go", "It wraps")
+        XCTAssertFalse(d.allViewed)
+
+        d.filter.hideViewed = true
+        XCTAssertEqual(d.tree.shown.map(\.path), ["a.go", "c.go"], "A stale file counts as not viewed")
+        d.filter = FileFilter()
+        d.filter.hideNotViewed = true
+        XCTAssertEqual(d.tree.shown.map(\.path), ["b.go"])
+        d.filter = FileFilter()
+
+        for f in d.files where !f.viewed { _ = await d.setViewed(f, true) }
+        XCTAssertTrue(d.allViewed)
+        XCTAssertNil(d.nextUnviewed(after: "oversire/a.go"))
+        XCTAssertFalse(d.files.contains(where: \.isStale), "A new mark clears the tag")
+    }
+
     func testAStepAcrossFilesLoadsTheNextDiffAndLandsOnItsFirstChange() async throws {
         let src = FakeReviewSource(machine: "mba")
         let s = summary("A-1", ready: 1, repos: [repo("oversire", .fastForward)])
