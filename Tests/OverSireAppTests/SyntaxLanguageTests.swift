@@ -30,6 +30,15 @@ final class SyntaxLanguageTests: XCTestCase {
         XCTAssertEqual(words(.go, "x := 404"), ["number:404"])
     }
 
+    func testGoRawStringEndsAtABackslash() {
+        var st = SyntaxLanguage.State()
+        XCTAssertEqual(words(.go, "\targs := []string{\"-csv\", `\\N\\`}", state: &st),
+                       ["type:string", "string:\"-csv\"", "string:`\\N\\`"])
+        XCTAssertEqual(st, SyntaxLanguage.State(), "the raw string is closed")
+        XCTAssertEqual(words(.go, "\t// a comment", state: &st), ["comment:// a comment"])
+        XCTAssertEqual(words(.script, "s = `a\\` + b`"), ["string:`a\\` + b`"], "a JS template string keeps its escapes")
+    }
+
     func testSwiftTypesAndEscapes() {
         XCTAssertEqual(words(.swift, "let s: String = \"a \\\"b\\\" c\""),
                        ["keyword:let", "type:String", "string:\"a \\\"b\\\" c\""])

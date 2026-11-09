@@ -19,12 +19,15 @@ struct SyntaxLanguage {
     struct State: Equatable {
         fileprivate var close: [UInt16]?
         fileprivate var kind = Kind.comment
+        fileprivate var raw = false
     }
 
     struct Block {
         let open: String
         let close: String
         let kind: Kind
+        /// A backslash does not escape the close mark, as in a Go raw string.
+        var raw = false
     }
 
     var keywords: Set<String> = []
@@ -66,7 +69,7 @@ struct SyntaxLanguage {
         func add(_ k: Kind, _ from: Int, _ to: Int) { if to > from { out.append(Token(kind: k, range: NSRange(location: from, length: to - from))) } }
 
         if let close = state.close {
-            guard let end = Self.find(close, in: u, from: 0) else {
+            guard let end = Self.find(close, in: u, from: 0, raw: state.raw) else {
                 add(state.kind, 0, n)
                 return out
             }
@@ -88,9 +91,9 @@ struct SyntaxLanguage {
                 let open = Array(b.open.utf16)
                 guard Self.has(open, in: u, at: i) else { continue }
                 let close = Array(b.close.utf16)
-                guard let end = Self.find(close, in: u, from: i + open.count) else {
+                guard let end = Self.find(close, in: u, from: i + open.count, raw: b.raw) else {
                     add(b.kind, i, n)
-                    state = State(close: close, kind: b.kind)
+                    state = State(close: close, kind: b.kind, raw: b.raw)
                     break scan
                 }
                 add(b.kind, i, end + close.count)
@@ -149,10 +152,10 @@ struct SyntaxLanguage {
         i + m.count <= u.count && u[i..<(i + m.count)].elementsEqual(m)
     }
 
-    private static func find(_ m: [UInt16], in u: [UInt16], from: Int) -> Int? {
+    private static func find(_ m: [UInt16], in u: [UInt16], from: Int, raw: Bool = false) -> Int? {
         var i = from
         while i + m.count <= u.count {
-            if u[i] == backslash, m.count == 1 || m == [quote, quote, quote] { i += 2; continue }
+            if !raw, u[i] == backslash, m.count == 1 || m == [quote, quote, quote] { i += 2; continue }
             if has(m, in: u, at: i) { return i }
             i += 1
         }
@@ -214,7 +217,7 @@ extension SyntaxLanguage {
         builtins: ["any", "bool", "byte", "complex128", "complex64", "error", "float32", "float64", "int", "int16", "int32", "int64",
                    "int8", "rune", "string", "uint", "uint16", "uint32", "uint64", "uint8", "uintptr", "append", "cap", "close", "copy",
                    "delete", "len", "make", "new", "panic", "recover"],
-        lineComments: ["//"], blocks: [cBlock, Block(open: "`", close: "`", kind: .string)])
+        lineComments: ["//"], blocks: [cBlock, Block(open: "`", close: "`", kind: .string, raw: true)])
 
     static let script = SyntaxLanguage(
         keywords: ["abstract", "as", "async", "await", "break", "case", "catch", "class", "const", "constructor", "continue", "debugger",
