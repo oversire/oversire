@@ -151,7 +151,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                                           updatedAt: o.createdAt, sources: ["orca"], key: r.key))
             let ref = SessionRef(workspace: WorkspaceRef(account: AccountID(provider: o.runtime, id: "local"), id: ws), id: term.id)
             return DaemonOrderState(state: .done, result: WorkOrderResult(session: ref, paneKey: term.session, turnStarted: !r.prompt.isEmpty))
-        case .send(let s, _, _, _):
+        case .send(let s, _, _, _, _):
             guard terminal(s) != nil else { return gone }
             return DaemonOrderState(state: .done, result: WorkOrderResult(turnStarted: true))
         case .read(let s, let lines, _):

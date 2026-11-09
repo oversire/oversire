@@ -198,7 +198,7 @@ final class MachineRuntimeTests: XCTestCase {
         let s = SessionRef(workspace: WorkspaceRef(account: rt.account, id: l.card), id: l.handle)
         let started = try await rt.send(s, text: "More")
         XCTAssertTrue(started)
-        guard case .send(let sent, "More", nil, nil) = d.runtime.orders.last!.order else { return XCTFail() }
+        guard case .send(let sent, "More", nil, nil, _) = d.runtime.orders.last!.order else { return XCTFail() }
         XCTAssertEqual(sent, SessionRef(workspace: WorkspaceRef(account: AccountID(provider: "orca", id: "local"), id: l.card), id: "term_1"))
 
         d.runtime.screen("term_1", ["a", "b", "c"])

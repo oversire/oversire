@@ -34,15 +34,28 @@ public struct SessionTurn: Codable, Hashable, Sendable, Identifiable {
     public var at: Date
     public var text: String                 // Markdown
     public var tool: TurnTool?
+    public var origin: String?              // user | overseer | system; nil means user
 
     public var id: Int { seq }
 
-    public init(seq: Int, role: Role, at: Date, text: String, tool: TurnTool? = nil) {
+    public init(seq: Int, role: Role, at: Date, text: String, tool: TurnTool? = nil, origin: String? = nil) {
         self.seq = seq
         self.role = role
         self.at = at
         self.text = text
         self.tool = tool
+        self.origin = origin
+    }
+}
+
+/// The answer of GET /v1/sessions/{id}/turns. `more` is true when the daemon cut the page.
+public struct SessionTurnsPage: Codable, Hashable, Sendable {
+    public var turns: [SessionTurn]
+    public var more: Bool
+
+    public init(turns: [SessionTurn], more: Bool) {
+        self.turns = turns
+        self.more = more
     }
 }
 

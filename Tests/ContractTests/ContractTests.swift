@@ -93,6 +93,7 @@ final class ContractTests: XCTestCase {
         "stream-client-frame": roundTrip(StreamClientFrame.self),
         "stream-daemon-frame": roundTrip(StreamDaemonFrame.self),
         "session-turn": roundTrip(SessionTurn.self),
+        "session-turns-page": roundTrip(SessionTurnsPage.self),
         "lease-request": roundTrip(LeaseRequest.self),
         "lease": roundTrip(Lease.self),
         "runbook": roundTrip(Runbook.self),

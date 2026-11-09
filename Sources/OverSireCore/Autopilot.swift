@@ -146,7 +146,8 @@ public enum SessionOrder: Hashable, Sendable {
     /// `scrollback` reads the scrollback with blank lines, not the visible screen.
     case read(SessionRef, lines: Int, scrollback: Bool = false)
     /// `permission` answers the PermissionPrompt, `answer` the RunnerQuestion of a runner session. Then `text` is empty.
-    case send(SessionRef, text: String, permission: PermissionAnswer? = nil, answer: RunnerAnswer? = nil)
+    /// `origin` is `user` or `overseer`; nil means `user`.
+    case send(SessionRef, text: String, permission: PermissionAnswer? = nil, answer: RunnerAnswer? = nil, origin: String? = nil)
     case history(SessionRef, budget: HistoryBudget? = nil)
 
     public enum Op: String, Codable, Sendable, CaseIterable { case sessionStart, sessionStop, sessionRead, sessionSend, sessionHistory }
@@ -164,7 +165,7 @@ public enum SessionOrder: Hashable, Sendable {
 
 extension SessionOrder: Codable {
     private enum CodingKeys: String, CodingKey { case op, payload }
-    private enum PayloadKeys: String, CodingKey { case session, lines, scrollback, text, permission, answer, budget }
+    private enum PayloadKeys: String, CodingKey { case session, lines, scrollback, text, permission, answer, origin, budget }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -180,7 +181,8 @@ extension SessionOrder: Codable {
             let p = try payload()
             self = .send(try p.decode(SessionRef.self, forKey: .session), text: try p.decode(String.self, forKey: .text),
                          permission: try p.decodeIfPresent(PermissionAnswer.self, forKey: .permission),
-                         answer: try p.decodeIfPresent(RunnerAnswer.self, forKey: .answer))
+                         answer: try p.decodeIfPresent(RunnerAnswer.self, forKey: .answer),
+                         origin: try p.decodeIfPresent(String.self, forKey: .origin))
         case .sessionHistory:
             let p = try payload()
             self = .history(try p.decode(SessionRef.self, forKey: .session), budget: try p.decodeIfPresent(HistoryBudget.self, forKey: .budget))
@@ -201,12 +203,13 @@ extension SessionOrder: Codable {
             try p.encode(s, forKey: .session)
             try p.encode(lines, forKey: .lines)
             if scrollback { try p.encode(true, forKey: .scrollback) }
-        case .send(let s, let text, let permission, let answer):
+        case .send(let s, let text, let permission, let answer, let origin):
             var p = payload()
             try p.encode(s, forKey: .session)
             try p.encode(text, forKey: .text)
             try p.encodeIfPresent(permission, forKey: .permission)
             try p.encodeIfPresent(answer, forKey: .answer)
+            try p.encodeIfPresent(origin, forKey: .origin)
         case .history(let s, let budget):
             var p = payload()
             try p.encode(s, forKey: .session)
