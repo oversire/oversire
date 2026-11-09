@@ -189,14 +189,6 @@ final class ReviewTabTests: XCTestCase {
         XCTAssertEqual(LinePick.place(DiffLine(kind: .ctx, old: 8, new: 11, text: "x"))?.side, .new)
     }
 
-    func testSplitPairsRemovedWithAddedLines() {
-        let lines = [DiffLine(kind: .ctx, old: 1, new: 1, text: "a"), DiffLine(kind: .del, old: 2, text: "b"), DiffLine(kind: .del, old: 3, text: "c"),
-                     DiffLine(kind: .add, new: 2, text: "B"), DiffLine(kind: .ctx, old: 4, new: 3, text: "d"), DiffLine(kind: .add, new: 4, text: "e")]
-        let p = ReviewChangesTab.pairs(lines)
-        XCTAssertEqual(p.map { $0.0?.text }, ["a", "b", "c", "d", nil])
-        XCTAssertEqual(p.map { $0.1?.text }, ["a", "B", nil, "d", "e"])
-    }
-
     // MARK: Desk
 
     private func desk(_ src: FakeReviewSource, tracker: FakeTracking? = nil) async -> ReviewDesk {

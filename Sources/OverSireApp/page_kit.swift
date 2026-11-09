@@ -1620,6 +1620,8 @@ final class ScrollCard: Box {
     private let head = NSView()
     private let rule = Box(fill: Palette.line, border: nil, radius: 0)
     private let doc = Flipped()
+    /// The body of `set(header:fill:place:)`. It fills the card in place of the scroll view.
+    private let filled = NSView()
     private var place: String?
     private lazy var fixed = doc.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
     private lazy var fit: NSLayoutConstraint = {
@@ -1632,13 +1634,14 @@ final class ScrollCard: Box {
     init(keep: String) {
         super.init(fill: Palette.panel, border: Palette.line, radius: 10)
         layer?.masksToBounds = true
-        [head, rule, scroll, doc].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
+        [head, rule, scroll, doc, filled].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
         scroll.identifier = NSUserInterfaceItemIdentifier(PageScroll.keepPrefix + keep)
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.documentView = doc
-        [head, rule, scroll].forEach(addSubview)
+        [head, rule, scroll, filled].forEach(addSubview)
+        filled.isHidden = true
         let none = head.heightAnchor.constraint(equalToConstant: 0)
         none.priority = .init(1)
         NSLayoutConstraint.activate([
@@ -1648,6 +1651,8 @@ final class ScrollCard: Box {
             rule.topAnchor.constraint(equalTo: head.bottomAnchor), rule.heightAnchor.constraint(equalToConstant: 1),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.topAnchor.constraint(equalTo: rule.bottomAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
+            filled.leadingAnchor.constraint(equalTo: leadingAnchor), filled.trailingAnchor.constraint(equalTo: trailingAnchor),
+            filled.topAnchor.constraint(equalTo: rule.bottomAnchor), filled.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -1),
             doc.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), doc.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             fixed,
         ])
@@ -1657,11 +1662,10 @@ final class ScrollCard: Box {
     /// The same header view stays in place, so a search field in it keeps the focus.
     /// A `wide` body can be wider than the card. It then scrolls horizontally.
     func set(header: NSView?, body: NSView, place: String, wide: Bool = false) {
-        if header == nil || header?.superview !== head {
-            head.subviews.forEach { $0.removeFromSuperview() }
-            if let header { Self.pin(header, in: head) }
-        }
-        rule.isHidden = header == nil
+        setHeader(header)
+        filled.subviews.forEach { $0.removeFromSuperview() }
+        filled.isHidden = true
+        scroll.isHidden = false
         let at = scroll.contentView.bounds.origin
         doc.subviews.forEach { $0.removeFromSuperview() }
         if wide != fit.isActive {
@@ -1677,6 +1681,27 @@ final class ScrollCard: Box {
         scroll.contentView.scroll(to: NSPoint(x: wide ? min(keep.x, max(0, doc.frame.width - scroll.contentView.bounds.width)) : 0,
                                               y: min(keep.y, max(0, doc.frame.height - scroll.contentView.bounds.height))))
         scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    /// A body with its own scroll view, such as a table. It fills the card, and the card does not scroll.
+    /// A scroll view in a scroll view breaks the row reuse of a table.
+    func set(header: NSView?, fill: NSView, place: String) {
+        setHeader(header)
+        self.place = place
+        doc.subviews.forEach { $0.removeFromSuperview() }
+        scroll.isHidden = true
+        filled.isHidden = false
+        guard fill.superview !== filled else { return }
+        filled.subviews.forEach { $0.removeFromSuperview() }
+        Self.pin(fill, in: filled)
+    }
+
+    private func setHeader(_ header: NSView?) {
+        if header == nil || header?.superview !== head {
+            head.subviews.forEach { $0.removeFromSuperview() }
+            if let header { Self.pin(header, in: head) }
+        }
+        rule.isHidden = header == nil
     }
 
     /// Scrolls the view with this identifier into sight. False when the body has no such view.
@@ -1706,30 +1731,6 @@ final class ScrollCard: Box {
     override func layout() {
         super.layout()
         if SidePane.fitLabels(doc) { doc.needsLayout = true }
-    }
-}
-
-/// A view in a wide `ScrollCard` body that keeps the width of the visible card, such as a comment thread beside long code lines.
-final class ViewportWidth: NSView {
-    private var width: NSLayoutConstraint?
-
-    init(_ content: NSView) {
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        content.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: leadingAnchor), content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.topAnchor.constraint(equalTo: topAnchor), content.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        width?.isActive = false
-        width = enclosingScrollView.map { widthAnchor.constraint(equalTo: $0.contentView.widthAnchor) }
-        width?.isActive = true
     }
 }
 

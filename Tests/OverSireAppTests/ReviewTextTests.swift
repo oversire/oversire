@@ -10,19 +10,6 @@ final class ReviewTextTests: XCTestCase {
         return t
     }
 
-    func testSelectAllCopiesTheCodeOfEachLine() {
-        let body = DiffBody(v: [], spacing: 0)
-        for (s, c) in [("func a() {", 0), ("    return", 0), ("}", 0), ("old", 1)] { body.adopt(text(s), column: c) }
-        body.selectAll(nil)
-        XCTAssertEqual(body.selected, "old", "a split diff selects all of the new side")
-
-        let unified = DiffBody(v: [], spacing: 0)
-        for s in ["func a() {", "    return", "}"] { unified.adopt(text(s), column: 0) }
-        XCTAssertNil(unified.selected)
-        unified.selectAll(nil)
-        XCTAssertEqual(unified.selected, "func a() {\n    return\n}")
-    }
-
     func testAPieceOfAShortFormGivesTheFullLine() {
         let full = String(repeating: "x", count: 20)
         let t = text(String(full.prefix(10)) + " …", code: full)

@@ -98,7 +98,7 @@ final class ReviewDesk {
     }
     /// The diff scrolls horizontally: a unified diff with no wrap.
     var scrolls: Bool { !wrap && !split }
-    private static var wraps = !UIShots.shooting && UserDefaults.standard.bool(forKey: "review.wrap")
+    static var wraps = !UIShots.shooting && UserDefaults.standard.bool(forKey: "review.wrap")
     var filter = FileFilter()
     var collapsed: Set<String> = []
     /// The comment to scroll to after the next build of the diff.

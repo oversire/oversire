@@ -1,0 +1,280 @@
+import Foundation
+import OverSireCore
+
+// ─── Changes › diff model ────────────────────────────────────────────────────
+// The rows of the diff of one file, with no views (OVERSIRE-439). The table of `review_diff_table.swift` shows them.
+// A full diff (`FileDiff.full`) holds the whole file as one hunk. The fold hides the unchanged runs.
+// A partial diff (an older daemon) holds `-U3` hunks. The fold shows the gaps between them, with no lines to open.
+
+/// A line of one side of a diff. A context line counts on the new side.
+struct DiffPlace: Hashable {
+    let side: ReviewAnchor.Side
+    let line: Int
+}
+
+/// A run of changed lines: indexes into `DiffFold.lines`.
+struct DiffChange: Hashable {
+    let lines: Range<Int>
+    let added: Int
+    let removed: Int
+}
+
+/// The direction of a fold button.
+enum DiffWay: Hashable { case down, up, all }
+
+/// A run of lines that the diff does not show.
+struct DiffGap: Hashable {
+    enum Edge: Hashable { case top, middle, bottom }
+    /// The hidden new-side line numbers.
+    let numbers: ClosedRange<Int>
+    let edge: Edge
+    /// "@@ −a,b +c,d @@ fn" of the lines below. Empty for the bottom gap.
+    let header: String
+    /// Empty in partial mode: the app does not have the hidden text.
+    let ways: [DiffWay]
+    var hidden: Int { numbers.count }
+}
+
+/// One row of the diff table.
+enum DiffItem: Hashable {
+    /// Unified: an index into `DiffFold.lines`.
+    case line(Int)
+    /// Split: the old and the new side.
+    case pair(old: Int?, new: Int?)
+    case gap(DiffGap)
+    /// The threads and the composer after a line.
+    case thread(DiffPlace)
+    case note(String)
+}
+
+struct DiffFold {
+    /// The context lines around a change.
+    static let context = 3
+
+    /// All hunk lines, in order.
+    let lines: [DiffLine]
+    /// The index of the first line of each hunk.
+    let starts: Set<Int>
+    let full: Bool
+    let changes: [DiffChange]
+    private let hunks: [(start: Int, hunk: DiffHunk)]
+
+    init(_ d: FileDiff) {
+        var lines: [DiffLine] = [], hunks: [(Int, DiffHunk)] = []
+        for h in d.hunks {
+            hunks.append((lines.count, h))
+            lines += h.lines
+        }
+        self.lines = lines
+        self.hunks = hunks
+        starts = Set(hunks.map(\.0))
+        full = d.full == true
+        changes = Self.changes(lines, starts: starts)
+    }
+
+    /// A line starts a new change when it starts a hunk, when the line above is context,
+    /// or when it is removed and the line above is added.
+    private static func changes(_ lines: [DiffLine], starts: Set<Int>) -> [DiffChange] {
+        var out: [DiffChange] = []
+        var from: Int?, added = 0, removed = 0
+        func close(_ end: Int) {
+            if let f = from { out.append(DiffChange(lines: f..<end, added: added, removed: removed)) }
+            from = nil
+            added = 0
+            removed = 0
+        }
+        for (i, l) in lines.enumerated() {
+            if l.kind == .ctx { close(i); continue }
+            if from != nil, starts.contains(i) || (l.kind == .del && lines[i - 1].kind == .add) { close(i) }
+            if from == nil { from = i }
+            if l.kind == .add { added += 1 } else { removed += 1 }
+        }
+        close(lines.count)
+        return out
+    }
+
+    static func place(_ l: DiffLine) -> DiffPlace? { LinePick.place(l).map { DiffPlace(side: $0.side, line: $0.line) } }
+
+    func index(of p: DiffPlace) -> Int? { lines.firstIndex { Self.place($0) == p } }
+
+    /// The change that holds the line at `index`.
+    func change(at index: Int) -> Int? { changes.firstIndex { $0.lines.contains(index) } }
+
+    /// The digits of the gutter: the largest line number, at least five.
+    var digits: Int {
+        let top = lines.reduce(0) { max($0, $1.old ?? 0, $1.new ?? 0) }
+        return max(5, String(top).count)
+    }
+
+    // MARK: Rows
+
+    /// The lines that show. A full diff shows the lines near a change and the lines with a thread.
+    func shown(threads: Set<DiffPlace>) -> [Bool] {
+        guard full else { return Array(repeating: true, count: lines.count) }
+        var out = Array(repeating: false, count: lines.count)
+        for c in changes {
+            for i in max(0, c.lines.lowerBound - Self.context)..<min(lines.count, c.lines.upperBound + Self.context) { out[i] = true }
+        }
+        for (i, l) in lines.enumerated() where !out[i] {
+            if let p = Self.place(l), threads.contains(p) { out[i] = true }
+        }
+        return out
+    }
+
+    func items(split: Bool, threads: Set<DiffPlace>) -> [DiffItem] {
+        let show = shown(threads: threads)
+        var out: [DiffItem] = []
+        var run: [Int] = []
+        func flush() {
+            out += split ? Self.splitItems(run, lines, threads) : run.flatMap { i -> [DiffItem] in
+                guard let p = Self.place(lines[i]), threads.contains(p) else { return [.line(i)] }
+                return [.line(i), .thread(p)]
+            }
+            run = []
+        }
+        var i = 0
+        while i < lines.count {
+            if let gap = partialGap(before: i) {
+                flush()
+                out.append(.gap(gap))
+            }
+            guard show[i] else {
+                var j = i
+                while j < lines.count, !show[j] { j += 1 }
+                flush()
+                out.append(.gap(fullGap(i..<j, show)))
+                i = j
+                continue
+            }
+            run.append(i)
+            i += 1
+        }
+        flush()
+        return out
+    }
+
+    private static func splitItems(_ run: [Int], _ lines: [DiffLine], _ threads: Set<DiffPlace>) -> [DiffItem] {
+        var out: [DiffItem] = []
+        func after(_ ids: [Int?]) {
+            var seen: Set<DiffPlace> = []
+            for i in ids.compactMap({ $0 }) {
+                if let p = place(lines[i]), threads.contains(p), seen.insert(p).inserted { out.append(.thread(p)) }
+            }
+        }
+        for (o, n) in pairs(run.map { ($0, lines[$0]) }) {
+            out.append(.pair(old: o, new: n))
+            after(o == n ? [o] : [o, n])
+        }
+        return out
+    }
+
+    /// The lines of a run side by side. A run of removed lines pairs with the next run of added lines.
+    /// A context line shows on both sides.
+    static func pairs<T>(_ lines: [(T, DiffLine)]) -> [(old: T?, new: T?)] {
+        var out: [(old: T?, new: T?)] = []
+        var dels: [T] = [], adds: [T] = []
+        func flush() {
+            for i in 0..<max(dels.count, adds.count) { out.append((i < dels.count ? dels[i] : nil, i < adds.count ? adds[i] : nil)) }
+            dels = []
+            adds = []
+        }
+        for (t, l) in lines {
+            switch l.kind {
+            case .del:
+                if !adds.isEmpty { flush() }
+                dels.append(t)
+            case .add: adds.append(t)
+            case .ctx:
+                flush()
+                out.append((t, t))
+            }
+        }
+        flush()
+        return out
+    }
+
+    static func pairs(_ lines: [DiffLine]) -> [(old: DiffLine?, new: DiffLine?)] { pairs(lines.map { ($0, $0) }) }
+
+    // MARK: Gaps
+
+    /// In partial mode: the gap above the hunk that starts at `i`.
+    private func partialGap(before i: Int) -> DiffGap? {
+        guard !full, starts.contains(i), let k = hunks.firstIndex(where: { $0.start == i }) else { return nil }
+        let h = hunks[k].hunk
+        let first = k == 0 ? 1 : (lines[..<i].last { $0.new != nil }?.new ?? 0) + 1
+        guard h.newStart > first else { return nil }
+        let header = "@@ −\(h.oldStart),\(h.oldLines) +\(h.newStart),\(h.newLines) @@" + (h.header.isEmpty ? "" : " " + h.header)
+        return DiffGap(numbers: first...(h.newStart - 1), edge: k == 0 ? .top : .middle, header: header, ways: [])
+    }
+
+    /// In full mode: the gap of the hidden lines `r`.
+    private func fullGap(_ r: Range<Int>, _ show: [Bool]) -> DiffGap {
+        let edge: DiffGap.Edge = r.lowerBound == 0 ? .top : r.upperBound == lines.count ? .bottom : .middle
+        let a = lines[r.lowerBound].new ?? 0, b = lines[r.upperBound - 1].new ?? a
+        return DiffGap(numbers: a...b, edge: edge, header: edge == .bottom ? "" : header(below: r.upperBound, shown: show), ways: [])
+    }
+
+    /// "@@ −a,b +c,d @@ fn" of the run of shown lines from `start`.
+    func header(below start: Int, shown: [Bool]? = nil) -> String {
+        let show = shown ?? self.shown(threads: [])
+        var end = start
+        while end < lines.count, show[end] { end += 1 }
+        let run = lines[start..<max(start, end)]
+        let olds = run.compactMap(\.old), news = run.compactMap(\.new)
+        let fn = Self.function(above: start, in: lines)
+        return "@@ −\(olds.first ?? 0),\(olds.count) +\(news.first ?? 0),\(news.count) @@" + (fn.isEmpty ? "" : " " + fn)
+    }
+
+    /// git's default funcname rule: the last line above that starts with a letter, "_" or "$". Cut to 80 characters.
+    static func function(above start: Int, in lines: [DiffLine]) -> String {
+        for l in lines[..<start].reversed() where l.kind != .del {
+            guard let c = l.text.unicodeScalars.first else { continue }
+            if CharacterSet.letters.contains(c) || c == "_" || c == "$" { return String(l.text.prefix(80)).trimmingCharacters(in: .whitespaces) }
+        }
+        return ""
+    }
+}
+
+/// A text selection across the rows of a diff. It keeps one column: the unified text, or one side of a split diff.
+struct DiffSelection: Equatable {
+    struct End: Equatable, Comparable {
+        var row: Int
+        var offset: Int
+        static func < (a: End, b: End) -> Bool { (a.row, a.offset) < (b.row, b.offset) }
+    }
+    var column: Int
+    var from: End
+    var to: End
+
+    var isEmpty: Bool { from == to }
+    var ordered: (End, End) { from <= to ? (from, to) : (to, from) }
+
+    /// The line of a row in this column.
+    static func line(_ item: DiffItem, column: Int, in fold: DiffFold) -> DiffLine? {
+        switch item {
+        case .line(let i): return column == 0 ? fold.lines[i] : nil
+        case .pair(let o, let n): return (column == 0 ? o : n).map { fold.lines[$0] }
+        default: return nil
+        }
+    }
+
+    /// The selected range of a row, in UTF-16 units of the full line.
+    func range(row: Int, length: Int) -> NSRange? {
+        let (a, b) = ordered
+        guard row >= a.row, row <= b.row else { return nil }
+        let start = row == a.row ? min(a.offset, length) : 0, end = row == b.row ? min(b.offset, length) : length
+        return NSRange(location: start, length: max(0, end - start))
+    }
+
+    /// The selected code, one line for each selected line. No line numbers and no marks.
+    func text(_ fold: DiffFold, _ items: [DiffItem]) -> String {
+        let (a, b) = ordered
+        var out: [String] = []
+        for row in a.row...min(b.row, items.count - 1) {
+            guard let l = Self.line(items[row], column: column, in: fold) else { continue }
+            let s = l.text as NSString
+            if let r = range(row: row, length: s.length) { out.append(s.substring(with: r)) }
+        }
+        return out.joined(separator: "\n")
+    }
+}

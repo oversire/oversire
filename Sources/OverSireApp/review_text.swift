@@ -2,14 +2,14 @@ import Cocoa
 import OverSireCore
 
 // ─── Changes › text selection ────────────────────────────────────────────────
-// Each diff line is its own field, so the body keeps one selection across the lines (OVERSIRE-414).
+// Each diff line is its own field, so the table keeps one selection across the lines (OVERSIRE-414).
 // A copy gives the code only: no line numbers, no "+" or "−" marks. A split diff selects in one column.
 
-/// The code of one diff line. The selection belongs to `DiffBody`.
+/// The code of one diff line. The selection belongs to `DiffTableView`.
 final class DiffText: NSTextField {
-    weak var body: DiffBody?
+    weak var table: DiffTableView?
     var column = 0
-    var order = 0
+    var row = 0
     /// The full line. The field can show a short form of a very long line.
     var code = ""
     var selection: NSRange? { didSet { if oldValue != selection { needsDisplay = true } } }
@@ -17,13 +17,13 @@ final class DiffText: NSTextField {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .iBeam) }
 
     override func mouseDown(with event: NSEvent) {
-        guard let body else { return super.mouseDown(with: event) }
-        body.track(from: self, event)
+        guard let table else { return super.mouseDown(with: event) }
+        table.track(from: self, event)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         if let r = selection, r.length > 0 {
-            (window?.firstResponder === body ? NSColor.selectedTextBackgroundColor : NSColor.unemphasizedSelectedTextBackgroundColor).setFill()
+            (window?.firstResponder === table ? NSColor.selectedTextBackgroundColor : NSColor.unemphasizedSelectedTextBackgroundColor).setFill()
             rects(r).forEach { $0.fill() }
         }
         super.draw(dirtyRect)
@@ -87,111 +87,6 @@ final class DiffText: NSTextField {
             out.append(NSRect(x: rect.minX + o.x, y: self.isFlipped ? rect.minY + o.y : o.y - rect.maxY, width: max(rect.width, 3), height: rect.height))
         }
         return out
-    }
-}
-
-/// The body of a diff. It owns the selection across its `DiffText` lines and copies it.
-final class DiffBody: NSStackView {
-    private var columns: [[DiffText]] = [[], []]
-    private var anchor: (column: Int, order: Int, at: Int)?
-    private var head: (order: Int, at: Int)?
-
-    func adopt(_ t: DiffText, column: Int) {
-        t.body = self
-        t.column = column
-        t.order = columns[column].count
-        columns[column].append(t)
-    }
-
-    override var acceptsFirstResponder: Bool { true }
-    override func becomeFirstResponder() -> Bool { redraw(); return true }
-    override func resignFirstResponder() -> Bool { redraw(); return true }
-
-    /// A click starts a selection, a drag extends it, Shift-click extends the last one.
-    /// A double-click picks a word, a triple-click the line.
-    func track(from t: DiffText, _ event: NSEvent) {
-        window?.makeFirstResponder(self)
-        let at = t.index(at: t.convert(event.locationInWindow, from: nil))
-        if event.clickCount >= 2 {
-            let r = event.clickCount == 2 ? t.word(at: at) : NSRange(location: 0, length: t.length)
-            anchor = (t.column, t.order, r.location)
-            select(to: (t.order, NSMaxRange(r)))
-            return
-        }
-        if !(event.modifierFlags.contains(.shift) && anchor?.column == t.column) { anchor = (t.column, t.order, at) }
-        select(to: (t.order, at))
-        NSEvent.startPeriodicEvents(afterDelay: 0.1, withPeriod: 0.05)
-        defer { NSEvent.stopPeriodicEvents() }
-        while let e = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .periodic]) {
-            if e.type == .leftMouseUp { break }
-            guard let w = window else { break }
-            let p = w.mouseLocationOutsideOfEventStream
-            if e.type == .periodic, let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: p, modifierFlags: [], timestamp: e.timestamp,
-                                                                    windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0) {
-                autoscroll(with: drag)
-            }
-            if let h = hit(p, column: t.column) { select(to: h) }
-        }
-    }
-
-    /// The line and the character under a window point. A point between lines takes the start of the next line.
-    private func hit(_ p: NSPoint, column: Int) -> (order: Int, at: Int)? {
-        let lines = columns[column]
-        guard let last = lines.last else { return nil }
-        for l in lines {
-            let r = l.convert(l.bounds, to: nil)
-            if p.y > r.maxY { return (l.order, 0) }
-            if p.y >= r.minY { return (l.order, l.index(at: l.convert(p, from: nil))) }
-        }
-        return (last.order, last.length)
-    }
-
-    private func select(to h: (order: Int, at: Int)) {
-        guard let a = anchor else { return }
-        head = h
-        let x: (Int, Int) = (a.order, a.at), y: (Int, Int) = (h.order, h.at)
-        let (from, to) = x <= y ? (x, y) : (y, x)
-        for (c, lines) in columns.enumerated() {
-            for l in lines {
-                guard c == a.column, l.order >= from.0, l.order <= to.0 else { l.selection = nil; continue }
-                let start = l.order == from.0 ? from.1 : 0, end = l.order == to.0 ? to.1 : l.length
-                l.selection = NSRange(location: start, length: max(0, end - start))
-            }
-        }
-    }
-
-    /// For `--uishots`: a selection with no mouse.
-    func show(from: (order: Int, at: Int), to: (order: Int, at: Int)) {
-        anchor = (0, from.order, from.at)
-        select(to: to)
-        window?.makeFirstResponder(self)
-    }
-
-    private func redraw() { columns.joined().forEach { if $0.selection != nil { $0.needsDisplay = true } } }
-
-    /// The selected code, one line for each selected line.
-    var selected: String? {
-        guard let a = anchor, let h = head, (a.order, a.at) != (h.order, h.at) else { return nil }
-        return columns[a.column].compactMap { l in l.selection.map(l.piece) }.joined(separator: "\n")
-    }
-
-    @objc func copy(_ sender: Any?) {
-        guard let s = selected else { return NSSound.beep() }
-        RowActions.copy(s)
-    }
-
-    @objc override func selectAll(_ sender: Any?) {
-        let c = anchor?.column ?? (columns[1].isEmpty ? 0 : 1)
-        guard let last = columns[c].last else { return }
-        anchor = (c, 0, 0)
-        select(to: (last.order, last.length))
-    }
-
-}
-
-extension DiffBody: NSMenuItemValidation {
-    func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        item.action == #selector(copy(_:)) ? selected != nil : true
     }
 }
 
