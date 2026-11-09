@@ -38,6 +38,28 @@ The Changes page of an item shows the files of each repository of the group: add
 - Mark a file as viewed. The mark stays until the file changes.
 - A binary file and a very large diff show a note in place of the lines.
 
+### Folds
+
+The diff shows each change with 3 lines of context above and below. A fold row hides each other run of unchanged lines. The fold row shows `@@ −a,b +c,d @@ fn` of the lines below it and the number of hidden lines. `fn` is the last line above that starts with a letter, `_` or `$` (the default rule of git).
+
+| Button | Lines that open | Line that stays in place |
+|---|---|---|
+| Show 20 lines below | The first 20 hidden lines | The line above the fold |
+| Show 20 lines above | The last 20 hidden lines | The line below the fold |
+| Show all N lines | All hidden lines | The line below the fold, or the line above the last fold |
+| Unfold | All hidden lines of a fold of 20 lines or fewer | The line below the fold |
+
+The top fold has no "below" button and the bottom fold has no "above" button. On a fold row, Return does the first button. The open lines stay open until the review changes. **Full file** in the header shows all lines. When you turn it off, the lines that you opened stay open.
+
+An older daemon gives only the changed hunks. Then the fold rows have no buttons, Full file is off, and the hint tells you to update `oversire` on that machine.
+
+### Large view and file switch
+
+- ⇧⌘M or the arrows at the right of the header show the diff in a large view over the page. Esc, a click outside the card, or ⇧⌘M again closes it. The large view closes when you leave the page.
+- In the large view the header shows `‹ path ▾ n / m ›`. ‹ › and ⌥⇧↑ / ⌥⇧↓ go to the previous or the next file, in the order of the file panel.
+- ⌘P, or a click on the path, opens the file switch. Type to filter, ↑ ↓ to move, Return to open, Esc to close.
+- In a comment field, the arrows and Esc go to the field.
+
 ## Plan review
 
 The Plan page shows the plan in blocks, one block for each `##` heading, and the sub-items that the plan proposes. Comment on a block. Approve sets the item and its sub-items to Todo, so that the queue can take them.

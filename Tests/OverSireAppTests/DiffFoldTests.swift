@@ -117,4 +117,103 @@ final class DiffFoldTests: XCTestCase {
         XCTAssertEqual(DiffKey(key: 46, shift: true, option: false, command: true, inText: true), .size)
         XCTAssertNil(DiffKey(key: 46, shift: false, option: false, command: true, inText: false), "⌘M stays Minimize")
     }
+
+    // MARK: Fold buttons (OVERSIRE-441)
+
+    /// A full diff of `count` lines with one added line at each of `adds`. Line `fn` starts a function.
+    private func full(_ count: Int, adds: [Int], fn: Int? = nil) -> DiffFold {
+        var shift = 0
+        let lines = (1...count).map { n -> DiffLine in
+            if adds.contains(n) { shift += 1; return add(n) }
+            return DiffLine(kind: .ctx, old: n - shift, new: n, text: n == fn ? "func run() {" : "\tc\(n)")
+        }
+        return DiffFold(diff([DiffHunk(oldStart: 1, oldLines: count - adds.count, newStart: 1, newLines: count, header: "", lines: lines)], full: true))
+    }
+
+    private func gaps(_ f: DiffFold) -> [DiffGap] {
+        f.items(split: false, threads: []).compactMap { i -> DiffGap? in if case .gap(let g) = i { return g } else { return nil } }
+    }
+
+    func testContextIsThreeLines() {
+        let f = full(100, adds: [50])
+        XCTAssertEqual(gaps(f).map(\.numbers), [1...46, 54...100])
+        XCTAssertEqual(f.lines.indices.filter { f.shown(threads: [])[$0] }.compactMap { f.lines[$0].new }, Array(47...53))
+    }
+
+    func testAGapOf20LinesHasOneButton() {
+        let g = gaps(full(60, adds: [10, 37]))
+        XCTAssertEqual(g[1].numbers, 14...33)
+        XCTAssertEqual(g[1].ways, [.all])
+    }
+
+    func testALargerGapHasDownUpAndAll() {
+        let g = gaps(full(100, adds: [10, 60]))
+        XCTAssertEqual(g[1].numbers, 14...56)
+        XCTAssertEqual(g[1].ways, [.down, .up, .all])
+    }
+
+    func testTheTopGapHasOnlyUpAndTheBottomGapOnlyDown() {
+        let g = gaps(full(100, adds: [50]))
+        XCTAssertEqual(g.map(\.edge), [.top, .bottom])
+        XCTAssertEqual(g[0].ways, [.up, .all])
+        XCTAssertEqual(g[1].ways, [.down, .all])
+    }
+
+    func testDownOpens20LinesWithTheAnchorAbove() {
+        var f = full(100, adds: [10, 60])
+        XCTAssertEqual(f.expand(gaps(f)[1], .down), 13)
+        XCTAssertEqual(f.opened, IndexSet(integersIn: 14...33))
+        XCTAssertEqual(gaps(f)[1].numbers, 34...56)
+    }
+
+    func testUpOpens20LinesWithTheAnchorBelow() {
+        var f = full(100, adds: [10, 60])
+        XCTAssertEqual(f.expand(gaps(f)[1], .up), 57)
+        XCTAssertEqual(f.opened, IndexSet(integersIn: 37...56))
+        XCTAssertEqual(gaps(f)[1].numbers, 14...36)
+    }
+
+    func testShowAllKeepsTheAnchorBelowOrAboveAtTheEnd() {
+        var f = full(100, adds: [10, 60])
+        XCTAssertEqual(f.expand(gaps(f)[1], .all), 57)
+        XCTAssertEqual(gaps(f).map(\.edge), [.top, .bottom], "the middle gap is open")
+        var e = full(100, adds: [50])
+        let g = gaps(e)
+        XCTAssertEqual(e.expand(g[0], .all), 47, "the top gap keeps the line below")
+        XCTAssertEqual(e.expand(g[1], .all), 53, "the bottom gap keeps the line above")
+        XCTAssertTrue(gaps(e).isEmpty)
+    }
+
+    func testTheGapHeaderCountsTheRunBelow() {
+        let g = gaps(full(100, adds: [50], fn: 20))
+        XCTAssertEqual(g[0].header, "@@ −47,6 +47,7 @@ func run() {")
+        XCTAssertEqual(g[1].header, "")
+    }
+
+    func testTheFunctionNameRule() {
+        let long = String(repeating: "x", count: 100)
+        let lines = [ctx(1, 1), DiffLine(kind: .ctx, old: 2, new: 2, text: "func a() {"), DiffLine(kind: .ctx, old: 3, new: 3, text: "\tbody"),
+                     del(4, "func gone() {"), DiffLine(kind: .ctx, old: 5, new: 4, text: "1 // a number"), DiffLine(kind: .ctx, old: 6, new: 5, text: "  indented")]
+        XCTAssertEqual(DiffFold.function(above: lines.count, in: lines), "func a() {", "a removed line, a digit and an indent do not count")
+        XCTAssertEqual(DiffFold.function(above: 1, in: [DiffLine(kind: .ctx, old: 1, new: 1, text: "_init:")]), "_init:")
+        XCTAssertEqual(DiffFold.function(above: 1, in: [DiffLine(kind: .ctx, old: 1, new: 1, text: "$x = 1")]), "$x = 1")
+        XCTAssertEqual(DiffFold.function(above: 1, in: [DiffLine(kind: .ctx, old: 1, new: 1, text: long)]).count, 80)
+        XCTAssertEqual(DiffFold.function(above: 0, in: lines), "")
+    }
+
+    func testFullFileOffKeepsOpenedLines() {
+        let base = full(100, adds: [50])
+        let d = diff([DiffHunk(oldStart: 1, oldLines: 99, newStart: 1, newLines: 100, header: "", lines: base.lines)], full: true)
+        XCTAssertTrue(gaps(DiffFold(d, opened: [20], wholeFile: true)).isEmpty, "Full file hides no line")
+        XCTAssertEqual(gaps(DiffFold(d, opened: [20], wholeFile: false)).map(\.numbers), [1...19, 21...46, 54...100])
+    }
+
+    func testAnOlderDaemonGivesNoButtons() {
+        var f = DiffFold(diff([DiffHunk(oldStart: 40, oldLines: 1, newStart: 40, newLines: 2, header: "", lines: [ctx(40, 40), add(41)])]))
+        let g = gaps(f)
+        XCTAssertEqual(g.map(\.numbers), [1...39])
+        XCTAssertTrue(g[0].ways.isEmpty)
+        XCTAssertNil(f.expand(g[0], .all))
+        XCTAssertTrue(f.opened.isEmpty)
+    }
 }

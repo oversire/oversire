@@ -84,6 +84,10 @@ final class ReviewDesk {
     var split = false
     /// The diff shows in the large view (OVERSIRE-440).
     var maximized = false
+    /// Full file: the diff hides no line (OVERSIRE-441).
+    var wholeFile = false
+    /// ReviewFile.id → the new-side numbers of the lines that the fold buttons opened.
+    var opened: [String: IndexSet] = [:]
     var pick: LinePick?
     var block: String?
     var draft = ""
@@ -201,12 +205,24 @@ final class ReviewDesk {
         guard let source, diffs[f.id] == nil, !asked.contains(f.id) else { return }
         asked.insert(f.id)
         do {
-            let d = try await source.diff(key, repo: f.repo, path: f.path, full: false)
+            let d = try await source.diff(key, repo: f.repo, path: f.path, full: true)
             await MainActor.run {
                 diffs[f.id] = d
                 changed()
             }
         } catch { await fail(error) }
+    }
+
+    /// The fold of the diff of a file, with the opened lines and Full file.
+    func fold(_ f: ReviewFile) -> DiffFold? {
+        diffs[f.id].map { DiffFold($0, opened: opened[f.id] ?? [], wholeFile: wholeFile) }
+    }
+
+    /// Opens lines of a gap. It gives the new-side number of the line that keeps its place on the screen.
+    func expand(_ f: ReviewFile, _ g: DiffGap, _ way: DiffWay) -> Int? {
+        guard var fold = fold(f), let anchor = fold.expand(g, way) else { return nil }
+        opened[f.id] = fold.opened
+        return anchor
     }
 
     func add(_ anchor: ReviewAnchor, text: String) async -> Bool {

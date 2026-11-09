@@ -92,4 +92,26 @@ final class DiffTableTests: XCTestCase {
         XCTAssertTrue(t.view.visibleRect.intersects(t.view.rect(ofRow: r)))
         XCTAssertFalse(t.reveal("comment.none"))
     }
+
+    func testExpandKeepsTheAnchorRowInPlace() throws {
+        let s = ReviewSummary(key: "K-1", kind: .code, machine: "mba", state: .ready, root: "/src", updatedAt: Date())
+        let d = ReviewDesk(detail: ReviewDetail(summary: s, files: [file], comments: []), diffs: [UIShots.fullDiff])
+        let p = DiffPanel(desk: d, threads: ReviewThreads(d))
+        // Short, so the open lines give room to scroll.
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        p.translatesAutoresizingMaskIntoConstraints = true
+        w.contentView = p
+        p.reload = { p.update(self.file, diff: UIShots.fullDiff); p.table.view.layoutSubtreeIfNeeded() }
+        p.reload()
+        w.layoutIfNeeded()
+        let t = p.table
+        let gap = try XCTUnwrap(t.items.lazy.compactMap { i -> DiffGap? in if case .gap(let g) = i, g.edge == .middle { return g }; return nil }.first)
+        let before = try XCTUnwrap(t.row(new: 97))
+        let y = t.view.rect(ofRow: before).minY - t.scroll.contentView.bounds.minY
+        p.expand(gap, .up)
+        let after = try XCTUnwrap(t.row(new: 97))
+        XCTAssertEqual(after, before + DiffFold.step, "20 lines open above the anchor")
+        XCTAssertEqual(t.view.rect(ofRow: after).minY - t.scroll.contentView.bounds.minY, y, accuracy: 0.5)
+    }
 }

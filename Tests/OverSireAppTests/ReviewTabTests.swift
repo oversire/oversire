@@ -281,6 +281,39 @@ final class ReviewTabTests: XCTestCase {
         XCTAssertEqual(MergeChoice.fix.title, "Fix with agent")
         XCTAssertEqual(MergeChoice.rebase.title, "Rebase and merge")
     }
+
+    // MARK: Folds (OVERSIRE-441)
+
+    private func foldDesk(_ src: FakeReviewSource) async -> (ReviewDesk, ReviewFile) {
+        let s = summary("A-1", ready: 1, repos: [repo("oversire", .fastForward)])
+        let f = ReviewFile(repo: "oversire", path: "a.go", status: .modified, added: 1, removed: 0)
+        let lines = (1...99).map { n in n == 50 ? DiffLine(kind: .add, new: 50, text: "a") : DiffLine(kind: .ctx, old: n > 50 ? n - 1 : n, new: n, text: "\tc") }
+        let d = FileDiff(repo: "oversire", path: "a.go", status: .modified, full: true,
+                         hunks: [DiffHunk(oldStart: 1, oldLines: 98, newStart: 1, newLines: 99, lines: lines)])
+        src.seed([ReviewDetail(summary: s, files: [f])], diffs: [d])
+        let desk = ReviewDesk(summary: s, source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }))
+        await desk.load()
+        await desk.diff(f)
+        return (desk, f)
+    }
+
+    func testTheDeskAsksForTheWholeFile() async {
+        let src = FakeReviewSource(machine: "mba")
+        _ = await foldDesk(src)
+        XCTAssertTrue(src.calls.contains("diff A-1 oversire/a.go full"), "\(src.calls)")
+    }
+
+    func testOpenedLinesStayOnTheDesk() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        let (d, f) = await foldDesk(src)
+        let fold = try XCTUnwrap(d.fold(f))
+        let top = try XCTUnwrap(fold.items(split: false, threads: []).lazy.compactMap { i -> DiffGap? in if case .gap(let g) = i { return g }; return nil }.first)
+        XCTAssertEqual(d.expand(f, top, .up), 47)
+        XCTAssertEqual(d.opened[f.id], IndexSet(integersIn: 27...46))
+        d.wholeFile = true
+        d.wholeFile = false
+        XCTAssertEqual(d.fold(f)?.opened, IndexSet(integersIn: 27...46), "Full file off keeps the opened lines")
+    }
 }
 
 /// The tracker writes of a desk, in memory.

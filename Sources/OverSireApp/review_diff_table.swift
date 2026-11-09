@@ -42,6 +42,13 @@ final class DiffPanel: NSView {
             return pick.contains(p.line, side: p.side)
         }
         table.dragEnded = { [weak self] in self?.reload() }
+        table.onWay = { [weak self] g, way in self?.expand(g, way) }
+    }
+
+    /// Opens lines of a gap. The line next to the gap keeps its place on the screen.
+    func expand(_ g: DiffGap, _ way: DiffWay) {
+        guard let f = table.file, let anchor = desk.expand(f, g, way) else { return }
+        table.keep(anchor: anchor) { reload() }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -107,14 +114,14 @@ final class DiffPanel: NSView {
 
     /// Shows the file. The table keeps its scroll position while the file stays the same.
     func update(_ f: ReviewFile, diff: FileDiff?) {
-        setHeader(f)
+        setHeader(f, full: diff?.full == true)
         var notes: [String] = []
         if f.untracked == true { notes.append("This file is not committed. The agent did not commit it.") }
         guard let diff else {
             notes.append(desk.error.map { "The diff did not load: \($0)" } ?? "Loading the diff…")
             return table.show(DiffFold(FileDiff(repo: f.repo, path: f.path, status: f.status, hunks: [])), items: notes.map(DiffItem.note), tokens: [], desk: desk, file: f)
         }
-        let fold = DiffFold(diff)
+        let fold = desk.fold(f) ?? DiffFold(diff)
         if diff.binary || f.binary {
             notes.append("Binary file. OverSire does not show a binary diff.")
             return table.show(fold, items: notes.map(DiffItem.note), tokens: [], desk: desk, file: f)
@@ -159,7 +166,7 @@ final class DiffPanel: NSView {
         return s
     }
 
-    private func setHeader(_ f: ReviewFile) {
+    private func setHeader(_ f: ReviewFile, full: Bool) {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
         let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f), open: { [weak self] in self?.showFiles() })
         pathView = pathField
@@ -173,9 +180,16 @@ final class DiffPanel: NSView {
         }
         wrap.setAccessibilityLabel("Wrap long lines")
         wrap.toolTip = desk.wrap ? "Long lines wrap. Click to keep each line on one row." : "Long lines scroll. Click to wrap them."
+        let whole = ToggleChip("Full file", on: desk.wholeFile && full, enabled: full) { [weak self] in
+            self?.desk.wholeFile.toggle()
+            self?.reload()
+        }
+        whole.setAccessibilityLabel("Show the full file")
+        whole.toolTip = full ? (desk.wholeFile ? "The diff shows all lines. Click to fold the unchanged lines." : "Show all lines of the file.")
+            : "Update oversire on \(desk.summary.machine) to see the full file."
         let desk = desk
         let viewed = CheckBox("Viewed", on: f.viewed, label: "Mark \(f.path) as viewed") { on in Task { _ = await desk.setViewed(f, on) } }
-        [wrap, viewed].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
+        [wrap, whole, viewed].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
         var parts: [NSView] = [NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: ReviewChangesTab.color(f.status), mono: true), pathField, Spacer()]
         if let n = desk.pendingByFile[f.id] {
             let chip = Chiplet("\(n) pending", symbol: "text.bubble", color: Palette.warn)
@@ -198,7 +212,7 @@ final class DiffPanel: NSView {
         let size = desk.maximized
             ? IconButton("arrow.down.right.and.arrow.up.left", label: "Restore", tip: "Restore ⇧⌘M") { [weak self] in self?.toggleSize() }
             : IconButton("arrow.up.left.and.arrow.down.right", label: "Maximize", tip: "Maximize ⇧⌘M") { [weak self] in self?.toggleSize() }
-        let row = NSStackView(h: parts + [wrap, mode, viewed, size], spacing: 8)
+        let row = NSStackView(h: parts + [wrap, whole, mode, viewed, size], spacing: 8)
         row.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         head.subviews.forEach { $0.removeFromSuperview() }
         head.addSubview(row)
@@ -235,6 +249,10 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     private var scrolled: NSObjectProtocol?
     private var framed: NSObjectProtocol?
     private(set) var hovered: (row: Int, column: Int)?
+    /// A fold button: open lines of a gap.
+    var onWay: (DiffGap, DiffWay) -> Void = { _, _ in }
+    /// The machine of the review, for the hint of an older daemon.
+    private var machine = ""
 
     /// The longest text that a line shows with no wrap. A very long line (minified code) would make a huge view.
     static let nowrapLimit = 1000
@@ -296,6 +314,7 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         self.file = file
         wrap = desk.wrap
         split = desk.split
+        machine = desk.summary.machine
         if !same { view.selection = nil; view.cursor = nil }
         if !same || hash != threadHash { threadCells = [:] }
         threadHash = hash
@@ -307,6 +326,28 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         view.reloadData()
         if !same { scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView) }
         DispatchQueue.main.async { [weak self] in self?.followMouse() }
+    }
+
+    /// The row of the line with the new-side number `line`.
+    func row(new line: Int) -> Int? {
+        items.firstIndex {
+            switch $0 {
+            case .line(let i): return fold.lines[i].new == line
+            case .pair(_, let n?): return fold.lines[n].new == line
+            default: return false
+            }
+        }
+    }
+
+    /// Shows new rows and keeps the line `anchor` at its place on the screen.
+    func keep(anchor: Int, _ change: () -> Void) {
+        let y = row(new: anchor).map { view.rect(ofRow: $0).minY - scroll.contentView.bounds.minY }
+        change()
+        guard let y, let r = row(new: anchor) else { return }
+        let clip = scroll.contentView
+        let top = max(0, min(view.rect(ofRow: r).minY - y, view.frame.height - clip.bounds.height))
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: top))
+        scroll.reflectScrolledClipView(clip)
     }
 
     /// Draws the rows again with no new data: a new pick or a new selection.
@@ -444,7 +485,7 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
             return c
         case .gap(let g):
             let c = (tableView.makeView(withIdentifier: DiffFoldCell.id, owner: nil) as? DiffFoldCell) ?? DiffFoldCell()
-            c.set(g)
+            c.set(g, machine: fold.full ? nil : machine) { [weak self] way in self?.onWay(g, way) }
             return c
         case .note(let s):
             let c = (tableView.makeView(withIdentifier: DiffNoteCell.id, owner: nil) as? DiffNoteCell) ?? DiffNoteCell()
@@ -649,11 +690,19 @@ final class DiffTableView: NSTableView {
         case 125, 126 where mods.isEmpty:
             let down = event.keyCode == 125
             var r = (cursor ?? (down ? -1 : owner.items.count)) + (down ? 1 : -1)
-            while r >= 0, r < owner.items.count, owner.place(row: r, column: owner.split ? 1 : 0) == nil, owner.place(row: r, column: 0) == nil { r += down ? 1 : -1 }
+            // The cursor stops on lines and on folds with buttons.
+            func stops(_ r: Int) -> Bool {
+                if case .gap(let g) = owner.items[r] { return !g.ways.isEmpty }
+                return owner.place(row: r, column: owner.split ? 1 : 0) != nil || owner.place(row: r, column: 0) != nil
+            }
+            while r >= 0, r < owner.items.count, !stops(r) { r += down ? 1 : -1 }
             guard r >= 0, r < owner.items.count else { return NSSound.beep() }
             cursor = r
             scrollRowToVisible(r)
         case 36, 76, 49 where mods.isEmpty:
+            if let r = cursor, owner.items.indices.contains(r), case .gap(let g) = owner.items[r], let way = g.ways.first {
+                return owner.onWay(g, way)
+            }
             guard let r = cursor, let p = owner.place(row: r, column: owner.split ? 1 : 0) ?? owner.place(row: r, column: 0) else { return super.keyDown(with: event) }
             owner.onPick(p, event.modifierFlags.contains(.shift))
         case 53 where selection != nil:
@@ -920,6 +969,7 @@ final class DiffFoldCell: NSView {
     static let id = NSUserInterfaceItemIdentifier("diff.fold")
     private let header = NSTextField.text("", size: 11, color: Palette.acc, mono: true)
     private let count = NSTextField.text("", size: 11.5, color: Palette.dim)
+    private let buttons = NSStackView(h: [], spacing: 10)
     /// The visible part of the row. A wide diff scrolls sideways, and the text stays in sight.
     private let inner = NSView()
 
@@ -930,8 +980,10 @@ final class DiffFoldCell: NSView {
         identifier = Self.id
         header.isSelectable = true
         header.lineBreakMode = .byTruncatingTail
+        // The header gives its width first.
+        header.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         count.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let s = NSStackView(h: [header, count, Spacer()], spacing: 8)
+        let s = NSStackView(h: [header, count, Spacer(), buttons], spacing: 8)
         inner.translatesAutoresizingMaskIntoConstraints = true
         addSubview(inner)
         inner.addSubview(s)
@@ -939,17 +991,42 @@ final class DiffFoldCell: NSView {
             s.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 12), s.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -12),
             s.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
         ])
-        setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
+        setAccessibilityElement(false)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func set(_ g: DiffGap) {
+    /// `machine` is set for a partial diff: the app does not have the hidden lines, and the hint names the machine to update.
+    func set(_ g: DiffGap, machine: String?, open: @escaping (DiffWay) -> Void) {
         header.stringValue = g.header
         header.isHidden = g.header.isEmpty
         count.stringValue = "\(g.hidden) line\(g.hidden == 1 ? "" : "s") hidden"
-        setAccessibilityLabel([g.header, count.stringValue].filter { !$0.isEmpty }.joined(separator: ", "))
+        count.setAccessibilityLabel([g.header, count.stringValue].filter { !$0.isEmpty }.joined(separator: ", "))
+        buttons.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if let machine {
+            let hint = NSTextField.text("Update oversire on \(machine) to show these lines.", size: 11, color: Palette.dim)
+            hint.setContentCompressionResistancePriority(.required, for: .horizontal)
+            buttons.addArrangedSubview(hint)
+            return
+        }
+        for way in g.ways {
+            let (title, symbol) = Self.title(way, hidden: g.hidden, one: g.ways.count == 1)
+            let b = ActionButton(title, symbol: symbol, style: .link) { open(way) }
+            b.font = .systemFont(ofSize: 11)
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+            buttons.addArrangedSubview(b)
+        }
     }
+
+    static func title(_ way: DiffWay, hidden: Int, one: Bool) -> (String, String) {
+        switch way {
+        case .down: return ("Show \(DiffFold.step) lines below", "arrow.down")
+        case .up: return ("Show \(DiffFold.step) lines above", "arrow.up")
+        case .all: return one ? ("Unfold", "arrow.up.and.down") : ("Show all \(hidden) lines", "arrow.up.and.down")
+        }
+    }
+
+    /// For tests: the titles of the buttons, or the hint.
+    var titles: [String] { buttons.arrangedSubviews.map { ($0 as? NSButton)?.title ?? ($0 as? NSTextField)?.stringValue ?? "" } }
 
     override func layout() {
         let clip = enclosingScrollView?.contentView.bounds ?? bounds

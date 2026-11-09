@@ -50,6 +50,8 @@ enum DiffItem: Hashable {
 struct DiffFold {
     /// The context lines around a change.
     static let context = 3
+    /// The lines that one fold button opens.
+    static let step = 20
 
     /// All hunk lines, in order.
     let lines: [DiffLine]
@@ -57,9 +59,15 @@ struct DiffFold {
     let starts: Set<Int>
     let full: Bool
     let changes: [DiffChange]
+    /// The new-side numbers of the hidden lines that the reviewer opened.
+    var opened: IndexSet
+    /// Full file: no line is hidden.
+    var wholeFile: Bool
     private let hunks: [(start: Int, hunk: DiffHunk)]
 
-    init(_ d: FileDiff) {
+    init(_ d: FileDiff, opened: IndexSet = [], wholeFile: Bool = false) {
+        self.opened = opened
+        self.wholeFile = wholeFile
         var lines: [DiffLine] = [], hunks: [(Int, DiffHunk)] = []
         for h in d.hunks {
             hunks.append((lines.count, h))
@@ -108,10 +116,10 @@ struct DiffFold {
 
     // MARK: Rows
 
-    /// The lines that show. A full diff shows the lines near a change and the lines with a thread.
+    /// The lines that show. A full diff shows the lines near a change, the opened lines and the lines with a thread.
     func shown(threads: Set<DiffPlace>) -> [Bool] {
-        guard full else { return Array(repeating: true, count: lines.count) }
-        var out = Array(repeating: false, count: lines.count)
+        guard full, !wholeFile else { return Array(repeating: true, count: lines.count) }
+        var out = lines.map { $0.new.map(opened.contains) ?? false }
         for c in changes {
             for i in max(0, c.lines.lowerBound - Self.context)..<min(lines.count, c.lines.upperBound + Self.context) { out[i] = true }
         }
@@ -211,7 +219,27 @@ struct DiffFold {
     private func fullGap(_ r: Range<Int>, _ show: [Bool]) -> DiffGap {
         let edge: DiffGap.Edge = r.lowerBound == 0 ? .top : r.upperBound == lines.count ? .bottom : .middle
         let a = lines[r.lowerBound].new ?? 0, b = lines[r.upperBound - 1].new ?? a
-        return DiffGap(numbers: a...b, edge: edge, header: edge == .bottom ? "" : header(below: r.upperBound, shown: show), ways: [])
+        let ways: [DiffWay] = b - a + 1 <= Self.step ? [.all] : (edge == .top ? [] : [.down]) + (edge == .bottom ? [] : [.up]) + [.all]
+        return DiffGap(numbers: a...b, edge: edge, header: edge == .bottom ? "" : header(below: r.upperBound, shown: show), ways: ways)
+    }
+
+    /// Opens hidden lines of a gap. It gives the new-side number of the line that must keep its place on the screen.
+    /// Down opens the top 20 lines below the line above. Up opens the last 20 lines above the line below.
+    /// Nil in partial mode: the app does not have the hidden text.
+    mutating func expand(_ g: DiffGap, _ way: DiffWay) -> Int? {
+        guard full else { return nil }
+        let a = g.numbers.lowerBound, b = g.numbers.upperBound
+        switch way {
+        case .down:
+            opened.insert(integersIn: a...min(b, a + Self.step - 1))
+            return a - 1
+        case .up:
+            opened.insert(integersIn: max(a, b - Self.step + 1)...b)
+            return b + 1
+        case .all:
+            opened.insert(integersIn: a...b)
+            return g.edge == .bottom ? a - 1 : b + 1
+        }
     }
 
     /// "@@ −a,b +c,d @@ fn" of the run of shown lines from `start`.

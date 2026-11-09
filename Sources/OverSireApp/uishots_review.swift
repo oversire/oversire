@@ -8,12 +8,13 @@ import OverSireCore
 extension UIShots {
     /// review:list, changes, select, menu, split, wrap, plan, submit, approve, merge, conflict or empty.
     /// max: the large view (OVERSIRE-440). switch: the file switch from the path, in the large view.
+    /// full: a full diff with fold buttons. expand: the same after "Show 20 lines below". old-daemon: a partial diff (OVERSIRE-441).
     /// long: a file of 4000 lines, with the widest line at line 3938 (OVERSIRE-439).
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
-        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long")
+        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: scene == "full" || scene == "expand")
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
               let plan = REVIEWS.review("OVERSIRE-349", kind: .plan).flatMap({ REVIEWS.desk($0) }) else {
             w.router.go(.work(.review))
@@ -30,7 +31,11 @@ extension UIShots {
         }
         code.pick = scene == "changes" ? LinePick(repo: "oversire", path: "Sources/OverSireApp/review_tab.swift", side: .new, line: 41).click(43, side: .new, shift: true) : nil
         plan.block = scene == "plan" ? "risks" : nil
-        if scene == "long" { code.file = "cli/review/routes.go" }
+        if ["long", "full", "expand", "old-daemon"].contains(scene) { code.file = "cli/review/routes.go" }
+        if scene == "expand", let f = code.files.first(where: { $0.id == "cli/review/routes.go" }),
+           let g = code.fold(f)?.items(split: false, threads: []).lazy.compactMap({ i -> DiffGap? in if case .gap(let g) = i, g.edge == .middle { return g }; return nil }).first {
+            _ = code.expand(f, g, .down)
+        }
         switch scene {
         case "long":
             w.router.go(.item("FRITZ-17", .changes))
@@ -38,7 +43,7 @@ extension UIShots {
                 guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
-        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "full", "expand", "old-daemon": w.router.go(.item("FRITZ-17", .changes))
         case "switch":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -91,7 +96,7 @@ extension UIShots {
     }
 
     /// The sample rows and desks. They replace the rows of the last scene.
-    static func seedReviews(empty: Bool = false, health: [String: ReviewHealth] = [:], long: Bool = false) {
+    static func seedReviews(empty: Bool = false, health: [String: ReviewHealth] = [:], long: Bool = false, full: Bool = false) {
         REVIEWS.reads = false
         guard !empty else {
             REVIEWS.set([:], health: health)
@@ -172,7 +177,7 @@ extension UIShots {
                 DiffLine(kind: .add, new: 43, text: ""),
             ]),
         ])
-        let fritzDesk = ReviewDesk(detail: ReviewDetail(summary: fritz, files: files, comments: comments, rounds: rounds), diffs: [diff] + (long ? [longDiff] : []))
+        let fritzDesk = ReviewDesk(detail: ReviewDetail(summary: fritz, files: files, comments: comments, rounds: rounds), diffs: [diff] + (long ? [longDiff] : []) + (full ? [fullDiff] : []))
 
         // OVERSIRE-349: a plan, version 2, with one answered round.
         let plan = ReviewSummary(key: "OVERSIRE-349", kind: .plan, title: "Runbooks: steps with gates", machine: "mba", state: .ready, round: 1,
@@ -210,6 +215,29 @@ extension UIShots {
             "mini": ReviewsPage(reviews: [waiting, conflict, older]),
         ], health: health)
         for d in [fritzDesk, planDesk, ReviewDesk(detail: ReviewDetail(summary: conflict)), ReviewDesk(detail: ReviewDetail(summary: older))] { REVIEWS.put(d) }
+    }
+
+    /// A full diff of a Go file of 120 lines: one added line at 40, one changed line at 100.
+    static var fullDiff: FileDiff {
+        func text(_ n: Int) -> String {
+            switch n {
+            case 1: return "package review"
+            case 3: return "import \"context\""
+            case 10: return "func (h *Handler) Run(ctx context.Context) error {"
+            case 70: return "func (h *Handler) readChanges(ctx context.Context, g *Group) error {"
+            default: return n < 10 ? "" : "\t\th.log(ctx, \"step %d\", \(n))"
+            }
+        }
+        var lines: [DiffLine] = []
+        for n in 1...120 {
+            switch n {
+            case 40: lines.append(DiffLine(kind: .add, new: 40, text: "\t\th.retries++"))
+            case 100: lines += [DiffLine(kind: .del, old: 99, text: "\t\treturn err"), DiffLine(kind: .add, new: 100, text: "\t\treturn h.onError(err)")]
+            default: lines.append(DiffLine(kind: .ctx, old: n > 40 ? n - 1 : n, new: n, text: text(n)))
+            }
+        }
+        return FileDiff(repo: "cli", path: "review/routes.go", status: .modified, full: true,
+                        hunks: [DiffHunk(oldStart: 1, oldLines: 119, newStart: 1, newLines: 120, lines: lines)])
     }
 
     /// A partial diff of a Go file of 4000 lines. Line 3938 is the widest line.
