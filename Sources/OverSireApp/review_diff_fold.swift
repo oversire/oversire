@@ -316,6 +316,61 @@ struct DiffSteps {
         guard let i = files.firstIndex(of: id), files.indices.contains(i + k) else { return nil }
         return files[i + k]
     }
+
+    /// The next stop for ⌥↓ (k = 1) or ⌥↑ (k = −1) from change `change` of `count` changes (OVERSIRE-442).
+    /// No current change counts as −1. Past the ends it goes to the next or the previous file; a file with no changes is a stop.
+    func step(file: String, change: Int?, count: Int, by k: Int) -> DiffStep {
+        let i = (change ?? -1) + k
+        if i < 0 { return self.file(file, by: -1).map { .file($0, .last) } ?? .end(.first) }
+        if i >= count { return self.file(file, by: 1).map { .file($0, .first) } ?? .end(.last) }
+        return .change(i)
+    }
+}
+
+/// Where a step lands in a file that it opens.
+enum DiffLanding: Hashable { case first, last }
+
+enum DiffStep: Equatable {
+    case change(Int)
+    case file(String, DiffLanding)
+    /// No change and no file in that direction: the first or the last change of the review.
+    case end(DiffLanding)
+}
+
+/// A change on the ruler. `from` and `to` are fractions of the rows.
+struct DiffMark: Hashable {
+    let change: Int
+    let rows: Range<Int>
+    let from: Double
+    let to: Double
+    let added: Int
+    let removed: Int
+    var label: String { "Go to change \(change + 1): \(added) added, \(removed) removed" }
+}
+
+extension DiffFold {
+    /// The marks of the changes in the rows `items`.
+    func marks(_ items: [DiffItem]) -> [DiffMark] {
+        guard !items.isEmpty else { return [] }
+        var rows: [Int: Range<Int>] = [:]
+        for (r, item) in items.enumerated() {
+            let ids: [Int]
+            switch item {
+            case .line(let i): ids = [i]
+            case .pair(let o, let n): ids = [o, n].compactMap { $0 }
+            default: continue
+            }
+            for c in Set(ids.compactMap(change(at:))) {
+                rows[c] = rows[c].map { min($0.lowerBound, r)..<max($0.upperBound, r + 1) } ?? r..<(r + 1)
+            }
+        }
+        let n = Double(items.count)
+        return rows.keys.sorted().map { c in
+            let r = rows[c]!
+            return DiffMark(change: c, rows: r, from: Double(r.lowerBound) / n, to: Double(r.upperBound) / n,
+                            added: changes[c].added, removed: changes[c].removed)
+        }
+    }
 }
 
 /// A key of the diff panel.

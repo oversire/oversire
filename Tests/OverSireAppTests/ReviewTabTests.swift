@@ -314,6 +314,49 @@ final class ReviewTabTests: XCTestCase {
         d.wholeFile = false
         XCTAssertEqual(d.fold(f)?.opened, IndexSet(integersIn: 27...46), "Full file off keeps the opened lines")
     }
+
+    // MARK: Steps (OVERSIRE-442)
+
+    func testAStepAcrossFilesLoadsTheNextDiffAndLandsOnItsFirstChange() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        let s = summary("A-1", ready: 1, repos: [repo("oversire", .fastForward)])
+        func file(_ path: String, adds: [Int]) -> (ReviewFile, FileDiff) {
+            var shift = 0
+            let lines = (1...60).map { n -> DiffLine in
+                if adds.contains(n) { shift += 1; return DiffLine(kind: .add, new: n, text: "a") }
+                return DiffLine(kind: .ctx, old: n - shift, new: n, text: "\tc")
+            }
+            return (ReviewFile(repo: "oversire", path: path, status: .modified, added: adds.count, removed: 0),
+                    FileDiff(repo: "oversire", path: path, status: .modified, full: true,
+                             hunks: [DiffHunk(oldStart: 1, oldLines: 60 - adds.count, newStart: 1, newLines: 60, lines: lines)]))
+        }
+        let (a, da) = file("a.go", adds: [30])
+        let (b, db) = file("b.go", adds: [10, 40])
+        src.seed([ReviewDetail(summary: s, files: [a, b])], diffs: [da, db])
+        let d = ReviewDesk(summary: s, source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }))
+        await d.load()
+        d.file = a.id
+        await d.diff(a)
+        d.change = 0
+
+        let s1 = await d.step(1)
+        XCTAssertEqual(s1, .file(b.id, .first))
+        XCTAssertEqual(d.file, b.id)
+        XCTAssertTrue(src.calls.contains("diff A-1 oversire/b.go full"), "\(src.calls)")
+        XCTAssertEqual(d.change, 0, "lands on the first change of the next file")
+        let s2 = await d.step(1)
+        XCTAssertEqual(s2, .change(1))
+        let s3 = await d.step(1)
+        XCTAssertEqual(s3, .end(.last))
+        XCTAssertEqual(d.change, 1)
+
+        d.change = 0
+        let back = await d.step(-1)
+        XCTAssertEqual(back, .file(a.id, .last))
+        XCTAssertEqual(d.change, 0, "lands on the last change of the previous file")
+        d.file = b.id
+        XCTAssertNil(d.change, "a new file has no current change")
+    }
 }
 
 /// The tracker writes of a desk, in memory.

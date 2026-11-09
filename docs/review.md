@@ -60,6 +60,21 @@ An older daemon gives only the changed hunks. Then the fold rows have no buttons
 - ⌘P, or a click on the path, opens the file switch. Type to filter, ↑ ↓ to move, Return to open, Esc to close.
 - In a comment field, the arrows and Esc go to the field.
 
+### Steps through the changes
+
+- ⌥↓ and ⌥↑, or the ˄ ˅ buttons in the header, go to the next or the previous change. A change is a run of added and removed lines.
+- The counter between the buttons shows `2 / 4`. With no current change it shows the number of changes, or "No changes".
+- Past the last change of a file, ⌥↓ opens the next file of the file panel at its first change. Before the first change, ⌥↑ opens the previous file at its last change. A file with no changes is a stop too.
+- At the end of the review the app beeps, and the counter shows "Last change" or "First change". VoiceOver reads "This is the last change of the review."
+- The current change has a 3 px blue bar at the left and a stronger fill. A new file has no current change.
+
+### Ruler
+
+- A 12 pt bar at the right of the diff shows where each change is in the file. Green is an added change, orange is a removed change, and half and half is both. The current change has an outline.
+- The gray thumb shows the part of the file that is on the screen.
+- A click on a mark goes to its change. A click on other space scrolls the diff to that point.
+- Each mark is a button for VoiceOver, with the label "Go to change 2: 1 added, 1 removed". The tooltip shows the same text.
+
 ## Plan review
 
 The Plan page shows the plan in blocks, one block for each `##` heading, and the sub-items that the plan proposes. Comment on a block. Approve sets the item and its sub-items to Todo, so that the queue can take them.

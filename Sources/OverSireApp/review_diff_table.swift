@@ -15,6 +15,8 @@ final class DiffPanel: NSView {
     /// Shows another file of the review.
     var open: (ReviewFile) -> Void = { _ in }
     private let head = NSView()
+    let ruler = DiffRuler()
+    private weak var counter: Chiplet?
     private var monitor: Any?
     private var tokens: (id: String, diff: FileDiff, tokens: [[SyntaxLanguage.Token]])?
 
@@ -27,13 +29,19 @@ final class DiffPanel: NSView {
         let rule = Box(fill: Palette.line, border: nil, radius: 0)
         head.translatesAutoresizingMaskIntoConstraints = false
         table.scroll.translatesAutoresizingMaskIntoConstraints = false
-        [head, rule, table.scroll].forEach(addSubview)
+        ruler.table = table
+        ruler.onChange = { [weak self] c in self?.go(to: c) }
+        table.onScroll = { [weak self] in self?.ruler.needsDisplay = true }
+        table.onShow = { [weak self] in self?.ruler.refresh() }
+        [head, rule, table.scroll, ruler].forEach(addSubview)
         NSLayoutConstraint.activate([
             head.leadingAnchor.constraint(equalTo: leadingAnchor), head.trailingAnchor.constraint(equalTo: trailingAnchor), head.topAnchor.constraint(equalTo: topAnchor),
             rule.leadingAnchor.constraint(equalTo: leadingAnchor), rule.trailingAnchor.constraint(equalTo: trailingAnchor),
             rule.topAnchor.constraint(equalTo: head.bottomAnchor), rule.heightAnchor.constraint(equalToConstant: 1),
-            table.scroll.leadingAnchor.constraint(equalTo: leadingAnchor), table.scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            table.scroll.leadingAnchor.constraint(equalTo: leadingAnchor), table.scroll.trailingAnchor.constraint(equalTo: ruler.leadingAnchor),
             table.scroll.topAnchor.constraint(equalTo: rule.bottomAnchor), table.scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ruler.trailingAnchor.constraint(equalTo: trailingAnchor), ruler.widthAnchor.constraint(equalToConstant: DiffRuler.width),
+            ruler.topAnchor.constraint(equalTo: table.scroll.topAnchor), ruler.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         table.onPick = { [weak self] p, shift in self?.pick(p, shift: shift, reload: true) }
         table.onDragPick = { [weak self] p in self?.pick(p, shift: true, reload: false) }
@@ -75,9 +83,35 @@ final class DiffPanel: NSView {
         case .close:
             guard desk.maximized else { return false }
             toggleSize()
-        case .nextChange, .previousChange: return false
+        case .nextChange, .previousChange: stepChange(key == .nextChange ? 1 : -1)
         }
         return true
+    }
+
+    /// Goes to the next or the previous change (OVERSIRE-442). Past the last change of a file it opens the next file.
+    func stepChange(_ k: Int) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            switch await self.desk.step(k) {
+            case .change: self.reload()
+            case .file(let id, _): if let f = self.desk.files.first(where: { $0.id == id }) { self.open(f) }
+            case .end(let at): self.atEnd(at)
+            }
+        }
+    }
+
+    /// A click on a mark of the ruler.
+    func go(to change: Int) {
+        desk.change = change
+        reload()
+    }
+
+    private func atEnd(_ at: DiffLanding) {
+        let text = "This is the \(at == .last ? "last" : "first") change of the review."
+        NSSound.beep()
+        counter?.flash(at == .last ? "Last change" : "First change")
+        NSAccessibility.post(element: counter ?? self, notification: .announcementRequested,
+                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     func toggleSize() {
@@ -114,7 +148,9 @@ final class DiffPanel: NSView {
 
     /// Shows the file. The table keeps its scroll position while the file stays the same.
     func update(_ f: ReviewFile, diff: FileDiff?) {
-        setHeader(f, full: diff?.full == true)
+        let changes = diff.map { desk.fold(f) ?? DiffFold($0) }?.changes.count ?? 0
+        setHeader(f, full: diff?.full == true, changes: diff == nil ? nil : changes)
+        table.change = desk.file == f.id ? desk.change : nil
         var notes: [String] = []
         if f.untracked == true { notes.append("This file is not committed. The agent did not commit it.") }
         guard let diff else {
@@ -139,6 +175,11 @@ final class DiffPanel: NSView {
         table.marks = marks
         table.threadView = { [weak self] p in self?.thread(p, file: f, notes: notesOfFile) }
         table.show(fold, items: items, tokens: tokens(f, diff), desk: desk, file: f, threads: threads.hash)
+        let at = table.change.map { "\(f.id)#\($0)" }
+        if at != table.scrolledTo {
+            table.scrolledTo = at
+            if let c = table.change { DispatchQueue.main.async { [weak table] in table?.scroll(toChange: c) } }
+        }
     }
 
     /// The syntax colors of each line of the fold, kept while the diff stays the same.
@@ -166,7 +207,7 @@ final class DiffPanel: NSView {
         return s
     }
 
-    private func setHeader(_ f: ReviewFile, full: Bool) {
+    private func setHeader(_ f: ReviewFile, full: Bool, changes: Int?) {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
         let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f), open: { [weak self] in self?.showFiles() })
         pathView = pathField
@@ -208,6 +249,16 @@ final class DiffPanel: NSView {
             count.setAccessibilityLabel(at.map { "File \($0 + 1) of \(order.count)" } ?? "\(order.count) files")
             parts.insert(back, at: 0)
             parts.insert(contentsOf: [count, next], at: 3)
+        }
+        if let n = changes {
+            let up = IconButton("chevron.up", label: "Previous change", tip: "Previous change ⌥↑") { [weak self] in self?.stepChange(-1) }
+            let down = IconButton("chevron.down", label: "Next change", tip: "Next change ⌥↓") { [weak self] in self?.stepChange(1) }
+            let c = desk.change.flatMap { $0 < n ? $0 : nil }
+            let chip = Chiplet(c.map { "\($0 + 1) / \(n)" } ?? (n == 0 ? "No changes" : "\(n) change\(n == 1 ? "" : "s")"), mono: c != nil)
+            chip.setAccessibilityLabel(c.map { "Change \($0 + 1) of \(n)" } ?? (n == 0 ? "No changes in this file" : "\(n) change\(n == 1 ? "" : "s") in this file"))
+            [up, chip, down].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
+            counter = chip
+            parts += [up, chip, down]
         }
         let size = desk.maximized
             ? IconButton("arrow.down.right.and.arrow.up.left", label: "Restore", tip: "Restore ⇧⌘M") { [weak self] in self?.toggleSize() }
@@ -253,6 +304,13 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var onWay: (DiffGap, DiffWay) -> Void = { _, _ in }
     /// The machine of the review, for the hint of an older daemon.
     private var machine = ""
+    /// The current change: its rows get a bar (OVERSIRE-442).
+    var change: Int?
+    /// The file and change that the table last scrolled to.
+    var scrolledTo: String?
+    private(set) var changeMarks: [DiffMark] = []
+    var onScroll: () -> Void = {}
+    var onShow: () -> Void = {}
 
     /// The longest text that a line shows with no wrap. A very long line (minified code) would make a huge view.
     static let nowrapLimit = 1000
@@ -297,9 +355,11 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         scrolled = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
             self?.followMouse()
             self?.placeThreads()
+            self?.onScroll()
         }
         framed = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView, queue: .main) { [weak self] _ in
             self?.fit()
+            self?.onShow()
         }
     }
 
@@ -325,7 +385,33 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         fit(force: true)
         view.reloadData()
         if !same { scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView) }
-        DispatchQueue.main.async { [weak self] in self?.followMouse() }
+        changeMarks = fold.marks(items)
+        onShow()
+        DispatchQueue.main.async { [weak self] in self?.followMouse(); self?.onShow() }
+    }
+
+    /// The rect of the rows of a change, in the table.
+    func rect(ofChange c: Int) -> NSRect? {
+        guard let m = changeMarks.first(where: { $0.change == c }) else { return nil }
+        return view.rect(ofRow: m.rows.lowerBound).union(view.rect(ofRow: m.rows.upperBound - 1))
+    }
+
+    /// Scrolls the change to a third of the height.
+    func scroll(toChange c: Int) {
+        guard let r = rect(ofChange: c) else { return }
+        let clip = scroll.contentView
+        let top = max(0, min(r.minY - clip.bounds.height / 3, view.frame.height - clip.bounds.height))
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: top))
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    /// The change of the lines in a row.
+    func change(ofRow r: Int) -> Int? {
+        switch items[r] {
+        case .line(let i): return fold.change(at: i)
+        case .pair(let o, let n): return [o, n].compactMap { $0 }.lazy.compactMap(fold.change(at:)).first
+        default: return nil
+        }
     }
 
     /// The row of the line with the new-side number `line`.
@@ -474,6 +560,7 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         rv.picks = picks
         rv.empty = empty
         rv.cursor = view.cursor == row && view.window?.firstResponder === view
+        rv.current = change != nil && change(ofRow: row) == change
         rv.needsDisplay = true
     }
 
@@ -740,6 +827,7 @@ final class DiffRowView: NSTableRowView {
     var gap = false
     var half: CGFloat = 0
     var cursor = false
+    var current = false
 
     override func drawBackground(in dirtyRect: NSRect) {
         Palette.panel.setFill()
@@ -758,7 +846,7 @@ final class DiffRowView: NSTableRowView {
                 r.fill()
                 continue
             }
-            if let c = picked ? Palette.acc.withAlphaComponent(0.2) : Self.color(kind)?.withAlphaComponent(0.12) {
+            if let c = picked ? Palette.acc.withAlphaComponent(0.2) : Self.color(kind)?.withAlphaComponent(current ? 0.24 : 0.12) {
                 c.setFill()
                 r.fill()
             }
@@ -766,6 +854,10 @@ final class DiffRowView: NSTableRowView {
         if split, !gap, kinds.0 != nil || kinds.1 != nil || empty.0 || empty.1 {
             Palette.line.setFill()
             NSRect(x: half, y: 0, width: 1, height: bounds.height).fill()
+        }
+        if current {
+            Palette.acc.setFill()
+            NSRect(x: 0, y: 0, width: 3, height: bounds.height).fill()
         }
         if cursor {
             Palette.acc.setStroke()

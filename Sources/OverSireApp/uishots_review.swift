@@ -9,12 +9,13 @@ extension UIShots {
     /// review:list, changes, select, menu, split, wrap, plan, submit, approve, merge, conflict or empty.
     /// max: the large view (OVERSIRE-440). switch: the file switch from the path, in the large view.
     /// full: a full diff with fold buttons. expand: the same after "Show 20 lines below". old-daemon: a partial diff (OVERSIRE-441).
+    /// steps: the second change of a full diff is the current change. ruler: the full file in the large view, with the ruler (OVERSIRE-442).
     /// long: a file of 4000 lines, with the widest line at line 3938 (OVERSIRE-439).
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
-        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: scene == "full" || scene == "expand")
+        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: ["full", "expand", "steps", "ruler"].contains(scene))
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
               let plan = REVIEWS.review("OVERSIRE-349", kind: .plan).flatMap({ REVIEWS.desk($0) }) else {
             w.router.go(.work(.review))
@@ -22,7 +23,8 @@ extension UIShots {
         }
         code.split = scene == "split"
         code.wrap = scene == "wrap"
-        code.maximized = scene == "max" || scene == "switch"
+        code.maximized = ["max", "switch", "ruler"].contains(scene)
+        code.wholeFile = scene == "ruler"
         code.view = scene == "files" ? .list : .tree
         if scene == "search" { code.filter.query = "review" }
         if scene == "filters" {
@@ -31,7 +33,8 @@ extension UIShots {
         }
         code.pick = scene == "changes" ? LinePick(repo: "oversire", path: "Sources/OverSireApp/review_tab.swift", side: .new, line: 41).click(43, side: .new, shift: true) : nil
         plan.block = scene == "plan" ? "risks" : nil
-        if ["long", "full", "expand", "old-daemon"].contains(scene) { code.file = "cli/review/routes.go" }
+        if ["long", "full", "expand", "old-daemon", "steps", "ruler"].contains(scene) { code.file = "cli/review/routes.go" }
+        code.change = scene == "steps" || scene == "ruler" ? 1 : nil
         if scene == "expand", let f = code.files.first(where: { $0.id == "cli/review/routes.go" }),
            let g = code.fold(f)?.items(split: false, threads: []).lazy.compactMap({ i -> DiffGap? in if case .gap(let g) = i, g.edge == .middle { return g }; return nil }).first {
             _ = code.expand(f, g, .down)
@@ -43,7 +46,7 @@ extension UIShots {
                 guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
-        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "full", "expand", "old-daemon": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
         case "switch":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {

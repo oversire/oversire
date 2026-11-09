@@ -80,7 +80,11 @@ final class ReviewDesk {
     var agent: (String) -> AgentLaunchSpec? = { _ in nil }
 
     // The place in the tab. It stays across builds of the page.
-    var file: String?
+    var file: String? { didSet { if file != oldValue { change = nil } } }
+    /// The current change of the file, for ⌥↑ / ⌥↓ (OVERSIRE-442).
+    var change: Int?
+    /// Where the next file lands when its diff loads.
+    var landing: DiffLanding?
     var split = false
     /// The diff shows in the large view (OVERSIRE-440).
     var maximized = false
@@ -211,6 +215,36 @@ final class ReviewDesk {
                 changed()
             }
         } catch { await fail(error) }
+    }
+
+    /// The files in the order of the file panel.
+    var steps: DiffSteps { DiffSteps(files: tree.steps(view).map(\.id)) }
+
+    /// ⌥↓ (k = 1) or ⌥↑ (k = −1). A step to another file opens it, waits for its diff and lands on its first or last change.
+    @MainActor
+    func step(_ k: Int) async -> DiffStep {
+        guard let id = file, let f = files.first(where: { $0.id == id }) else { return .end(k > 0 ? .last : .first) }
+        let s = steps.step(file: id, change: change, count: fold(f)?.changes.count ?? 0, by: k)
+        switch s {
+        case .change(let i): change = i
+        case .file(let next, let at):
+            file = next
+            landing = at
+            pick = nil
+            if let n = files.first(where: { $0.id == next }) {
+                await diff(n)
+                land(n)
+            }
+        case .end: break
+        }
+        return s
+    }
+
+    /// Sets the change from `landing` when the diff of the file is there.
+    func land(_ f: ReviewFile) {
+        guard let at = landing, f.id == file, let n = fold(f)?.changes.count else { return }
+        change = n == 0 ? nil : at == .first ? 0 : n - 1
+        landing = nil
     }
 
     /// The fold of the diff of a file, with the opened lines and Full file.

@@ -216,4 +216,54 @@ final class DiffFoldTests: XCTestCase {
         XCTAssertNil(f.expand(g[0], .all))
         XCTAssertTrue(f.opened.isEmpty)
     }
+
+    // MARK: Steps and ruler (OVERSIRE-442)
+
+    private let three = DiffSteps(files: ["a", "b", "c"])
+
+    func testAStepInsideAFile() {
+        XCTAssertEqual(three.step(file: "b", change: nil, count: 3, by: 1), .change(0), "no current change starts at the first")
+        XCTAssertEqual(three.step(file: "b", change: 0, count: 3, by: 1), .change(1))
+        XCTAssertEqual(three.step(file: "b", change: 2, count: 3, by: -1), .change(1))
+    }
+
+    func testAStepPastTheLastChangeOpensTheNextFileAtItsFirst() {
+        XCTAssertEqual(three.step(file: "b", change: 2, count: 3, by: 1), .file("c", .first))
+    }
+
+    func testAStepBeforeTheFirstChangeOpensThePreviousFileAtItsLast() {
+        XCTAssertEqual(three.step(file: "b", change: 0, count: 3, by: -1), .file("a", .last))
+        XCTAssertEqual(three.step(file: "b", change: nil, count: 3, by: -1), .file("a", .last))
+    }
+
+    func testTheEndOfTheReviewInBothDirections() {
+        XCTAssertEqual(three.step(file: "c", change: 1, count: 2, by: 1), .end(.last))
+        XCTAssertEqual(three.step(file: "a", change: 0, count: 2, by: -1), .end(.first))
+    }
+
+    func testAFileWithNoChangesIsAStop() {
+        XCTAssertEqual(three.step(file: "b", change: nil, count: 0, by: 1), .file("c", .first))
+        XCTAssertEqual(three.step(file: "b", change: nil, count: 0, by: -1), .file("a", .last))
+    }
+
+    func testRulerMarksFollowTheRows() throws {
+        let f = full(60, adds: [10, 37])
+        let items = f.items(split: false, threads: [])
+        let marks = f.marks(items)
+        XCTAssertEqual(marks.map(\.change), [0, 1])
+        for m in marks {
+            XCTAssertEqual(m.rows.count, 1)
+            guard case .line(let i) = items[m.rows.lowerBound] else { return XCTFail("a mark is on a line row") }
+            XCTAssertEqual(f.lines[i].new, m.change == 0 ? 10 : 37)
+            XCTAssertEqual(m.from, Double(m.rows.lowerBound) / Double(items.count), accuracy: 0.0001)
+            XCTAssertEqual(m.added, 1)
+        }
+        XCTAssertLessThan(marks[0].to, marks[1].from)
+        XCTAssertEqual(f.marks([]), [])
+    }
+
+    func testTheMarkLabel() {
+        let m = DiffMark(change: 1, rows: 4..<6, from: 0.1, to: 0.2, added: 1, removed: 1)
+        XCTAssertEqual(m.label, "Go to change 2: 1 added, 1 removed")
+    }
 }

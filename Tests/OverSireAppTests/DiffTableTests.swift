@@ -114,4 +114,49 @@ final class DiffTableTests: XCTestCase {
         XCTAssertEqual(after, before + DiffFold.step, "20 lines open above the anchor")
         XCTAssertEqual(t.view.rect(ofRow: after).minY - t.scroll.contentView.bounds.minY, y, accuracy: 0.5)
     }
+
+    /// A panel with the full sample diff in a short window.
+    private func fullPanel(whole: Bool = false) -> (DiffPanel, NSWindow, ReviewDesk) {
+        let s = ReviewSummary(key: "K-1", kind: .code, machine: "mba", state: .ready, root: "/src", updatedAt: Date())
+        let d = ReviewDesk(detail: ReviewDetail(summary: s, files: [file], comments: []), diffs: [UIShots.fullDiff])
+        d.file = file.id
+        d.wholeFile = whole
+        let p = DiffPanel(desk: d, threads: ReviewThreads(d))
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        p.translatesAutoresizingMaskIntoConstraints = true
+        w.contentView = p
+        p.reload = { p.update(self.file, diff: UIShots.fullDiff); p.table.view.layoutSubtreeIfNeeded(); p.ruler.layoutSubtreeIfNeeded() }
+        p.reload()
+        w.layoutIfNeeded()
+        return (p, w, d)
+    }
+
+    func testTheRulerShowsEachChangeAndTheVisiblePart() throws {
+        let (p, w, _) = fullPanel(whole: true)
+        defer { w.close() }
+        p.ruler.refresh()
+        let rects = p.ruler.rects()
+        XCTAssertEqual(rects.map(\.mark.change), [0, 1])
+        XCTAssertLessThan(rects[0].rect.minY, rects[1].rect.minY, "the marks follow the order of the file")
+        let thumb = try XCTUnwrap(p.ruler.thumb())
+        XCTAssertEqual(thumb.minY, 0, accuracy: 0.5)
+        XCTAssertLessThan(thumb.height, p.ruler.bounds.height)
+        XCTAssertEqual(p.ruler.accessibilityChildren()?.count, 2)
+    }
+
+    func testTheCurrentChangeScrollsIntoViewAndGetsTheBar() throws {
+        let (p, w, d) = fullPanel(whole: true)
+        defer { w.close() }
+        d.change = 1
+        p.reload()
+        let t = p.table
+        t.scroll(toChange: 1)
+        let r = try XCTUnwrap(t.rect(ofChange: 1))
+        XCTAssertTrue(t.view.visibleRect.intersects(r))
+        let row = try XCTUnwrap(t.row(new: 100))
+        XCTAssertEqual(t.change(ofRow: row), 1)
+        let rv = try XCTUnwrap(t.view.rowView(atRow: row, makeIfNecessary: true) as? DiffRowView)
+        XCTAssertTrue(rv.current)
+    }
 }

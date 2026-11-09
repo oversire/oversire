@@ -231,7 +231,7 @@ final class ReviewChangesTab {
             }
         }
         out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos,
-                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.opened, desk.wholeFile, update: fill) {
+                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.opened, desk.wholeFile, desk.change, update: fill) {
             let pane = TwoPane(sideWidth: 300, keep: "changes")
             fill(pane)
             return pane
