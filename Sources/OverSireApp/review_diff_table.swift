@@ -12,7 +12,10 @@ final class DiffPanel: NSView {
     let threads: ReviewThreads
     let table: DiffTable
     var reload: () -> Void = {}
+    /// Shows another file of the review.
+    var open: (ReviewFile) -> Void = { _ in }
     private let head = NSView()
+    private var monitor: Any?
     private var tokens: (id: String, diff: FileDiff, tokens: [[SyntaxLanguage.Token]])?
 
     init(desk: ReviewDesk, threads: ReviewThreads) {
@@ -41,6 +44,55 @@ final class DiffPanel: NSView {
         table.dragEnded = { [weak self] in self?.reload() }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    // The panel moves between the page and the large view, so the monitor follows its window.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self, let w = self.window, e.window === w else { return e }
+            let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard let key = DiffKey(key: e.keyCode, shift: mods.contains(.shift), option: mods.contains(.option),
+                                    command: mods.contains(.command), inText: w.firstResponder is NSTextView) else { return e }
+            return self.handle(key) ? nil : e
+        }
+    }
+
+    /// Does the action of a key. False when the key is not for the panel.
+    func handle(_ key: DiffKey) -> Bool {
+        switch key {
+        case .size: toggleSize()
+        case .files: showFiles()
+        case .nextFile, .previousFile: step(key == .nextFile ? 1 : -1)
+        case .close:
+            guard desk.maximized else { return false }
+            toggleSize()
+        case .nextChange, .previousChange: return false
+        }
+        return true
+    }
+
+    func toggleSize() {
+        desk.maximized.toggle()
+        reload()
+    }
+
+    /// The files in the order of the file panel.
+    var steps: DiffSteps { DiffSteps(files: desk.tree.steps(desk.view).map(\.id)) }
+
+    /// Opens the file `k` steps away. Beeps at the two ends.
+    func step(_ k: Int) {
+        guard let id = desk.file, let next = steps.file(id, by: k), let f = desk.files.first(where: { $0.id == next }) else { return NSSound.beep() }
+        open(f)
+    }
+
+    private weak var pathView: NSView?
+
+    func showFiles() {
+        guard let v = pathView ?? head.subviews.first, v.window != nil else { return }
+        DiffFileSwitch.show(desk, from: v) { [weak self] f in self?.open(f) }
+    }
 
     private func pick(_ p: DiffPlace, shift: Bool, reload again: Bool) {
         guard let f = table.file else { return }
@@ -109,7 +161,8 @@ final class DiffPanel: NSView {
 
     private func setHeader(_ f: ReviewFile) {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
-        let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f))
+        let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f), open: { [weak self] in self?.showFiles() })
+        pathView = pathField
         let mode = Segmented(["Unified", "Split"], selected: desk.split ? 1 : 0, label: "Diff view") { [weak self] i in
             self?.desk.split = i == 1
             self?.reload()
@@ -129,7 +182,23 @@ final class DiffPanel: NSView {
             chip.setAccessibilityLabel("\(n) pending comment\(n == 1 ? "" : "s") in this file")
             parts.append(chip)
         }
-        let row = NSStackView(h: parts + [wrap, mode, viewed], spacing: 8)
+        if desk.maximized {
+            let order = steps.files
+            let at = order.firstIndex(of: f.id)
+            let back = IconButton("chevron.left", label: "Previous file", tip: "Previous file ⌥⇧↑") { [weak self] in self?.step(-1) }
+            let next = IconButton("chevron.right", label: "Next file", tip: "Next file ⌥⇧↓") { [weak self] in self?.step(1) }
+            back.isEnabled = (at ?? 0) > 0
+            next.isEnabled = at.map { $0 < order.count - 1 } ?? false
+            let count = NSTextField.text(at.map { "\($0 + 1) / \(order.count)" } ?? "– / \(order.count)", size: 11, color: Palette.mut, mono: true)
+            count.setContentCompressionResistancePriority(.required, for: .horizontal)
+            count.setAccessibilityLabel(at.map { "File \($0 + 1) of \(order.count)" } ?? "\(order.count) files")
+            parts.insert(back, at: 0)
+            parts.insert(contentsOf: [count, next], at: 3)
+        }
+        let size = desk.maximized
+            ? IconButton("arrow.down.right.and.arrow.up.left", label: "Restore", tip: "Restore ⇧⌘M") { [weak self] in self?.toggleSize() }
+            : IconButton("arrow.up.left.and.arrow.down.right", label: "Maximize", tip: "Maximize ⇧⌘M") { [weak self] in self?.toggleSize() }
+        let row = NSStackView(h: parts + [wrap, mode, viewed, size], spacing: 8)
         row.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         head.subviews.forEach { $0.removeFromSuperview() }
         head.addSubview(row)

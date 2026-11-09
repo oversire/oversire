@@ -106,9 +106,13 @@ final class PathHead: NSStackView {
     private let path: String
     private let absolute: String
 
-    init(_ shown: String, path: String, absolute: String) {
+    private var open: (() -> Void)?
+
+    /// With `open`, a click on the path or on ▾ opens the file switch. The path is then not selectable.
+    init(_ shown: String, path: String, absolute: String, open: (() -> Void)? = nil) {
         self.path = path
         self.absolute = absolute
+        self.open = open
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 4
@@ -131,7 +135,24 @@ final class PathHead: NSStackView {
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         show(copied: false)
         addArrangedSubview(field)
+        if open != nil {
+            field.isSelectable = false
+            let more = IconButton("chevron.down", label: "Switch file", tip: "Switch file ⌘P") { [weak self] in self?.open?() }
+            more.setContentCompressionResistancePriority(.required, for: .horizontal)
+            addArrangedSubview(more)
+        }
         addArrangedSubview(button)
+    }
+
+    // The path label takes no clicks, so the stack gets them.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let v = super.hitTest(point)
+        return open != nil && v is NSTextField ? self : v
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let open else { return super.mouseDown(with: event) }
+        open()
     }
     required init?(coder: NSCoder) { fatalError() }
 

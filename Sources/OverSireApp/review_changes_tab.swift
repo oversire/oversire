@@ -110,6 +110,8 @@ final class ReviewChangesTab {
     private var threads: [String: ReviewThreads] = [:]
     private var panels: [String: FilePanel] = [:]
     private var diffs: [String: DiffPanel] = [:]
+    private var modal: DiffModal?
+    private weak var away: DiffAwayNote?
 
     func threads(_ desk: ReviewDesk) -> ReviewThreads {
         if let t = threads[desk.id], t.desk === desk { return t }
@@ -151,6 +153,12 @@ final class ReviewChangesTab {
         if let p = diffs[desk.id], p.desk === desk { return p }
         let p = DiffPanel(desk: desk, threads: threads(desk))
         p.reload = { [weak self] in self?.reload() }
+        p.open = { [weak self, weak desk] f in
+            guard let desk else { return }
+            desk.file = f.id
+            if !desk.filter.matches(f) { desk.filter = FileFilter() }
+            self?.open(desk)
+        }
         diffs[desk.id] = p
         return p
     }
@@ -179,10 +187,43 @@ final class ReviewChangesTab {
             guard let pane = v as? TwoPane else { return }
             let p = self.panel(desk)
             pane.side.set(header: p.head, body: p.body(), place: "files")
-            guard let file else { return pane.main.set(header: nil, body: EmptyNote("No changed files."), place: "") }
+            guard let file else {
+                self.closeModal()
+                return pane.main.set(header: nil, body: EmptyNote("No changed files."), place: "")
+            }
             let panel = self.diffPanel(desk)
             panel.update(file, diff: diff)
-            pane.main.set(header: nil, fill: panel, place: file.id)
+            if desk.maximized {
+                let note = self.away ?? DiffAwayNote()
+                note.gone = { [weak self, weak desk] in
+                    // A rebuild puts the note back at once. Only a page that leaves the screen closes the large view.
+                    DispatchQueue.main.async {
+                        guard let self, self.away?.window == nil, let desk else { return }
+                        desk.maximized = false
+                        self.closeModal()
+                    }
+                }
+                self.away = note
+                pane.main.set(header: nil, body: note, place: "max")
+                // A new page is not in its window yet. Then the large view shows on the next turn.
+                let show = { [weak self, weak desk, weak panel] in
+                    guard let self, let desk, let panel, desk.maximized else { return }
+                    guard let w = self.window() else {
+                        desk.maximized = false
+                        return self.reload()
+                    }
+                    if let m = self.modal, m.window === w { return m.hold(panel) }
+                    self.closeModal()
+                    self.modal = DiffModal.show(panel, in: w) { [weak self, weak desk] in
+                        desk?.maximized = false
+                        self?.reload()
+                    }
+                }
+                if self.window() != nil { show() } else { DispatchQueue.main.async(execute: show) }
+            } else {
+                self.closeModal()
+                pane.main.set(header: nil, fill: panel, place: file.id)
+            }
             guard desk.reveal != nil else { return }
             DispatchQueue.main.async { [weak panel, weak desk] in
                 guard let panel, let desk, let r = desk.reveal, panel.table.reveal(r) else { return }
@@ -190,12 +231,17 @@ final class ReviewChangesTab {
             }
         }
         out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos,
-                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, update: fill) {
+                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, update: fill) {
             let pane = TwoPane(sideWidth: 300, keep: "changes")
             fill(pane)
             return pane
         })
         return out
+    }
+
+    func closeModal() {
+        modal?.dismiss()
+        modal = nil
     }
 
     /// Shows the file and reads its diff.

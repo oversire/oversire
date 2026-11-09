@@ -7,6 +7,7 @@ import OverSireCore
 
 extension UIShots {
     /// review:list, changes, select, menu, split, wrap, plan, submit, approve, merge, conflict or empty.
+    /// max: the large view (OVERSIRE-440). switch: the file switch from the path, in the large view.
     /// long: a file of 4000 lines, with the widest line at line 3938 (OVERSIRE-439).
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
@@ -20,6 +21,7 @@ extension UIShots {
         }
         code.split = scene == "split"
         code.wrap = scene == "wrap"
+        code.maximized = scene == "max" || scene == "switch"
         code.view = scene == "files" ? .list : .tree
         if scene == "search" { code.filter.query = "review" }
         if scene == "filters" {
@@ -36,7 +38,13 @@ extension UIShots {
                 guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
-        case "changes", "split", "wrap", "files", "search", "filters", "stale": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max": w.router.go(.item("FRITZ-17", .changes))
+        case "switch":
+            w.router.go(.item("FRITZ-17", .changes))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard let root = w.window?.contentView else { return }
+                (Self.find(root) { $0 is DiffPanel } as? DiffPanel)?.showFiles()
+            }
         case "select":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {

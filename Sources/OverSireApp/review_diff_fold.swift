@@ -278,3 +278,32 @@ struct DiffSelection: Equatable {
         return out.joined(separator: "\n")
     }
 }
+
+/// The order of the files for ‹ › and ⌥⇧↑ / ⌥⇧↓: the rows of the file panel (OVERSIRE-440).
+struct DiffSteps {
+    let files: [String]
+
+    /// The file `k` steps from `id`. Nil before the first file and after the last file.
+    func file(_ id: String, by k: Int) -> String? {
+        guard let i = files.firstIndex(of: id), files.indices.contains(i + k) else { return nil }
+        return files[i + k]
+    }
+}
+
+/// A key of the diff panel.
+enum DiffKey: Equatable {
+    case size, files, nextChange, previousChange, nextFile, previousFile, close
+
+    /// ⇧⌘M: size. ⌘P: files. ⌥↓ ⌥↑: changes. ⌥⇧↓ ⌥⇧↑: files. Esc: close.
+    /// In a text view, the arrows and Esc go to the text, so a comment field can cancel its draft.
+    init?(key: UInt16, shift: Bool, option: Bool, command: Bool, inText: Bool) {
+        switch (key, shift, option, command) {
+        case (46, true, false, true): self = .size
+        case (35, false, false, true): self = .files
+        case (125, _, true, false) where !inText: self = shift ? .nextFile : .nextChange
+        case (126, _, true, false) where !inText: self = shift ? .previousFile : .previousChange
+        case (53, false, false, false) where !inText: self = .close
+        default: return nil
+        }
+    }
+}

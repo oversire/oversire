@@ -82,6 +82,8 @@ final class ReviewDesk {
     // The place in the tab. It stays across builds of the page.
     var file: String?
     var split = false
+    /// The diff shows in the large view (OVERSIRE-440).
+    var maximized = false
     var pick: LinePick?
     var block: String?
     var draft = ""

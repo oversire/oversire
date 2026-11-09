@@ -87,6 +87,13 @@ struct FileTree {
 
     var shown: [ReviewFile] { files.filter(filter.matches) }
 
+    /// The files in the order of the rows, with the filter. A collapsed folder does not hide its files.
+    func steps(_ view: FileView) -> [ReviewFile] {
+        var all = self
+        all.collapsed = []
+        return all.rows(view).compactMap(\.file)
+    }
+
     private var order: [String] {
         repos + Set(files.map(\.repo)).subtracting(repos).sorted()
     }

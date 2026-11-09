@@ -117,4 +117,16 @@ final class ReviewFileTreeTests: XCTestCase {
         XCTAssertEqual(desk.filter, FileFilter())
         XCTAssertEqual(builds, 1)
     }
+
+    func testTheFilesOfTheTreeIgnoreCollapsedFolders() {
+        let t = tree(collapsed: ["oversire/Sources"])
+        XCTAssertFalse(t.rows(.tree).contains { $0.file?.path == "Sources/OverSireCore/Review.swift" }, "the folder is collapsed")
+        XCTAssertEqual(t.steps(.tree).map(\.path), [
+            "docs/old.md", "Sources/OverSireApp/review_tab.swift", "Sources/OverSireApp/work_page.swift",
+            "Sources/OverSireCore/Review.swift", "README.md", "review/routes.go",
+        ])
+        var q = FileFilter()
+        q.query = "review"
+        XCTAssertEqual(tree(q).steps(.list).map(\.id), tree(q).rows(.list).compactMap(\.file?.id), "the steps use the filter")
+    }
 }

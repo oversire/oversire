@@ -91,4 +91,30 @@ final class DiffFoldTests: XCTestCase {
         XCTAssertEqual(right.text(f, split), "func a() {\n    return 2\n}", "a split diff copies one side")
         XCTAssertTrue(DiffSelection(column: 0, from: .init(row: 1, offset: 2), to: .init(row: 1, offset: 2)).isEmpty)
     }
+
+    func testFileStepsFollowThePanelOrder() {
+        let s = DiffSteps(files: ["a", "b", "c"])
+        XCTAssertEqual(s.file("b", by: 1), "c")
+        XCTAssertEqual(s.file("b", by: -1), "a")
+        XCTAssertNil(s.file("a", by: -1), "no file before the first file")
+        XCTAssertNil(s.file("c", by: 1), "no file after the last file")
+        XCTAssertNil(s.file("x", by: 1))
+    }
+
+    func testKeysInATextFieldGoToTheField() {
+        XCTAssertNil(DiffKey(key: 53, shift: false, option: false, command: false, inText: true), "Esc cancels the draft")
+        XCTAssertNil(DiffKey(key: 125, shift: false, option: true, command: false, inText: true))
+        XCTAssertNil(DiffKey(key: 126, shift: true, option: true, command: false, inText: true))
+        XCTAssertEqual(DiffKey(key: 53, shift: false, option: false, command: false, inText: false), .close)
+        XCTAssertEqual(DiffKey(key: 125, shift: false, option: true, command: false, inText: false), .nextChange)
+        XCTAssertEqual(DiffKey(key: 126, shift: true, option: true, command: false, inText: false), .previousFile)
+        XCTAssertEqual(DiffKey(key: 35, shift: false, option: false, command: true, inText: true), .files, "⌘P works in a field")
+        XCTAssertNil(DiffKey(key: 125, shift: false, option: false, command: false, inText: false), "a plain ↓ moves the cursor")
+    }
+
+    func testShiftCommandMTogglesTheSize() {
+        XCTAssertEqual(DiffKey(key: 46, shift: true, option: false, command: true, inText: false), .size)
+        XCTAssertEqual(DiffKey(key: 46, shift: true, option: false, command: true, inText: true), .size)
+        XCTAssertNil(DiffKey(key: 46, shift: false, option: false, command: true, inText: false), "⌘M stays Minimize")
+    }
 }
