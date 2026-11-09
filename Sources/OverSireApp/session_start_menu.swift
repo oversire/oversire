@@ -17,14 +17,11 @@ struct SessionStartMenu {
         }
     }
 
-    /// Ship on an item that is not in Todo asks first (OVERSIRE-373). `ship` runs on "Ship as is".
+    /// Ship on an item that is not planned (Backlog or Triage) asks first (OVERSIRE-373). `ship` runs on "Ship as is".
     /// "Plan first" opens the Plan session of the item.
     func shipGate(_ item: Item, snap: ProjectSnapshot, in window: NSWindow?, ship: @escaping () -> Void) {
-        guard let state = snap.notTodo(item) else { ship(); return }
-        let spec = AlertConfirm.Spec(title: "Plan first, or ship as is?",
-                                     info: "\(item.key) is in \(state), not Todo. A plan ends at the plan review in Work › Review. "
-                                         + "When you approve the plan, the item and its sub-items go to Todo.",
-                                     buttons: ["Plan first", "Ship as is", "Cancel"])
+        guard let state = snap.unplanned(item) else { ship(); return }
+        let spec = Self.gateSpec(key: item.key, state: state)
         let agents = data.agentIndex
         AlertConfirm.show(spec, in: window) { a in
             switch a.button {
@@ -36,6 +33,13 @@ struct SessionStartMenu {
             default: break
             }
         }
+    }
+
+    static func gateSpec(key: String, state: String) -> AlertConfirm.Spec {
+        AlertConfirm.Spec(title: "Plan first, or ship as is?",
+                          info: "\(key) is in \(state), not planned. A plan ends at the plan review in Work › Review. "
+                              + "When you approve the plan, the item and its sub-items go to Todo.",
+                          buttons: ["Plan first", "Ship as is", "Cancel"])
     }
 
     /// Gives nil when the project has a saved Orca workspace. Else a menu at `anchor` asks for one.
@@ -147,11 +151,11 @@ struct SessionStartMenu {
     }
 
     /// Starts a runbook on the sessions machine. Without a saved Orca workspace, a menu at `anchor` asks for it.
-    /// A runbook other than Plan asks first when the item is not in Todo. A start at a later step does not ask.
+    /// A runbook other than Plan asks first when the item is not planned. A start at a later step does not ask.
     func runbook(_ book: Runbook, _ item: Item, snap: ProjectSnapshot, at anchor: NSView, step: String? = nil, asked: Bool = false,
                  started: @escaping (RunbookRun) -> Void) {
         let window = anchor.window
-        guard asked || book.id == Runbook.planID || step != nil || snap.notTodo(item) == nil else {
+        guard asked || book.id == Runbook.planID || step != nil || snap.unplanned(item) == nil else {
             shipGate(item, snap: snap, in: window) { [weak anchor] in
                 guard let anchor else { return }
                 self.runbook(book, item, snap: snap, at: anchor, asked: true, started: started)

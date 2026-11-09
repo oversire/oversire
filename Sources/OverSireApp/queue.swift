@@ -27,7 +27,7 @@ struct QueueWorld {
     var areas: (String) -> [String] = { _ in [] }       // code areas of a key (cloud)
     var busyAreas: (QueueLane) -> [String: String] = { _ in [:] }   // area → the key that runs in it (cloud)
     var sharable: (QueueLane, String) -> Bool = { _, _ in false }   // a feature area that two items can hold (cloud)
-    var notTodo: (String) -> String? = { _ in nil }   // the state name of a key that is not in Todo, else nil (OVERSIRE-373)
+    var unplanned: (String) -> String? = { _ in nil }   // the state name of a key in Backlog or Triage, else nil (OVERSIRE-373)
 }
 
 // Why the queue skips an entry.
@@ -43,7 +43,7 @@ enum QueueHold: Equatable {
         switch self {
         case .waits(let keys): return "⏸ Waits on " + keys.joined(separator: ", ")
         case .area(let a, let k): return "⊘ Area busy: \(a) · \(k) runs"
-        case .planFirst(let st): return "◇ Plan first: the item is in \(st), not Todo"
+        case .planFirst(let st): return "◇ Plan first: the item is in \(st), not planned"
         case .unknown: return "Reads the relations…"
         }
     }
@@ -117,14 +117,14 @@ extension QueueLane {
         var holds: [String: QueueHold]    // key → hold
     }
 
-    /// Only a Todo item ships. A Plan entry starts in each state.
+    /// An item in Backlog or Triage does not ship. A Plan entry starts in each state.
     /// The first entry with no open blocker and no busy area starts when a slot is free and its condition holds.
     /// The condition keeps the lane order: a later entry does not pass the next entry because of it. Pure.
     func pick(state: QueueLaneState?, world: QueueWorld) -> Pick {
         var p = Pick(holds: [:])
         let busyAreas = world.busyAreas(self)
         for e in entries {
-            if e.runbook != Runbook.planID, let st = world.notTodo(e.key) { p.holds[e.key] = .planFirst(state: st); continue }
+            if e.runbook != Runbook.planID, let st = world.unplanned(e.key) { p.holds[e.key] = .planFirst(state: st); continue }
             if let hold = Self.hold(e.key, world: world, busyAreas: busyAreas.filter { !world.sharable(self, $0.key) }) { p.holds[e.key] = hold; continue }
             if p.next == nil { p.next = e.key }
         }
@@ -301,7 +301,7 @@ final class WorkQueue {
             areas: { [unowned self] k in self.areaBook()?.areas(key: k) ?? [] },
             busyAreas: { [unowned self] lane in self.areaBook()?.busy(running: self.running(lane)) ?? [:] },
             sharable: { [unowned self] lane, a in self.planner()?.sharable(a, project: lane.project) ?? false },
-            notTodo: { [unowned self] k in self.store.item(key: k).flatMap { $0.snap.notTodo($0.item) } })
+            unplanned: { [unowned self] k in self.store.item(key: k).flatMap { $0.snap.unplanned($0.item) } })
     }
 
     // Adds items from Plane triggers, then starts what is due. Call it after each data change.

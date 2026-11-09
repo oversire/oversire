@@ -276,12 +276,14 @@ public struct ProjectSnapshot: Codable, Sendable {
     /// The state is in the completed or cancelled group (or a status that the user set to Done).
     public func isClosed(_ stateId: String?) -> Bool { option(stateId)?.category == .done }
 
-    /// The state name when the item is not in Todo, else nil. Todo is the Plane group unstarted.
-    /// A tracker with no groups uses the Todo category. An unknown state is not held.
-    public func notTodo(_ item: Item) -> String? {
+    /// The state name when the item is not planned, else nil. Not planned is the Plane group backlog or triage.
+    /// A tracker with no groups matches the state name. An unknown state is not held.
+    public func unplanned(_ item: Item) -> String? {
         guard let o = option(item.statusOptionId) else { return nil }
-        if let g = o.group { return g == "unstarted" ? nil : o.name }
-        return o.category == .todo ? nil : o.name
+        let unplanned = ["backlog", "triage"]
+        if let g = o.group { return unplanned.contains(g) ? o.name : nil }
+        let n = o.name.lowercased()
+        return unplanned.contains { n.contains($0) } ? o.name : nil
     }
 
     /// Sub-items at all levels that are not closed. Counts also the sub-items that are not loaded.

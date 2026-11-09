@@ -76,8 +76,8 @@ final class WorkQueueTests: XCTestCase {
         XCTAssertEqual(QueueHold.area("contract", runs: "OVERSIRE-63").reason, "⊘ Area busy: contract · OVERSIRE-63 runs")
     }
 
-    // OVERSIRE-373: the queue ships only Todo items. A Plan entry starts in each state.
-    func testPickTakesOnlyTodoItems() {
+    // OVERSIRE-448: the queue holds only Backlog and Triage items. A Plan entry starts in each state.
+    func testPickHoldsOnlyUnplannedItems() {
         let states = [StatusOption(id: "b", name: "Backlog", color: "#999", group: "backlog"),
                       StatusOption(id: "t", name: "Todo", color: "#999", group: "unstarted"),
                       StatusOption(id: "p", name: "In Progress", color: "#999", group: "started")]
@@ -88,16 +88,14 @@ final class WorkQueueTests: XCTestCase {
         let items = ["OVERSIRE-2": item(2, "b"), "OVERSIRE-3": item(3, "t"), "OVERSIRE-4": item(4, "p")]
         let snap = ProjectSnapshot(summary: ProjectSummary(ref: ProjectRef(workspace: "ocral", id: "p1"), identifier: "OVERSIRE", title: "OverSire", url: "", closed: false),
                                    statusOptions: states, items: Array(items.values), fetchedAt: Date(), me: "ada")
-        XCTAssertEqual(snap.notTodo(items["OVERSIRE-2"]!), "Backlog")
-        XCTAssertNil(snap.notTodo(items["OVERSIRE-3"]!))
-        XCTAssertEqual(snap.notTodo(items["OVERSIRE-4"]!), "In Progress")
         var w = world(ciPassed: true)
-        w.notTodo = { items[$0].flatMap(snap.notTodo) }
+        w.unplanned = { items[$0].flatMap(snap.unplanned) }
         func entry(_ n: Int, runbook: String? = nil) -> QueueEntry { QueueEntry(key: "OVERSIRE-\(n)", title: "\(n)", added: Date(), runbook: runbook) }
 
         var p = QueueLane(project: lane.project, identifier: "OVERSIRE", entries: [entry(2), entry(4), entry(3)]).pick(state: nil, world: w)
-        XCTAssertEqual(p.holds, ["OVERSIRE-2": .planFirst(state: "Backlog"), "OVERSIRE-4": .planFirst(state: "In Progress")], "a Backlog item is refused")
-        XCTAssertEqual(p.entry?.key, "OVERSIRE-3", "a Todo item is taken")
+        XCTAssertEqual(p.holds, ["OVERSIRE-2": .planFirst(state: "Backlog")], "only a Backlog item is refused")
+        XCTAssertEqual(p.entry?.key, "OVERSIRE-4", "an In Progress item ships")
+        XCTAssertEqual(QueueHold.planFirst(state: "Backlog").reason, "◇ Plan first: the item is in Backlog, not planned")
         XCTAssertEqual(QueueBoard.note(.planFirst(state: "Backlog")), "◇ Plan first · Backlog")
 
         p = QueueLane(project: lane.project, identifier: "OVERSIRE", entries: [entry(2, runbook: Runbook.planID)]).pick(state: nil, world: w)

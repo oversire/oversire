@@ -148,7 +148,7 @@ struct WorkContext {
             switch h {
             case .waits(let keys): why = "Waits on the open blockers \(keys.joined(separator: ", "))."
             case .area(let a, let other): why = "The area \(a) is busy: \(other) runs."
-            case .planFirst(let st): why = "The item is in \(st), not Todo. Plan it first, or set it to Todo to ship it as is."
+            case .planFirst(let st): why = "The item is in \(st), not planned. Plan it first, or set it to Todo to ship it as is."
             case .unknown: why = "The relations are not loaded yet."
             }
         } else if let next = pick.next, next != k {

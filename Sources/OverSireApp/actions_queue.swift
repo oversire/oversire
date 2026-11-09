@@ -13,7 +13,7 @@ struct QueueActions {
         let device: () -> String? = { RELAY.deviceID.isEmpty ? nil : RELAY.deviceID }
         return [
             ActionSpec(id: "queue.add", title: "Add to queue", help: "Adds the item to the queue lane of its project. The queue starts it when a slot is free. "
-                       + "The queue ships only items in Todo: an item in another state waits with \"Plan first\", except with the plan runbook. "
+                       + "The queue holds an item in Backlog or Triage with \"Plan first\", except with the plan runbook. "
                        + "`runbook`: a runbook id that runs in place of one session. Leave it out for one session.",
                        kind: .change, input: ActionSpec.args(["key": key, "runbook": ("string", "A runbook id, for example ship.")], required: ["key"])) { a in
                 await link.item(a) { d, f, done in

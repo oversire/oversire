@@ -33,7 +33,7 @@ A step of `claude-max` uses the default agent when the config has no `claude-max
 
 The Plan button of an item or an intake item starts the same plan as a talk: one session with the start key `plan:<KEY>`. On an intake item, the agent accepts the item first, with the same ID. See [enhance.md](enhance.md) for the ladder Enhance, Plan, Ship.
 
-Ship on an item that is not in Todo asks **Plan first, or ship as is?** Plan first opens the Plan session. Ship as is starts Ship. A start at a later step does not ask.
+Ship on an item in Backlog or Triage asks **Plan first, or ship as is?** Plan first opens the Plan session. Ship as is starts Ship. A start at a later step does not ask.
 
 ### The move from Full
 
@@ -84,7 +84,7 @@ The item page has a Runbook tab when the item has a run. It shows:
 
 Add to queue asks for the runbook: Run <runbook> or One session. The queue starts a run for an entry with a runbook.
 
-The queue ships only items in Todo (the Plane state group `unstarted`). An item in another state, for example Backlog, waits in its lane with **◇ Plan first · Backlog**. Approve its plan, or set it to Todo, and the queue takes it. An entry with the Plan runbook starts in each state.
+The queue does not ship an item in the Plane state groups `backlog` or `triage`. It waits in its lane with **◇ Plan first · Backlog**. Approve its plan, or set it to Todo, and the queue takes it. An item in Todo or In Progress ships. An entry with the Plan runbook starts in each state.
 
 A run holds a queue slot only while a step starts, works or asks. A run at a gate or paused frees its slot. The running card of the lane shows a step bar: a filled square for each done step, a ring on the current step, and "n/N · step name".
 

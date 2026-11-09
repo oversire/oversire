@@ -22,6 +22,27 @@ final class TrackerModelTests: XCTestCase {
                                statusOptions: options, items: items, fetchedAt: Date())
     }
 
+    func testUnplannedOnlyInBacklogAndTriage() {
+        let opts = [StatusOption(id: "bl", name: "Backlog", color: "", group: "backlog"),
+                    StatusOption(id: "tr", name: "Triage", color: "", group: "triage"),
+                    todo, doing,
+                    StatusOption(id: "dn", name: "Done", color: "", group: "completed"),
+                    StatusOption(id: "cx", name: "Cancelled", color: "", group: "cancelled")]
+        let s = snap([], opts)
+        XCTAssertEqual(s.unplanned(item("1", status: "bl")), "Backlog")
+        XCTAssertEqual(s.unplanned(item("2", status: "tr")), "Triage")
+        for id in ["s1", "s2", "dn", "cx"] { XCTAssertNil(s.unplanned(item("3", status: id)), id) }
+        XCTAssertNil(s.unplanned(item("4", status: "unknown")))
+        XCTAssertNil(s.unplanned(item("5", status: nil)))
+    }
+
+    func testUnplannedWithoutGroups() {
+        let backlog = StatusOption(id: "bl", name: "Backlog", color: "")
+        let s = snap([], [backlog, StatusOption(id: "t", name: "Todo", color: ""), StatusOption(id: "p", name: "In progress", color: ""), done])
+        XCTAssertEqual(s.unplanned(item("1", status: "bl")), "Backlog")
+        for id in ["t", "p", "s5"] { XCTAssertNil(s.unplanned(item("2", status: id)), id) }
+    }
+
     func testCategoryByName() {
         let cases: [(String, StatusCategory)] = [("Done", .done), ("Closed", .done), ("Shipped", .done), ("Blocked", .blocked),
                                                  ("In review", .review), ("In progress", .progress), ("Doing", .progress),
