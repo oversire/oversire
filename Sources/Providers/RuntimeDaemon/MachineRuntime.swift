@@ -95,7 +95,7 @@ public class MachineRuntime: AgentRuntime, SessionIO, HostFileWriting, Workspace
             let agents = (byWorkspace[w.id] ?? []).filter { $0.runtime == w.runtime }.map { s in
                 AgentSession(phase: Self.phase(s), since: s.stateSince, card: w.id, paneKey: s.id, agent: AgentName(rawValue: s.harness),
                              repo: repo, prompt: s.prompt, message: s.lastMessage, key: s.key, startedAt: s.startedAt,
-                             profile: s.profile, model: s.model, effort: s.effort, view: s.view)
+                             profile: s.profile, model: s.model, effort: s.effort, view: s.view, overseer: s.overseer)
             }
             return Workspace(id: w.id, repo: repo, path: w.path, name: w.name ?? "", comment: w.comment, liveTerminals: w.liveTerminals,
                              lastActivity: w.lastActivity, agents: agents, kind: Self.kind(w.kind), branch: w.branch ?? "")

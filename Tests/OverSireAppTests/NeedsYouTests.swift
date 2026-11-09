@@ -29,6 +29,16 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(got.first?.kind, .needsInput, "the Orca row and the AI row of an item become one row")
     }
 
+    @MainActor
+    func testNeedsYouSkipsOverseenTurnEnds() {
+        let d = TestAppData()
+        let at = Date()
+        d.agentIndex.seed("A-1", AgentSession(phase: .waiting, since: at, paneKey: "s-1", message: "Done?", overseer: "claude-1"))
+        d.agentIndex.seed("A-2", AgentSession(phase: .waiting, since: at, paneKey: "s-2", message: "Done?"))
+        let rows = NeedsYou.collect(d, now: at, runs: [])
+        XCTAssertEqual(rows.filter { $0.kind == .needsInput }.map(\.key), ["A-2"], "an overseen session gives no row until it has a question")
+    }
+
     func testFilters() {
         let kinds: [NeedsYou.Kind] = [.needsInput, .blocked, .usageLimit, .stuck, .notFinished, .openSubItems, .done, .runFailed, .review, .mention]
         func of(_ f: NeedsYou.Filter) -> [NeedsYou.Kind] { kinds.filter(f.has) }

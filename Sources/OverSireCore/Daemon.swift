@@ -50,12 +50,14 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
     public var effort: String?
     public var profile: String?         // the OverSire agent name
     public var view: View?              // nil: chat for the oversire runtime, terminal for the others
+    public var overseer: String?        // LaunchRequest.overseer of the start
 
     public init(id: String, machine: MachineName, runtime: String, harness: String, workspace: String? = nil,
                 terminal: String? = nil, harnessSession: String? = nil, cwd: String, repo: String? = nil, branch: String? = nil,
                 state: State, reason: Reason? = nil, question: QuestionID? = nil, prompt: String? = nil,
                 lastMessage: String? = nil, stateSince: Date, startedAt: Date? = nil, updatedAt: Date, sources: [String], key: String? = nil,
-                model: String? = nil, effort: String? = nil, profile: String? = nil, view: View? = nil) {
+                model: String? = nil, effort: String? = nil, profile: String? = nil, view: View? = nil,
+                overseer: String? = nil) {
         self.id = id
         self.machine = machine
         self.runtime = runtime
@@ -80,6 +82,7 @@ public struct DaemonSession: Codable, Hashable, Sendable, Identifiable {
         self.effort = effort
         self.profile = profile
         self.view = view
+        self.overseer = overseer
     }
 }
 

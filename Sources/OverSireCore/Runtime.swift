@@ -20,10 +20,12 @@ public struct AgentSession: Hashable, Sendable {
     public var model: String?
     public var effort: String?
     public var view: DaemonSession.View?   // the view that the daemon gives; nil: the default of the runtime
+    public var overseer: String?    // the session id of the Claude session that oversees this session
 
     public init(phase: Phase, since: Date, card: String? = nil, paneKey: String? = nil, agent: AgentName = .claude,
                 repo: String = "", prompt: String? = nil, message: String? = nil, key: String? = nil, startedAt: Date? = nil,
-                profile: String? = nil, model: String? = nil, effort: String? = nil, view: DaemonSession.View? = nil) {
+                profile: String? = nil, model: String? = nil, effort: String? = nil, view: DaemonSession.View? = nil,
+                overseer: String? = nil) {
         self.phase = phase
         self.since = since
         self.card = card
@@ -38,6 +40,7 @@ public struct AgentSession: Hashable, Sendable {
         self.model = model
         self.effort = effort
         self.view = view
+        self.overseer = overseer
     }
 
     /// The session waits, or its turn ended with a question.
@@ -194,12 +197,14 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
     public var profile: String?          // the OverSire agent name, display only; agent stays the base CLI
     public var env: [String: String]?    // plain env of the agent process
     public var envSecrets: [String: AgentSecretRef]?   // secret env: the runner gets the values from home
+    public var overseer: String?         // the session id of the Claude session that oversees the agent
 
     public init(repo: String, item: ItemRef? = nil, name: String? = nil, note: String? = nil, branch: String? = nil,
                 agent: AgentName, prompt: String, environment: String? = nil, command: String? = nil, title: String? = nil,
                 baseBranch: String? = nil, inPlace: Bool? = nil, key: String? = nil,
                 model: String? = nil, effort: String? = nil, profile: String? = nil,
-                env: [String: String]? = nil, envSecrets: [String: AgentSecretRef]? = nil) {
+                env: [String: String]? = nil, envSecrets: [String: AgentSecretRef]? = nil,
+                overseer: String? = nil) {
         self.repo = repo
         self.item = item
         self.name = name
@@ -218,6 +223,7 @@ public struct LaunchRequest: Hashable, Sendable, Codable {
         self.profile = profile
         self.env = env
         self.envSecrets = envSecrets
+        self.overseer = overseer
     }
 
     public var workspaceName: String? { name ?? item?.key }

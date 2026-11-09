@@ -576,7 +576,9 @@ struct NeedsYou: Equatable {
     static func collect(_ data: AppData, snoozes: Snoozes = SNOOZES, now: Date = Date(), runs: [RunbookRun] = RUNBOOKS.open) -> [NeedsYou] {
         var out = questions(data.questions) + runbooks(runs)
         let agents = data.agentIndex
-        for (key, a) in agents.agents where agents.state(key) == .needsInput {
+        // The overseer handles the turn ends of its worker. An escalation sets a question, which shows again.
+        let asked = Set(data.questions.open.compactMap { data.questions.key($0.question)?.uppercased() })
+        for (key, a) in agents.agents where agents.state(key) == .needsInput && (a.overseer == nil || asked.contains(key)) {
             let ask = (a.message ?? "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
             out.append(NeedsYou(kind: .needsInput, key: key, reason: ask.isEmpty ? "Waits for your input" : "Asks: " + ask, at: a.since,
                                 route: .item(key, .session), act: .reply(key)))
