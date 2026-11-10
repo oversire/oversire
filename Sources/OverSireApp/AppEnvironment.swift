@@ -43,6 +43,8 @@ final class AppEnvironment: @unchecked Sendable {
 
     /// Plane calls a minute for each token. Both Macs share the token, and Plane allows 60.
     static let planeBudget = (lead: 40, other: 15)
+    /// Slots of the Plane gate that only user calls use.
+    static let planeReserved = 1
 
     /// The app that holds the automation lease. The Mac that leads gets the larger Plane budget.
     var automationOwner: AutomationOwner? {
@@ -56,7 +58,7 @@ final class AppEnvironment: @unchecked Sendable {
         // Make the gate outside the lock: its init reads the budget, and the budget takes the lock.
         let made = RateGate(perMinute: { [weak self] in
             (self?.automationOwner?.leads ?? true) ? Self.planeBudget.lead : Self.planeBudget.other
-        })
+        }, reserved: Self.planeReserved)
         return lock.withLock {
             if let g = gates[a] { return g }
             gates[a] = made

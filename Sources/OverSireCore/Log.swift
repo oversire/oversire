@@ -44,6 +44,8 @@ public struct LogEntry: Codable, Hashable, Sendable {
     public var message: String
     /// The time the job took, in milliseconds.
     public var ms: Int?
+    /// The wait at the rate gate, in milliseconds. Nil when there was no gate or no wait.
+    public var waitMs: Int?
 
     // AI jobs.
     public var engine: String?

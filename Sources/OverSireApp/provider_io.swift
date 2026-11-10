@@ -9,8 +9,13 @@ import OverSireSync
 struct IOLog {
     var sink: any LogSink = AppLog()
 
+    /// A user call that waits this long at the rate gate stays in the log with Debug detail off.
+    static let slowWait = 2000
+
     /// `quiet`: a failure that is no fault to show (NetworkPath.quiet). Its line is verbose.
-    func request(_ r: URLRequest, status: Int?, ms: Int, body: Data? = nil, error: String? = nil, quiet: Bool = false) {
+    /// `wait`: the wait at the rate gate. It comes from the gate wrapper of the request.
+    func request(_ r: URLRequest, status: Int?, ms: Int, body: Data? = nil, error: String? = nil, quiet: Bool = false,
+                 wait: GateWait? = GateWait.current) {
         let method = r.httpMethod ?? "GET"
         let path = r.url.map { $0.path.isEmpty ? "/" : $0.path } ?? "?"
         // A lease 409 names the other holder. It is an answer, not a fault, and it comes every 30 s.
@@ -25,7 +30,9 @@ struct IOLog {
         }
         let host = r.url.map { u in (u.host ?? "") + (u.port.map { ":\($0)" } ?? "") }
         var e = LogEntry(level: failed ? .warn : .ok, area: .net, job: "HTTP", subject: "\(method) \(Self.route(path))", host: host, message: msg, ms: ms)
-        e.verbose = quiet || held || (!failed && method == "GET")
+        if let wait, wait.ms > 0 { e.waitMs = wait.ms }
+        let slowUserWait = wait.map { $0.priority == .user && $0.ms >= Self.slowWait } ?? false
+        e.verbose = quiet || held || (!failed && method == "GET" && !slowUserWait)
         sink.write(e)
     }
 

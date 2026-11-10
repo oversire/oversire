@@ -101,4 +101,207 @@ final class RateGateTests: XCTestCase {
             XCTAssertTrue(error is CancellationError)
         }
     }
+
+    // MARK: Priority (OVERSIRE-456)
+
+    func testUserCallPassesWaitingBackgroundCalls() async throws {
+        let gate = RateGate(perMinute: { 1000 }, concurrent: 1, clock: GateClock().clock)
+        let order = Order()
+        try await gate.enter(priority: .background)
+        for (name, p) in [("bg1", CallPriority.background), ("bg2", .background), ("user", .user)] {
+            Task {
+                try await gate.enter(priority: p)
+                await order.add(name)
+            }
+            try await Task.sleep(nanoseconds: 30_000_000)
+        }
+        for _ in 0..<3 {
+            await gate.leave()
+            try await Task.sleep(nanoseconds: 30_000_000)
+        }
+        let seen = await order.list
+        XCTAssertEqual(seen, ["user", "bg1", "bg2"])
+    }
+
+    func testUserCallPassesBackgroundInTheTokenWait() async throws {
+        let c = SleepGateClock()
+        let gate = RateGate(perMinute: { 6 }, concurrent: 2, clock: c.clock)
+        for _ in 0..<6 {
+            try await gate.enter()
+            await gate.leave()
+        }
+        let order = Order()
+        Task {
+            try await gate.enter(priority: .background)
+            await order.add("bg")
+        }
+        try await c.waitForSleepers(1)
+        Task {
+            try await gate.enter(priority: .user)
+            await order.add("user")
+        }
+        try await c.waitForSleepers(2)
+        c.advance(10)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        var seen = await order.list
+        XCTAssertEqual(seen, ["user"], "the user call takes the token")
+        try await c.waitForSleepers(1)
+        c.advance(10)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        seen = await order.list
+        XCTAssertEqual(seen, ["user", "bg"])
+    }
+
+    func testReservedSlotStaysFreeForUserCalls() async throws {
+        let gate = RateGate(perMinute: { 1000 }, concurrent: 2, reserved: 1, clock: GateClock().clock)
+        try await gate.enter(priority: .background)
+        let order = Order()
+        let second = Task {
+            try await gate.enter(priority: .background)
+            await order.add("bg2")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        var seen = await order.list
+        XCTAssertEqual(seen, [], "the second background call waits")
+        try await gate.enter(priority: .user)
+        await gate.leave()
+        await gate.leave()
+        _ = try await second.value
+        seen = await order.list
+        XCTAssertEqual(seen, ["bg2"], "a background call enters when a slot is free")
+    }
+
+    func testEnterReturnsTheWait() async throws {
+        let gate = RateGate(perMinute: { 6 }, concurrent: 10, clock: GateClock().clock)
+        for _ in 0..<6 {
+            let waited = try await gate.enter()
+            XCTAssertEqual(waited, 0)
+            await gate.leave()
+        }
+        let waited = try await gate.enter()
+        XCTAssertEqual(waited, 10, accuracy: 0.01)
+    }
+
+    func testUserWaitingIsCountedOnCancel() async throws {
+        let gate = RateGate(perMinute: { 1000 }, concurrent: 1, clock: GateClock().clock)
+        try await gate.enter(priority: .background)
+        let user = Task { try await gate.enter(priority: .user) }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        let order = Order()
+        let bg = Task {
+            try await gate.enter(priority: .background)
+            await order.add("bg")
+        }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        user.cancel()
+        do {
+            _ = try await user.value
+            XCTFail("a cancelled caller enters")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        await gate.leave()
+        _ = try await bg.value
+        let seen = await order.list
+        XCTAssertEqual(seen, ["bg"])
+    }
+
+    func testPriorityIsATaskLocal() async {
+        XCTAssertEqual(CallPriority.current, .background)
+        await CallPriority.user {
+            XCTAssertEqual(CallPriority.current, .user)
+            let child = await Task { CallPriority.current }.value
+            XCTAssertEqual(child, .user)
+            let detached = await Task.detached { CallPriority.current }.value
+            XCTAssertEqual(detached, .background)
+        }
+        XCTAssertEqual(CallPriority.current, .background)
+    }
+
+    func testPauseHoldsBothLanes() async throws {
+        let c = GateClock()
+        let gate = RateGate(perMinute: { 60 }, concurrent: 10, clock: c.clock)
+        let start = c.now
+        _ = await gate.pause(retryAfter: nil)
+        try await gate.enter(priority: .user)
+        XCTAssertGreaterThanOrEqual(c.now.timeIntervalSince(start), RateGate.defaultPause)
+    }
+
+    func testGatedTransportGivesTheWaitToTheBase() async throws {
+        let c = GateClock()
+        let gate = RateGate(perMinute: { 6 }, concurrent: 10, clock: c.clock)
+        for _ in 0..<6 {
+            try await gate.enter()
+            await gate.leave()
+        }
+        let base = WaitProbe(statuses: [200])
+        let t = GatedTransport(base, gate: gate, host: "acme")
+        _ = try await CallPriority.user { try await t.send(URLRequest(url: URL(string: "https://x.test/a")!)) }
+        XCTAssertEqual(base.waits, [GateWait(ms: 10_000, priority: .user)])
+    }
+
+    func testRetryAfter429GivesEachAttemptItsOwnWait() async throws {
+        let c = GateClock()
+        let gate = RateGate(perMinute: { 60 }, concurrent: 10, clock: c.clock)
+        let base = WaitProbe(statuses: [429, 200])
+        let t = GatedTransport(base, gate: gate, host: "acme")
+        _ = try await t.send(URLRequest(url: URL(string: "https://x.test/a")!))
+        XCTAssertEqual(base.waits.count, 2)
+        XCTAssertEqual(base.waits[0], GateWait(ms: 0, priority: .background))
+        XCTAssertGreaterThanOrEqual(base.waits[1].ms, 15_000, "the retry waits for the pause")
+    }
+}
+
+actor Order {
+    private(set) var list: [String] = []
+    func add(_ s: String) { list.append(s) }
+}
+
+/// A clock whose sleep waits for `advance`.
+final class SleepGateClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var at = Date(timeIntervalSince1970: 1_800_000_000)
+    private var sleepers: [CheckedContinuation<Void, Error>] = []
+
+    var clock: RateGate.Clock {
+        RateGate.Clock(now: { self.lock.withLock { self.at } }, sleep: { _ in
+            try await withCheckedThrowingContinuation { c in self.lock.withLock { self.sleepers.append(c) } }
+        })
+    }
+
+    func waitForSleepers(_ n: Int) async throws {
+        for _ in 0..<200 {
+            if lock.withLock({ sleepers.count }) == n { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("expected \(n) sleepers")
+    }
+
+    func advance(_ s: TimeInterval) {
+        let woken = lock.withLock { () -> [CheckedContinuation<Void, Error>] in
+            at = at.addingTimeInterval(s)
+            defer { sleepers = [] }
+            return sleepers
+        }
+        woken.forEach { $0.resume() }
+    }
+}
+
+/// Answers with the given statuses and keeps the gate wait that it sees.
+final class WaitProbe: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var statuses: [Int]
+    private var seen: [GateWait] = []
+    var waits: [GateWait] { lock.withLock { seen } }
+
+    init(statuses: [Int]) { self.statuses = statuses }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let status = lock.withLock { () -> Int in
+            if let w = GateWait.current { seen.append(w) }
+            return statuses.isEmpty ? 200 : statuses.removeFirst()
+        }
+        let headers = status == 429 ? ["Retry-After": "20"] : [:]
+        return (Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
+    }
 }

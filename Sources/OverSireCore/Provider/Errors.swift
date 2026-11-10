@@ -31,6 +31,14 @@ public enum ProviderError: Error, Hashable, Sendable {
         if case .vendor(Self.intakeOff, _) = self { return true }
         return false
     }
+
+    /// The vendor code when a work item is still in the intake and has no work item page.
+    public static let pendingIntake = "WORK_ITEM_PENDING_INTAKE"
+
+    public var isPendingIntake: Bool {
+        if case .vendor(Self.pendingIntake, _) = self { return true }
+        return false
+    }
 }
 
 // Pages show `localizedDescription`. Without this, they show "ProviderError error 4".

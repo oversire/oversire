@@ -83,6 +83,37 @@ final class LogStoreTests: XCTestCase {
         XCTAssertEqual(s.entries.count, 2)
     }
 
+    func testWaitMsRoundTripsAndOldLinesDecode() throws {
+        var e = line()
+        e.waitMs = 2500
+        store().write(e)
+        XCTAssertEqual(store().entries.first?.waitMs, 2500)
+        let old = #"{"at":"2026-11-10T10:00:00Z","level":"ok","area":"net","job":"HTTP","message":"GET /x 200","ms":5}"#
+        let yesterday = LogStore.day(now.addingTimeInterval(-86_400)) + ".jsonl"
+        try (old + "\n").write(toFile: dir + "/" + yesterday, atomically: true, encoding: .utf8)
+        let old1 = try XCTUnwrap(store().entries.first { $0.message == "GET /x 200" })
+        XCTAssertNil(old1.waitMs)
+        XCTAssertEqual(old1.ms, 5)
+    }
+
+    func testSlowUserWaitRowIsKept() {
+        let s = store()
+        var r = URLRequest(url: URL(string: "https://api.plane.so/api/v1/workspaces/ocral/projects/")!)
+        r.httpMethod = "GET"
+        let log = IOLog(sink: s)
+        log.request(r, status: 200, ms: 300, wait: GateWait(ms: 2500, priority: .user))
+        log.request(r, status: 200, ms: 300, wait: GateWait(ms: 2500, priority: .background))
+        XCTAssertEqual(s.entries.count, 1, "Debug detail is off: only the slow user call stays")
+        XCTAssertEqual(s.entries.first?.waitMs, 2500)
+    }
+
+    func testDetailsShowGateWait() {
+        var e = line()
+        XCTAssertNil(LogListModel.details(e).first { $0.0 == "Gate wait" })
+        e.waitMs = 2500
+        XCTAssertEqual(LogListModel.details(e).first { $0.0 == "Gate wait" }?.1, "2.5 s")
+    }
+
     private func http(_ method: String, _ url: String, status: Int? = nil, error: String? = nil, quiet: Bool = false, to s: LogStore) {
         var r = URLRequest(url: URL(string: url)!)
         r.httpMethod = method

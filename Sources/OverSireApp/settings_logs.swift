@@ -56,6 +56,7 @@ struct LogListModel {
             ("Engine", e.engine), ("Model", e.model), ("Host", e.host == e.engine ? nil : e.host), ("Why", e.reason),
             ("Tokens", e.tokensIn.map { i in "\(i) in" + (e.tokensOut.map { " · \($0) out" } ?? "") }), ("Stop", e.stop),
             ("Exit", e.exit.map(String.init)), ("Time", Self.stamp.string(from: e.at)),
+            ("Gate wait", e.waitMs.map { Self.took($0) }),
         ]
         return all.compactMap { k, v in v.flatMap { $0.isEmpty ? nil : (k, $0) } }
     }

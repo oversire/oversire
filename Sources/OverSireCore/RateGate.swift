@@ -19,30 +19,56 @@ public actor RateGate {
     public static let defaultPause: TimeInterval = 15
     public static let maxPause: TimeInterval = 60
 
+    private struct Waiter {
+        let id: Int
+        let resume: CheckedContinuation<Void, Never>
+    }
+
     private let perMinute: @Sendable () -> Int
     private let concurrent: Int
+    private let reserved: Int
     private let clock: Clock
     private var tokens: Double
     private var filledAt: Date
     private var running = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var userWaiting = 0
+    private var nextID = 0
+    private var userWaiters: [Waiter] = []
+    private var backgroundWaiters: [Waiter] = []
     public private(set) var pausedUntil: Date?
 
     /// perMinute: the budget, read at each call, so it can follow the automation lease.
-    public init(perMinute: @escaping @Sendable () -> Int, concurrent: Int = 2, clock: Clock = .system) {
+    /// reserved: slots that only user calls use. A background call enters while `running < concurrent - reserved`.
+    public init(perMinute: @escaping @Sendable () -> Int, concurrent: Int = 2, reserved: Int = 0, clock: Clock = .system) {
         self.perMinute = perMinute
         self.concurrent = max(1, concurrent)
+        self.reserved = min(max(0, reserved), self.concurrent - 1)
         self.clock = clock
         tokens = Double(max(1, perMinute()))
         filledAt = clock.now()
     }
 
     /// Waits for a free slot, the end of a pause and a token. Call `leave()` after the request.
-    public func enter() async throws {
+    /// A user call goes before each background call. Gives the seconds of the wait.
+    @discardableResult
+    public func enter(priority: CallPriority = CallPriority.current) async throws -> TimeInterval {
+        let start = clock.now()
+        let isUser = priority >= .user
+        if isUser { userWaiting += 1 }
+        defer {
+            if isUser {
+                userWaiting -= 1
+                if userWaiting == 0 { wakeBackground(all: true) }
+            }
+        }
         while true {
             try Task.checkCancellation()
+            if !isUser, userWaiting > 0 || running >= concurrent - reserved {
+                await park(user: false)
+                continue
+            }
             if running >= concurrent {
-                await withCheckedContinuation { waiters.append($0) }
+                await park(user: true)
                 continue
             }
             let now = clock.now()
@@ -56,7 +82,7 @@ public actor RateGate {
             if tokens >= 1 {
                 tokens -= 1
                 running += 1
-                return
+                return max(0, clock.now().timeIntervalSince(start))
             }
             try await clock.sleep((1 - tokens) * 60 / rate)
         }
@@ -64,7 +90,44 @@ public actor RateGate {
 
     public func leave() {
         running = max(0, running - 1)
-        if !waiters.isEmpty { waiters.removeFirst().resume() }
+        if !userWaiters.isEmpty {
+            userWaiters.removeFirst().resume.resume()
+        } else if userWaiting == 0 {
+            wakeBackground(all: false)
+        }
+    }
+
+    /// Parks the caller until `leave()` wakes it. A cancel wakes it too.
+    private func park(user: Bool) async {
+        let id = nextID
+        nextID += 1
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                if Task.isCancelled {
+                    c.resume()
+                } else if user {
+                    userWaiters.append(Waiter(id: id, resume: c))
+                } else {
+                    backgroundWaiters.append(Waiter(id: id, resume: c))
+                }
+            }
+        } onCancel: {
+            Task { await self.unpark(id) }
+        }
+    }
+
+    private func unpark(_ id: Int) {
+        if let i = userWaiters.firstIndex(where: { $0.id == id }) {
+            userWaiters.remove(at: i).resume.resume()
+        } else if let i = backgroundWaiters.firstIndex(where: { $0.id == id }) {
+            backgroundWaiters.remove(at: i).resume.resume()
+        }
+    }
+
+    private func wakeBackground(all: Bool) {
+        let woken = all ? backgroundWaiters : Array(backgroundWaiters.prefix(1))
+        backgroundWaiters.removeFirst(woken.count)
+        woken.forEach { $0.resume.resume() }
     }
 
     /// Pauses all callers after a 429. Gives the pause in seconds when it starts a new pause, else nil.
@@ -96,11 +159,16 @@ public struct GatedTransport: HTTPTransport {
     }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let priority = CallPriority.current
         var attempt = 0
         while true {
-            try await gate.enter()
+            let waited = try await gate.enter(priority: priority)
             let out: (Data, HTTPURLResponse)
-            do { out = try await base.send(request) } catch {
+            do {
+                out = try await GateWait.$current.withValue(GateWait(ms: Int(waited * 1000), priority: priority)) {
+                    try await base.send(request)
+                }
+            } catch {
                 await gate.leave()
                 throw error
             }

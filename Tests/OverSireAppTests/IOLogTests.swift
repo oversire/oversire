@@ -48,6 +48,36 @@ final class IOLogTests: XCTestCase {
         XCTAssertEqual(l.all.map(\.level), [.ok, .ok])
     }
 
+    func testGateWaitIsInTheRow() throws {
+        let l = Lines()
+        IOLog(sink: l).request(request("GET", "https://api.plane.so/api/v1/workspaces/ocral/projects/"), status: 200, ms: 350,
+                               wait: GateWait(ms: 1800, priority: .user))
+        let e = try XCTUnwrap(l.all.first)
+        XCTAssertEqual(e.waitMs, 1800)
+        XCTAssertEqual(e.ms, 350)
+        XCTAssertEqual(e.message, "GET /api/v1/workspaces/ocral/projects 200")
+    }
+
+    func testSlowUserWaitIsKeptWithDebugOff() {
+        let l = Lines()
+        let log = IOLog(sink: l)
+        let url = "https://api.plane.so/api/v1/workspaces/ocral/projects/"
+        log.request(request("GET", url), status: 200, ms: 300, wait: GateWait(ms: 2500, priority: .user))
+        log.request(request("GET", url), status: 200, ms: 300, wait: GateWait(ms: 1999, priority: .user))
+        log.request(request("GET", url), status: 200, ms: 300, wait: GateWait(ms: 2500, priority: .background))
+        XCTAssertEqual(l.all.map { $0.verbose == true }, [false, true, true])
+        XCTAssertEqual(l.all.map(\.level), [.ok, .ok, .ok])
+    }
+
+    func testNoGateNoWaitMs() {
+        let l = Lines()
+        let log = IOLog(sink: l)
+        log.request(request("GET", "http://127.0.0.1:7690/v1/sessions"), status: 200, ms: 3, wait: nil)
+        log.request(request("GET", "http://127.0.0.1:7690/v1/sessions"), status: 200, ms: 3, wait: GateWait(ms: 0, priority: .user))
+        log.request(request("GET", "http://127.0.0.1:7690/v1/sessions"), status: 200, ms: 3)
+        XCTAssertEqual(l.all.map(\.waitMs), [nil, nil, nil])
+    }
+
     func testALease409IsAnAnswer() throws {
         let l = Lines()
         IOLog(sink: l).request(request("POST", "http://mbp:7690/v1/leases/automations"), status: 409, ms: 4,
