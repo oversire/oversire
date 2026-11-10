@@ -56,19 +56,21 @@ public actor RateGate {
         let isUser = priority >= .user
         if isUser { userWaiting += 1 }
         defer {
-            if isUser {
-                userWaiting -= 1
-                if userWaiting == 0 { wakeBackground(all: true) }
-            }
+            if isUser { userWaiting -= 1 }
+            // A wake can go to a caller that ends here, so it passes on.
+            wakeNext()
         }
+        var woken = false
         while true {
             try Task.checkCancellation()
             if !isUser, userWaiting > 0 || running >= concurrent - reserved {
-                await park(user: false)
+                await park(user: false, front: woken)
+                woken = true
                 continue
             }
             if running >= concurrent {
-                await park(user: true)
+                await park(user: true, front: woken)
+                woken = true
                 continue
             }
             let now = clock.now()
@@ -90,25 +92,34 @@ public actor RateGate {
 
     public func leave() {
         running = max(0, running - 1)
-        if !userWaiters.isEmpty {
+        wakeNext()
+    }
+
+    /// Wakes the first parked user caller when a slot is free, else the first background caller when it may enter.
+    /// One wake at a time keeps the order of each lane: a woken caller that finds no room parks again at the front.
+    private func wakeNext() {
+        if running < concurrent, !userWaiters.isEmpty {
             userWaiters.removeFirst().resume.resume()
-        } else if userWaiting == 0 {
-            wakeBackground(all: false)
+        } else if userWaiting == 0, running < concurrent - reserved, !backgroundWaiters.isEmpty {
+            backgroundWaiters.removeFirst().resume.resume()
         }
     }
 
-    /// Parks the caller until `leave()` wakes it. A cancel wakes it too.
-    private func park(user: Bool) async {
+    /// Parks the caller until a wake. A cancel wakes it too.
+    private func park(user: Bool, front: Bool) async {
         let id = nextID
         nextID += 1
         await withTaskCancellationHandler {
             await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
                 if Task.isCancelled {
                     c.resume()
-                } else if user {
-                    userWaiters.append(Waiter(id: id, resume: c))
+                    return
+                }
+                let w = Waiter(id: id, resume: c)
+                if user {
+                    userWaiters.insert(w, at: front ? 0 : userWaiters.endIndex)
                 } else {
-                    backgroundWaiters.append(Waiter(id: id, resume: c))
+                    backgroundWaiters.insert(w, at: front ? 0 : backgroundWaiters.endIndex)
                 }
             }
         } onCancel: {
@@ -122,12 +133,6 @@ public actor RateGate {
         } else if let i = backgroundWaiters.firstIndex(where: { $0.id == id }) {
             backgroundWaiters.remove(at: i).resume.resume()
         }
-    }
-
-    private func wakeBackground(all: Bool) {
-        let woken = all ? backgroundWaiters : Array(backgroundWaiters.prefix(1))
-        backgroundWaiters.removeFirst(woken.count)
-        woken.forEach { $0.resume.resume() }
     }
 
     /// Pauses all callers after a 429. Gives the pause in seconds when it starts a new pause, else nil.

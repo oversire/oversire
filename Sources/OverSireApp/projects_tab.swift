@@ -825,7 +825,7 @@ extension TabVC {
             let header = ProjectHeader(snap: snap, live: live, refreshing: store.refreshing.contains(key),
                                        filter: statusFilter[key], updated: relativeTime(snap.fetchedAt), w: w,
                                        folded: folded, canReorder: canReorder)
-            header.onRefresh = { [weak store] in store?.refresh([key], force: true) { _ in } }
+            header.onRefresh = { [weak store] in store?.refresh([key], force: true, priority: .user) { _ in } }
             header.onFilter = { [weak self] id in
                 guard let self = self else { return }
                 if self.statusFilter[key] == id { self.statusFilter[key] = nil }

@@ -33,11 +33,11 @@ final class RelationCache {
     }
 
     /// Loads the keys that are not loaded. `force` loads them again.
-    func load(_ keys: [String], force: Bool = false) {
+    func load(_ keys: [String], force: Bool = false, priority: CallPriority = .user) {
         for k in Set(keys.map { $0.uppercased() }) where !loading.contains(k) && !seeded.contains(k) && (force || byKey[k] == nil) {
             guard let r = ref(k), let t = tracker(r), t.capabilities.contains(.relations) else { continue }
             loading.insert(k)
-            Task { [weak self] in
+            CallPriority.task(priority) { [weak self] in
                 let result = await Result(awaiting: { try await t.relations(of: r) })
                 DispatchQueue.main.async {
                     guard let self else { return }
@@ -56,13 +56,13 @@ final class RelationCache {
     func refresh(changed: Set<String>) {
         let up = Set(changed.map { $0.uppercased() })
         let stale = byKey.filter { k, rels in up.contains(k) || rels.contains { up.contains($0.item.key.uppercased()) } }.map(\.key)
-        load(stale, force: true)
+        load(stale, force: true, priority: .background)
     }
 
     /// Writes the patch, then loads the item and the other items again.
     func apply(_ patch: RelationPatch, to key: String, done: @escaping (String?) -> Void) {
         guard let r = ref(key), let t = tracker(r) else { done("OverSire does not know \(key)."); return }
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let result = await Result(awaiting: { try await t.apply(patch, to: r) })
             DispatchQueue.main.async {
                 guard let self else { return }

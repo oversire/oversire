@@ -206,6 +206,24 @@ final class RateGateTests: XCTestCase {
         XCTAssertEqual(seen, ["bg"])
     }
 
+    func testMixedAndCancelledCallsAllEnd() async throws {
+        let gate = RateGate(perMinute: { 100_000 }, concurrent: 2, reserved: 1, clock: GateClock().clock)
+        let ended = expectation(description: "all callers end")
+        ended.expectedFulfillmentCount = 300
+        for n in 0..<300 {
+            let t = Task {
+                defer { ended.fulfill() }
+                do {
+                    try await gate.enter(priority: n % 3 == 0 ? .user : .background)
+                    await Task.yield()
+                    await gate.leave()
+                } catch {}
+            }
+            if n % 5 == 0 { t.cancel() }
+        }
+        await fulfillment(of: [ended], timeout: 10)
+    }
+
     func testPriorityIsATaskLocal() async {
         XCTAssertEqual(CallPriority.current, .background)
         await CallPriority.user {

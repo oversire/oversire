@@ -86,7 +86,7 @@ struct PlanStarter {
         // plan:<KEY>: the daemon sends the plan review to this session, and the code review to the work session.
         let startKey = StartKey.plan(t.key)
         let agents = agents
-        Task {
+        CallPriority.task(.user) {
             var t = t
             if case .intake(let i, let k, nil) = t, let triage = tracker as? any IntakeTriaging {
                 t = .intake(i, key: k, body: (try? await triage.intakeDetail(i, in: summary.ref))?.body)

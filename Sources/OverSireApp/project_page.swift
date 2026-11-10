@@ -152,7 +152,7 @@ enum ProjectLookup: Hashable {
         case .failed(let error):
             let retry = ActionButton("Try again", symbol: "arrow.clockwise") {
                 guard let store = data?.projectStore, let p = store.tracked.first(where: { $0.identifier.uppercased() == key }) else { return }
-                store.refresh([p.ref.storeKey], force: true) { _ in }
+                store.refresh([p.ref.storeKey], force: true, priority: .user) { _ in }
             }
             return Banner(.bad, title: "Plane did not give the items of \(key)", body: error, actions: [retry])
         case .untracked(let canTrack):

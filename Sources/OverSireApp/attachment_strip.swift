@@ -47,7 +47,7 @@ final class AttachmentBook {
     private func ask(_ ref: ItemRef) {
         guard let r = reader(ref), asking.insert(ref.id).inserted else { return }
         Task { [weak self] in
-            let got = try? await r.attachments(of: ref)
+            let got = await CallPriority.user { try? await r.attachments(of: ref) }
             guard let self else { return }
             self.asking.remove(ref.id)
             // A failed call keeps the old list and waits for the next age.

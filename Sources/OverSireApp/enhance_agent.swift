@@ -185,7 +185,7 @@ final class EnhanceAgent {
             for item in snap.intake ?? [] where room > 0 && states[item.id] == nil && !autoTried.contains(item.id) {
                 autoTried.insert(item.id)
                 guard now().timeIntervalSince(item.createdAt) < 86400 else { continue }
-                store.intakeDetail(projectKey: pk, item: item) { [weak self] r in
+                store.intakeDetail(projectKey: pk, item: item, priority: .background) { [weak self] r in
                     if case .success(let d) = r, EnhanceAgent.vague(d.body) { self?.start(projectKey: pk, target: .intake(item)) }
                 }
                 room -= 1
@@ -464,7 +464,7 @@ final class EnhanceAgent {
         let startLabel = AGENTS.startLabel
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
             guard let self else { return }
-            Task {
+            CallPriority.task(.user) {
                 let labeler = tracker as? any LabelManaging
                 var labels = (try? await labeler?.labels(snap.summary.ref)) ?? []
                 let keep = (try? r.get())?.labels.compactMap { n in labels.first { $0.name == n }?.id } ?? []
@@ -506,7 +506,7 @@ final class EnhanceAgent {
               let tracker = store.tracker(of: snap.summary.ref) else { done("The item is not loaded."); return }
         let known = Self.known(snap)
         let graph = BlockGraph(store.relations.byKey)
-        Task {
+        CallPriority.task(.user) {
             let labels = (try? await (tracker as? any LabelManaging)?.labels(snap.summary.ref)) ?? []
             let keep = item.labels.compactMap { n in labels.first { $0.name == n }?.id }
             let edit = self.edit(target, result, run: run, labels: labels, keep: keep, items: known, graph: graph)

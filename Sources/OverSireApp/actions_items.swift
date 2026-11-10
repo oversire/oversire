@@ -182,7 +182,7 @@ struct ItemActions {
                        input: ActionSpec.args(["project": Self.project], required: ["project"])) { a in
                 await link.run { d, done in
                     guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else { done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return }
-                    d.projectStore.refresh([snap.summary.ref.storeKey], force: true) { done(ActionLink.stored(d, $0, "\(snap.summary.identifier) is loaded again.")) }
+                    d.projectStore.refresh([snap.summary.ref.storeKey], force: true, priority: .user) { done(ActionLink.stored(d, $0, "\(snap.summary.identifier) is loaded again.")) }
                 }
             },
         ]

@@ -16,6 +16,12 @@ public enum CallPriority: Int, Comparable, Sendable {
         try await $current.withValue(p, operation: op)
     }
 
+    /// Starts a task that runs with the priority. The task keeps the isolation of no actor.
+    @discardableResult
+    public static func task(_ p: CallPriority, _ op: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
+        $current.withValue(p) { Task(operation: op) }
+    }
+
     public static func user<T>(_ op: () async throws -> T) async rethrows -> T {
         try await run(.user, op)
     }
