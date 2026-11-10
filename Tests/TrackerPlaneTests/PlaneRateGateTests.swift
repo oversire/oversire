@@ -50,4 +50,36 @@ final class PlaneRateGateTests: XCTestCase {
         XCTAssertEqual(log.all.count, 1, "one log line for the pause")
         XCTAssertEqual(log.all.first?.message, "HTTP 429: all requests wait 20 s")
     }
+
+    /// Keeps the order of the calls. A call takes a short time, so the others wait at the gate.
+    final class Ordered: HTTPTransport, @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var paths: [String] = []
+
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            lock.withLock { paths.append(request.url?.path() ?? "") }
+            try await Task.sleep(nanoseconds: 20_000_000)
+            return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    func testUserLaneThroughPlane() async throws {
+        let http = Ordered(), clock = Clock()
+        let gate = RateGate(perMinute: { 1000 }, concurrent: 1, clock: clock.gate)
+        let plane = PlaneTracker(workspace: PlaneWorkspace(slug: "acme"), token: "tok", http: GatedTransport(http, gate: gate, host: "acme"))
+        await withTaskGroup(of: Void.self) { g in
+            for n in 0..<10 {
+                g.addTask { _ = try? await plane.api.send("GET", "/api/v1/background/\(n)/") }
+            }
+            g.addTask {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                await CallPriority.user { _ = try? await plane.api.send("GET", "/api/v1/user/") }
+            }
+            await g.waitForAll()
+        }
+        let order = http.paths
+        XCTAssertEqual(order.count, 11)
+        let at = try XCTUnwrap(order.firstIndex(of: "/api/v1/user/"))
+        XCTAssertLessThan(at, 10, "the user call does not wait behind all background calls")
+    }
 }

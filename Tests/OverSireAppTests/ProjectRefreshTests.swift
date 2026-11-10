@@ -117,6 +117,45 @@ final class ProjectRefreshTests: XCTestCase {
         t.release()
     }
 
+    /// The intake list goes before the items, so the tracker knows the pending items when it walks the tree (OVERSIRE-456).
+    final class OrderTracker: Tracker, IntakeTriaging, @unchecked Sendable {
+        let id: ProviderID = "order"
+        let account = AccountID(provider: "order", id: "ws")
+        let capabilities: Set<Capability> = [.intake]
+        let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 60)
+        let keyFormat = KeyFormat.projectDash
+        private let lock = NSLock()
+        private var seen: [String] = []
+        var calls: [String] { lock.withLock { seen } }
+        private func note(_ s: String) { lock.withLock { seen.append(s) } }
+
+        func probe() async throws -> Identity { Identity(person: PersonRef(id: "u1", name: "me")) }
+        func poll(since: Cursor?) async throws -> EventPage { EventPage(events: [], cursor: Cursor(rawValue: "0")) }
+        func projects() async throws -> [ProjectSummary] { [] }
+        func statuses(_ p: ProjectRef) async throws -> [StatusOption] { note("statuses"); return [] }
+        func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] { note("items"); return [] }
+        func detail(_ i: ItemRef) async throws -> ItemDetail { throw ProviderError.notFound }
+        func comments(_ i: ItemRef) async throws -> [Comment] { [] }
+        func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef { throw ProviderError.notFound }
+        func update(_ i: ItemRef, _ patch: ItemPatch) async throws {}
+        func comment(_ i: ItemRef, markdown: String) async throws {}
+        func intake(_ p: ProjectRef) async throws -> [IntakeItem] {
+            note("intake")
+            return [IntakeItem(id: "n1", workItemId: "w1", name: "Ask", priority: nil, createdAt: Date(), author: nil, source: nil)]
+        }
+        func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail { throw ProviderError.notFound }
+        func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {}
+    }
+
+    func testSnapshotReadsIntakeBeforeItems() async throws {
+        let t = OrderTracker()
+        let ref = ProjectRef(account: t.account, id: "p1", key: "ORD")
+        let summary = ProjectSummary(ref: ref, identifier: "ORD", title: "Order", url: "https://x/ORD", closed: false)
+        let snap = try await ProjectStore.snapshot(t, summary, limit: 10, previous: nil)
+        XCTAssertEqual(t.calls, ["statuses", "intake", "items"])
+        XCTAssertEqual(snap.intake?.map(\.workItemId), ["w1"])
+    }
+
     // MARK: Plane
 
     /// Recorded Plane answers by method and path. Each request is counted.

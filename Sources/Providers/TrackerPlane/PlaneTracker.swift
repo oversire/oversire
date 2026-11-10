@@ -22,6 +22,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     private var fullAt: [String: Date] = [:]                            // project id → the last full list
     private var refCache: [String: ItemRef] = [:]                       // item id → ref, for relations
     private var statusCache: [String: (options: [StatusOption], at: Date)] = [:]
+    private var pendingIntake: [String: Set<String>] = [:]              // project id → work item ids that are pending in the intake
     static let fullEvery: TimeInterval = 600
     static let statusMaxAge: TimeInterval = 600
     var indexMaxAge: TimeInterval = 10
@@ -271,6 +272,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     // An item that fails to load stays as in `previous`, so it does not drop out. A rate limit stops the load.
     private func load(_ p: ProjectRef, _ need: Set<String>, depth: Int,
                       previous: [String: Item]) async throws -> (rows: [[String: Any]], kept: [Item]) {
+        let need = need.subtracting(pendingIds(p))
         if need.isEmpty { return ([], []) }
         let expand = URLQueryItem(name: "expand", value: "assignees,labels")
         var rows: [[String: Any]] = []
@@ -287,11 +289,18 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
             } catch ProviderError.rateLimited(let after) {
                 throw ProviderError.rateLimited(retryAfter: after)
             } catch ProviderError.notFound {
+            } catch let e as ProviderError where e.isPendingIntake {
+                lock.withLock { _ = pendingIntake[p.id, default: []].insert(id) }
             } catch {
                 if let old = previous[id] { kept.append(old) }
             }
         }
         return (rows, kept)
+    }
+
+    /// The pending intake items of the project. The work item endpoint answers 404 for them, so no load asks for them.
+    private func pendingIds(_ p: ProjectRef) -> Set<String> {
+        lock.withLock { pendingIntake[p.id] ?? [] }
     }
 
     private func identifier(of p: ProjectRef) async throws -> String {
@@ -336,7 +345,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
                  URLQueryItem(name: "fields", value: "id,name,priority,work_item_id,created_at,created_by_id,source")]
         let obj = try await api.send("GET", "/api/v2/workspaces/\(workspace.slug)/projects/\(p.id)/intake-issues/", query: q)
         let rows = (obj as? [String: Any])?["data"] as? [[String: Any]] ?? []
-        return rows.compactMap { r in
+        let found: [IntakeItem] = rows.compactMap { r in
             guard let id = PlaneAPI.id(r["id"]), let item = PlaneAPI.id(r["work_item_id"]) else { return nil }
             return IntakeItem(id: id, workItemId: item, name: r["name"] as? String ?? "Untitled",
                               priority: (r["priority"] as? String).flatMap { $0 == "none" ? nil : $0.capitalized },
@@ -344,6 +353,8 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
                               author: PlaneAPI.id(r["created_by_id"]).map { names[$0] ?? $0 },
                               source: r["source"] as? String)
         }
+        lock.withLock { pendingIntake[p.id] = Set(found.map(\.workItemId)) }
+        return found
     }
 
     // The work item endpoints do not return pending items.
@@ -384,12 +395,16 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
         let path = "\(ws)/projects/\(p.id)/intake-issues/\(i.workItemId)/"
         switch a {
-        case .delete: _ = try await api.send("DELETE", path)
+        case .delete:
+            _ = try await api.send("DELETE", path)
+            lock.withLock { _ = pendingIntake[p.id]?.remove(i.workItemId) }
         case .update(let e):
             let ref = ItemRef(project: p, id: i.workItemId, key: p.key ?? "", url: URL(string: workspace.itemURL(p.key ?? ""))!)
             if e.patch != ItemPatch() { try await update(ref, e.patch) }
             if !e.relations.isEmpty { try await apply(RelationPatch(add: e.relations), to: ref) }
-        default: if let body = a.planeBody { _ = try await api.send("PATCH", path + "status/", body: body) }
+        default:
+            if let body = a.planeBody { _ = try await api.send("PATCH", path + "status/", body: body) }
+            lock.withLock { _ = pendingIntake[p.id]?.remove(i.workItemId) }
         }
     }
 
@@ -535,7 +550,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         do {
             o = try await api.send("GET", "\(ws)/projects/\(p.id)/work-items/\(id)/",
                                    query: [URLQueryItem(name: "fields", value: "id,sequence_id")]) as? [String: Any]
-        } catch ProviderError.notFound { return nil }
+        } catch ProviderError.notFound { return nil } catch let e as ProviderError where e.isPendingIntake { return nil }
         guard let seq = PlaneAPI.int(o?["sequence_id"]) else { return nil }
         let key = "\(try await identifier(of: p))-\(seq)"
         let ref = ItemRef(project: p, id: id, key: key, url: URL(string: workspace.itemURL(key))!)

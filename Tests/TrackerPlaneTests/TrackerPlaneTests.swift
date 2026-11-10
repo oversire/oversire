@@ -244,6 +244,71 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(d["w1"]?.labels, ["bug"])
     }
 
+    // MARK: Pending intake items (OVERSIRE-456)
+
+    static let pendingBody = #"{"error":"Work item is pending intake","error_code":"WORK_ITEM_PENDING_INTAKE","intake_status":-2}"#
+
+    /// A child item that has the pending intake item w9 as parent.
+    private func childOfPending() {
+        let list = "\(ws)/projects/P1/issues/"
+        http.on("GET", list, #"{"results":[{"id":"i2","name":"Child","sequence_id":2,"state":"s1","parent":"w9","last_activity_at":"2026-10-16T11:00:00Z"}],"next_page_results":false}"#)
+        http.on("GET", list + "w9/", status: 404, Self.pendingBody)
+    }
+
+    private func parentGets() -> Int {
+        http.requests.filter { $0.url?.path() == "\(ws)/projects/P1/issues/w9/" }.count
+    }
+
+    func testPendingIntakeIsAProviderError() async {
+        http.on("GET", "\(ws)/projects/P1/labels/", status: 404, Self.pendingBody)
+        do { _ = try await plane.labels(project); XCTFail("no error") } catch {
+            XCTAssertEqual(error as? ProviderError, .vendor(code: ProviderError.pendingIntake, message: "Work item is pending intake"))
+            XCTAssertEqual((error as? ProviderError)?.isPendingIntake, true)
+        }
+        http.on("GET", "\(ws)/projects/P1/labels/", status: 404, #"{"detail":"Not found"}"#)
+        do { _ = try await plane.labels(project); XCTFail("no error") } catch {
+            XCTAssertEqual(error as? ProviderError, .notFound)
+        }
+    }
+
+    func testPendingIntakeItemLoadsOnce() async throws {
+        childOfPending()
+        plane.indexMaxAge = 0
+        for _ in 0..<2 {
+            let items = try await plane.items(project, since: nil, limit: 50)
+            XCTAssertEqual(items.map(\.key), ["ENG-2"], "the pending parent is no item")
+        }
+        XCTAssertEqual(parentGets(), 1)
+    }
+
+    func testIntakeListFeedsTheMemory() async throws {
+        childOfPending()
+        http.on("GET", "/api/v2/workspaces/acme/projects/P1/intake-issues/", #"{"data":[{"id":"n9","work_item_id":"w9","name":"Ask","created_at":"2026-10-16T09:00:00Z"}]}"#)
+        _ = try await plane.intake(project)
+        _ = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(parentGets(), 0, "the intake list tells that w9 is pending")
+    }
+
+    func testAcceptClearsThePendingMemory() async throws {
+        childOfPending()
+        http.on("GET", "/api/v2/workspaces/acme/projects/P1/intake-issues/", #"{"data":[{"id":"n9","work_item_id":"w9","name":"Ask","created_at":"2026-10-16T09:00:00Z"}]}"#)
+        let list = try await plane.intake(project)
+        http.on("PATCH", "\(ws)/projects/P1/intake-issues/w9/status/", "{}")
+        try await plane.triage(list[0], in: project, .accept)
+        http.on("GET", "\(ws)/projects/P1/issues/w9/", #"{"id":"w9","name":"Parent","sequence_id":9,"state":"s1","last_activity_at":"2026-10-16T12:00:00Z"}"#)
+        let items = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(parentGets(), 1)
+        XCTAssertEqual(Set(items.map(\.key)), ["ENG-2", "ENG-9"])
+    }
+
+    func testRefIgnoresPendingIntake() async throws {
+        let a = ItemRef(project: project, id: "a", key: "ENG-1", url: URL(string: "https://x/ENG-1")!)
+        http.on("GET", "\(ws)/projects/P1/work-items/a/relations/", #"{"blocked_by":["w9"]}"#)
+        http.on("GET", "\(ws)/projects/P1/work-items/w9/", status: 404, Self.pendingBody)
+        let rels = try await plane.relations(of: a)
+        XCTAssertTrue(rels.isEmpty, "a pending item is dropped, with no error")
+    }
+
     func testErrorsMapToProviderErrors() async {
         for (status, want) in [(401, ProviderError.unauthorized), (403, .forbidden), (404, .notFound)] {
             http.on("GET", "\(ws)/projects/P1/labels/", status: status, "{}")

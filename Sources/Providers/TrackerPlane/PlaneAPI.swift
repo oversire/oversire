@@ -120,7 +120,12 @@ struct PlaneAPI: Sendable {
         case 200..<300: return obj
         case 401: throw ProviderError.unauthorized
         case 403: throw ProviderError.forbidden
-        case 404: throw ProviderError.notFound
+        case 404:
+            // A pending intake item has no work item page. Plane names it in the body.
+            if let code = (obj as? [String: Any])?["error_code"] as? String, code == ProviderError.pendingIntake {
+                throw ProviderError.vendor(code: code, message: (obj as? [String: Any])?["error"] as? String ?? "The item is pending in the intake")
+            }
+            throw ProviderError.notFound
         case 429:
             let wait = Double(resp.value(forHTTPHeaderField: "Retry-After") ?? "")
             throw ProviderError.rateLimited(retryAfter: wait.map { .seconds($0) })

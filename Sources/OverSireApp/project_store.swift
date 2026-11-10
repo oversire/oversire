@@ -71,6 +71,7 @@ final class ProjectStore {
     var now: () -> Date = Date.init
     /// A forced refresh of a key during its refresh runs once more after it. The callers wait for that run.
     private var again: [String: [(Bool) -> Void]] = [:]
+    private var againUser: Set<String> = []
     /// Workspace → the end of the pause after a rate limit.
     private(set) var cooldown: [String: Date] = [:]
     /// Keys that wait for a pause or a delay, by the time of their refresh.
@@ -124,12 +125,14 @@ final class ProjectStore {
 
     /// One refresh of a project at a time. A forced refresh of a running project runs once more after it.
     /// A workspace in its rate limit pause refreshes after the pause.
-    func refresh(_ keys: [String], force: Bool, done: @escaping (Bool) -> Void) {
+    /// A refresh that joins a running refresh keeps the lane of the running one. Its rerun uses the lane of the last caller.
+    func refresh(_ keys: [String], force: Bool, priority: CallPriority = .background, done: @escaping (Bool) -> Void) {
         let running = keys.filter { refreshing.contains($0) }
         var todo = keys.filter { !refreshing.contains($0) }
         var done = done
         if force, let first = running.first {
             for k in running where again[k] == nil { again[k] = [] }
+            if priority == .user { againUser.formUnion(running) }
             again[first]?.append(done)
             done = { _ in }
         }
@@ -149,7 +152,7 @@ final class ProjectStore {
         let label = { (n: Int) in jobs.count == 1 ? "Loading \(jobs[0].0.identifier)" : "Loading projects: \(n) of \(jobs.count)" }
         let token = busy?.begin(label(0))
         if hold { return }
-        Task { [weak self] in
+        CallPriority.task(priority) { [weak self] in
             guard let self = self else { return }
             var fresh: [ProjectSnapshot] = []
             var gone: [String: Set<String>] = [:]
@@ -220,7 +223,9 @@ final class ProjectStore {
         let next = keys.filter { again[$0] != nil }
         guard !next.isEmpty else { return }
         let waiters = next.flatMap { again.removeValue(forKey: $0) ?? [] }
-        refresh(next, force: true) { ok in waiters.forEach { $0(ok) } }
+        let lane: CallPriority = next.contains { againUser.contains($0) } ? .user : .background
+        againUser.subtract(next)
+        refresh(next, force: true, priority: lane) { ok in waiters.forEach { $0(ok) } }
     }
 
     private func workspace(of key: String) -> String? { tracked.first { $0.ref.storeKey == key }?.ref.workspace }
@@ -259,7 +264,7 @@ final class ProjectStore {
             done(.failure(.notFound))
             return
         }
-        Task {
+        CallPriority.task(.user) {
             let r = await Result(awaiting: { try await client.comments(ref) })
             DispatchQueue.main.async { done(r) }
         }
@@ -276,7 +281,7 @@ final class ProjectStore {
         let projectKey = found.key
         let states = found.snap.statusOptions
         let current = found.snap.option(found.item.statusOptionId)?.name
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let result = await Result(awaiting: { try await ProjectStore.timeline(client, ref, statuses: states, current: current) })
             guard let self else { return }
             DispatchQueue.main.async {
@@ -373,7 +378,7 @@ final class ProjectStore {
         if let hit = optionCache[projectKey], -hit.at.timeIntervalSinceNow < 600 { done(hit.options); return }
         guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { return }
         let project = snap.summary.ref
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let labels = (try? await (client as? any LabelManaging)?.labels(project)) ?? []
             let names = await (client as? any MemberListing)?.memberNames() ?? [:]
             let members = names.map { StatusOption(id: $0.key, name: $0.value, color: "") }
@@ -433,7 +438,7 @@ final class ProjectStore {
         }
         let body = "OverSire closed this sub-item with its parent \(found.item.key)."
         ids.forEach { suppressNotify.insert($0) }
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             var failed = 0
             for ref in refs {
                 do {
@@ -444,7 +449,7 @@ final class ProjectStore {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if failed > 0 { self.lastError = "Could not close \(failed) of \(refs.count) sub-items" }
-                self.refresh([found.key], force: true) { done($0 && failed == 0) }
+                self.refresh([found.key], force: true, priority: .user) { done($0 && failed == 0) }
             }
         }
     }
@@ -461,7 +466,7 @@ final class ProjectStore {
             snap.items.first { $0.id == id }?.ref(in: snap.summary.ref) ?? ItemRef(project: snap.summary.ref, id: id, key: "", url: parent.url)
         }
         ids.forEach { suppressNotify.insert($0) }
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             var failed = 0
             for ref in refs {
                 do { try await client.update(ref, ItemPatch(status: state.id)) } catch { failed += 1 }
@@ -469,7 +474,7 @@ final class ProjectStore {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if failed > 0 { self.lastError = "Could not set \(failed) of \(refs.count) items to \(state.name)" }
-                self.refresh([found.key], force: true) { done($0 && failed == 0) }
+                self.refresh([found.key], force: true, priority: .user) { done($0 && failed == 0) }
             }
         }
     }
@@ -495,7 +500,7 @@ final class ProjectStore {
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
                               priority: new.fieldOptions[ProjectSnapshot.priorityFieldId])
         let project = snap.summary.ref
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let added = await Result(awaiting: { try await client.create(draft, in: project).id })
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -506,7 +511,7 @@ final class ProjectStore {
                 case .success(let itemId):
                     self.lastCreated = itemId
                     self.suppressNotify.insert(itemId)
-                    self.refresh([new.projectKey], force: true) { _ in done(true, nil) }
+                    self.refresh([new.projectKey], force: true, priority: .user) { _ in done(true, nil) }
                 }
             }
         }
@@ -531,7 +536,7 @@ final class ProjectStore {
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
               let ref = found.item.ref(in: found.snap.summary.ref) else { done(false); return }
         suppressNotify.insert(itemId)
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let result = await Result(awaiting: { try await op(client, ref) })
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -540,19 +545,19 @@ final class ProjectStore {
                     self.lastError = failure ?? e.message
                 }
                 self.timelineCache = self.timelineCache.filter { !$0.key.hasPrefix(itemId) }
-                self.refresh([found.key], force: true) { done($0 && result.isOk) }
+                self.refresh([found.key], force: true, priority: .user) { done($0 && result.isOk) }
             }
         }
     }
 
     // MARK: Intake
 
-    func intakeDetail(projectKey: String, item: IntakeItem, done: @escaping (Result<IntakeDetail, ProviderError>) -> Void) {
+    func intakeDetail(projectKey: String, item: IntakeItem, priority: CallPriority = .user, done: @escaping (Result<IntakeDetail, ProviderError>) -> Void) {
         guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(.failure(.unauthorized)); return
         }
         let project = snap.summary.ref
-        Task {
+        CallPriority.task(priority) {
             let r = await Result(awaiting: {
                 guard let t = client as? any IntakeTriaging else { throw ProviderError.unsupported(.intake) }
                 return try await t.intakeDetail(item, in: project)
@@ -566,7 +571,7 @@ final class ProjectStore {
         guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { done(false); return }
         suppressNotify.insert(item.workItemId)
         let project = snap.summary.ref
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let r = await Result(awaiting: {
                 guard let t = client as? any IntakeTriaging else { throw ProviderError.unsupported(.intake) }
                 try await t.triage(item, in: project, action)
@@ -580,7 +585,7 @@ final class ProjectStore {
                     EVENTS.action(.intakeAccepted, item: nil, project: snap.summary.identifier, verb: "intake:\(item.id)", item.name,
                                   payload: ["intake": .string(item.id), "title": .string(item.name)])
                 }
-                self.refresh([projectKey], force: true) { done($0 && r.isOk) }
+                self.refresh([projectKey], force: true, priority: .user) { done($0 && r.isOk) }
             }
         }
     }
@@ -593,7 +598,7 @@ final class ProjectStore {
         loadingKeys.insert(projectKey)
         let project = snap.summary.ref
         let asked = intake.map(\.workItemId)
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             let r = await Result(awaiting: { try await client.intakeSequences(project) })
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -621,7 +626,7 @@ final class ProjectStore {
         guard !todo.isEmpty, let client = linker else {
             done(apply()); return
         }
-        Task { [weak self] in
+        CallPriority.task(.user) { [weak self] in
             var found: [(String, String)] = []
             for id in todo { if let u = try? await client.assetURL(id) { found.append((id, u.absoluteString)) } }
             DispatchQueue.main.async {
@@ -900,6 +905,8 @@ extension ProjectStore {
         ref.key = summary.identifier
         let me = try await t.probe().person
         let states = try await t.statuses(ref)
+        // Before the items: the tracker then knows the pending intake items and does not load them as parents.
+        let intake = try? await (t as? any IntakeTriaging)?.intake(ref)
         let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var items: [Item] = []
         for var item in try await t.items(ref, since: nil, limit: limit) {
@@ -931,7 +938,7 @@ extension ProjectStore {
                                    options: StatusOption.priorities.filter { $0.id != "none" })]
         return ProjectSnapshot(summary: summary, statusOptions: states, items: items, fetchedAt: Date(),
                                fields: fields, me: me.name, meId: me.id, index: try? await (t as? any ItemIndexing)?.index(ref),
-                               intake: try? await (t as? any IntakeTriaging)?.intake(ref))
+                               intake: intake)
     }
 }
 
