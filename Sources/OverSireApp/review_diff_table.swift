@@ -409,6 +409,8 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     /// Shows the rows. The same file keeps its scroll position.
     func show(_ fold: DiffFold, items: [DiffItem], tokens: [[SyntaxLanguage.Token]], desk: ReviewDesk, file: ReviewFile, threads hash: AnyHashable? = nil) {
         let same = file.id == self.file?.id
+        // Before the data changes: each setter calls refresh(), and the table still has the old rows.
+        if !same { view.selection = nil; view.cursor = nil }
         self.fold = fold
         self.items = items
         self.tokens = tokens
@@ -416,7 +418,6 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         wrap = desk.wrap
         split = desk.split
         machine = desk.summary.machine
-        if !same { view.selection = nil; view.cursor = nil }
         if !same || hash != threadHash { threadCells = [:] }
         threadHash = hash
         heights = [:]
@@ -480,8 +481,9 @@ final class DiffTable: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     /// Draws the rows again with no new data: a new pick or a new selection.
     func refresh() {
         let rows = view.rows(in: view.visibleRect)
-        guard rows.length > 0 else { return }
-        for r in rows.location..<NSMaxRange(rows) { configure(row: r) }
+        let end = min(NSMaxRange(rows), items.count)
+        guard rows.location < end else { return }
+        for r in rows.location..<end { configure(row: r) }
     }
 
     private func configure(row r: Int) {

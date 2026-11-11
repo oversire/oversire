@@ -44,6 +44,33 @@ final class DiffTableTests: XCTestCase {
         return c
     }
 
+    // OVERSIRE-459: a selection or a cursor on a row past the end of the next file trapped.
+    private let other = ReviewFile(repo: "cli", path: "review/other.go", status: .modified, added: 1, removed: 0)
+
+    func testAShortFileAfterTheCursorClearsItWithNoTrap() throws {
+        let (p, w) = panel(width: 600, wrap: false)
+        defer { w.close() }
+        let t = p.table
+        let r = t.items.count - 1
+        _ = try XCTUnwrap(cell(t, r))
+        t.view.cursor = r
+        p.update(other, diff: nil)
+        XCTAssertNil(t.view.cursor)
+        XCTAssertEqual(t.view.numberOfRows, t.items.count)
+    }
+
+    func testAShortFileAfterASelectionClearsItWithNoTrap() throws {
+        let (p, w) = panel(width: 600, wrap: false)
+        defer { w.close() }
+        let t = p.table
+        let r = t.items.count - 1
+        _ = try XCTUnwrap(cell(t, r))
+        t.view.selection = DiffSelection(column: 0, from: .init(row: r - 2, offset: 0), to: .init(row: r, offset: 4))
+        p.update(other, diff: nil)
+        XCTAssertNil(t.view.selection)
+        XCTAssertEqual(t.view.numberOfRows, t.items.count)
+    }
+
     func testTheMarkKeepsItsWidthOnTheWidestLine() throws {
         let (p, w) = panel(width: 600, wrap: false)
         defer { w.close() }
