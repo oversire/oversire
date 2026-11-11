@@ -181,6 +181,9 @@ let ENV = AppEnvironment()
 
 extension AppEnvironment: TrackerDirectory {
     var trackerIds: [String] { accounts(.tracker).map(\.account.id) }
+    func trackerError(_ id: String) -> String? {
+        accounts(.tracker).first { $0.account.id == id }.flatMap { error($0.account) }
+    }
 }
 
 extension AppEnvironment: RepoAccounts {}

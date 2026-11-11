@@ -9,14 +9,27 @@ final class RecordedPlane: HTTPTransport, @unchecked Sendable {
     private var answers: [String: (Int, String)] = [:]
     private(set) var requests: [URLRequest] = []
 
+    private var pages: [String: [[String]]] = [:]
+
     func on(_ method: String, _ path: String, status: Int = 200, _ body: String) {
-        lock.withLock { answers[method + " " + path] = (status, body) }
+        lock.withLock { answers[method + " " + path] = (status, body); pages[method + " " + path] = nil }
+    }
+
+    /// A cursor list: page n answers the cursor "c<n>", page 0 answers no cursor.
+    func onPages(_ method: String, _ path: String, _ rows: [[String]]) {
+        lock.withLock { pages[method + " " + path] = rows; answers[method + " " + path] = nil }
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let key = (request.httpMethod ?? "GET") + " " + (request.url?.path(percentEncoded: false) ?? "")
+        let cursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cursor" }?.value
         let (status, body) = lock.withLock {
             requests.append(request)
+            if let list = pages[key] {
+                let n = cursor.flatMap { Int($0.dropFirst()) } ?? 0
+                let more = n + 1 < list.count
+                return (200, #"{"results":[\#(list[n].joined(separator: ","))],"next_page_results":\#(more),"next_cursor":"c\#(n + 1)"}"#)
+            }
             return answers[key] ?? (404, #"{"detail":"no answer for \#(key)"}"#)
         }
         return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
@@ -159,6 +172,108 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(fullLists(), 1, "no full list between the full refreshes")
         XCTAssertEqual(Set(http.requests.compactMap { $0.url?.path() }.filter { $0.hasSuffix("i2/") || $0.hasSuffix("i3/") }),
                        ["\(list)i2/", "\(list)i3/"])
+    }
+
+    // MARK: Open items over the limit (OVERSIRE-457)
+
+    private func row(_ n: Int, _ state: String, _ at: String) -> String {
+        #"{"id":"i\#(n)","name":"Item \#(n)","sequence_id":\#(n),"state":"\#(state)","last_activity_at":"\#(at)"}"#
+    }
+
+    private func closedStates() {
+        http.on("GET", "\(ws)/projects/P1/states/", ##"{"results":[{"id":"s1","name":"Todo","color":"#888888","group":"unstarted","sequence":1},{"id":"s2","name":"Doing","color":"#F59E0B","group":"started","sequence":2},{"id":"s3","name":"Done","color":"#46A758","group":"completed","sequence":3},{"id":"s4","name":"Cancelled","color":"#9AA4BC","group":"cancelled","sequence":4}]}"##)
+    }
+
+    private var expandLists: Int {
+        http.requests.filter { $0.url?.path() == "\(ws)/projects/P1/issues/" && $0.url?.query()?.contains("expand") == true }.count
+    }
+
+    func testItemsHoldEachOpenItemOverTheLimit() async throws {
+        closedStates()
+        http.onPages("GET", "\(ws)/projects/P1/issues/", [[
+            row(1, "s3", "2026-10-16T12:00:00Z"), row(2, "s3", "2026-10-16T11:00:00Z"), row(3, "s3", "2026-10-10T10:00:00Z"),
+            row(4, "s2", "2026-10-09T10:00:00Z"), row(5, "s1", "2026-10-01T10:00:00Z"), row(6, "s4", "2026-10-08T10:00:00Z"),
+        ]])
+        let items = try await plane.items(project, since: nil, limit: 2)
+        XCTAssertEqual(Set(items.map(\.key)), ["ENG-1", "ENG-2", "ENG-4", "ENG-5"], "the limit, plus each open item")
+    }
+
+    func testItemsPageToTheLastOpenItem() async throws {
+        closedStates()
+        // 250 rows in 3 pages. The only old open item is on the last page.
+        let rows = (1...250).map { n in row(n, n == 250 ? "s1" : "s3", n == 250 ? "2026-01-01T00:00:00Z" : "2026-10-16T10:00:00Z") }
+        http.onPages("GET", "\(ws)/projects/P1/issues/", [Array(rows[0..<100]), Array(rows[100..<200]), Array(rows[200...])])
+        let items = try await plane.items(project, since: nil, limit: 2)
+        XCTAssertTrue(items.contains { $0.key == "ENG-250" })
+        XCTAssertEqual(items.count, 3)
+        XCTAssertEqual(expandLists, 3, "the list pages to the last open item")
+    }
+
+    func testItemsStopAtThePageWithTheLastWantedItem() async throws {
+        closedStates()
+        let rows = (1...250).map { n in row(n, n == 3 ? "s2" : "s3", n == 3 ? "2026-01-01T00:00:00Z" : "2026-10-16T10:00:00Z") }
+        http.onPages("GET", "\(ws)/projects/P1/issues/", [Array(rows[0..<100]), Array(rows[100..<200]), Array(rows[200...])])
+        let items = try await plane.items(project, since: nil, limit: 2)
+        XCTAssertTrue(items.contains { $0.key == "ENG-3" })
+        XCTAssertEqual(expandLists, 1, "all wanted rows are on page 1")
+    }
+
+    func testOpenItemsLoadAgainOnlyWhenTheyChange() async throws {
+        closedStates()
+        let list = "\(ws)/projects/P1/issues/"
+        http.on("GET", list, #"{"results":[\#(row(1, "s3", "2026-10-16T12:00:00Z")),\#(row(2, "s1", "2026-10-01T10:00:00Z"))],"next_page_results":false}"#)
+        _ = try await plane.items(project, since: nil, limit: 1)
+        plane.indexMaxAge = 0
+        let before = http.requests.count
+        let quiet = try await plane.items(project, since: nil, limit: 1)
+        XCTAssertEqual(Set(quiet.map(\.key)), ["ENG-1", "ENG-2"])
+        let calls = http.requests.dropFirst(before)
+        XCTAssertFalse(calls.contains { $0.url?.query()?.contains("expand") == true }, "no load when nothing changed")
+
+        http.on("GET", list, #"{"results":[\#(row(1, "s3", "2026-10-16T12:00:00Z")),\#(row(2, "s1", "2026-10-17T10:00:00Z"))],"next_page_results":false}"#)
+        http.on("GET", "\(list)i2/", row(2, "s1", "2026-10-17T10:00:00Z"))
+        let mark = http.requests.count
+        _ = try await plane.items(project, since: nil, limit: 1)
+        let loads = http.requests.dropFirst(mark).filter { $0.url?.query()?.contains("expand") == true }.compactMap { $0.url?.path() }
+        XCTAssertEqual(loads, ["\(list)i2/"], "only the changed open item loads")
+    }
+
+    func testItemsUseTheLimitWhenStatesFail() async throws {
+        http.on("GET", "\(ws)/projects/P1/states/", status: 500, #"{"detail":"down"}"#)
+        http.on("GET", "\(ws)/projects/P1/issues/", #"{"results":[\#(row(1, "s3", "2026-10-16T12:00:00Z")),\#(row(2, "s1", "2026-10-01T10:00:00Z"))],"next_page_results":false}"#)
+        let items = try await plane.items(project, since: nil, limit: 1)
+        XCTAssertEqual(items.map(\.key), ["ENG-1"])
+    }
+
+    func testWantedCountsAnUnknownStateAsOpen() {
+        let at = { (d: Double) in Date(timeIntervalSince1970: d) }
+        let index = [ItemStub(id: "new", parentId: nil, stateId: "done", activityAt: at(3)),
+                     ItemStub(id: "x", parentId: nil, stateId: "sX", activityAt: at(2)),
+                     ItemStub(id: "none", parentId: nil, stateId: nil, activityAt: at(1)),
+                     ItemStub(id: "old", parentId: nil, stateId: "done", activityAt: at(0))]
+        XCTAssertEqual(PlaneTracker.wanted(index, closed: ["done"], limit: 1, since: nil).map(\.id), ["new", "x", "none"])
+        XCTAssertEqual(PlaneTracker.wanted(index, closed: nil, limit: 1, since: nil).map(\.id), ["new"])
+        XCTAssertEqual(PlaneTracker.wanted(index, closed: ["done"], limit: 1, since: at(2)).map(\.id), ["new", "x"])
+    }
+
+    func testListKeepsThePageSize() async throws {
+        // The cursor holds the page number. A smaller last page would read the wrong rows.
+        let path = "\(ws)/projects/P1/issues/"
+        http.onPages("GET", path, [(1...100).map { row($0, "s1", "2026-10-16T12:00:00Z") }, (101...150).map { row($0, "s1", "2026-10-16T12:00:00Z") }])
+        let rows = try await plane.api.list(path, max: 120)
+        XCTAssertEqual(rows.count, 120)
+        let sizes = http.requests.compactMap { URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "per_page" }?.value }
+        XCTAssertEqual(sizes, ["100", "100"])
+    }
+
+    func testListStopsWhenDone() async throws {
+        let path = "\(ws)/projects/P1/issues/"
+        http.onPages("GET", path, [[row(1, "s1", "2026-10-16T12:00:00Z")], [row(2, "s1", "2026-10-16T12:00:00Z")], [row(3, "s1", "2026-10-16T12:00:00Z")]])
+        let rows = try await plane.api.list(path, max: 500) { _ in true }
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(http.requests.count, 1)
+        let all = try await plane.api.list(path, max: 500)
+        XCTAssertEqual(all.count, 3)
     }
 
     func testItemsKeepAChangedItemBelowTheListDepth() async throws {

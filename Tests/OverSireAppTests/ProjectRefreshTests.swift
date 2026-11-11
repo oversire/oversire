@@ -18,7 +18,9 @@ final class ProjectRefreshTests: XCTestCase {
         private let lock = NSLock()
         private var waiting: [CheckedContinuation<Void, Never>] = []
         private var count = 0
+        private var seenLimits: [Int] = []
         var limited = false
+        var limits: [Int] { lock.withLock { seenLimits } }
         var calls: Int { lock.withLock { count } }
         var blocked: Int { lock.withLock { waiting.count } }
 
@@ -35,7 +37,7 @@ final class ProjectRefreshTests: XCTestCase {
             return []
         }
         func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
-            await withCheckedContinuation { c in lock.withLock { count += 1; waiting.append(c) } }
+            await withCheckedContinuation { c in lock.withLock { count += 1; seenLimits.append(limit); waiting.append(c) } }
             return []
         }
         func detail(_ i: ItemRef) async throws -> ItemDetail { throw ProviderError.notFound }
@@ -52,10 +54,20 @@ final class ProjectRefreshTests: XCTestCase {
         func tracker(_ id: String) -> (any Tracker)? { id == t.account.id ? t : nil }
     }
 
-    private func store(_ t: any Tracker) throws -> ProjectStore {
+    /// A directory whose tracker can come later, as after a failed Keychain read.
+    private final class SwitchTrackers: TrackerDirectory {
+        var t: (any Tracker)?
+        var trackerIds: [String] { ["ws"] }
+        func tracker(_ id: String) -> (any Tracker)? { id == "ws" ? t : nil }
+        func trackerError(_ id: String) -> String? { t == nil ? "no token in the Keychain" : nil }
+    }
+
+    private func store(_ t: any Tracker) throws -> ProjectStore { try store(Trackers(t)) }
+
+    private func store(_ trackers: TrackerDirectory) throws -> ProjectStore {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("refresh-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        return ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, _ in }),
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
 
@@ -236,5 +248,96 @@ final class ProjectRefreshTests: XCTestCase {
         http.on("\(ws)/projects/P1/issues/", #"{"results":[{"id":"i1","name":"One","sequence_id":1,"state":"s1","updated_at":"2026-10-16T10:00:00Z","last_activity_at":"2026-10-16T10:00:00Z"},{"id":"i2","parent":"i1","state":"s1","last_activity_at":"2026-10-17T11:00:00Z"}],"next_page_results":false}"#)
         let second = try await ProjectStore.snapshot(p, summary, limit: 50, previous: first)
         XCTAssertEqual(second.items.map(\.id).sorted(), ["i1", "i2"], "no item drops out")
+    }
+
+    // MARK: Live projects and the item limit (OVERSIRE-457)
+
+    private var order: ProjectSummary {
+        ProjectSummary(ref: ProjectRef(account: AccountID(provider: "order", id: "ws"), id: "p1", key: "ORD"),
+                       identifier: "ORD", title: "Order", url: "https://x/ORD", closed: false)
+    }
+
+    func testPollRetriesAFailedLiveProject() async throws {
+        let dir = SwitchTrackers()
+        let store = try store(dir)
+        let key = order.ref.storeKey
+        store.relayIsLive = { true }
+        await MainActor.run { store.track([order], live: [key]) }
+        await until("the refresh fails") { store.errors[key] != nil && store.refreshing.isEmpty }
+        XCTAssertEqual(store.errors[key], ProjectStore.noToken + " (no token in the Keychain)")
+        let t = OrderTracker()
+        dir.t = t
+        await MainActor.run { store.poll() }
+        await until("the poll loads the live project again") { t.calls.contains("items") && store.errors[key] == nil }
+    }
+
+    func testPollRefreshesOnlyAStaleLiveProject() async throws {
+        let t = OrderTracker()
+        let store = try store(t)
+        let key = order.ref.storeKey
+        store.relayIsLive = { true }
+        await MainActor.run { store.track([order], live: [key]) }
+        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        let loads = { t.calls.filter { $0 == "items" }.count }
+        await MainActor.run { store.poll() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(loads(), 1, "a fresh live project waits for its events")
+        store.now = { Date().addingTimeInterval(3600) }
+        await MainActor.run { store.poll() }
+        await until("a stale live project polls") { loads() == 2 }
+    }
+
+    func testLimitChangeDuringARefreshRunsAgain() async throws {
+        let saved = PROJECTS_CFG.itemsPerProject
+        defer { PROJECTS_CFG.itemsPerProject = saved }
+        PROJECTS_CFG.itemsPerProject = 10
+        let t = SlowTracker()
+        let store = try store(t)
+        let summary = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        await MainActor.run { store.track([summary], live: []) }
+        await until("the first refresh runs") { t.blocked == 1 }
+        PROJECTS_CFG.itemsPerProject = 0
+        await MainActor.run { store.track([summary], live: []) }
+        t.release()
+        await until("one more refresh runs with the new limit") { t.blocked == 1 && t.calls == 2 }
+        t.release()
+        XCTAssertEqual(t.limits, [100, 200])
+    }
+
+    func testSnapshotLimitValues() {
+        XCTAssertEqual(ProjectStore.snapshotLimit(itemsPerProject: 10), 100)
+        XCTAssertEqual(ProjectStore.snapshotLimit(itemsPerProject: 25), 100)
+        XCTAssertEqual(ProjectStore.snapshotLimit(itemsPerProject: 0), 200)
+    }
+
+    func testJoinedItemIsNotNews() async throws {
+        let (p, http, summary) = plane()
+        p.indexMaxAge = 0
+        let first = try await ProjectStore.snapshot(p, summary, limit: 50, previous: nil)
+        // i3 was in the index only. i4 is new.
+        var previous = first
+        previous.index = (first.index ?? []) + [ItemStub(id: "i3", parentId: nil, stateId: "s1", activityAt: nil)]
+        let rows = [#"{"id":"i1","name":"One","sequence_id":1,"state":"s1","last_activity_at":"2026-10-16T10:00:00Z"}"#,
+                    #"{"id":"i2","name":"Two","sequence_id":2,"state":"s1","parent":"i1","last_activity_at":"2026-10-16T11:00:00Z"}"#,
+                    #"{"id":"i3","name":"Three","sequence_id":3,"state":"s1","last_activity_at":"2026-10-01T10:00:00Z"}"#,
+                    #"{"id":"i4","name":"Four","sequence_id":4,"state":"s1","last_activity_at":"2026-10-17T10:00:00Z"}"#]
+        http.on("\(ws)/projects/P1/issues/", #"{"results":[\#(rows.joined(separator: ","))],"next_page_results":false}"#)
+        http.on("\(ws)/projects/P1/issues/i3/", rows[2])
+        http.on("\(ws)/projects/P1/issues/i4/", rows[3])
+        http.on("\(ws)/projects/P1/issues/i4/comments/", #"{"results":[]}"#)
+        let second = try await ProjectStore.snapshot(p, summary, limit: 50, previous: previous)
+        XCTAssertEqual(second.items.map(\.id).sorted(), ["i1", "i2", "i3", "i4"])
+        XCTAssertFalse(http.paths.contains { $0.hasSuffix("/i3/comments/") }, "a joined item loads no comments")
+        XCTAssertTrue(http.paths.contains { $0.hasSuffix("/i4/comments/") }, "a new item loads its comments")
+
+        let store = try store(p)
+        await MainActor.run {
+            store.absorb(previous)
+            store.absorb(second)
+        }
+        let added = store.activity(limit: 50, project: summary.ref.storeKey).filter {
+            if case .added = $0.change { return true } else { return false }
+        }.map(\.itemId)
+        XCTAssertEqual(added, ["i4"], "only the new item is news")
     }
 }

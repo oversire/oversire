@@ -111,10 +111,10 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 - `keyFormat`: the pattern of the item keys, for example `ENG-12`. `.projectDash` fits most trackers. The app finds keys in branch names and pull request titles with it.
 - `projects`, `statuses`, `items`, `detail`, `comments`, `create`, `update`, `comment`.
 - Map each vendor status to a `StatusCategory`. The suite needs at least one done status and one open status.
-- `items` gives the newest activity first.
+- `items` gives the newest activity first, up to the limit. An adapter that knows the state groups also gives each open item, over the limit.
 - `TrackerConformance` uses the first project that is not closed. It checks these:
   - `create` returns a key that `keyFormat` finds in a title, and in lower case in a branch name.
-  - `items` lists the new item, and `items(limit: 1)` gives one item or none.
+  - `items` lists the new item, and `items(limit: 1)` gives one closed item or none.
   - `detail` shows the title from `update`.
   - `comments` contains the body of the new comment.
   - With `RelationManaging`, a new `blockedBy` relation shows on both items (the other item gets `blocks`), and the remove takes it away. `TrackerConformance.relations(_:item:project:)` runs it alone.

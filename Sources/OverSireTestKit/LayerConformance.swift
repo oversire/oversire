@@ -12,7 +12,8 @@ public enum TrackerConformance {
             r.expect(false, "no open project")
             return r
         }
-        if let statuses = await r.step("statuses", { try await t.statuses(p) }) {
+        let statuses = await r.step("statuses", { try await t.statuses(p) })
+        if let statuses {
             let cats = Set(statuses.map(\.category))
             r.expect(cats.contains(.done) && cats.count > 1, "the statuses map to \(cats.map(\.rawValue).sorted()), with no done and open split")
         }
@@ -29,7 +30,10 @@ public enum TrackerConformance {
             r.expect(Set(list.map(\.id)).count == list.count, "items gives one id more than one time")
         }
         if let one = await r.step("items limit 1", { try await t.items(p, since: nil, limit: 1) }) {
-            r.expect(one.count <= 1, "items gave \(one.count) items for limit 1")
+            // Open items can go over the limit.
+            let done = Set((statuses ?? []).filter { $0.category == .done }.map(\.id))
+            let closed = one.filter { done.contains($0.statusOptionId ?? "") }.count
+            r.expect(closed <= 1, "items gave \(closed) closed items for limit 1")
         }
         if let s = t as? any ItemSearching, t.capabilities.contains(.itemSearch),
            let hits = await r.step("search", { try await s.search(title, in: [p], limit: 10) }) {

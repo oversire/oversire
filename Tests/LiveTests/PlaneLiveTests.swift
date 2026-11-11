@@ -18,6 +18,23 @@ final class PlaneLiveTests: XCTestCase {
         XCTAssertEqual(detail.item.id, first.id)
     }
 
+    /// Read-only: each open item loads, also far below the activity limit (OVERSIRE-457).
+    func testEachOpenItemLoads() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["OVERSIRE_LIVE"] == "1", let token = env["PLANE_TOKEN_ocral"] else {
+            throw XCTSkip("set OVERSIRE_LIVE=1 and PLANE_TOKEN_ocral")
+        }
+        let plane = PlaneTracker(workspace: PlaneWorkspace(slug: "ocral"), token: token, http: LiveHTTP())
+        let projects = try await plane.projects()
+        for id in ["SLING", "OVERSIRE"] {
+            let project = try XCTUnwrap(projects.first { $0.identifier == id }).ref
+            let closed = Set(try await plane.statuses(project).filter { $0.group == "completed" || $0.group == "cancelled" }.map(\.id))
+            let open = Set(try await plane.index(project).filter { !closed.contains($0.stateId ?? "") }.map(\.id))
+            let items = Set(try await plane.items(project, since: nil, limit: 5).map(\.id))
+            XCTAssertTrue(open.isSubset(of: items), "\(id): \(open.subtracting(items).count) of \(open.count) open items are missing")
+        }
+    }
+
     /// Read-only: lists the relations of OVERSIRE-82, which waits on OVERSIRE-80.
     func testReadRelations() async throws {
         let env = ProcessInfo.processInfo.environment
@@ -70,7 +87,11 @@ final class PlaneLiveTests: XCTestCase {
 
 struct LiveHTTP: HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let t0 = Date()
         let (data, resp) = try await URLSession.shared.data(for: request)
+        if ProcessInfo.processInfo.environment["LIVE_TRACE"] == "1" {
+            print("TRACE", (resp as! HTTPURLResponse).statusCode, String(format: "%.1fs", Date().timeIntervalSince(t0)), data.count, request.url!.path(), request.url!.query() ?? "")
+        }
         return (data, resp as! HTTPURLResponse)
     }
 }

@@ -48,18 +48,21 @@ struct PlaneAPI: Sendable {
         return nil
     }
 
-    /// Follows the cursor until max rows or the last page.
-    func list(_ path: String, query: [URLQueryItem] = [], max: Int) async throws -> [[String: Any]] {
+    /// Follows the cursor until max rows, the last page, or `done` of the rows so far.
+    func list(_ path: String, query: [URLQueryItem] = [], max: Int,
+              until done: (([[String: Any]]) -> Bool)? = nil) async throws -> [[String: Any]] {
         var out: [[String: Any]] = []
         var cursor: String?
+        // The cursor holds the page number, so the page size must not change between pages.
+        let size = String(min(100, Swift.max(1, max)))
         for _ in 0..<20 {
-            var q = query + [URLQueryItem(name: "per_page", value: String(min(100, Swift.max(1, max - out.count))))]
+            var q = query + [URLQueryItem(name: "per_page", value: size)]
             if let cursor { q.append(URLQueryItem(name: "cursor", value: cursor)) }
             let obj = try await send("GET", path, query: q)
             if let rows = obj as? [[String: Any]] { return Array((out + rows).prefix(max)) }
             let o = obj as? [String: Any] ?? [:]
             out += o["results"] as? [[String: Any]] ?? []
-            guard out.count < max, o["next_page_results"] as? Bool == true, let next = o["next_cursor"] as? String else {
+            guard out.count < max, done?(out) != true, o["next_page_results"] as? Bool == true, let next = o["next_cursor"] as? String else {
                 return Array(out.prefix(max))
             }
             cursor = next

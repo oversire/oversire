@@ -104,7 +104,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         return out
     }
 
-    /// The items with the newest activity, and the parents and sub-items that complete each tree.
+    /// The items with the newest activity up to limit, each open item, and the parents and sub-items that complete each tree.
     /// Between full lists, the index tells which items changed. Only those load again.
     /// A full list each 10 minutes catches changes that do not move the activity time.
     public func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
@@ -113,17 +113,31 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         let (previous, last) = lock.withLock { (itemCache[p.id] ?? [:], fullAt[p.id]) }
         let index = try? await index(p, maxAge: indexMaxAge)
         var rows: [[String: Any]], kept: [Item] = [], loaded: Set<String>
-        if let index, !previous.isEmpty, let last, -last.timeIntervalSinceNow < Self.fullEvery {
-            var top = Array(index.sorted { ($0.activityAt ?? .distantPast) > ($1.activityAt ?? .distantPast) }.prefix(limit))
-            if let since { top = top.filter { ($0.activityAt ?? .distantFuture) >= since } }
-            let need = Set(top.filter { $0.activityAt == nil || previous[$0.id]?.activityAt != $0.activityAt }.map(\.id))
-            kept = top.compactMap { need.contains($0.id) ? nil : previous[$0.id] }
-            // Changed items have the newest activity, so they are near the top of the list.
-            let depth = (top.lastIndex { need.contains($0.id) } ?? 0) + 10
-            let (got, old) = try await load(p, need, depth: depth, previous: previous)
-            rows = got
-            kept += old
-            loaded = Set(top.map(\.id))
+        if let index {
+            let want = Self.wanted(index, closed: await closedStates(p), limit: limit, since: since)
+            if !previous.isEmpty, let last, -last.timeIntervalSinceNow < Self.fullEvery {
+                let need = Set(want.filter { $0.activityAt == nil || previous[$0.id]?.activityAt != $0.activityAt }.map(\.id))
+                kept = want.compactMap { need.contains($0.id) ? nil : previous[$0.id] }
+                // Changed items have the newest activity, so they are near the top of the list.
+                let depth = (want.lastIndex { need.contains($0.id) } ?? 0) + 10
+                let (got, old) = try await load(p, need, depth: depth, previous: previous)
+                rows = got
+                kept += old
+                loaded = Set(want.map(\.id))
+            } else {
+                // Pages until each wanted item and its tree is in, about one call for each 100 items.
+                let ids = Self.tree(of: Set(want.map(\.id)), index: index).subtracting(pendingIds(p))
+                let query = [URLQueryItem(name: "expand", value: "assignees,labels"), Self.newestFirst]
+                rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: query, max: Swift.max(index.count, limit)) { rows in
+                    ids.isSubset(of: rows.compactMap { PlaneAPI.id($0["id"]) })
+                }.filter { PlaneAPI.id($0["id"]).map(ids.contains) ?? false }
+                let missing = ids.subtracting(rows.compactMap { PlaneAPI.id($0["id"]) })
+                let (got, old) = try await load(p, missing, depth: 0, previous: previous)
+                rows += got
+                kept = old
+                lock.withLock { fullAt[p.id] = Date() }
+                loaded = ids
+            }
         } else {
             let query = [URLQueryItem(name: "expand", value: "assignees,labels"),
                          Self.newestFirst]
@@ -141,6 +155,21 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         let items = ProjectSnapshot.unique(kept + rows.compactMap { parseItem($0, identifier: identifier, names: names) })
         lock.withLock { itemCache[p.id] = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
         return items
+    }
+
+    /// The `limit` stubs with the newest activity, plus each open stub, newest first.
+    /// A state that is not in `closed` counts as open. With no `closed`, only the limit counts.
+    static func wanted(_ index: [ItemStub], closed: Set<String>?, limit: Int, since: Date?) -> [ItemStub] {
+        let sorted = index.sorted { ($0.activityAt ?? .distantPast) > ($1.activityAt ?? .distantPast) }
+        var out = sorted.enumerated().filter { n, s in n < limit || closed.map { !$0.contains(s.stateId ?? "") } ?? false }.map(\.element)
+        if let since { out = out.filter { ($0.activityAt ?? .distantFuture) >= since } }
+        return out
+    }
+
+    /// The states in the completed or cancelled group. Nil when the states do not load.
+    private func closedStates(_ p: ProjectRef) async -> Set<String>? {
+        guard let states = try? await statuses(p), !states.isEmpty else { return nil }
+        return Set(states.filter { $0.group == "completed" || $0.group == "cancelled" }.map(\.id))
     }
 
     /// One item with no comments and no links: one call.
@@ -234,15 +263,12 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         return stubs
     }
 
-    // The parents and the sub-items of the loaded items, so that each tree is complete.
-    // An item that did not change since the last call is kept. A few others load one by one.
-    // More load with the full list, which costs one call for each 100 items.
-    private func treeRows(_ p: ProjectRef, loaded: Set<String>, index: [ItemStub],
-                          previous: [String: Item]) async throws -> (rows: [[String: Any]], kept: [Item]) {
+    /// The ids, their parents, and the sub-items of each, so that each tree is complete.
+    static func tree(of ids: Set<String>, index: [ItemStub]) -> Set<String> {
         let byId = Dictionary(index.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let kids = Dictionary(grouping: index.filter { $0.parentId != nil }, by: { $0.parentId! })
-        var tree = loaded
-        for id in loaded {
+        var tree = ids
+        for id in ids {
             var parent = byId[id]?.parentId
             while let x = parent, !tree.contains(x) { tree.insert(x); parent = byId[x]?.parentId }
         }
@@ -250,6 +276,16 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         while let id = queue.popLast() {
             for c in kids[id] ?? [] where !tree.contains(c.id) { tree.insert(c.id); queue.append(c.id) }
         }
+        return tree
+    }
+
+    // The parents and the sub-items of the loaded items, so that each tree is complete.
+    // An item that did not change since the last call is kept. A few others load one by one.
+    // More load with the full list, which costs one call for each 100 items.
+    private func treeRows(_ p: ProjectRef, loaded: Set<String>, index: [ItemStub],
+                          previous: [String: Item]) async throws -> (rows: [[String: Any]], kept: [Item]) {
+        let byId = Dictionary(index.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let tree = Self.tree(of: loaded, index: index)
         var kept: [Item] = [], need: Set<String> = []
         for id in tree.subtracting(loaded) {
             if let prev = previous[id], prev.activityAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
@@ -276,8 +312,10 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         if need.isEmpty { return ([], []) }
         let expand = URLQueryItem(name: "expand", value: "assignees,labels")
         var rows: [[String: Any]] = []
-        if need.count > 3 {
-            let all = try await api.list("\(ws)/projects/\(p.id)/issues/", query: [expand, Self.newestFirst], max: depth)
+        if need.count > 3, depth > 0 {
+            let all = try await api.list("\(ws)/projects/\(p.id)/issues/", query: [expand, Self.newestFirst], max: depth) { rows in
+                need.isSubset(of: rows.compactMap { PlaneAPI.id($0["id"]) })
+            }
             rows = all.filter { PlaneAPI.id($0["id"]).map(need.contains) ?? false }
         }
         var kept: [Item] = []

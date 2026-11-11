@@ -71,7 +71,7 @@ extension SettingsPage {
                 PROJECTS_CFG.defaultView = i == 1 ? .activity : .board
                 self?.app?.applyProjectSelection()
             }),
-            FieldRow("Items per project", Segmented(["10", "25", "All"], selected: items.firstIndex(of: PROJECTS_CFG.itemsPerProject) ?? 0,
+            FieldRow("Items per project", note: "All shows each open item, and the closed items with recent activity.", Segmented(["10", "25", "All"], selected: items.firstIndex(of: PROJECTS_CFG.itemsPerProject) ?? 0,
                                                     label: "Items per project") { [weak self] i in
                 PROJECTS_CFG.itemsPerProject = items[i]
                 self?.app?.applyProjectSelection()

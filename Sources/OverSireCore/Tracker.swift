@@ -741,6 +741,7 @@ public protocol Tracker: Provider {
     func projects() async throws -> [ProjectSummary]
     func statuses(_ p: ProjectRef) async throws -> [StatusOption]
     /// The items with the newest activity first, up to limit. A since date stops at older activity.
+    /// An adapter that knows the state groups also gives each open item, over the limit.
     func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item]
     func detail(_ i: ItemRef) async throws -> ItemDetail
     func comments(_ i: ItemRef) async throws -> [Comment]

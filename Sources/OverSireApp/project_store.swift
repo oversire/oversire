@@ -13,6 +13,12 @@ protocol TrackerDirectory: AnyObject {
     /// The tracker account ids, for example the Plane workspace slugs.
     var trackerIds: [String] { get }
     func tracker(_ id: String) -> (any Tracker)?
+    /// Why `tracker(id)` is nil, when the directory knows.
+    func trackerError(_ id: String) -> String?
+}
+
+extension TrackerDirectory {
+    func trackerError(_ id: String) -> String? { nil }
 }
 
 /// Optional tracker features that the store uses when a tracker has them.
@@ -78,6 +84,10 @@ final class ProjectStore {
     private var waiting: [Date: Set<String>] = [:]
     /// The shortest pause after a rate limit, and the wait of the Mac that does not lead.
     var cooldownMin: TimeInterval = 60
+    /// A live project polls when its snapshot is older than this, also while the relay is live.
+    var liveMaxAge: TimeInterval = 1800
+    /// The snapshot limit of the last refresh. A new limit forces a refresh.
+    private var limitUsed: Int?
     var otherMacDelay: TimeInterval = 60
     var onChange: ((DataChange) -> Void)?
     var busy: BusyTracker?
@@ -100,7 +110,7 @@ final class ProjectStore {
         PROJECT_ICONS.track(projects)
         restartTimer()
         let keys = projects.map { $0.ref.storeKey }
-        refresh(keys, force: false) { _ in }
+        refresh(keys, force: limitUsed != nil && limitUsed != snapshotLimit) { _ in }
         if changed { publish(DataChange(.projects, origin: .event)) }
     }
 
@@ -117,7 +127,11 @@ final class ProjectStore {
     func poll() {
         let liveRelay = relayIsLive()
         let keys = tracked.map(\.ref.storeKey).filter { key in
-            if liveKeys.contains(key) { return !liveRelay }
+            // A live project waits for its events, unless its last refresh failed or is old.
+            if liveKeys.contains(key), liveRelay {
+                guard errors[key] == nil, let at = snapshots[key]?.fetchedAt else { return true }
+                return now().timeIntervalSince(at) > liveMaxAge
+            }
             return true
         }
         refresh(keys, force: false) { _ in }
@@ -149,6 +163,7 @@ final class ProjectStore {
             (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey])
         }
         let limit = snapshotLimit, minPause = cooldownMin
+        limitUsed = limit
         let label = { (n: Int) in jobs.count == 1 ? "Loading \(jobs[0].0.identifier)" : "Loading projects: \(n) of \(jobs.count)" }
         let token = busy?.begin(label(0))
         if hold { return }
@@ -171,9 +186,10 @@ final class ProjectStore {
                     APP_LOG.write(e)
                 }
                 guard let client else {
-                    error = "\(p.ref.workspace): " + ProjectStore.noToken
-                    errors[p.ref.storeKey] = ProjectStore.noToken
-                    line(.error, ProjectStore.noToken)
+                    let why = self.trackers.trackerError(p.ref.workspace).map { "\(ProjectStore.noToken) (\($0))" } ?? ProjectStore.noToken
+                    error = "\(p.ref.workspace): " + why
+                    errors[p.ref.storeKey] = why
+                    line(.error, why)
                     continue
                 }
                 switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
@@ -682,10 +698,10 @@ final class ProjectStore {
     /// The open blocker keys of an item, from the relation cache.
     func blockers(of key: String) -> [String] { relations.blockers(of: key) { isDone(key: $0) } }
 
-    var snapshotLimit: Int {
-        let n = PROJECTS_CFG.itemsPerProject
-        return min(300, max(100, n == 0 ? 200 : n))
-    }
+    /// The window of items by newest activity. Closed items outside it do not load. Open items always load.
+    var snapshotLimit: Int { Self.snapshotLimit(itemsPerProject: PROJECTS_CFG.itemsPerProject) }
+
+    static func snapshotLimit(itemsPerProject n: Int) -> Int { min(300, max(100, n == 0 ? 200 : n)) }
 
     // MARK: Diff
 
@@ -769,8 +785,10 @@ final class ProjectStore {
         let key = snap.summary.ref.storeKey
         let old = snapshots[key]
         let all = ProjectStore.diff(old, snap)
+        // An item that was in the index only joined the snapshot. It is not new.
+        let known = Set(old?.index?.map(\.id) ?? [])
         let back = Set(all.compactMap { c -> String? in
-            if case .added = c.1, seenItems.contains(c.itemId) { return c.itemId }
+            if case .added = c.1, seenItems.contains(c.itemId) || known.contains(c.itemId) { return c.itemId }
             return nil
         })
         let changes = all.filter { c in
@@ -908,6 +926,8 @@ extension ProjectStore {
         // Before the items: the tracker then knows the pending intake items and does not load them as parents.
         let intake = try? await (t as? any IntakeTriaging)?.intake(ref)
         let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // An item that only joins the snapshot loads no comments, as in a first snapshot.
+        let indexed = Set(previous?.index?.map(\.id) ?? [])
         var items: [Item] = []
         for var item in try await t.items(ref, since: nil, limit: limit) {
             let prev = prevById[item.id]
@@ -915,7 +935,7 @@ extension ProjectStore {
                 item.commentCount = prev.commentCount
                 item.lastComment = prev.lastComment
                 item.mentionsMe = prev.mentionsMe
-            } else if previous != nil, let iref = item.ref(in: ref) {
+            } else if previous != nil, prev != nil || !indexed.contains(item.id), let iref = item.ref(in: ref) {
                 let list: [Comment]
                 do { list = try await t.comments(iref) } catch ProviderError.rateLimited(let after) {
                     throw ProviderError.rateLimited(retryAfter: after)
