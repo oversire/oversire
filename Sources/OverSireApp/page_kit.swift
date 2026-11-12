@@ -2384,6 +2384,19 @@ final class ReadAccessory: NSStackView {
     required init(coder: NSCoder) { fatalError() }
 }
 
+extension PagePart {
+    /// A failed GitHub list read with no value. GitHub polls on its own timer: no retry plan.
+    static func github(error: String, refresh: @escaping () -> Void) -> PagePart {
+        PagePart(id: "github", title: "GitHub", state: .failed(error), retry: nil, refresh: refresh, auto: false)
+    }
+
+    /// The header control of a part that failed but keeps its old value. Empty in the other states.
+    var staleAccessory: [NSView] {
+        if case .stale = state { return [ReadAccessory(self)] }
+        return []
+    }
+}
+
 /// The failure note of a part that has no value: the title, the reason, Try again and the time of the next automatic try.
 final class ReadNote: Box {
     private let part: PagePart

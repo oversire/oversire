@@ -7,6 +7,7 @@ import OverSireCore
 extension UIShots {
     /// journey:full, folded, noai or timeline, cut, real, tip-mark, tip-bar, tip-cut,
     /// or an open Timeline row: detail-comment, detail-raw, detail-payload, detail-ci (OVERSIRE-398).
+    /// detail-failed: the comment row whose read failed, try 2 of 3 (OVERSIRE-462).
     func journeyState(_ scene: String, in w: AppWindow) {
         let now = Date()
         var rows = JourneySample.rows(now: now, folded: scene == "folded")
@@ -52,7 +53,9 @@ extension UIShots {
 
             After this change, run `scripts/contract-check.sh` again.
             """
-        CommentBook.preset = [item: [Comment(id: id, author: JourneySample.me, createdAt: at, url: url, body: body)]]
+        let failed = scene == "detail-failed"
+        CommentBook.preset = failed ? nil : [item: [Comment(id: id, author: JourneySample.me, createdAt: at, url: url, body: body)]]
+        CommentBook.presetRead = failed ? Read(error: "Plane did not answer.", tries: 2) : nil
         ItemPage.payloadMode = scene == "detail-raw" ? .raw : scene == "detail-payload" ? .payload : .rendered
         ItemPage.presetOpen = scene == "detail-ci" ? "s-ci" : "s-comment"
         let d = EventDraft(id: "s-comment", at: at, kind: .commentCreated, item: item, parentItem: JourneySample.key, project: "oversire",

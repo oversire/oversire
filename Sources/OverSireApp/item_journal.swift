@@ -21,18 +21,22 @@ final class ItemJournal {
     private let reader: () async -> (any ItemEventReader)?
     private let bus: ChangeBus
     var lookPath: String?
-    private var trees: [String: [Event]] = [:]
-    private var loading: Set<String> = []
-    private var readAt: [String: Date] = [:]
-    private(set) var errors: [String: String] = [:]
+    private let now: () -> Date
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
+    /// Upper-case key → the read of its tree. A failed read keeps the old rows.
+    private var trees: [String: PartReader<[Event]>] = [:]
     private var looks: [String: Date] = [:]
     /// False for `--uishots` and tests: the seeded rows stay.
     var reads = true
 
     init(reader: @escaping () async -> (any ItemEventReader)? = ItemJournal.homeReader, bus: ChangeBus = .shared,
-         lookPath: String? = (CONFIG_DIR as NSString).appendingPathComponent("looks.json")) {
+         lookPath: String? = (CONFIG_DIR as NSString).appendingPathComponent("looks.json"),
+         now: @escaping () -> Date = Date.init,
+         schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter) {
         self.reader = reader
         self.bus = bus
+        self.now = now
+        self.schedule = schedule
         self.lookPath = lookPath
         if let p = lookPath, let d = FileManager.default.contents(atPath: p), let l = try? JSONDecoder().decode([String: Date].self, from: d) { looks = l }
     }
@@ -51,56 +55,62 @@ final class ItemJournal {
 
     // MARK: Rows
 
-    /// The rows of the key and its sub-items, oldest first. Nil before the first read.
-    func rows(_ key: String) -> [Event]? { trees[key.uppercased()] }
+    /// The rows of the key and its sub-items, oldest first. Nil before the first good read.
+    func rows(_ key: String) -> [Event]? { trees[key.uppercased()]?.value }
 
-    func isLoading(_ key: String) -> Bool { loading.contains(key.uppercased()) }
-
-    /// Reads the tree of the key. A read in the last 30 s is enough, unless force.
-    func load(_ key: String, force: Bool = false) {
-        let k = key.uppercased()
-        guard reads, !loading.contains(k), force || -(readAt[k] ?? .distantPast).timeIntervalSinceNow > 30 else { return }
-        loading.insert(k)
-        Task {
-            var out: [Event] = []
-            var err: String?
-            if let r = await reader() {
-                var after: Int64 = 0
-                do {
-                    for _ in 0..<Self.maxPages {
-                        let p = try await r.events(Event.Query(item: k, tree: true, after: after, limit: Self.pageSize))
-                        out += p.events
-                        after = p.next
-                        if !p.more { break }
-                    }
-                } catch { err = String(describing: error) }
-            } else {
-                err = "No daemon is live."
-            }
-            let rows = out, e = err
-            await MainActor.run { self.finish(k, rows, error: e) }
-        }
+    func isLoading(_ key: String) -> Bool {
+        if case .busy? = trees[key.uppercased()]?.state { return true }
+        return false
     }
 
-    private func finish(_ k: String, _ rows: [Event], error: String?) {
-        loading.remove(k)
-        readAt[k] = Date()
-        errors[k] = error
-        if error == nil || trees[k] == nil { trees[k] = Self.merge(trees[k] ?? [], rows) }
-        post([k])
+    /// The part for the toolbar menu and the Activity tab.
+    func part(_ key: String) -> PagePart { tree(key.uppercased()).part(id: "journal", title: "Daemon activity") }
+
+    /// Reads the tree of the key. A read in the last 30 s is enough, unless force. A failed read waits for its retry plan.
+    func load(_ key: String, force: Bool = false) {
+        guard reads else { return }
+        tree(key.uppercased()).start(force: force)
+    }
+
+    /// Waits for the read that began. For tests.
+    func settled(_ key: String) async { await trees[key.uppercased()]?.settled() }
+
+    private func tree(_ k: String) -> PartReader<[Event]> {
+        if let r = trees[k] { return r }
+        let r = PartReader<[Event]>(
+            fetch: { [weak self] in
+                guard let self else { throw ProviderError.transport("The journal is gone.") }
+                return try await self.read(k)
+            },
+            merge: { Self.merge($0 ?? [], $1) },
+            maxAge: 30, now: now, schedule: schedule,
+            changed: { [weak self] in self?.post([k]) })
+        trees[k] = r
+        return r
+    }
+
+    private func read(_ k: String) async throws -> [Event] {
+        guard let r = await self.reader() else { throw ProviderError.transport("No daemon is live.") }
+        var out: [Event] = []
+        var after: Int64 = 0
+        for _ in 0..<Self.maxPages {
+            let p = try await r.events(Event.Query(item: k, tree: true, after: after, limit: Self.pageSize))
+            out += p.events
+            after = p.next
+            if !p.more { break }
+        }
+        return out
     }
 
     /// A row of an event frame: it goes into each tree that holds its item.
     func received(_ e: Event) {
-        let keys = Set([e.item, e.parentItem].compactMap { $0?.uppercased() }).filter { trees[$0] != nil }
-        for k in keys { trees[k] = Self.merge(trees[k] ?? [], [e]) }
-        if !keys.isEmpty { post(keys) }
+        let keys = Set([e.item, e.parentItem].compactMap { $0?.uppercased() }).filter { trees[$0]?.value != nil }
+        for k in keys { trees[k]?.update { $0 = Self.merge($0, [e]) } }
     }
 
     /// For tests and `--uishots`.
     func seed(_ key: String, _ rows: [Event]) {
-        trees[key.uppercased()] = Self.merge([], rows)
-        readAt[key.uppercased()] = Date()
+        tree(key.uppercased()).seed(Read(value: Self.merge([], rows)))
     }
 
     static func merge(_ a: [Event], _ b: [Event]) -> [Event] {

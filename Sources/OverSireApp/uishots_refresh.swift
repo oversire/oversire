@@ -4,9 +4,15 @@ import OverSireCore
 // ─── --uishots: a part that did not load (OVERSIRE-462) ──────────────────────
 
 extension UIShots {
+    static let refreshScenes: Set<String> = ["intake:description-failed", "work:plane-down", "runs:gh-error", "prs:gh-error"]
+
     /// run:log-failed: the Log card of a run, and GitHub gives no log. The countdown to the next try runs.
     /// planner:failed: the Planner card of OVERSIRE-82 with no relations, try 2 of 3.
     /// planner:stale: the same card, and a new read failed. The old relations show.
+    /// intake:description-failed: the intake detail page, and Plane gives no description. Try 2 of 3.
+    /// work:plane-down: My items with no snapshot and a Plane error. It clears the snapshots: shoot it last.
+    /// runs:gh-error and prs:gh-error: the empty list and the gh error. They clear the runs and the PRs: shoot them last.
+    /// The comment scene is journey:detail-failed (uishots_journey.swift).
     func refreshState(_ scene: String, in w: AppWindow) {
         switch scene {
         case "run:log-failed":
@@ -26,6 +32,19 @@ extension UIShots {
                 projectStore.relations.seed(key, read: Read(value: old, at: Date().addingTimeInterval(-4 * 60), error: error, tries: 1))
             }
             w.router.go(.item(key, .overview))
+        case "intake:description-failed":
+            guard let snap = projectStore.snapshot("TREBI"), let item = snap.intake?.first else { print("UISHOTS no intake item in TREBI"); return }
+            IntakeDetailPage.presetRead = Read(error: "Plane did not answer.", tries: 2)
+            w.router.go(.intakeItem(snap.summary.identifier.uppercased(), item.id))
+        case "work:plane-down":
+            projectStore.seedDown("Plane did not answer.")
+            w.router.go(.work(.items))
+        case "runs:gh-error", "prs:gh-error":
+            grouped = []
+            prGrouped = []
+            firstLoad = false
+            lastFetchError = "gh: HTTP 401: Bad credentials. Run gh auth login."
+            w.router.go(scene == "runs:gh-error" ? .runs(.all) : .prs)
         default:
             print("UISHOTS no refresh scene \(scene)")
         }

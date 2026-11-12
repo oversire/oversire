@@ -28,6 +28,8 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var writeFailures: [String: Int] = [:]               // item id → failed writes left
     private var relationReadFailures = 0
     private var relationReadCount = 0
+    private var intakeDetailFailure: ProviderError?
+    private var intakeDetailCount = 0
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
     private var uploadTimes: [Date] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
@@ -168,6 +170,8 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
 
     public func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail {
         try base.locked {
+            intakeDetailCount += 1
+            if let intakeDetailFailure { throw intakeDetailFailure }
             guard let item = itemList[p.id]?.first(where: { $0.id == i.workItemId }) else { throw ProviderError.notFound }
             return IntakeDetail(sequence: Int(item.key.split(separator: "-").last ?? ""), body: item.body ?? "", labels: item.labels)
         }
@@ -193,6 +197,15 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
 
     /// The next `times` reads of relations fail.
     public func failRelationReads(times: Int) { base.lockedValue { relationReadFailures = times } }
+
+    /// While set, `intakeDetail` throws this error.
+    public var failIntakeDetail: ProviderError? {
+        get { base.lockedValue { intakeDetailFailure } }
+        set { base.lockedValue { intakeDetailFailure = newValue } }
+    }
+
+    /// The calls of `intakeDetail`.
+    public var intakeDetailReads: Int { base.lockedValue { intakeDetailCount } }
 
     /// The calls of `relations(of:)`.
     public var relationReads: Int { base.lockedValue { relationReadCount } }

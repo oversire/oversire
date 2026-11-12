@@ -14,12 +14,17 @@ extension ProjectStore {
 // After a triage the page shows the next item. When Refine accepts the item, the page opens the item page.
 final class IntakeDetailPage: Page {
     override var pageWidth: CGFloat { 960 }
+    /// For `--uishots`: each new description read starts in this state.
+    static var presetRead: Read<IntakeDetail>?
 
     private let markdown = MarkdownView(width: 600)
     private var markdownHeight: NSLayoutConstraint?
-    private var details: [String: IntakeDetail] = [:]   // work item id
+    /// Work item id → the read of its description. A failed read waits for its retry plan.
+    private var reads: [String: PartReader<IntakeDetail>] = [:]
+    private var details: [String: IntakeDetail] { reads.compactMapValues(\.value) }
     private var bodies: [String: String] = [:]          // with signed image links
-    private var loading: Set<String> = []
+    /// True while `reload` starts a read. The change of that start must not call `reload` again.
+    private var starting = false
     private var mode = MarkdownView.Mode.rendered
     private var editor: MarkdownEditor?
     private var busy: String?
@@ -96,30 +101,46 @@ final class IntakeDetailPage: Page {
     override func reload(reason: String) {
         if let snap, let item = current {
             data.projectStore.loadIntakeKeys(projectKey: snap.summary.ref.storeKey) { [weak self] in self?.reload() }
-            if details[item.workItemId] == nil { load(item, pk: snap.summary.ref.storeKey) }
+            starting = true
+            read(item, pk: snap.summary.ref.storeKey).start()
+            starting = false
         }
         pageBusy = snap == nil && data.projectsLoading
         super.reload(reason: reason)
     }
 
-    private func load(_ item: IntakeItem, pk: String) {
-        guard loading.insert(item.workItemId).inserted else { return }
-        data.projectStore.intakeDetail(projectKey: pk, item: item) { [weak self] r in
-            guard let self else { return }
-            self.loading.remove(item.workItemId)
-            switch r {
-            case .success(let d):
-                self.details[item.workItemId] = d
+    /// The read of the description of an item. It reads each time that `reload` asks only when it has no value or no error.
+    func read(_ item: IntakeItem, pk: String) -> PartReader<IntakeDetail> {
+        if let r = reads[item.workItemId] { return r }
+        let store = data.projectStore
+        let r = PartReader<IntakeDetail>(
+            fetch: {
+                let result: Result<IntakeDetail, ProviderError> = await withCheckedContinuation { c in
+                    DispatchQueue.main.async { store.intakeDetail(projectKey: pk, item: item) { c.resume(returning: $0) } }
+                }
+                return try result.get()
+            },
+            onRead: { [weak self] d in
+                guard let self else { return }
                 if UIShots.shooting, UIShots.intakeEdit, self.editor == nil { self.beginEdit(item) }
-                self.data.projectStore.resolveImages(d.body, projectKey: pk) { body in
+                store.resolveImages(d.body, projectKey: pk) { body in
                     self.bodies[item.workItemId] = body
                     self.reload()
                 }
-            case .failure(let e):
-                self.note = (.bad, "OverSire cannot read the description: \(e.message)")
-            }
-            self.reload()
-        }
+            },
+            changed: { [weak self] in
+                guard let self, !self.starting else { return }
+                self.reload()
+            })
+        if let seed = Self.presetRead { r.seed(seed) }
+        reads[item.workItemId] = r
+        return r
+    }
+
+    override var parts: [PagePart] {
+        var out: [PagePart] = []
+        if let item = current, let r = reads[item.workItemId] { out.append(r.part(id: "description", title: "Description")) }
+        return out + [data.projectStore.plane]
     }
 
     override func sections() -> [PageSection]? {
@@ -329,13 +350,14 @@ final class IntakeDetailPage: Page {
         let d = details[item.workItemId]
         let body = d?.body, shown = bodies[item.workItemId]
         let editing = editor != nil, saving = busy == "body", mode = mode
-        return PageRow("description", body, shown, editing, saving, mode.rawValue) { [unowned self] in
-            self.descriptionCard(item, body: body, shown: shown ?? body, editing: editing, saving: saving, mode: mode)
+        let part = reads[item.workItemId]?.part(id: "description", title: "Description")
+        return PageRow("description", body, shown, editing, saving, mode.rawValue, part?.state, part?.retry) { [unowned self] in
+            self.descriptionCard(item, body: body, shown: shown ?? body, part: part, editing: editing, saving: saving, mode: mode)
         }
     }
 
-    private func descriptionCard(_ item: IntakeItem, body: String?, shown: String?, editing: Bool, saving: Bool, mode: MarkdownView.Mode) -> NSView {
-        var trailing: [NSView] = []
+    private func descriptionCard(_ item: IntakeItem, body: String?, shown: String?, part: PagePart?, editing: Bool, saving: Bool, mode: MarkdownView.Mode) -> NSView {
+        var trailing: [NSView] = part.map { [ReadAccessory($0)] } ?? []
         if let url = URL(string: intakeURL(item)) {
             trailing.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square", style: .ghost) { NSWorkspace.shared.open(url) })
         }
@@ -360,7 +382,11 @@ final class IntakeDetailPage: Page {
             return c
         }
         guard let body else {
-            c.add(LoadingNote("Loading the description", height: 60, compact: true))
+            if let part, case .failed = part.state {
+                c.add(ReadNote("OverSire cannot read the description.", part: part, framed: false))
+            } else {
+                c.add(LoadingNote("Loading the description", height: 60, compact: true))
+            }
             return c
         }
         let text = (shown ?? body).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -408,7 +434,7 @@ final class IntakeDetailPage: Page {
         guard text != details[item.workItemId]?.body else { cancelEdit(); return }
         update(item, ItemPatch(bodyMarkdown: text), what: "body") { [weak self] in
             self?.editor = nil
-            self?.details[item.workItemId] = nil
+            self?.reads[item.workItemId] = nil
             self?.bodies[item.workItemId] = nil
         }
     }

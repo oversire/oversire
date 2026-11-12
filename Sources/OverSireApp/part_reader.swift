@@ -79,6 +79,8 @@ struct Read<T> {
     private(set) var tries = 0
     /// The time of the last end of a read.
     private(set) var endedAt: Date?
+    /// True when the last failure ended the plan, for example a session that is gone.
+    private(set) var isFinal = false
 
     /// For tests and `--uishots`.
     init(value: T? = nil, at: Date? = nil, error: String? = nil, tries: Int = 0) {
@@ -128,6 +130,7 @@ struct Read<T> {
         error = nil
         busy = false
         tries = 0
+        isFinal = false
     }
 
     /// Keeps `value` and `at`. `final` ends the plan.
@@ -136,6 +139,7 @@ struct Read<T> {
         endedAt = t
         busy = false
         tries = final ? Self.plan.count + 1 : tries + 1
+        isFinal = final
     }
 
     /// A frame or a seed. It keeps the error state.

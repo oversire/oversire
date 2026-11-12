@@ -117,6 +117,7 @@ final class WorkPage: Page {
     }
 
     override var watches: DataDomains { [.projects, .agents, .runs, .queue, .summaries, .planner, .config, .reviews] }
+    override var parts: [PagePart] { [data.projectStore.plane] }
 
     override func sections() -> [PageSection]? {
         let q = data.queue
@@ -126,8 +127,9 @@ final class WorkPage: Page {
         var caption = "\(list.count) open items of yours"
         if slots > 0 { caption += " · \(used) of \(slots) session slots used" }
         let on = AGENTS.autoStart
-        let top = WorkPage.header(self, tab: .items, caption: caption, extra: on, actions: { [weak self] in
-            [ToggleChip("Auto start", on: on) { AGENTS.autoStart.toggle(); saveConfig(); self?.reload() }]
+        let plane = data.projectStore.plane
+        let top = WorkPage.header(self, tab: .items, caption: caption, extra: [AnyHashable(on), AnyHashable(plane.state)], actions: { [weak self] in
+            plane.staleAccessory + [ToggleChip("Auto start", on: on) { AGENTS.autoStart.toggle(); saveConfig(); self?.reload() }]
         })
 
         let job = data.statusJob
@@ -145,7 +147,11 @@ final class WorkPage: Page {
         pageBusy = data.projectsLoading
         if rows.isEmpty {
             let loading = data.projectsLoading
-            rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.") }]
+            if !loading, case .failed = plane.state {
+                rows = [PageRow("failed", plane.state) { ReadNote("Plane did not give your items.", part: plane) }]
+            } else {
+                rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.") }]
+            }
         }
         let table = table
         return [PageSection("top", rows: top), PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]

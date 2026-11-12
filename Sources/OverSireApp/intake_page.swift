@@ -22,6 +22,7 @@ final class IntakeListPage: Page {
     }
 
     override var watches: DataDomains { [.projects, .intake, .questions, .config] }
+    override var parts: [PagePart] { [data.projectStore.plane] }
 
     override func sections() -> [PageSection]? {
         pageBusy = data.loadingFirst
@@ -56,10 +57,11 @@ final class IntakeListPage: Page {
         let canEnhance = agent.available && !open.isEmpty
         let today = IntakeListPage.addedToday(all)
         let caption = "\(all.count) items wait for triage" + (today > 0 ? " · +\(today) today" : "")
+        let plane = data.projectStore.plane
         var top: [PageRow] = [
             PageRow("header", caption, canEnhance ? open.count : -1, groom.available, groomKey, groomKey.flatMap { groom.pill($0)?.text },
-                    groomKey.map { groom.undoable.contains($0) } ?? false) { [weak self] in
-                var actions: [NSView] = []
+                    groomKey.map { groom.undoable.contains($0) } ?? false, plane.state) { [weak self] in
+                var actions: [NSView] = plane.staleAccessory
                 if let self, groom.available { actions += self.groomActions(groomKey) }
                 if canEnhance {
                     let b = ActionButton("Enhance all", symbol: "sparkles", style: .primary) {
@@ -115,7 +117,11 @@ final class IntakeListPage: Page {
         }
         if rows.isEmpty {
             let loading = data.loadingFirst
-            rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading the intake") : EmptyNote("No intake waits for triage.") }]
+            if !loading, case .failed = plane.state {
+                rows = [PageRow("failed", plane.state) { ReadNote("Plane did not give your items.", part: plane) }]
+            } else {
+                rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading the intake") : EmptyNote("No intake waits for triage.") }]
+            }
         }
         let table = shown.isEmpty ? nil : FeedLine.intakeLayout
         let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }

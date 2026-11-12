@@ -137,6 +137,26 @@ final class ProjectStore {
         refresh(keys, force: false) { _ in }
     }
 
+    /// The Plane read of the keys, for the toolbar menu and the page notes. Plane polls on its own timer: no retry plan.
+    func part(_ keys: [String]) -> PagePart {
+        let named = keys.count == 1 ? tracked.first { $0.ref.storeKey == keys[0] }?.identifier ?? keys[0] : nil
+        let title = named.map { "Plane project \($0)" } ?? "Plane projects"
+        let at = keys.compactMap { snapshots[$0]?.fetchedAt }.min()
+        let state: ReadState
+        if keys.contains(where: refreshing.contains) {
+            state = .busy(shows: at)
+        } else if let why = keys.compactMap({ errors[$0] }).first {
+            state = at.map { .stale($0, error: why) } ?? .failed(why)
+        } else {
+            state = at.map(ReadState.fresh) ?? .idle
+        }
+        return PagePart(id: "plane", title: title, state: state, retry: nil,
+                        refresh: { [weak self] in self?.refresh(keys, force: true, priority: .user) { _ in } }, auto: false)
+    }
+
+    /// The Plane read of all tracked projects.
+    var plane: PagePart { part(tracked.map(\.ref.storeKey)) }
+
     /// One refresh of a project at a time. A forced refresh of a running project runs once more after it.
     /// A workspace in its rate limit pause refreshes after the pause.
     /// A refresh that joins a running refresh keeps the lane of the running one. Its rerun uses the lane of the last caller.
@@ -505,6 +525,14 @@ final class ProjectStore {
     func seed(_ snap: ProjectSnapshot) {
         snapshots[snap.summary.ref.storeKey] = snap
         publish(DataChange(.projects, projects: [snap.summary.ref.storeKey]))
+    }
+
+    /// For `--uishots`: Plane is down and no snapshot is left. The next refresh replaces this.
+    func seedDown(_ why: String) {
+        snapshots = [:]
+        for p in tracked { errors[p.ref.storeKey] = why }
+        lastError = why
+        publish(DataChange([.projects, .intake], origin: .event))
     }
 
     // `done(created, message)`.

@@ -53,9 +53,9 @@ final class RunbookTab {
     // The picks and the histories are the same in each window. The history of a round does not change.
     private static var picked: [RunbookRunID: String] = [:]
     private static var pickedRound: [String: Int] = [:]          // "run.step" → round
-    private static var histories: [String: SessionDigest] = [:]  // session key → digest
-    private var reading: Set<String> = []
-    private var unread: [String: String] = [:]            // session key → why
+    private static var histories: [String: PartReader<SessionDigest>] = [:]  // session key → read
+    /// The runtime that reads a session. Tests set it.
+    static var historyRuntime: () -> (any SessionHistoryReading)? = { ENV.runtime as? any SessionHistoryReading }
     private var busy: String?
     private var focusPicked = false
 
@@ -81,7 +81,46 @@ final class RunbookTab {
     static func seed(_ r: RunbookRun, pick step: String?, round: Int? = nil, histories: [StepRun: SessionDigest] = [:]) {
         picked[r.id] = step
         if let step { pickedRound["\(r.id).\(step)"] = round }
-        for (s, d) in histories { Self.histories[sessionKey(r, s)] = d }
+        for (s, d) in histories { reader(r, s).seed(Read(value: d)) }
+    }
+
+    /// For `--uishots` and tests: the read of the history of a round, in any state.
+    static func seed(_ r: RunbookRun, round s: StepRun, read: Read<SessionDigest>) { reader(r, s).seed(read) }
+
+    /// The history part of the shown step, for the toolbar menu.
+    func part(_ r: RunbookRun) -> PagePart? {
+        guard let step = selected(r), let shown = round(of: step.id, in: r), let rd = Self.histories[Self.sessionKey(r, shown)] else { return nil }
+        return rd.part(id: "history", title: "History of \(step.name)")
+    }
+
+    /// Why a history never loads. These failures do not retry.
+    private struct Unreadable: LocalizedError {
+        let errorDescription: String?
+    }
+
+    private static func reader(_ r: RunbookRun, _ s: StepRun) -> PartReader<SessionDigest> {
+        let k = sessionKey(r, s)
+        if let rd = histories[k] { return rd }
+        let key = r.item.key
+        let rd = PartReader<SessionDigest>(
+            fetch: {
+                let rt = await MainActor.run { historyRuntime() }
+                guard let rt, rt.capabilities.contains(.sessionHistory), let ref = s.session, let pane = s.daemonSession else {
+                    throw Unreadable(errorDescription: "OverSire cannot read the history of this session.")
+                }
+                let cli = r.agents[r.runbook.step(s.step)?.agent ?? ""]?.cli ?? "claude"
+                let a = AgentSession(phase: .done, since: s.started ?? r.started, card: ref.workspace.id, paneKey: pane, agent: AgentName(rawValue: cli), repo: r.repo)
+                let ws = Workspace(id: ref.workspace.id, repo: r.repo, path: r.repo, name: r.item.key, comment: nil, liveTerminals: 0, lastActivity: s.ended ?? r.updated, agents: [])
+                do {
+                    return try await rt.history(of: a, in: ws, budget: HistoryBudget(earlier: 40, full: 2, maxChars: 12000))
+                } catch ProviderError.notFound {
+                    throw Unreadable(errorDescription: "The terminal of this step is closed. Its history is gone.")
+                }
+            },
+            final: { $0 is Unreadable },
+            changed: { ChangeBus.shared.post(DataChange(.runbooks, items: [key])) })
+        histories[k] = rd
+        return rd
     }
 
     static func sessionKey(_ r: RunbookRun, _ s: StepRun) -> String { "runbook:\(r.id).\(s.step).\(s.round)" }
@@ -99,7 +138,7 @@ final class RunbookTab {
         let key = shown.map { Self.sessionKey(r, $0) } ?? ""
         let kids = snap.children(of: item.id).map { "\($0.key)|\($0.statusOptionId ?? "")" }
         let hasLive = live != nil
-        rows.append(PageRow("rb-split", r, step?.id, shown?.round, Self.histories[key], reading.contains(key), unread[key], canReveal, kids, busy, hasLive) { [unowned self] in
+        rows.append(PageRow("rb-split", r, step?.id, shown?.round, Self.histories[key]?.state, Self.histories[key]?.last.retry(now: Date()), canReveal, kids, busy, hasLive) { [unowned self] in
             self.split(r, step: step, shown: shown, item: item, snap: snap, canReveal: canReveal, hasLive: hasLive)
         })
         if let live, let step, r.current == step.id, shown?.state.isLive == true { rows.append(live) }
@@ -313,13 +352,18 @@ final class RunbookTab {
 
     private func history(_ r: RunbookRun, _ s: StepRun, in c: Card) {
         let k = Self.sessionKey(r, s)
-        if let d = Self.histories[k] {
+        let rd = Self.reader(r, s)
+        if !rd.last.isFinal { rd.start() }
+        let part = rd.part(id: "history", title: "History of \(r.runbook.step(s.step)?.name ?? s.step)")
+        if let d = rd.value {
+            if rd.state.didFail { c.add(ReadAccessory(part)) }
             turns(d, in: c, id: k)
-        } else if let why = unread[k] {
-            c.add(NSTextField.text(why, size: 12, color: Palette.dim, lines: 2))
-        } else {
-            c.add(InlineSpinner("Reading the session…"))
-            read(r, s)
+            return
+        }
+        switch rd.state {
+        case .failed(let why) where rd.last.isFinal: c.add(NSTextField.text(why, size: 12, color: Palette.dim, lines: 2))
+        case .failed: c.add(ReadNote("OverSire could not read the session.", part: part, framed: false))
+        default: c.add(InlineSpinner("Reading the session…"))
         }
     }
 
@@ -347,32 +391,6 @@ final class RunbookTab {
         s.setAccessibilityRole(.group)
         s.setAccessibilityLabel(who)
         return s
-    }
-
-    private func read(_ r: RunbookRun, _ s: StepRun) {
-        let k = Self.sessionKey(r, s)
-        guard !reading.contains(k) else { return }
-        guard let rt = ENV.runtime as? any SessionHistoryReading, rt.capabilities.contains(.sessionHistory),
-              let ref = s.session, let pane = s.daemonSession else {
-            unread[k] = "OverSire cannot read the history of this session."
-            return
-        }
-        reading.insert(k)
-        let cli = r.agents[r.runbook.step(s.step)?.agent ?? ""]?.cli ?? "claude"
-        let a = AgentSession(phase: .done, since: s.started ?? r.started, card: ref.workspace.id, paneKey: pane, agent: AgentName(rawValue: cli), repo: r.repo)
-        let ws = Workspace(id: ref.workspace.id, repo: r.repo, path: r.repo, name: r.item.key, comment: nil, liveTerminals: 0, lastActivity: s.ended ?? r.updated, agents: [])
-        Task {
-            let res = await Result(awaiting: { try await rt.history(of: a, in: ws, budget: HistoryBudget(earlier: 40, full: 2, maxChars: 12000)) })
-            await MainActor.run {
-                self.reading.remove(k)
-                switch res {
-                case .success(let d): Self.histories[k] = d
-                case .failure(.notFound): self.unread[k] = "The terminal of this step is closed. Its history is gone."
-                case .failure(let e): self.unread[k] = "OverSire could not read the session: \(e.message)"
-                }
-                self.reload()
-            }
-        }
     }
 
     // MARK: Actions

@@ -66,6 +66,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         guard let self else { return done(.failure(.notFound)) }
         self.data.projectStore.comments(key: key, done: done)
     }
+    /// The item of the open comment row: the key of its comments part.
+    private var commentKey: String?
     private var replyField: NSTextField?
     private var commentField: NSTextField?
     private var askField: NSTextField?
@@ -223,9 +225,19 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override var parts: [PagePart] {
-        if tab == .overview { return data.projectStore.relations.part(key).map { [$0] } ?? [] }
-        guard tab == .plan || tab == .changes, let desk = reviewDesk(tab == .plan ? .plan : .code) else { return [] }
-        return desk.parts(file: desk.files.first { $0.id == desk.file }) + [REVIEWS.part(machine: desk.summary.machine)]
+        var out: [PagePart] = []
+        if let pk = data.projectStore.item(key: key)?.0 { out.append(data.projectStore.part([pk])) }
+        switch tab {
+        case .overview: out += (data.projectStore.relations.part(key).map { [$0] } ?? []) + [JOURNAL.part(key)]
+        case .activity: out += [JOURNAL.part(key)] + (commentKey.flatMap { comments.part($0) }.map { [$0] } ?? [])
+        case .runbook: out += RUNBOOKS.run(for: key).flatMap { runbookTab.part($0) }.map { [$0] } ?? []
+        case .plan, .changes:
+            if let desk = reviewDesk(tab == .plan ? .plan : .code) {
+                out += desk.parts(file: desk.files.first { $0.id == desk.file }) + [REVIEWS.part(machine: desk.summary.machine)]
+            }
+        case .session, .subitems: break
+        }
+        return out
     }
 
     /// The rows of a review tab, after a warning when the last read of its machine failed.
@@ -1247,10 +1259,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func activity(item: Item, stream: Workstream?) -> [PageRow] {
         if let t = timelineRows(item: item) { return t }
+        var lead: [PageRow] = []
+        let journal = JOURNAL.part(item.key)
+        if case .failed = journal.state {
+            lead.append(PageRow("journal-failed", journal.state, journal.retry) { ReadNote("The activity of the daemon did not load.", part: journal) })
+        }
         let all = events(item: item, stream: stream)
         let source = activitySource, pending = pendingComment, loading = timeline == nil
         let shown = all.filter { source == .all || $0.source == source }
-        return [
+        return lead + [
             PageRow("filters", source) { [unowned self] in
                 NSStackView(h: Source.allCases.map { s in
                     ToggleChip(s.rawValue, on: source == s) { [weak self] in self?.activitySource = s; self?.reload() } as NSView
@@ -1291,12 +1308,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let shown = Array(rows.filter { filter.matches($0) }.reversed().prefix(300))
         if let o = Self.presetOpen { timelineOpen = o; timelineFocus = o; timelineReveal = o; Self.presetOpen = nil }
         let open = shown.first { $0.id == timelineOpen }
-        let body = open?.commentID.map { comments.body(key: open?.item ?? item.key, id: $0) { [weak self] in self?.reload() } }
+        let openKey = open?.item ?? item.key
+        let body = open?.commentID.map { comments.body(key: openKey, id: $0) { [weak self] in self?.reload() } }
+        let bodyPart = body == nil ? nil : comments.part(openKey)
+        commentKey = bodyPart == nil ? nil : openKey
+        let journal = JOURNAL.part(item.key)
         let mode = Self.payloadMode
         let head = "\(spanText(model.end.timeIntervalSince(model.start))) · \(Int((model.active / 3600).rounded())) active hours"
         var out: [PageRow] = [
-            PageRow("tl-head", head, real) { [unowned self] in
-                NSStackView(h: [NSTextField.text(head, size: 12.5, weight: .medium, color: Palette.mut), Spacer(),
+            PageRow("tl-head", head, real, journal.state) { [unowned self] in
+                NSStackView(h: [NSTextField.text(head, size: 12.5, weight: .medium, color: Palette.mut), Spacer(), ReadAccessory(journal),
                                 ToggleChip("Cut empty time", on: !real) { [weak self] in self?.timelineReal = false; self?.reload() },
                                 ToggleChip("Real time", on: real) { [weak self] in self?.timelineReal = true; self?.reload() }], spacing: 6)
             },
@@ -1322,15 +1343,15 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 } + [Spacer()], spacing: 6)
             },
             PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
-            PageRow("tl-rows", Self.sig(shown.map(\.id)), pending, open?.id, body, mode) { [unowned self] in
-                self.eventList(shown, pending: pending, open: open.map { ($0, body, mode) }, now: now)
+            PageRow("tl-rows", Self.sig(shown.map(\.id)), pending, open?.id, body, bodyPart?.state, bodyPart?.retry, mode) { [unowned self] in
+                self.eventList(shown, pending: pending, open: open.map { ($0, body, bodyPart, mode) }, now: now)
             },
         ]
         return out
     }
 
     /// The Timeline table. A click, Return or Space opens a row in place. Esc closes it.
-    private func eventList(_ shown: [OverSireCore.Event], pending: String?, open: (OverSireCore.Event, CommentBook.Body?, EventDetailCard.Mode)?,
+    private func eventList(_ shown: [OverSireCore.Event], pending: String?, open: (OverSireCore.Event, CommentBook.Body?, PagePart?, EventDetailCard.Mode)?,
                            now: Date) -> NSView {
         let list = ListCard()
         func fixed(_ v: NSView, _ w: CGFloat) -> NSView {
@@ -1385,8 +1406,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
                     v.scrollToVisible(v.bounds)
                 }
             }
-            if isOpen, let (e, body, mode) = open {
-                let card = EventDetailCard(e, pageKey: key, body: body, mode: mode, markdown: eventMarkdown, now: now,
+            if isOpen, let (e, body, bodyPart, mode) = open {
+                let card = EventDetailCard(e, pageKey: key, body: body, bodyPart: bodyPart, mode: mode, markdown: eventMarkdown, now: now,
                                            go: { [weak self] r in self?.go(r) },
                                            onMode: { [weak self] m in Self.payloadMode = m; self?.reload() },
                                            onClose: { [weak self] in self?.toggleEvent(id) },

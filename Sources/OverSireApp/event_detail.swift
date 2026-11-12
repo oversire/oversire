@@ -293,45 +293,79 @@ final class JSONTreeView: Box, NSTextViewDelegate {
 }
 
 /// The comments of items, from the tracker, by item key. Use it on the main thread.
+/// A failed read waits for its retry plan, and the part tells the way to try again (OVERSIRE-462).
 final class CommentBook {
     enum Body: Hashable { case loading, text(String), missing, failed(String) }
     typealias Fetch = (_ key: String, _ done: @escaping (Result<[Comment], ProviderError>) -> Void) -> Void
 
     /// For `--uishots`: these lists take the place of the tracker.
     static var preset: [String: [Comment]]?
-    static let retry: TimeInterval = 60
+    /// For `--uishots`: each new read starts in this state.
+    static var presetRead: Read<[Comment]>?
 
     private let fetch: Fetch
-    private var lists: [String: [Comment]] = [:]
-    private var loading: Set<String> = []
-    private var failed: [String: (message: String, at: Date)] = [:]
-    /// Each comment id starts at most one fetch. A comment that is not in the new list is gone.
+    private let now: () -> Date
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
+    /// Upper-case key → the read of its comments.
+    private var reads: [String: PartReader<[Comment]>] = [:]
+    /// What to call when a read of the key changes.
+    private var done: [String: () -> Void] = [:]
+    /// Each comment id starts at most one fetch after a good list. A comment that is not in the new list is gone.
     private var asked: Set<String> = []
+    private var inBody = false
 
-    init(fetch: @escaping Fetch) { self.fetch = fetch }
+    init(now: @escaping () -> Date = Date.init,
+         schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter,
+         fetch: @escaping Fetch) {
+        self.now = now
+        self.schedule = schedule
+        self.fetch = fetch
+    }
 
-    /// The text of comment `id` on item `key`. A comment that is not in the list starts a fetch, and `done` runs after it.
-    func body(key: String, id: String, now: Date = Date(), done: @escaping () -> Void) -> Body {
+    /// The part for the toolbar menu and the comment detail. Nil before the first read of the key.
+    func part(_ key: String) -> PagePart? { reads[key.uppercased()]?.part(id: "comments", title: "Comments of \(key.uppercased())") }
+
+    /// The text of comment `id` on item `key`. A comment that is not in the list starts a read, and `done` runs when the read changes.
+    func body(key: String, id: String, done: @escaping () -> Void) -> Body {
         let k = key.uppercased()
-        if let list = Self.preset?[k] ?? lists[k], let c = list.first(where: { $0.id == id }) { return .text(c.body ?? "") }
-        if loading.contains(k) { return .loading }
-        if let f = failed[k], now.timeIntervalSince(f.at) < Self.retry { return .failed(f.message) }
-        if asked.contains(k + "|" + id), failed[k] == nil { return .missing }
-        asked.insert(k + "|" + id)
-        loading.insert(k)
-        failed[k] = nil
-        fetch(k) { [weak self] r in
-            guard let self else { return }
-            self.loading.remove(k)
-            switch r {
-            case .success(let list): self.lists[k] = list
-            case .failure(let e):
-                self.failed[k] = (e.message, Date())
-                self.asked.remove(k + "|" + id)
-            }
-            done()
+        if let list = Self.preset?[k] ?? reads[k]?.value, let c = list.first(where: { $0.id == id }) { return .text(c.body ?? "") }
+        let r = reader(k)
+        self.done[k] = done
+        switch r.state {
+        case .busy: return .loading
+        case .failed(let message): return .failed(message)
+        case .idle, .fresh, .stale: break
         }
+        if r.value != nil, asked.contains(k + "|" + id) { return .missing }
+        asked.insert(k + "|" + id)
+        inBody = true
+        r.start(force: true)
+        inBody = false
         return .loading
+    }
+
+    /// Waits for the read that began. For tests.
+    func settled(_ key: String) async { await reads[key.uppercased()]?.settled() }
+
+    private func reader(_ k: String) -> PartReader<[Comment]> {
+        if let r = reads[k] { return r }
+        let fetch = self.fetch
+        let r = PartReader<[Comment]>(
+            fetch: {
+                let result: Result<[Comment], ProviderError> = await withCheckedContinuation { c in
+                    DispatchQueue.main.async { fetch(k) { c.resume(returning: $0) } }
+                }
+                return try result.get()
+            },
+            now: now, schedule: schedule,
+            changed: { [weak self] in
+                // The page builds a row while it calls `body`. A change in that call must not rebuild it.
+                guard let self, !self.inBody else { return }
+                self.done[k]?()
+            })
+        if let seed = Self.presetRead { r.seed(seed) }
+        reads[k] = r
+        return r
     }
 }
 
@@ -366,7 +400,7 @@ final class EventDetailCard: Box {
     private var tree: JSONTreeView?
 
     /// body: the comment text of a comment.created row, else nil. markdown: the page's view for Raw and Rendered.
-    init(_ e: Event, pageKey: String, body: CommentBook.Body?, mode: Mode, markdown: MarkdownView, now: Date = Date(),
+    init(_ e: Event, pageKey: String, body: CommentBook.Body?, bodyPart: PagePart? = nil, mode: Mode, markdown: MarkdownView, now: Date = Date(),
          go: @escaping (Route) -> Void, onMode: @escaping (Mode) -> Void, onClose: @escaping () -> Void, onSized: (() -> Void)? = nil) {
         self.onClose = onClose
         self.onMode = onMode
@@ -414,7 +448,11 @@ final class EventDetailCard: Box {
         case (_, .text(let t)?):
             content = Self.markdownBox(markdown, text: t, mode: shown == .raw ? .code : .rendered, sized: onSized)
         case (_, .failed(let m)?):
-            content = NSTextField.text("The comment did not load: \(m). It loads again in a minute.", size: 12, color: Palette.bad, lines: 2)
+            if let bodyPart {
+                content = ReadNote("The comment did not load.", part: bodyPart, framed: false)
+            } else {
+                content = NSTextField.text("The comment did not load: \(m)", size: 12, color: Palette.bad, lines: 2)
+            }
         case (_, .missing?):
             content = NSTextField.text("The tracker has no comment with this id. Someone deleted it.", size: 12, color: Palette.dim, lines: 2)
         default:

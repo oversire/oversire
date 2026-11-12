@@ -277,7 +277,13 @@ final class RunsPage: Page {
         }
         if rows.isEmpty {
             let loading = data.firstLoad
-            rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed") }]
+            if !loading, shown.isEmpty, all.isEmpty, let err = lastFetchError {
+                rows = [PageRow("failed", err) {
+                    ReadNote("GitHub did not give the runs.", part: .github(error: err) { data.refresh(force: true, completion: nil) })
+                }]
+            } else {
+                rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed") }]
+            }
         }
         let table = shown.isEmpty ? nil : RunLine.layout
         let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }

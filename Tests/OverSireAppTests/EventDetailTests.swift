@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import OverSireCore
 import XCTest
@@ -80,42 +81,90 @@ final class EventTagTests: XCTestCase {
     }
 }
 
-final class CommentBookTests: XCTestCase {
-    func comment(_ id: String) -> Comment { Comment(id: id, author: nil, createdAt: Date(), url: "", body: "body \(id)") }
-
-    func testFetchOnceThenText() {
-        var calls = 0
-        var pending: ((Result<[Comment], ProviderError>) -> Void)?
-        let book = CommentBook { key, done in
-            XCTAssertEqual(key, "OVERSIRE-1")
+/// A comment fetch that counts its calls. It fails while `failure` is set.
+private final class CommentScript {
+    var calls = 0
+    var failure: ProviderError?
+    var list: [Comment] = []
+    var fetch: CommentBook.Fetch {
+        { [self] _, done in
             calls += 1
-            pending = done
+            if let failure { done(.failure(failure)) } else { done(.success(list)) }
         }
+    }
+}
+
+@MainActor
+final class CommentBookTests: XCTestCase {
+    private let clock = ManualSchedule()
+    private let script = CommentScript()
+
+    private func comment(_ id: String) -> Comment { Comment(id: id, author: nil, createdAt: Date(), url: "", body: "body \(id)") }
+
+    private func book() -> CommentBook {
+        CommentBook(now: { Date(timeIntervalSince1970: 1_793_000_000 + self.clock.now) }, schedule: clock.schedule, fetch: script.fetch)
+    }
+
+    private func texts(_ v: NSView) -> [String] { (v as? NSTextField).map { [$0.stringValue] } ?? v.subviews.flatMap(texts) }
+    private func buttons(_ v: NSView) -> [NSButton] { (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(buttons) }
+
+    func testFetchOnceThenText() async {
+        script.list = [comment("c1")]
+        let book = book()
         var done = 0
         XCTAssertEqual(book.body(key: "oversire-1", id: "c1") { done += 1 }, .loading)
-        XCTAssertEqual(book.body(key: "OVERSIRE-1", id: "c1") {}, .loading)
-        pending?(.success([comment("c1")]))
+        XCTAssertEqual(book.body(key: "OVERSIRE-1", id: "c1") { done += 1 }, .loading)
+        await book.settled("OVERSIRE-1")
         XCTAssertEqual(done, 1)
         XCTAssertEqual(book.body(key: "OVERSIRE-1", id: "c1") {}, .text("body c1"))
-        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(script.calls, 1)
     }
 
-    func testMissingAfterOneFetch() {
-        var calls = 0
-        let book = CommentBook { _, done in calls += 1; done(.success([]) ) }
+    func testMissingAfterOneFetch() async {
+        let book = book()
         XCTAssertEqual(book.body(key: "K-1", id: "gone") {}, .loading)
+        await book.settled("K-1")
         XCTAssertEqual(book.body(key: "K-1", id: "gone") {}, .missing)
-        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(book.body(key: "K-1", id: "gone") {}, .missing)
+        XCTAssertEqual(script.calls, 1)
     }
 
-    func testFailureStaysThenRetries() {
-        var calls = 0
-        let book = CommentBook { _, done in calls += 1; done(.failure(.transport("offline"))) }
-        let t = Date()
-        _ = book.body(key: "K-1", id: "c1", now: t) {}
-        XCTAssertEqual(book.body(key: "K-1", id: "c1", now: t.addingTimeInterval(30)) {}, .failed("offline"))
-        XCTAssertEqual(calls, 1)
-        XCTAssertEqual(book.body(key: "K-1", id: "c1", now: Date().addingTimeInterval(CommentBook.retry + 1)) {}, .loading)
-        XCTAssertEqual(calls, 2)
+    func testAFailedCommentTriesAgainByItself() async {
+        script.failure = .transport("offline")
+        let book = book()
+        XCTAssertEqual(book.body(key: "K-1", id: "c1") {}, .loading)
+        await book.settled("K-1")
+        XCTAssertEqual(book.body(key: "K-1", id: "c1") {}, .failed("offline"))
+        XCTAssertEqual(book.body(key: "K-1", id: "c1") {}, .failed("offline"), "a page rebuild does not read again")
+        XCTAssertEqual(script.calls, 1)
+        XCTAssertEqual(book.part("K-1")?.retry?.k, 1)
+        script.failure = nil
+        script.list = [comment("c1")]
+        clock.advance(5)
+        await book.settled("K-1")
+        XCTAssertEqual(script.calls, 2)
+        XCTAssertEqual(book.body(key: "K-1", id: "c1") {}, .text("body c1"))
+    }
+
+    func testTheFailedCommentNoteHasTryAgain() async throws {
+        script.failure = .transport("offline")
+        let book = book()
+        _ = book.body(key: "K-1", id: "c1") {}
+        await book.settled("K-1")
+        let part = try XCTUnwrap(book.part("K-1"))
+        guard case .failed(let why) = book.body(key: "K-1", id: "c1", done: {}) else { return XCTFail("the body failed") }
+        let e = Event(seq: 1, seenAt: Date(), draft: EventDraft(id: "x", at: Date(), kind: .commentCreated, item: "K-1", actorType: .human, actor: "a", via: "v", summary: "s"))
+        let card = EventDetailCard(e, pageKey: "K-1", body: .failed(why), bodyPart: part, mode: .rendered, markdown: MarkdownView(width: 600),
+                                   go: { _ in }, onMode: { _ in }, onClose: {})
+        let all = texts(card)
+        XCTAssertTrue(all.contains("The comment did not load."))
+        XCTAssertTrue(all.contains("offline"))
+        XCTAssertFalse(all.contains { $0.contains("loads again in a minute") })
+        script.failure = nil
+        let again = try XCTUnwrap(buttons(card).first { $0.title == "Try again" })
+        again.performClick(nil)
+        await book.settled("K-1")
+        XCTAssertEqual(script.calls, 2)
+        XCTAssertEqual(book.body(key: "K-1", id: "c1") {}, .missing, "the good list has no c1")
     }
 }

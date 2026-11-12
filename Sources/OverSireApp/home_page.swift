@@ -105,6 +105,7 @@ final class HomePage: Page {
     static let shown = 5
 
     override var watches: DataDomains { [.runs, .prs, .agents, .queue, .projects, .intake, .questions, .summaries, .stats, .config, .runbooks] }
+    override var parts: [PagePart] { [data.projectStore.plane] }
 
     override func sections() -> [PageSection]? {
         pageBusy = data.loadingFirst
@@ -114,9 +115,10 @@ final class HomePage: Page {
         let df = DateFormatter()
         df.dateFormat = "EEEE, MMM d"
         let day = df.string(from: now), loading = data.firstLoad, data = data
+        let plane = data.projectStore.plane
         var rows: [PageRow] = [
-            PageRow("header", day, loading) {
-                PageHeader("Home", updated: { data.lastUpdate }, caption: { "\(day) · " + (loading ? "loading" : "updated \($0)") }, actions: [
+            PageRow("header", day, loading, plane.state) {
+                PageHeader("Home", updated: { data.lastUpdate }, caption: { "\(day) · " + (loading ? "loading" : "updated \($0)") }, actions: plane.staleAccessory + [
                     ActionButton("Refresh", symbol: "arrow.clockwise") { data.refresh(force: true, completion: nil) },
                 ])
             },
@@ -249,9 +251,14 @@ final class HomePage: Page {
         }
         if list.isEmpty {
             let loading = data.loadingFirst
-            rows.append(PageRow(loading ? "loading" : "empty", filter.rawValue) {
-                loading ? LoadingNote("Loading") : EmptyNote(filter == .all ? "Nothing waits for you." : "No row of this kind.", symbol: "checkmark.circle")
-            })
+            let plane = data.projectStore.plane
+            if !loading, case .failed = plane.state {
+                rows.append(PageRow("failed", plane.state) { ReadNote("Plane did not give your items.", part: plane) })
+            } else {
+                rows.append(PageRow(loading ? "loading" : "empty", filter.rawValue) {
+                    loading ? LoadingNote("Loading") : EmptyNote(filter == .all ? "Nothing waits for you." : "No row of this kind.", symbol: "checkmark.circle")
+                })
+            }
         }
         return rows
     }

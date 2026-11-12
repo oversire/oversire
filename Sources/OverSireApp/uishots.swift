@@ -1107,8 +1107,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("review:") {
                         // review:list, changes, max, max-nofiles, split, wrap, plan, submit, approve, merge, conflict, stale, stale-list or empty: the samples of uishots_review.swift.
                         self.reviewState(String(p.dropFirst(7)), in: w)
-                    } else if p.hasPrefix("run:") || p.hasPrefix("planner:") {
-                        // run:log-failed, planner:failed or planner:stale: a part that did not load (OVERSIRE-462, uishots_refresh.swift).
+                    } else if p.hasPrefix("run:") || p.hasPrefix("planner:") || UIShots.refreshScenes.contains(p) {
+                        // run:log-failed, planner:failed, planner:stale, intake:description-failed, work:plane-down or runs:gh-error:
+                        // a part that did not load (OVERSIRE-462, uishots_refresh.swift).
                         self.refreshState(p, in: w)
                     } else if p.hasPrefix("close-guard:") {
                         // close-guard:<KEY>: the item page with the dialog of a close with 3 open sub-items (OVERSIRE-396).

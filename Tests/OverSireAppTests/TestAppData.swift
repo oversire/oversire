@@ -71,7 +71,12 @@ final class TestAppData: AppData {
     func has(_ c: Capability) -> Bool { caps.contains(c) }
     func rerun(repo: String, runs: [Run], failedOnly: Bool) {}
     func setIgnored(_ runs: [Run], ignored: Bool) {}
-    func refresh(force: Bool, completion: (() -> Void)?) { completion?() }
+    /// The count of forced data refreshes.
+    var forcedRefreshes = 0
+    func refresh(force: Bool, completion: (() -> Void)?) {
+        if force { forcedRefreshes += 1 }
+        completion?()
+    }
 
     /// Posts a change and lets the burst end.
     func post(_ c: DataChange) {
