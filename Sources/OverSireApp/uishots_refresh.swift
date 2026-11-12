@@ -7,9 +7,9 @@ extension UIShots {
     static let refreshScenes: Set<String> = ["intake:description-failed", "work:plane-down", "runs:gh-error", "prs:gh-error"]
 
     /// run:log-failed: the Log card of a run, and GitHub gives no log. The countdown to the next try runs.
-    /// planner:failed: the Planner card of OVERSIRE-82 with no relations, try 2 of 3.
+    /// planner:failed: the Planner card of the first OVERSIRE item with no relations, try 2 of 3.
     /// planner:stale: the same card, and a new read failed. The old relations show.
-    /// intake:description-failed: the intake detail page, and Plane gives no description. Try 2 of 3.
+    /// intake:description-failed: the detail page of the first intake item, and Plane gives no description. Try 2 of 3.
     /// work:plane-down: My items with no snapshot and a Plane error. It clears the snapshots: shoot it last.
     /// runs:gh-error and prs:gh-error: the empty list and the gh error. They clear the runs and the PRs: shoot them last.
     /// The comment scene is journey:detail-failed (uishots_journey.swift).
@@ -20,7 +20,11 @@ extension UIShots {
             JobLogs.shared.raw = { _, _ in nil }
             w.router.go(.run(repo: "oversire/oversire", id: "9001"))
         case "planner:failed", "planner:stale":
-            let key = "OVERSIRE-82"
+            guard let snap = projectStore.snapshots.values.first(where: { $0.summary.identifier.uppercased() == "OVERSIRE" }), snap.items.count > 2 else {
+                print("UISHOTS no OVERSIRE project"); return
+            }
+            let keys = snap.items.prefix(3).map(\.key)
+            let key = keys[0]
             let error = "Plane did not answer."
             func rel(_ kind: RelationKind, _ k: String) -> ItemRelation? {
                 projectStore.item(key: k).flatMap { $0.item.ref(in: $0.snap.summary.ref) }.map { ItemRelation(kind: kind, item: $0) }
@@ -28,12 +32,13 @@ extension UIShots {
             if scene == "planner:failed" {
                 projectStore.relations.seed(key, read: Read(error: error, tries: 2))
             } else {
-                let old = [rel(.blockedBy, "OVERSIRE-67"), rel(.blocks, "OVERSIRE-88")].compactMap { $0 }
+                let old = [rel(.blockedBy, keys[1]), rel(.blocks, keys[2])].compactMap { $0 }
                 projectStore.relations.seed(key, read: Read(value: old, at: Date().addingTimeInterval(-4 * 60), error: error, tries: 1))
             }
             w.router.go(.item(key, .overview))
         case "intake:description-failed":
-            guard let snap = projectStore.snapshot("TREBI"), let item = snap.intake?.first else { print("UISHOTS no intake item in TREBI"); return }
+            let snaps = projectStore.snapshots.values.sorted { $0.summary.identifier < $1.summary.identifier }
+            guard let snap = snaps.first(where: { $0.intake?.isEmpty == false }), let item = snap.intake?.first else { print("UISHOTS no intake item"); return }
             IntakeDetailPage.presetRead = Read(error: "Plane did not answer.", tries: 2)
             w.router.go(.intakeItem(snap.summary.identifier.uppercased(), item.id))
         case "work:plane-down":

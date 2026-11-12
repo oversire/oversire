@@ -143,9 +143,13 @@ final class ProjectStore {
         let title = named.map { "Plane project \($0)" } ?? "Plane projects"
         let at = keys.compactMap { snapshots[$0]?.fetchedAt }.min()
         let state: ReadState
-        if keys.contains(where: refreshing.contains) {
+        let why = keys.compactMap { errors[$0] }.first
+        // With no data, the failure stays while Plane polls again, so the page does not say "no items".
+        if at == nil, let why {
+            state = .failed(why)
+        } else if keys.contains(where: refreshing.contains) {
             state = .busy(shows: at)
-        } else if let why = keys.compactMap({ errors[$0] }).first {
+        } else if let why {
             state = at.map { .stale($0, error: why) } ?? .failed(why)
         } else {
             state = at.map(ReadState.fresh) ?? .idle

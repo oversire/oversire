@@ -50,6 +50,14 @@ final class PlaneDownTests: XCTestCase {
         guard case .fresh = data.projectStore.part([key]).state else { return XCTFail("the state is fresh") }
     }
 
+    /// Plane polls again with no data: the failure stays, so a page does not say "no items".
+    func testThePlanePartStaysFailedWhilePlaneReadsAgain() async throws {
+        try await trackAndWait { if case .failed = $0.state { return true } else { return false } }
+        data.projectStore.refresh([key], force: true, priority: .user) { _ in }
+        XCTAssertTrue(data.projectStore.refreshing.contains(key))
+        guard case .failed = data.projectStore.plane.state else { return XCTFail("the state stays failed") }
+    }
+
     func testMyItemsWithPlaneDownShowsTheFailure() async throws {
         try await trackAndWait { if case .failed = $0.state { return true } else { return false } }
         let page = WorkPage(.work(.items), data: data, router: Router())
