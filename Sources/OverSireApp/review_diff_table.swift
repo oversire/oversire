@@ -259,19 +259,22 @@ final class DiffPanel: NSView {
         let viewed = CheckBox("Viewed", on: f.viewed, label: "Mark \(f.path) as viewed") { on in Task { _ = await desk.setViewed(f, on) } }
         [wrap, whole, viewed].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }
         var parts: [NSView] = [NSTextField.text(f.status.rawValue, size: 11, weight: .bold, color: ReviewChangesTab.color(f.status), mono: true), pathField, Spacer()]
+        // The large view without the file panel has room for the file position, the pending count and long words.
+        // With the panel, the tree shows them, so the path keeps its room.
+        let wide = desk.maximized && !desk.maxFiles
         if f.isStale {
-            let tag = Chiplet(desk.maximized ? "Changed since viewed" : "", symbol: "arrow.clockwise", color: Palette.warn)
+            let tag = Chiplet(wide ? "Changed since viewed" : "", symbol: "arrow.clockwise", color: Palette.warn)
             tag.setAccessibilityLabel("This file changed after you marked it as viewed")
             tag.toolTip = "The file changed after you marked it as viewed."
             parts.append(tag)
         }
         // The normal view is narrow. The file row shows the pending count there.
-        if desk.maximized, let n = desk.pendingByFile[f.id] {
+        if wide, let n = desk.pendingByFile[f.id] {
             let chip = Chiplet("\(n) pending", symbol: "text.bubble", color: Palette.warn)
             chip.setAccessibilityLabel("\(n) pending comment\(n == 1 ? "" : "s") in this file")
             parts.append(chip)
         }
-        if desk.maximized {
+        if wide {
             let order = steps.files
             let at = order.firstIndex(of: f.id)
             let back = IconButton("chevron.left", label: "Previous file", tip: "Previous file ⌥⇧↑") { [weak self] in self?.step(-1) }
@@ -283,6 +286,8 @@ final class DiffPanel: NSView {
             count.setAccessibilityLabel(at.map { "File \($0 + 1) of \(order.count)" } ?? "\(order.count) files")
             parts.insert(back, at: 0)
             parts.insert(contentsOf: [count, next], at: 3)
+        }
+        if desk.maximized {
             let shown = desk.maxFiles
             let side = IconButton("sidebar.left", label: shown ? "Hide the file panel" : "Show the file panel",
                                   tip: (shown ? "Hide files" : "Show files") + " ⌃⌘S") { [weak self] in self?.toggleFiles() }
@@ -294,9 +299,9 @@ final class DiffPanel: NSView {
             let up = IconButton("chevron.up", label: "Previous change", tip: "Previous change ⌥↑") { [weak self] in self?.stepChange(-1) }
             let down = IconButton("chevron.down", label: "Next change", tip: "Next change ⌥↓") { [weak self] in self?.stepChange(1) }
             let c = desk.change.flatMap { $0 < n ? $0 : nil }
-            // The normal view is narrow, so it shows the count only.
-            let word = desk.maximized ? (n == 0 ? "No changes" : "\(n) change\(n == 1 ? "" : "s")") : "\(n)"
-            let chip = Chiplet(c.map { "\($0 + 1) / \(n)" } ?? word, mono: c != nil || !desk.maximized)
+            // A narrow header shows the count only.
+            let word = wide ? (n == 0 ? "No changes" : "\(n) change\(n == 1 ? "" : "s")") : "\(n)"
+            let chip = Chiplet(c.map { "\($0 + 1) / \(n)" } ?? word, mono: c != nil || !wide)
             chip.toolTip = "\(n) change\(n == 1 ? "" : "s") in this file"
             chip.setAccessibilityLabel(c.map { "Change \($0 + 1) of \(n)" } ?? (n == 0 ? "No changes in this file" : "\(n) change\(n == 1 ? "" : "s") in this file"))
             [up, chip, down].forEach { $0.setContentCompressionResistancePriority(.required, for: .horizontal) }

@@ -139,4 +139,25 @@ final class DiffModalTests: XCTestCase {
         b.first?.performClick(nil)
         XCTAssertTrue(ReviewDesk.maxFilesOn)
     }
+
+    // The tree shows the file position, so the header gives its room to the path.
+    func testTheFileButtonsShowOnlyWithoutTheFilePanel() {
+        let r = rig()
+        func labels() -> [String] {
+            var out: [String] = []
+            func walk(_ v: NSView) {
+                if let b = v as? IconButton, let l = b.accessibilityLabel() { out.append(l) }
+                v.subviews.forEach(walk)
+            }
+            walk(r.panel)
+            return out
+        }
+        r.desk.maximized = true
+        ReviewDesk.maxFilesOn = true
+        r.panel.update(r.file, diff: UIShots.longDiff)
+        XCTAssertFalse(labels().contains("Next file"))
+        ReviewDesk.maxFilesOn = false
+        r.panel.update(r.file, diff: UIShots.longDiff)
+        XCTAssertTrue(labels().contains("Next file"))
+    }
 }
