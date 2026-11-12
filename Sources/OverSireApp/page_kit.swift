@@ -1631,8 +1631,9 @@ final class ScrollCard: Box {
     }()
     private lazy var least = doc.widthAnchor.constraint(greaterThanOrEqualTo: scroll.contentView.widthAnchor)
 
-    init(keep: String) {
-        super.init(fill: Palette.panel, border: Palette.line, radius: 10)
+    /// A card that is not `framed` has no fill, border or radius. It sits inside another card.
+    init(keep: String, framed: Bool = true) {
+        if framed { super.init(fill: Palette.panel, border: Palette.line, radius: 10) } else { super.init(fill: nil, border: nil, radius: 0) }
         layer?.masksToBounds = true
         [head, rule, scroll, doc, filled].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
         scroll.identifier = NSUserInterfaceItemIdentifier(PageScroll.keepPrefix + keep)

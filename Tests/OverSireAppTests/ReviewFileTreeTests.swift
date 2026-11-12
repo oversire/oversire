@@ -38,6 +38,41 @@ final class ReviewFileTreeTests: XCTestCase {
         ])
     }
 
+    @MainActor
+    func testTheCurrentFileScrollsIntoTheTree() {
+        let many = (0..<60).map { ReviewFile(repo: "cli", path: "f\($0).swift", status: .modified, added: 1, removed: 0) }
+        let s = ReviewSummary(key: "K-1", kind: .code, machine: "mba", state: .ready, root: "/src", updatedAt: Date())
+        let desk = ReviewDesk(detail: ReviewDetail(summary: s, files: many, comments: []))
+        let p = FilePanel(desk)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        let home = NSView()
+        w.contentView = home
+        p.card.translatesAutoresizingMaskIntoConstraints = false
+        home.addSubview(p.card)
+        NSLayoutConstraint.activate([
+            p.card.leadingAnchor.constraint(equalTo: home.leadingAnchor), p.card.trailingAnchor.constraint(equalTo: home.trailingAnchor),
+            p.card.topAnchor.constraint(equalTo: home.topAnchor), p.card.bottomAnchor.constraint(equalTo: home.bottomAnchor),
+        ])
+        p.refresh()
+        let last = many.last!.id
+        desk.file = last
+        p.refresh()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        w.layoutIfNeeded()
+        func find(_ v: NSView) -> TreeRow? {
+            if let r = v as? TreeRow, r.identifier?.rawValue == FilePanel.rowID(last) { return r }
+            for s in v.subviews { if let f = find(s) { return f } }
+            return nil
+        }
+        let row = find(p.card)
+        XCTAssertNotNil(row)
+        XCTAssertEqual(row?.selected, true)
+        let at = row.map { p.card.scroll.documentView!.convert($0.bounds, from: $0) } ?? .zero
+        XCTAssertTrue(p.card.scroll.documentVisibleRect.intersects(at), "the open file is in sight")
+        XCTAssertGreaterThan(p.card.scroll.contentView.bounds.origin.y, 100)
+    }
+
     func testAFolderChainWithOneChildIsOneRow() {
         let t = FileTree(files: [ReviewFile(repo: "cli", path: "a/b/c/x.go", status: .added, added: 1, removed: 0),
                                  ReviewFile(repo: "cli", path: "a/b/c/y.go", status: .added, added: 1, removed: 0)],

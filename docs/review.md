@@ -58,6 +58,7 @@ An older daemon gives only the changed hunks. Then the fold rows have no buttons
 - ⇧⌘M or the arrows at the right of the header show the diff in a large view over the page. Esc, a click outside the card, or ⇧⌘M again closes it. The large view closes when you leave the page.
 - In the large view the header shows `‹ path ▾ n / m ›`. ‹ › and ⌥⇧↑ / ⌥⇧↓ go to the previous or the next file, in the order of the file panel.
 - ⌘P, or a click on the path, opens the file switch. Type to filter, ↑ ↓ to move, Return to open, Esc to close.
+- In the large view the file panel shows at the left of the diff. The sidebar button at the left of the header, or ⌃⌘S, hides or shows it. The app keeps the choice. Outside the large view, ⌃⌘S toggles the app sidebar.
 - In a comment field, the arrows and Esc go to the field.
 
 ### Steps through the changes

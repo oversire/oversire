@@ -90,6 +90,9 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
     var open: (ReviewFile) -> Void = { _ in }
 
     let head = NSStackView(v: [], spacing: 8)
+    /// The header and the rows. It moves between the page side and the large view, so the scroll position stays.
+    let card = ScrollCard(keep: "changes.files", framed: false)
+    private var revealed: String?
     private let count = NSTextField.text("", size: 12, color: Palette.dim)
     private let search = NSSearchField()
     private var searchOpen = false
@@ -222,6 +225,17 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
 
     // MARK: Rows
 
+    static func rowID(_ file: String) -> String { "file:" + file }
+
+    /// Builds the rows into the card. The header and the scroll position stay.
+    /// A file that opens from elsewhere scrolls into view once.
+    func refresh() {
+        card.set(header: head, body: body(), place: "files")
+        guard let id = desk?.file, id != revealed else { return }
+        revealed = id
+        DispatchQueue.main.async { [weak self] in self?.card.reveal(Self.rowID(id)) }
+    }
+
     func body() -> NSView {
         let list = NSStackView(v: [], spacing: 1)
         list.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 8, right: 6)
@@ -306,6 +320,7 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         }
         row.stack.spacing = 5
         row.selected = f.id == desk.file
+        row.identifier = NSUserInterfaceItemIdentifier(Self.rowID(f.id))
         row.copyID = f.path
         row.menuItems = { [weak self, weak desk] in
             guard let self, let desk else { return [] }

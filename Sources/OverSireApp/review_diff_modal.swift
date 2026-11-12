@@ -4,6 +4,7 @@ import OverSireCore
 // ─── Changes › large view ────────────────────────────────────────────────────
 // ⇧⌘M shows the diff panel in a card at 90% of the window, over a dim scrim (OVERSIRE-440).
 // The panel moves into the card and back, so the table keeps its rows and its scroll position.
+// The file panel can sit at the left of the card (OVERSIRE-461). It moves in the same way.
 // ⌘P opens the file switch from the path: type to filter, ↑ ↓ to move, Return to open.
 
 /// The large view of the diff. Esc or a click on the scrim closes it.
@@ -11,10 +12,17 @@ final class DiffModal: NSView {
     private let scrim = Scrim()
     private let card = Box(fill: Palette.panel, border: Palette.line, radius: 12)
     private let close: () -> Void
+    private let filesSlot = NSView()
+    private let rule = Box(fill: Palette.line, border: nil, radius: 0)
+    private let diffSlot = NSView()
+    private var withFiles: NSLayoutConstraint!
+    private var noFiles: NSLayoutConstraint!
     private(set) weak var panel: DiffPanel?
+    private(set) weak var files: NSView?
 
     /// Adds the large view on top of the window and moves the panel into it.
-    static func show(_ panel: DiffPanel, in window: NSWindow, close: @escaping () -> Void) -> DiffModal {
+    /// `files` is the file panel. It shows at the left of the diff.
+    static func show(_ panel: DiffPanel, files: NSView? = nil, in window: NSWindow, close: @escaping () -> Void) -> DiffModal {
         let m = DiffModal(close: close)
         guard let root = window.contentView else { return m }
         root.addSubview(m)
@@ -23,7 +31,7 @@ final class DiffModal: NSView {
             // Below the toolbar of a full-size content view.
             m.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor), m.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
-        m.hold(panel)
+        m.hold(panel, files: files)
         return m
     }
 
@@ -34,6 +42,26 @@ final class DiffModal: NSView {
         scrim.onClick = { [weak self] in self?.close() }
         card.layer?.masksToBounds = true
         [scrim, card].forEach(addSubview)
+        [filesSlot, rule, diffSlot].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview($0)
+        }
+        withFiles = diffSlot.leadingAnchor.constraint(equalTo: rule.trailingAnchor)
+        noFiles = diffSlot.leadingAnchor.constraint(equalTo: card.leadingAnchor)
+        NSLayoutConstraint.activate([
+            filesSlot.leadingAnchor.constraint(equalTo: card.leadingAnchor), filesSlot.topAnchor.constraint(equalTo: card.topAnchor),
+            filesSlot.bottomAnchor.constraint(equalTo: card.bottomAnchor), filesSlot.widthAnchor.constraint(equalToConstant: ReviewChangesTab.sideWidth),
+            rule.leadingAnchor.constraint(equalTo: filesSlot.trailingAnchor), rule.widthAnchor.constraint(equalToConstant: 1),
+            rule.topAnchor.constraint(equalTo: card.topAnchor), rule.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            diffSlot.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            diffSlot.topAnchor.constraint(equalTo: card.topAnchor), diffSlot.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            noFiles,
+        ])
+        filesSlot.isHidden = true
+        rule.isHidden = true
+        filesSlot.setAccessibilityElement(true)
+        filesSlot.setAccessibilityRole(.group)
+        filesSlot.setAccessibilityLabel("Files")
         NSLayoutConstraint.activate([
             scrim.leadingAnchor.constraint(equalTo: leadingAnchor), scrim.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrim.topAnchor.constraint(equalTo: topAnchor), scrim.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -46,23 +74,50 @@ final class DiffModal: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Moves a panel into the card. The same panel stays where it is.
-    func hold(_ p: DiffPanel) {
-        guard p.superview !== card else { return }
-        panel = p
-        card.subviews.forEach { $0.removeFromSuperview() }
-        p.removeFromSuperview()
-        card.addSubview(p)
-        NSLayoutConstraint.activate([
-            p.leadingAnchor.constraint(equalTo: card.leadingAnchor), p.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            p.topAnchor.constraint(equalTo: card.topAnchor), p.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-        ])
-        DispatchQueue.main.async { [weak p] in p?.window?.makeFirstResponder(p?.table.view) }
+    /// Moves the panel and the file panel into the card. A panel that is in place stays, with its focus and scroll position.
+    func hold(_ p: DiffPanel, files: NSView?) {
+        if p.superview !== diffSlot {
+            panel = p
+            diffSlot.subviews.forEach { $0.removeFromSuperview() }
+            p.removeFromSuperview()
+            Self.pin(p, in: diffSlot)
+            DispatchQueue.main.async { [weak p] in p?.window?.makeFirstResponder(p?.table.view) }
+        }
+        if files !== self.files || files?.superview !== filesSlot {
+            filesSlot.subviews.forEach { $0.removeFromSuperview() }
+            self.files = files
+            files.map { Self.pin($0, in: filesSlot) }
+        }
+        filesSlot.isHidden = files == nil
+        rule.isHidden = files == nil
+        if files == nil {
+            noFiles.isActive = true
+            withFiles.isActive = false
+        } else {
+            noFiles.isActive = false
+            withFiles.isActive = true
+        }
+        // The focus was in the file panel that left.
+        if files == nil, window != nil, (window?.firstResponder as? NSView).map({ !$0.isDescendant(of: diffSlot) }) ?? true {
+            window?.makeFirstResponder(p.table.view)
+        }
+        window?.recalculateKeyViewLoop()
     }
 
-    /// Removes the large view. The panel goes back on the next build of the tab.
+    private static func pin(_ v: NSView, in box: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(v)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: box.leadingAnchor), v.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            v.topAnchor.constraint(equalTo: box.topAnchor), v.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ])
+    }
+
+    /// Removes the large view. The panels go back on the next build of the tab.
+    /// A view that is not in the card any more stays where it is.
     func dismiss() {
-        panel?.removeFromSuperview()
+        if panel?.superview === diffSlot { panel?.removeFromSuperview() }
+        if files?.superview === filesSlot { files?.removeFromSuperview() }
         removeFromSuperview()
     }
 

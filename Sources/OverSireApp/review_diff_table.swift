@@ -69,7 +69,7 @@ final class DiffPanel: NSView {
             guard let self, let w = self.window, e.window === w else { return e }
             let mods = e.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard let key = DiffKey(key: e.keyCode, shift: mods.contains(.shift), option: mods.contains(.option),
-                                    command: mods.contains(.command), inText: w.firstResponder is NSTextView) else { return e }
+                                    command: mods.contains(.command), control: mods.contains(.control), inText: w.firstResponder is NSTextView) else { return e }
             return self.handle(key) ? nil : e
         }
     }
@@ -79,6 +79,9 @@ final class DiffPanel: NSView {
         switch key {
         case .size: toggleSize()
         case .files: showFiles()
+        case .filePanel:
+            guard desk.maximized else { return false }
+            toggleFiles()
         case .nextFile, .previousFile: step(key == .nextFile ? 1 : -1)
         case .close:
             guard desk.maximized else { return false }
@@ -132,6 +135,14 @@ final class DiffPanel: NSView {
     func toggleSize() {
         desk.maximized.toggle()
         reload()
+    }
+
+    /// Shows or hides the file panel of the large view.
+    func toggleFiles() {
+        desk.maxFiles.toggle()
+        reload()
+        NSAccessibility.post(element: self, notification: .announcementRequested,
+                             userInfo: [.announcement: desk.maxFiles ? "File panel shown." : "File panel hidden.", .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     /// The files in the order of the file panel.
@@ -272,6 +283,12 @@ final class DiffPanel: NSView {
             count.setAccessibilityLabel(at.map { "File \($0 + 1) of \(order.count)" } ?? "\(order.count) files")
             parts.insert(back, at: 0)
             parts.insert(contentsOf: [count, next], at: 3)
+            let shown = desk.maxFiles
+            let side = IconButton("sidebar.left", label: shown ? "Hide the file panel" : "Show the file panel",
+                                  tip: (shown ? "Hide files" : "Show files") + " ⌃⌘S") { [weak self] in self?.toggleFiles() }
+            side.contentTintColor = shown ? Palette.acc : Palette.mut
+            side.setAccessibilityExpanded(shown)
+            parts.insert(side, at: 0)
         }
         if let n = changes {
             let up = IconButton("chevron.up", label: "Previous change", tip: "Previous change ⌥↑") { [weak self] in self?.stepChange(-1) }

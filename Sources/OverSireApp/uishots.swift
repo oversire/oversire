@@ -1105,7 +1105,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         // journey:full, folded, noai (Status recap) or timeline, real, tip-mark, tip-bar, tip-cut: uishots_journey.swift.
                         self.journeyState(String(p.dropFirst(8)), in: w)
                     } else if p.hasPrefix("review:") {
-                        // review:list, changes, split, wrap, plan, submit, approve, merge, conflict, stale, stale-list or empty: the samples of uishots_review.swift.
+                        // review:list, changes, max, max-nofiles, split, wrap, plan, submit, approve, merge, conflict, stale, stale-list or empty: the samples of uishots_review.swift.
                         self.reviewState(String(p.dropFirst(7)), in: w)
                     } else if p.hasPrefix("close-guard:") {
                         // close-guard:<KEY>: the item page with the dialog of a close with 3 open sub-items (OVERSIRE-396).

@@ -375,12 +375,13 @@ extension DiffFold {
 
 /// A key of the diff panel.
 enum DiffKey: Equatable {
-    case size, files, nextChange, previousChange, nextFile, previousFile, viewedNext, close
+    case size, files, filePanel, nextChange, previousChange, nextFile, previousFile, viewedNext, close
 
-    /// ⇧⌘M: size. ⌘P: files. ⌥↓ ⌥↑: changes. ⌥⇧↓ ⌥⇧↑: files. ⌥V: viewed, next. Esc: close.
+    /// ⇧⌘M: size. ⌘P: files. ⌃⌘S: file panel (large view). ⌥↓ ⌥↑: changes. ⌥⇧↓ ⌥⇧↑: files. ⌥V: viewed, next. Esc: close.
     /// In a text view, the arrows and Esc go to the text, so a comment field can cancel its draft.
-    init?(key: UInt16, shift: Bool, option: Bool, command: Bool, inText: Bool) {
+    init?(key: UInt16, shift: Bool, option: Bool, command: Bool, control: Bool = false, inText: Bool) {
         switch (key, shift, option, command) {
+        case (1, false, false, true) where control: self = .filePanel
         case (46, true, false, true): self = .size
         case (35, false, false, true): self = .files
         case (125, _, true, false) where !inText: self = shift ? .nextFile : .nextChange

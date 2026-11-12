@@ -109,6 +109,15 @@ final class ReviewDesk {
     /// The diff scrolls horizontally: a unified diff with no wrap.
     var scrolls: Bool { !wrap && !split }
     static var wraps = !UIShots.shooting && UserDefaults.standard.bool(forKey: "review.wrap")
+    /// The large view shows the file panel at its left. One choice for all reviews, kept across launches. On by default.
+    var maxFiles: Bool {
+        get { Self.maxFilesOn }
+        set {
+            Self.maxFilesOn = newValue
+            if !UIShots.shooting { UserDefaults.standard.set(newValue, forKey: "review.maxFiles") }
+        }
+    }
+    static var maxFilesOn: Bool = UIShots.shooting || (UserDefaults.standard.object(forKey: "review.maxFiles") as? Bool ?? true)
     var filter = FileFilter()
     var collapsed: Set<String> = []
     /// The comment to scroll to after the next build of the diff.

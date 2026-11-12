@@ -120,6 +120,14 @@ final class DiffFoldTests: XCTestCase {
         XCTAssertNil(DiffKey(key: 46, shift: false, option: false, command: true, inText: false), "⌘M stays Minimize")
     }
 
+    func testControlCommandSTogglesTheFilePanel() {
+        XCTAssertEqual(DiffKey(key: 1, shift: false, option: false, command: true, control: true, inText: false), .filePanel)
+        XCTAssertEqual(DiffKey(key: 1, shift: false, option: false, command: true, control: true, inText: true), .filePanel, "it works in a field")
+        XCTAssertNil(DiffKey(key: 1, shift: false, option: false, command: true, inText: false), "⌘S is not for the panel")
+        XCTAssertNil(DiffKey(key: 1, shift: false, option: true, command: true, control: true, inText: false), "⌃⌥⌘S stays Snap")
+        XCTAssertNil(DiffKey(key: 1, shift: true, option: false, command: true, control: true, inText: false))
+    }
+
     // MARK: Fold buttons (OVERSIRE-441)
 
     /// A full diff of `count` lines with one added line at each of `adds`. Line `fn` starts a function.

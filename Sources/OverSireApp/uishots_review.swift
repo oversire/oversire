@@ -7,7 +7,8 @@ import OverSireCore
 
 extension UIShots {
     /// review:list, changes, select, menu, split, wrap, plan, submit, approve, merge, conflict or empty.
-    /// max: the large view (OVERSIRE-440). switch: the file switch from the path, in the large view.
+    /// max: the large view with the file panel (OVERSIRE-440, OVERSIRE-461). max-nofiles: the large view with the file panel hidden.
+    /// switch: the file switch from the path, in the large view.
     /// full: a full diff with fold buttons. expand: the same after "Show 20 lines below". old-daemon: a partial diff (OVERSIRE-441).
     /// steps: the second change of a full diff is the current change. ruler: the full file in the large view, with the ruler (OVERSIRE-442).
     /// viewed: the large view of a file that changed since it was viewed, with Next. unviewed: the Viewed chip hides the viewed files (OVERSIRE-447).
@@ -24,7 +25,8 @@ extension UIShots {
         }
         code.split = scene == "split"
         code.wrap = scene == "wrap"
-        code.maximized = ["max", "switch", "ruler", "viewed"].contains(scene)
+        code.maximized = ["max", "max-nofiles", "switch", "ruler", "viewed"].contains(scene)
+        code.maxFiles = scene != "max-nofiles"
         code.wholeFile = scene == "ruler"
         code.view = scene == "files" ? .list : .tree
         if scene == "search" { code.filter.query = "review" }
@@ -49,7 +51,7 @@ extension UIShots {
                 guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
-        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "viewed", "unviewed", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
+        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "max-nofiles", "viewed", "unviewed", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
         case "switch":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {

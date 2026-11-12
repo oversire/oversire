@@ -186,9 +186,10 @@ final class ReviewChangesTab {
         let fill: (NSView) -> Void = { [unowned self] v in
             guard let pane = v as? TwoPane else { return }
             let p = self.panel(desk)
-            pane.side.set(header: p.head, body: p.body(), place: "files")
+            p.refresh()
             guard let file else {
                 self.closeModal()
+                pane.side.set(header: nil, fill: p.card, place: "files")
                 return pane.main.set(header: nil, body: EmptyNote("No changed files."), place: "")
             }
             let panel = self.diffPanel(desk)
@@ -205,16 +206,22 @@ final class ReviewChangesTab {
                 }
                 self.away = note
                 pane.main.set(header: nil, body: note, place: "max")
+                if desk.maxFiles {
+                    pane.side.set(header: nil, body: EmptyNote("The files are in the large view. Press ⇧⌘M to restore.", symbol: "sidebar.left"), place: "files-away")
+                } else {
+                    pane.side.set(header: nil, fill: p.card, place: "files")
+                }
                 // A new page is not in its window yet. Then the large view shows on the next turn.
-                let show = { [weak self, weak desk, weak panel] in
+                let show = { [weak self, weak desk, weak panel, weak p] in
                     guard let self, let desk, let panel, desk.maximized else { return }
+                    let files: NSView? = desk.maxFiles ? p?.card : nil
                     guard let w = self.window() else {
                         desk.maximized = false
                         return self.reload()
                     }
-                    if let m = self.modal, m.window === w { return m.hold(panel) }
+                    if let m = self.modal, m.window === w { return m.hold(panel, files: files) }
                     self.closeModal()
-                    self.modal = DiffModal.show(panel, in: w) { [weak self, weak desk] in
+                    self.modal = DiffModal.show(panel, files: files, in: w) { [weak self, weak desk] in
                         desk?.maximized = false
                         self?.reload()
                     }
@@ -222,6 +229,7 @@ final class ReviewChangesTab {
                 if self.window() != nil { show() } else { DispatchQueue.main.async(execute: show) }
             } else {
                 self.closeModal()
+                pane.side.set(header: nil, fill: p.card, place: "files")
                 pane.main.set(header: nil, fill: panel, place: file.id)
             }
             guard desk.reveal != nil else { return }
@@ -231,13 +239,16 @@ final class ReviewChangesTab {
             }
         }
         out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos,
-                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.opened, desk.wholeFile, desk.change, update: fill) {
-            let pane = TwoPane(sideWidth: 300, keep: "changes")
+                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.maxFiles, desk.opened, desk.wholeFile, desk.change, update: fill) {
+            let pane = TwoPane(sideWidth: Self.sideWidth, keep: "changes")
             fill(pane)
             return pane
         })
         return out
     }
+
+    /// The width of the file panel, in the page and in the large view.
+    static let sideWidth: CGFloat = 300
 
     func closeModal() {
         modal?.dismiss()
