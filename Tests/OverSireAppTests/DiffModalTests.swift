@@ -91,6 +91,28 @@ final class DiffModalTests: XCTestCase {
         XCTAssertTrue(v.superview === r.home, "dismiss leaves a view that is not in the card")
     }
 
+    // A row takes only the mouse up. Its mouse down goes up the responder chain.
+    func testAPressOnAFileRowKeepsTheLargeView() {
+        let r = rig()
+        let files = NSView()
+        let row = NSView(frame: NSRect(x: 10, y: 10, width: 200, height: 24))
+        files.addSubview(row)
+        var closed = 0
+        let m = DiffModal.show(r.panel, files: files, in: r.window) { closed += 1 }
+        r.window.layoutIfNeeded()
+        func press(_ v: NSView, at p: NSPoint) {
+            let at = v.convert(p, to: nil)
+            let hit = r.window.contentView!.hitTest(r.window.contentView!.convert(at, from: nil))!
+            let e = NSEvent.mouseEvent(with: .leftMouseDown, location: at, modifierFlags: [], timestamp: 0, windowNumber: r.window.windowNumber,
+                                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            hit.mouseDown(with: e)
+        }
+        press(row, at: NSPoint(x: 20, y: 12))
+        XCTAssertEqual(closed, 0, "a click on a file row does not close the large view")
+        press(m, at: NSPoint(x: 4, y: 4))
+        XCTAssertEqual(closed, 1, "a click on the scrim closes the large view")
+    }
+
     func testHidingTheFilesMovesTheFocusToTheDiff() {
         let r = rig()
         let v = NSView()

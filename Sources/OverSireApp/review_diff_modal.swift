@@ -39,7 +39,6 @@ final class DiffModal: NSView {
         self.close = close
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        scrim.onClick = { [weak self] in self?.close() }
         card.layer?.masksToBounds = true
         [scrim, card].forEach(addSubview)
         [filesSlot, rule, diffSlot].forEach {
@@ -123,12 +122,17 @@ final class DiffModal: NSView {
 
     override func cancelOperation(_ sender: Any?) { close() }
 
-    /// The dim layer behind the card. It takes the clicks, so the page under it does not get them.
+    // A press that no view in the card takes comes up the responder chain to here.
+    // Only a press on the scrim closes the large view. Else a click on a file row closes it.
+    override func mouseDown(with event: NSEvent) {
+        guard !card.frame.contains(convert(event.locationInWindow, from: nil)) else { return }
+        close()
+    }
+
+    /// The dim layer behind the card. It keeps the wheel from the page under it.
     private final class Scrim: Box {
-        var onClick: () -> Void = {}
         init() { super.init(fill: NSColor.black.withAlphaComponent(0.45), border: nil, radius: 0) }
         required init?(coder: NSCoder) { fatalError() }
-        override func mouseDown(with event: NSEvent) { onClick() }
         override func scrollWheel(with event: NSEvent) {}
     }
 }
