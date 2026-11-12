@@ -167,11 +167,16 @@ final class ReviewChangesTab {
         let t = threads(desk)
         let s = desk.summary
         var out: [PageRow] = []
-        if let e = desk.error, desk.detail == nil {
-            out.append(PageRow("error", e) { Banner(.bad, title: "The daemon on \(s.machine) did not give the review", body: e) })
+        let read = desk.review.state
+        if desk.detail == nil, case .failed = read {
+            let part = desk.review.part(id: "review", title: "Review of \(s.key)")
+            out.append(PageRow("error", read, desk.review.last.retry(now: Date())) {
+                ReadNote("The daemon on \(s.machine) did not give the review.", part: part)
+            })
         }
-        out.append(PageRow("repos", s.repos, s.note, s.state, s.group, desk.pending.count, desk.filter.repo) { [unowned self] in self.repos(desk) })
+        out.append(PageRow("repos", s.repos, s.note, s.state, s.group, desk.pending.count, desk.filter.repo, read) { [unowned self] in self.repos(desk) })
         if desk.detail == nil {
+            guard !read.didFail else { return out }
             out.append(PageRow("loading", desk.loading) {
                 let c = ListCard()
                 c.add(LoadingNote("Loading the review of \(s.key)"))
@@ -181,7 +186,8 @@ final class ReviewChangesTab {
         }
         out.append(PageRow("review-bar", desk.rounds, s.round, desk.pending, desk.error, t.hash) { t.reviewBar() })
         let file = desk.files.first { $0.id == desk.file }
-        let diff = file.flatMap { desk.diffs[$0.id] }
+        let diff = file.flatMap { desk.shownDiff($0) }
+        let diffRead = file.map { desk.diffRead($0) }
         let notes = file.map { desk.comments(in: $0) } ?? []
         let fill: (NSView) -> Void = { [unowned self] v in
             guard let pane = v as? TwoPane else { return }
@@ -238,7 +244,7 @@ final class ReviewChangesTab {
                 desk.reveal = nil
             }
         }
-        out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, notes, t.hash, desk.pendingByFile, s.repos,
+        out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, diffRead?.state, diffRead?.last.retry(now: Date()), notes, t.hash, desk.pendingByFile, s.repos,
                            desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.maxFiles, desk.opened, desk.wholeFile, desk.change, update: fill) {
             let pane = TwoPane(sideWidth: Self.sideWidth, keep: "changes")
             fill(pane)
@@ -326,6 +332,7 @@ final class ReviewChangesTab {
             if s.state == .waiting { m.toolTip = "The agent works on the last round. Merge when it hands off." }
             foot.append(m)
         }
+        foot.append(ReadAccessory(desk.review.part(id: "review", title: "Review of \(s.key)")))
         card.add(NSStackView(h: foot, spacing: 8))
         return card
     }

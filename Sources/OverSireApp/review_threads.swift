@@ -261,7 +261,7 @@ final class ReviewThreads {
     func reviewBar() -> NSView {
         let n = desk.pending.count
         var views = roundChips() + [Spacer()]
-        if let e = desk.error { views.append(NSTextField.text(e, size: 12, color: Palette.bad, lines: 2)) }
+        if let e = desk.error { views.append(NSTextField.text("The last change did not save: " + e, size: 12, color: Palette.bad, lines: 2)) }
         let text = "Round \(desk.nextRound) · \(n) pending"
         let chip = Chiplet(text, symbol: n > 0 ? "text.bubble" : "circle", color: n > 0 ? Palette.warn : Palette.dim)
         chip.toolTip = n > 0 ? "Show the pending comments" : "No pending comments. You can still approve."
@@ -347,7 +347,7 @@ final class ReviewThreads {
             : "\(n) pending comment\(n == 1 ? "" : "s") · round \(desk.nextRound) · not sent yet"
         var views: [NSView] = [NSTextField.text(n == 0 ? "○" : "◆", size: 13, weight: .bold, color: n == 0 ? Palette.dim : Palette.warn),
                                NSTextField.text(text, size: 12.5, weight: .medium), Spacer()]
-        if let e = desk.error { views.insert(NSTextField.text(e, size: 12, color: Palette.bad, lines: 2), at: 2) }
+        if let e = desk.error { views.insert(NSTextField.text("The last change did not save: " + e, size: 12, color: Palette.bad, lines: 2), at: 2) }
         if n > 0 {
             views.append(ActionButton("Discard all", style: .danger) { [weak self] in self?.discardAll() })
         }

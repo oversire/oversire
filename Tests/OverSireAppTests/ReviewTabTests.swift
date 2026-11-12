@@ -386,6 +386,114 @@ final class ReviewTabTests: XCTestCase {
         d.file = b.id
         XCTAssertNil(d.change, "a new file has no current change")
     }
+
+    // MARK: Failed reads (OVERSIRE-462)
+
+    private func readDesk(_ src: FakeReviewSource, schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = { _, _ in })
+        async -> (ReviewDesk, ReviewFile) {
+        let s = summary("A-1", ready: 1, repos: [repo("oversire", .fastForward)])
+        let f = ReviewFile(repo: "oversire", path: "a.go", status: .modified, added: 1, removed: 0)
+        let d = FileDiff(repo: "oversire", path: "a.go", status: .modified, full: true,
+                         hunks: [DiffHunk(oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: [DiffLine(kind: .add, new: 1, text: "a")])])
+        src.seed([ReviewDetail(summary: s, files: [f])], diffs: [d])
+        let desk = ReviewDesk(summary: s, source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }), schedule: schedule)
+        await desk.load()
+        return (desk, f)
+    }
+
+    private func failed(_ s: ReadState) -> Bool { if case .failed = s { return true }; return false }
+
+    func testAFailedDiffReadsAgainOnTryAgain() async {
+        let src = FakeReviewSource(machine: "mba")
+        let (desk, f) = await readDesk(src)
+        src.failure = ProviderError.transport("down")
+        await desk.diff(f)
+        XCTAssertTrue(failed(desk.diffRead(f).state))
+        await desk.diff(f)
+        XCTAssertEqual(src.calls.filter { $0.hasPrefix("diff") }.count, 1, "a read that is not forced does not loop")
+        src.failure = nil
+        await desk.diff(f, force: true)
+        XCTAssertNotNil(desk.shownDiff(f))
+    }
+
+    func testAFailedDiffRetriesByItself() async {
+        let src = FakeReviewSource(machine: "mba")
+        let clock = ManualSchedule()
+        let (desk, f) = await readDesk(src, schedule: clock.schedule)
+        src.failure = ProviderError.transport("down")
+        await desk.diff(f)
+        src.failure = nil
+        clock.advance(5)
+        await desk.diffRead(f).settled()
+        XCTAssertNotNil(desk.shownDiff(f))
+    }
+
+    func testAFailedDiffDoesNotSetTheDeskError() async {
+        let src = FakeReviewSource(machine: "mba")
+        let (desk, f) = await readDesk(src)
+        src.failure = ProviderError.transport("down")
+        await desk.diff(f)
+        XCTAssertNil(desk.error)
+        await desk.load()
+        XCTAssertNil(desk.error)
+        XCTAssertNotNil(desk.detail, "a failed read keeps the review")
+    }
+
+    func testAFailedRefreshKeepsTheOldDiff() async {
+        let src = FakeReviewSource(machine: "mba")
+        let (desk, f) = await readDesk(src)
+        await desk.diff(f)
+        XCTAssertNotNil(desk.shownDiff(f))
+        src.failure = ProviderError.transport("down")
+        await desk.diff(f, force: true)
+        XCTAssertNotNil(desk.shownDiff(f))
+        if case .stale = desk.diffRead(f).state {} else { XCTFail("\(desk.diffRead(f).state)") }
+    }
+
+    func testANewCommitDropsTheDiffReads() async {
+        let src = FakeReviewSource(machine: "mba")
+        let (desk, f) = await readDesk(src)
+        await desk.diff(f)
+        XCTAssertNotNil(desk.shownDiff(f))
+        await desk.load()
+        XCTAssertNotNil(desk.shownDiff(f), "a read with the same files keeps the diffs")
+        var changed = f
+        changed.added = 5
+        src.seed([ReviewDetail(summary: desk.summary, files: [changed])])
+        await desk.load()
+        XCTAssertNil(desk.shownDiff(f))
+    }
+
+    func testRetryOfAMachineReadsItsFailedDesksAgain() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        let (seeded, f) = await readDesk(src)
+        let b = book([src])
+        await b.refresh()
+        let desk = try XCTUnwrap(b.desk(seeded.summary))
+        await desk.load()
+        src.failure = ProviderError.transport("down")
+        await desk.diff(f)
+        XCTAssertTrue(desk.readFailed)
+        src.failure = nil
+        let before = src.calls.filter { $0.hasPrefix("diff") }.count
+        await b.retry(machine: "mba")
+        XCTAssertEqual(src.calls.filter { $0.hasPrefix("diff") }.count, before + 1)
+        XCTAssertNotNil(desk.shownDiff(f))
+        XCTAssertFalse(desk.readFailed)
+    }
+
+    func testTheMachinePartTellsTheHealth() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        src.seed([ReviewDetail(summary: summary("A-1", ready: 1))])
+        let b = book([src])
+        await b.refresh()
+        XCTAssertEqual(b.part(machine: "mba").state, .fresh(try XCTUnwrap(b.health("mba").read)))
+        src.failure = ProviderError.transport("down")
+        await b.refresh()
+        let p = b.part(machine: "mba")
+        XCTAssertTrue(p.state.didFail)
+        XCTAssertNil(p.retry)
+    }
 }
 
 /// The tracker writes of a desk, in memory.

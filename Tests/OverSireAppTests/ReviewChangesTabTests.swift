@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
@@ -116,5 +117,67 @@ final class ReviewChangesTabTests: XCTestCase {
         ReviewDesk.maxFilesOn = false
         let b = r.tab.rows(r.desk).first { $0.id == "body" }!.hash
         XCTAssertNotEqual(a, b)
+    }
+
+    // MARK: Failed reads (OVERSIRE-462)
+
+    private func failedDesk() async -> (ReviewDesk, ReviewFile, FakeReviewSource) {
+        let src = FakeReviewSource(machine: "mba")
+        let sum = ReviewSummary(key: "K-1", kind: .code, machine: "mba", state: .ready, root: "/src", updatedAt: Date())
+        let f = ReviewFile(repo: "cli", path: "a.go", status: .modified, added: 1, removed: 0)
+        let d = FileDiff(repo: "cli", path: "a.go", status: .modified, hunks: UIShots.longDiff.hunks)
+        src.seed([ReviewDetail(summary: sum, files: [f])], diffs: [d])
+        let desk = ReviewDesk(summary: sum, source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }), schedule: { _, _ in })
+        await desk.load()
+        src.failure = ProviderError.transport("The request timed out.")
+        await desk.diff(f)
+        return (desk, f, src)
+    }
+
+    func testAFailedDiffShowsTheNoteWithTryAgain() async throws {
+        let (desk, f, src) = await failedDesk()
+        let panel = DiffPanel(desk: desk, threads: ReviewThreads(desk))
+        panel.update(f, diff: nil)
+        let note: ReadNote = try XCTUnwrap(find(panel))
+        let again: ActionButton = try XCTUnwrap(find(note) { $0.title == "Try again" })
+        let reason: NSTextField? = find(note) { $0.stringValue == "The request timed out." }
+        XCTAssertNotNil(reason)
+        src.failure = nil
+        again.performClick(nil)
+        await desk.diffRead(f).settled()
+        XCTAssertNotNil(desk.shownDiff(f))
+        panel.update(f, diff: desk.shownDiff(f))
+        XCTAssertNil(find(panel) as ReadNote?)
+    }
+
+    func testAStaleDiffDimsTheTableAndKeepsItsAccessory() async throws {
+        let (desk, f, src) = await failedDesk()
+        src.failure = nil
+        await desk.diff(f, force: true)
+        src.failure = ProviderError.transport("down")
+        await desk.diff(f, force: true)
+        let panel = DiffPanel(desk: desk, threads: ReviewThreads(desk))
+        panel.update(f, diff: desk.shownDiff(f))
+        XCTAssertEqual(panel.table.scroll.alphaValue, 0.6, accuracy: 0.01)
+        XCTAssertNil(find(panel) as ReadNote?)
+        let again: IconButton? = find(panel) { $0.accessibilityLabel()?.hasPrefix("Try again") == true }
+        XCTAssertNotNil(again, "the header shows Try again")
+    }
+
+    func testTheReviewErrorRowIsAReadNote() async throws {
+        let src = FakeReviewSource(machine: "mba")
+        src.failure = ProviderError.transport("down")
+        let sum = ReviewSummary(key: "K-1", kind: .code, machine: "mba", state: .ready, root: "/src", updatedAt: Date())
+        let desk = ReviewDesk(summary: sum, source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }), schedule: { _, _ in })
+        await desk.load()
+        let rows = ReviewChangesTab().rows(desk)
+        let row = try XCTUnwrap(rows.first { $0.id == "error" })
+        let note = row.make() as? ReadNote
+        XCTAssertNotNil(note)
+        XCTAssertFalse(rows.contains { $0.id == "loading" }, "a failed read shows no loading row")
+        let plan = ReviewDesk(summary: ReviewSummary(key: "K-1", kind: .plan, machine: "mba", state: .ready, root: "/src", updatedAt: Date()),
+                              source: src, tracker: nil, bus: ChangeBus(schedule: { _, _ in }), schedule: { _, _ in })
+        await plan.load()
+        XCTAssertTrue(ReviewPlanTab().rows(plan).first { $0.id == "error" }?.make() is ReadNote)
     }
 }

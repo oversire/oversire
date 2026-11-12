@@ -17,6 +17,19 @@ final class AgentsPage: Page {
 
     override var watches: DataDomains { [.agents, .projects, .runs, .questions, .summaries, .config] }
 
+    override var parts: [PagePart] {
+        let idx = data.agentIndex
+        let state: ReadState
+        let read = idx.lastPoll > .distantPast
+        if idx.polling { state = .busy(shows: read ? idx.lastPoll : nil) }
+        else if let e = idx.lastError { state = read ? .stale(idx.lastPoll, error: e) : .failed(e) }
+        else { state = read ? .fresh(idx.lastPoll) : .idle }
+        return [PagePart(id: "sessions", title: "Sessions", state: state, retry: nil, refresh: { [weak self] in
+            self?.data.agentIndex.poll()
+            self?.checkAgain()
+        }, auto: false)]
+    }
+
     override func sections() -> [PageSection]? {
         let idx = data.agentIndex
         var caption = "Sessions on \(idx.place)"

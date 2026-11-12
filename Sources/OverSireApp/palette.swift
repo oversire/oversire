@@ -182,7 +182,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
                                  symbol: Tone(r).symbol, kind: "Run", run: go(.run(repo: repo, id: r.id))))
             }
         }
-        out.append(Entry(title: "Refresh now", detail: "⌘R", symbol: "arrow.clockwise", kind: "Action") { data.refresh(force: true, completion: nil) })
+        out.append(Entry(title: "Refresh now", detail: "⌘R", symbol: "arrow.clockwise", kind: "Action") { [weak owner] in owner?.refreshNow() })
         for t in Theme.allCases {
             out.append(Entry(title: "Theme: \(t.label)", detail: "Settings › General", symbol: "circle.lefthalf.filled", kind: "Action") {
                 GENERAL.theme = t

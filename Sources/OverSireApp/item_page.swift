@@ -215,11 +215,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
         REVIEWS.review(key, kind: kind).flatMap { REVIEWS.desk($0) }
     }
 
-    /// Reads the review and the diff of the shown file once. A failed read waits for Refresh or a review frame.
+    /// Reads the review and the diff of the shown file. `Read.wants` stops a loop after a failure: the part tries again by itself.
     private func loadReview() {
         guard tab == .plan || tab == .changes, let desk = reviewDesk(tab == .plan ? .plan : .code) else { return }
-        if desk.detail == nil, !desk.loading, desk.error == nil { Task { await desk.load() } }
-        if tab == .changes, let f = desk.files.first(where: { $0.id == desk.file }), desk.diffs[f.id] == nil { Task { await desk.diff(f) } }
+        Task { await desk.load(force: false) }
+        if tab == .changes, let f = desk.files.first(where: { $0.id == desk.file }) { Task { await desk.diff(f) } }
+    }
+
+    override var parts: [PagePart] {
+        guard tab == .plan || tab == .changes, let desk = reviewDesk(tab == .plan ? .plan : .code) else { return [] }
+        return desk.parts(file: desk.files.first { $0.id == desk.file }) + [REVIEWS.part(machine: desk.summary.machine)]
     }
 
     /// The rows of a review tab, after a warning when the last read of its machine failed.

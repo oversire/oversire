@@ -10,6 +10,10 @@ private final class CountPage: Page {
     var repos: Set<String>?
     override var watches: DataDomains { domains }
     override var shownRepos: Set<String>? { repos }
+    var refreshed: [String] = []
+    override var parts: [PagePart] {
+        ["a", "b"].map { id in PagePart(id: id, title: id, state: .idle, retry: nil) { [unowned self] in refreshed.append(id) } }
+    }
     override func sections() -> [PageSection]? {
         [PageSection("s", rows: rows.keys.sorted().map { id in
             let v = rows[id]!
@@ -29,6 +33,17 @@ final class PageBuildCountTests: XCTestCase {
         let p = makePage(TestAppData())
         XCTAssertEqual(p.buildCount, 1)
         XCTAssertEqual(p.lastBuildReason, "open")
+    }
+
+    func testTheDefaultPageRefreshCallsEachPart() {
+        let p = makePage(TestAppData())
+        p.refresh(nil)
+        XCTAssertEqual(p.refreshed, ["a", "b"])
+        p.refreshed = []
+        p.refresh("b")
+        XCTAssertEqual(p.refreshed, ["b"])
+        p.refresh("none")
+        XCTAssertEqual(p.refreshed, ["b"])
     }
 
     func testSameDataDoesNotBuild() {

@@ -98,7 +98,7 @@ final class AgentIndex: NSObject {
     private(set) var polling = false
     private var pollAgain = false
     private var againDone: [() -> Void] = []
-    private var lastPoll = Date.distantPast
+    private(set) var lastPoll = Date.distantPast
     private var timer: (() -> Void)?
     private var holdChecks: [String: (tag: String, cancel: () -> Void)] = [:]   // pane key → the check at since + 10 s
 

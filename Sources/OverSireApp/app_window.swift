@@ -141,6 +141,14 @@ class Page: NSViewController {
     /// The rows of the page. Nil: the page builds all its views in `build(_:)`.
     func sections() -> [PageSection]? { nil }
 
+    /// The parts of the page that read their own data, for the toolbar menu and ⌘R.
+    var parts: [PagePart] { [] }
+
+    /// Refreshes the part with this id, or each part when `part` is nil.
+    func refresh(_ part: String?) {
+        for p in parts where part == nil || p.id == part { p.refresh() }
+    }
+
     /// A hash of only the data that this page shows. The page builds when it changes. Nil: no hash, each change builds.
     /// A page with no `sections()` can give its own hash.
     func fingerprint() -> Int? { sections().map(PageSection.fingerprint) }
@@ -400,7 +408,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         })
         observers.append(NotificationCenter.default.addObserver(forName: BusyTracker.changed, object: data.busy, queue: .main) { [weak self] _ in
             guard let self else { return }
-            self.refreshButton?.show(self.data.busy)
+            self.syncRefresh()
         })
         observers.append(NotificationCenter.default.addObserver(forName: Updater.changed, object: data.updater, queue: .main) { [weak self] _ in
             self?.syncUpdateItem()
@@ -516,11 +524,13 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         window?.setAccessibilityTitle("OverSire, \(r.title)")
         updateNav()
         reloadSidebar()
+        syncRefresh()
     }
 
     // The bus gives one change for each burst. Pages that do not show the changed data drop it.
     // The shown page updates through the gate, so it does not change under the cursor.
     private func dataChanged(_ c: DataChange) {
+        defer { syncRefresh() }
         if c.domains.contains(.connection) { sidebar.live.show(data.relay) }
         for p in cache where p !== page { p.receive(c) }
         if page?.wants(c) == true { if held == nil { held = c } else { held?.merge(c) } }
@@ -715,8 +725,12 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             let i = NSToolbarItem(itemIdentifier: id)
             let b = RefreshButton(target: self, action: #selector(refreshNow))
             refreshButton = b
-            b.show(data.busy)
-            i.view = b
+            b.show(data.busy, parts: page?.parts ?? [])
+            let more = IconButton("chevron.down", label: "Parts of the page", tip: "The parts of this page, one by one") { [weak self, weak b] in
+                self?.showPartsMenu(from: b)
+            }
+            more.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            i.view = NSStackView(h: [b, more], spacing: 0)
             i.label = "Refresh"
             return i
         case copyId:
@@ -772,9 +786,31 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(router.current.url.absoluteString, forType: .string)
     }
+    /// ⌘R: the app data and the parts of the page. An ⌥-click does everything.
     @objc func refreshNow() {
+        if NSApp.currentEvent?.modifierFlags.contains(.option) == true { return refreshEverything() }
         data.refresh(force: true, completion: nil)
-        (page as? AgentsPage)?.checkAgain()
+        page?.refresh(nil)
+    }
+
+    /// ⌥⌘R: the page, Plane, the reviews, the daemons.
+    @objc func refreshEverything() {
+        data.refresh(force: true, completion: nil)
+        page?.refresh(nil)
+        data.projectStore.refresh(data.projectStore.tracked.map(\.ref.storeKey), force: true, priority: .user) { _ in }
+        Task { await REVIEWS.refresh() }
+        ENV.machines?.refresh(probe: true)
+    }
+
+    private func syncRefresh() {
+        refreshButton?.show(data.busy, parts: page?.parts ?? [])
+    }
+
+    private func showPartsMenu(from b: NSView?) {
+        guard let b else { return }
+        let menu = RefreshButton.menu(for: page?.parts ?? [], page: { [weak self] in self?.refreshNow() },
+                                      everything: { [weak self] in self?.refreshEverything() })
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: b.bounds.height + 4), in: b)
     }
     @objc func toggleSidebarNow(_ sender: Any?) { split.toggleSidebar(sender) }
     func setSidebarWidth(_ w: CGFloat) { split.splitView.setPosition(w, ofDividerAt: 0) }
@@ -954,9 +990,13 @@ enum PageFactory {
 }
 
 // The toolbar refresh button. It shows a spinner while OverSire loads, and the tooltip names the work.
+// A dot says that a part of the page did not load. Each state has words in the tooltip and the label.
 final class RefreshButton: NSButton {
     private let spinner = Spinner()
     private let arrow = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+    private let dot = Box(fill: Palette.bad, border: nil, radius: 3.5)
+    /// For tests: true while the dot shows.
+    var showsDot: Bool { !dot.isHidden }
 
     init(target: AnyObject, action: Selector) {
         super.init(frame: .zero)
@@ -966,21 +1006,73 @@ final class RefreshButton: NSButton {
         image = arrow
         imagePosition = .imageOnly
         addSubview(spinner)
+        addSubview(dot)
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: 32),
             spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 7),
+            dot.heightAnchor.constraint(equalToConstant: 7),
+            dot.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            dot.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
         ])
         spinner.isHidden = true
+        dot.isHidden = true
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ busy: BusyTracker) {
+    func show(_ busy: BusyTracker, parts: [PagePart]) {
         let on = busy.isBusy
         spinner.isHidden = !on
         image = on ? nil : arrow
-        let work = busy.labels.joined(separator: "\n")
-        toolTip = on ? work + "\n\nRefresh now (⌘R)" : "Refresh now (⌘R)"
-        setAccessibilityLabel(on ? "Refresh. " + busy.labels.joined(separator: ". ") : "Refresh")
+        let failed = parts.filter { $0.state.didFail }
+        dot.isHidden = failed.isEmpty
+        var tip = busy.labels
+        if !failed.isEmpty { tip.append(contentsOf: failed.map { "\($0.title) did not load" }) }
+        tip.append("Refresh now (⌘R) · Refresh everything (⌥⌘R)")
+        toolTip = tip.joined(separator: "\n")
+        var label = on ? "Refresh. " + busy.labels.joined(separator: ". ") : "Refresh"
+        if !failed.isEmpty { label += (on ? ". " : ". ") + "\(failed.count) part\(failed.count == 1 ? "" : "s") of the page did not load" }
+        setAccessibilityLabel(label)
     }
+
+    /// One item for each part, then the page and everything.
+    static func menu(for parts: [PagePart], page: @escaping () -> Void, everything: @escaping () -> Void) -> NSMenu {
+        let menu = NSMenu(title: "Refresh")
+        menu.autoenablesItems = false
+        if parts.isEmpty {
+            let none = NSMenuItem(title: "This page has no parts to refresh", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        }
+        for p in parts {
+            let item = ClosureItem("\(p.title) · \(p.state.word)", p.refresh)
+            item.image = NSImage(systemSymbolName: p.state.symbol, accessibilityDescription: nil)
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let now = ClosureItem("Refresh page", page)
+        now.keyEquivalent = "r"
+        now.keyEquivalentModifierMask = .command
+        let all = ClosureItem("Refresh everything", everything)
+        all.keyEquivalent = "r"
+        all.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(now)
+        menu.addItem(all)
+        return menu
+    }
+}
+
+/// A menu item that runs a closure.
+final class ClosureItem: NSMenuItem {
+    private let run: () -> Void
+
+    init(_ title: String, _ run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    @objc private func fire() { run() }
 }

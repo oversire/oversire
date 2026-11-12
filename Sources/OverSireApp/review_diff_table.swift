@@ -17,6 +17,7 @@ final class DiffPanel: NSView {
     private let head = NSView()
     let ruler = DiffRuler()
     private weak var counter: Chiplet?
+    private var failNote: ReadNote?
     private var monitor: Any?
     private var tokens: (id: String, diff: FileDiff, tokens: [[SyntaxLanguage.Token]])?
 
@@ -174,13 +175,20 @@ final class DiffPanel: NSView {
 
     /// Shows the file. The table keeps its scroll position while the file stays the same.
     func update(_ f: ReviewFile, diff: FileDiff?) {
+        let part = desk.diffRead(f).part(id: "diff", title: "Diff of \(f.path)")
         let changes = diff.map { desk.fold(f) ?? DiffFold($0) }?.changes.count ?? 0
-        setHeader(f, full: diff?.full == true, changes: diff == nil ? nil : changes)
+        setHeader(f, full: diff?.full == true, changes: diff == nil ? nil : changes, part: part)
         table.change = desk.file == f.id ? desk.change : nil
         var notes: [String] = []
         if f.untracked == true { notes.append("This file is not committed. The agent did not commit it.") }
+        var stale = false
+        if case .stale = part.state { stale = true }
+        table.scroll.alphaValue = stale ? 0.6 : 1
+        var failed = false
+        if diff == nil, case .failed = part.state { failed = true }
+        showFailure(failed ? part : nil)
         guard let diff else {
-            notes.append(desk.error.map { "The diff did not load: \($0)" } ?? "Loading the diff…")
+            if !failed { notes.append("Loading the diff…") }
             return table.show(DiffFold(FileDiff(repo: f.repo, path: f.path, status: f.status, hunks: [])), items: notes.map(DiffItem.note), tokens: [], desk: desk, file: f)
         }
         let fold = desk.fold(f) ?? DiffFold(diff)
@@ -208,6 +216,21 @@ final class DiffPanel: NSView {
         }
     }
 
+    /// The note over the table when the read of the diff failed and there is no diff to show.
+    private func showFailure(_ part: PagePart?) {
+        failNote?.removeFromSuperview()
+        failNote = nil
+        guard let part else { return }
+        let n = ReadNote("The diff did not load.", part: part)
+        addSubview(n)
+        NSLayoutConstraint.activate([
+            n.topAnchor.constraint(equalTo: table.scroll.topAnchor, constant: 12),
+            n.leadingAnchor.constraint(equalTo: table.scroll.leadingAnchor, constant: 12),
+            n.trailingAnchor.constraint(lessThanOrEqualTo: table.scroll.trailingAnchor, constant: -12),
+        ])
+        failNote = n
+    }
+
     /// The syntax colors of each line of the fold, kept while the diff stays the same.
     private func tokens(_ f: ReviewFile, _ d: FileDiff) -> [[SyntaxLanguage.Token]] {
         if let t = tokens, t.id == f.id, t.diff == d { return t.tokens }
@@ -233,7 +256,7 @@ final class DiffPanel: NSView {
         return s
     }
 
-    private func setHeader(_ f: ReviewFile, full: Bool, changes: Int?) {
+    private func setHeader(_ f: ReviewFile, full: Bool, changes: Int?, part: PagePart) {
         let path = f.oldPath.map { "\($0) → \(f.path)" } ?? f.path
         let pathField = PathHead(path, path: f.path, absolute: desk.absolutePath(f), open: { [weak self] in self?.showFiles() })
         pathView = pathField
@@ -295,6 +318,8 @@ final class DiffPanel: NSView {
             side.setAccessibilityExpanded(shown)
             parts.insert(side, at: 0)
         }
+        let read = ReadAccessory(part, compact: true)
+        if !read.arrangedSubviews.isEmpty { parts.append(read) }
         if let n = changes {
             let up = IconButton("chevron.up", label: "Previous change", tip: "Previous change ⌥↑") { [weak self] in self?.stepChange(-1) }
             let down = IconButton("chevron.down", label: "Next change", tip: "Next change ⌥↓") { [weak self] in self?.stepChange(1) }

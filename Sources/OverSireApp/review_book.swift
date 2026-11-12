@@ -167,6 +167,27 @@ final class ReviewBook {
         }
     }
 
+    /// Reads one machine again with force, then each desk of the machine whose review or diff read failed.
+    func retry(machine: String) async {
+        await refresh(machine: machine)
+        let failed = await MainActor.run { desks.values.filter { $0.machine == machine && $0.readFailed } }
+        for d in failed { await d.retryReads() }
+    }
+
+    /// The reads of a machine as a part of the page. It is never busy, and the book polls it, so it has no countdown.
+    func part(machine: String) -> PagePart {
+        let h = health(machine)
+        let state: ReadState
+        switch (h.error, h.read) {
+        case (let e?, let t?): state = .stale(t, error: e)
+        case (let e?, nil): state = .failed(e)
+        case (nil, let t?): state = .fresh(t)
+        case (nil, nil): state = .idle
+        }
+        return PagePart(id: "machine-\(machine)", title: "Machine \(machine)", state: state, retry: nil,
+                        refresh: { [weak self] in Task { await self?.retry(machine: machine) } }, auto: false)
+    }
+
     /// A review frame: the rows of the machine and the open desk of the key read again.
     func apply(_ e: ReviewEvent, from machine: String) async {
         let m = e.machine ?? machine

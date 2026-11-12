@@ -55,7 +55,7 @@ extension ReviewBook {
             guard let n = health(m).notice(machine: m, now: t) else { return nil }
             return PageRow("read-failed-\(m)", n.title, n.body) { [weak self] in
                 Banner(.warning, title: n.title, body: n.body,
-                       actions: [ActionButton("Retry", symbol: "arrow.clockwise") { Task { await self?.refresh(machine: m) } }])
+                       actions: [ActionButton("Retry", symbol: "arrow.clockwise") { Task { await self?.retry(machine: m) } }])
             }
         }
     }
@@ -63,6 +63,10 @@ extension ReviewBook {
 
 final class ReviewPage: Page {
     override var watches: DataDomains { [.reviews, .projects, .config] }
+
+    override var parts: [PagePart] {
+        Set(REVIEWS.rows.map(\.machine)).union(REVIEWS.failing).sorted().map { REVIEWS.part(machine: $0) }
+    }
 
     override func sections() -> [PageSection]? {
         let book = REVIEWS

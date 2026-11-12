@@ -12,12 +12,14 @@ extension UIShots {
     /// full: a full diff with fold buttons. expand: the same after "Show 20 lines below". old-daemon: a partial diff (OVERSIRE-441).
     /// steps: the second change of a full diff is the current change. ruler: the full file in the large view, with the ruler (OVERSIRE-442).
     /// viewed: the large view of a file that changed since it was viewed, with Next. unviewed: the Viewed chip hides the viewed files (OVERSIRE-447).
+    /// diff-failed: the diff of cli/review/routes.go did not load, try 2 of 3 (OVERSIRE-462). diff-stale: a new read failed and the old diff shows.
+    /// refresh-menu: the ▾ menu of the toolbar with the failed diff, and the dot on the button.
     /// long: a file of 4000 lines, with the widest line at line 3938 (OVERSIRE-439).
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     func reviewState(_ scene: String, in w: AppWindow) {
         let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
-        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: ["full", "expand", "steps", "ruler", "viewed"].contains(scene), stale: scene == "viewed")
+        Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: ["full", "expand", "steps", "ruler", "viewed", "diff-stale"].contains(scene), stale: scene == "viewed")
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
               let plan = REVIEWS.review("OVERSIRE-349", kind: .plan).flatMap({ REVIEWS.desk($0) }) else {
             w.router.go(.work(.review))
@@ -38,7 +40,15 @@ extension UIShots {
         }
         code.pick = scene == "changes" ? LinePick(repo: "oversire", path: "Sources/OverSireApp/review_tab.swift", side: .new, line: 41).click(43, side: .new, shift: true) : nil
         plan.block = scene == "plan" ? "risks" : nil
-        if ["long", "full", "expand", "old-daemon", "steps", "ruler"].contains(scene) { code.file = "cli/review/routes.go" }
+        if ["long", "full", "expand", "old-daemon", "steps", "ruler", "diff-failed", "diff-stale", "refresh-menu"].contains(scene) { code.file = "cli/review/routes.go" }
+        if let f = code.files.first(where: { $0.id == "cli/review/routes.go" }) {
+            let error = "The request timed out."
+            switch scene {
+            case "diff-failed", "refresh-menu": code.diffRead(f).seed(Read(error: error, tries: 2))
+            case "diff-stale": code.diffRead(f).seed(Read(value: code.shownDiff(f), at: Date().addingTimeInterval(-4 * 60), error: error, tries: 1))
+            default: break
+            }
+        }
         code.change = scene == "steps" || scene == "ruler" ? 1 : nil
         if scene == "expand", let f = code.files.first(where: { $0.id == "cli/review/routes.go" }),
            let g = code.fold(f)?.items(split: false, threads: []).lazy.compactMap({ i -> DiffGap? in if case .gap(let g) = i, g.edge == .middle { return g }; return nil }).first {
@@ -51,7 +61,13 @@ extension UIShots {
                 guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
-        case "changes", "split", "wrap", "files", "search", "filters", "stale", "max", "max-nofiles", "viewed", "unviewed", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
+        case "refresh-menu":
+            w.router.go(.item("FRITZ-17", .changes))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                guard let more = (w.window?.toolbar?.items.first { $0.itemIdentifier.rawValue == "refresh" }?.view as? NSStackView)?.arrangedSubviews.last else { return }
+                self.shootMenu(RefreshButton.menu(for: w.page?.parts ?? [], page: {}, everything: {}), under: more, name: "review-refresh-menu")
+            }
+        case "changes", "diff-failed", "diff-stale", "split", "wrap", "files", "search", "filters", "stale", "max", "max-nofiles", "viewed", "unviewed", "full", "expand", "old-daemon", "steps", "ruler": w.router.go(.item("FRITZ-17", .changes))
         case "switch":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {

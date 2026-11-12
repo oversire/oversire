@@ -462,6 +462,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         sub("View", [
             mi("Toggle Sidebar", #selector(AppWindow.toggleSidebarNow(_:)), "s", [.command, .control]),
             mi("Refresh", #selector(AppWindow.refreshNow), "r"),
+            mi("Refresh Everything", #selector(AppWindow.refreshEverything), "r", [.command, .option]),
             .separator(),
             mi("Ask the Assistant", #selector(toggleAssistant), "j", target: self),
         ])

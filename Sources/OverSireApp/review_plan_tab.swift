@@ -29,10 +29,15 @@ final class ReviewPlanTab {
         let t = threads(desk)
         let s = desk.summary
         var out: [PageRow] = []
-        if let e = desk.error, desk.detail == nil {
-            out.append(PageRow("error", e) { Banner(.bad, title: "The daemon on \(s.machine) did not give the review", body: e) })
+        let read = desk.review.state
+        let part = desk.review.part(id: "review", title: "Plan review of \(s.key)")
+        if desk.detail == nil, case .failed = read {
+            out.append(PageRow("error", read, desk.review.last.retry(now: Date())) {
+                ReadNote("The daemon on \(s.machine) did not give the review.", part: part)
+            })
         }
         guard let detail = desk.detail else {
+            guard !read.didFail else { return out }
             out.append(PageRow("loading", desk.loading) {
                 let c = ListCard()
                 c.add(LoadingNote("Loading the plan review of \(s.key)"))
@@ -44,12 +49,13 @@ final class ReviewPlanTab {
             out.append(PageRow("noplan", s.key) { EmptyNote("The agent did not hand off a plan comment for \(s.key) yet.") })
             return out
         }
-        out.append(PageRow("head", plan.version, s.state, s.note, s.machine) {
+        out.append(PageRow("head", plan.version, s.state, s.note, s.machine, read) {
             let mark = ReviewMark(s)
             var parts: [NSView] = [mark.view(size: 13),
                                    NSTextField.text("Plan comment on \(plan.key) · version \(plan.version)", size: 12.5, weight: .semibold),
                                    NSTextField.text("· Click + on a section to comment on it", size: 12, color: Palette.dim), Spacer()]
             if let note = s.note { parts.append(NSTextField.text("Agent: " + note, size: 12, color: Palette.mut)) }
+            parts.append(ReadAccessory(part))
             return NSStackView(h: parts, spacing: 6)
         })
         out.append(PageRow("rounds", desk.rounds, s.round, desk.pending.count) { t.rounds() })

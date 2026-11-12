@@ -2331,3 +2331,117 @@ extension PageScroll {
         return found
     }
 }
+
+// ─── Read state of a part ────────────────────────────────────────────────────
+// The control in the header of a part, and the note that shows a failed read (OVERSIRE-462).
+
+/// The state of a part in its header. Each state has a glyph and words. The failure note of an idle or failed part is a `ReadNote`.
+final class ReadAccessory: NSStackView {
+    init(_ part: PagePart, compact: Bool = false, now: @escaping () -> Date = Date.init) {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 6
+        alignment = .centerY
+        translatesAutoresizingMaskIntoConstraints = false
+        let word = part.state.word(now: now(), zone: .current)
+        func refresh() -> IconButton {
+            IconButton("arrow.clockwise", label: "Refresh \(part.title)", tip: "Refresh \(part.title)", part.refresh)
+        }
+        switch part.state {
+        case .fresh:
+            if !compact { addArrangedSubview(NSTextField.text(word, size: 11.5, color: Palette.dim)) }
+            addArrangedSubview(refresh())
+        case .busy:
+            addArrangedSubview(Glyph(Tone(symbol: "arrow.clockwise", color: Palette.run, word: "Reading", spins: true), size: 12))
+            if !compact { addArrangedSubview(NSTextField.text(word, size: 11.5, color: Palette.dim)) }
+        case .stale(_, let error):
+            if compact {
+                let b = IconButton("exclamationmark.triangle", label: "Try again: \(part.title)", tip: "\(word). \(error). Click to try again", part.refresh)
+                b.contentTintColor = Palette.warn
+                addArrangedSubview(b)
+            } else {
+                addArrangedSubview(Glyph(.warning, size: 12))
+                addArrangedSubview(NSTextField.text(word, size: 11.5, color: Palette.warn))
+                let again = ActionButton("Try again", style: .link, part.refresh)
+                again.toolTip = error
+                again.setAccessibilityLabel("Try again: \(part.title)")
+                addArrangedSubview(again)
+            }
+        case .idle, .failed:
+            break
+        }
+        arrangedSubviews.forEach {
+            $0.setContentHuggingPriority(.required, for: .horizontal)
+            $0.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("\(part.title): \(word)")
+        toolTip = { if case .stale(_, let e) = part.state { return e }; return nil }()
+    }
+    required init(coder: NSCoder) { fatalError() }
+}
+
+/// The failure note of a part that has no value: the title, the reason, Try again and the time of the next automatic try.
+final class ReadNote: Box {
+    private let part: PagePart
+    private let now: () -> Date
+    private let countdown = NSTextField.text("", size: 12, color: Palette.dim)
+    private var timer: Timer?
+
+    init(_ title: String, part: PagePart, framed: Bool = true, now: @escaping () -> Date = Date.init) {
+        self.part = part
+        self.now = now
+        super.init(fill: framed ? Palette.panel : nil, border: framed ? Palette.bad.withAlphaComponent(0.55) : nil, radius: 10)
+        var reason: String?
+        switch part.state {
+        case .failed(let e), .stale(_, let e): reason = e
+        default: break
+        }
+        var texts: [NSView] = [NSTextField.text(title, size: 13, weight: .semibold, lines: 2)]
+        if let reason { texts.append(NSTextField.text(reason, size: 12, color: Palette.mut, lines: 3)) }
+        let busy: Bool = { if case .busy = part.state { return true }; return false }()
+        let again = ActionButton(busy ? "Reading…" : "Try again", symbol: "arrow.clockwise", key: "r", part.refresh)
+        again.isEnabled = !busy
+        again.setAccessibilityLabel(busy ? "Reading" : "Try again: \(part.title)")
+        var actions: [NSView] = [again]
+        if !busy, part.auto { actions.append(countdown) }
+        texts.append(NSStackView(h: actions, spacing: 10))
+        let text = NSStackView(v: texts, spacing: 4)
+        let row = NSStackView(h: [Glyph(.bad, size: 15), text], spacing: 10, align: .top)
+        addSubview(row)
+        let pad: CGFloat = framed ? 12 : 0
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: pad + 2),
+            row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -pad),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: pad),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -pad),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Failed: \(title) \(reason ?? "")")
+        tick()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// "Tries again by itself in 25 s · try 2 of 3", or the stop line.
+    var countdownText: String {
+        guard let r = part.retry else { return "OverSire stopped trying. Click Try again." }
+        let s = max(0, Int(r.at.timeIntervalSince(now()).rounded(.up)))
+        return "Tries again by itself in \(s) s · try \(r.k) of \(r.of)"
+    }
+
+    private func tick() { countdown.stringValue = countdownText }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        timer?.invalidate()
+        timer = nil
+        guard window != nil, part.retry != nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+    }
+
+    deinit { timer?.invalidate() }
+}

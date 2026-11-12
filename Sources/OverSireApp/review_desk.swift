@@ -69,13 +69,33 @@ final class ReviewDesk {
     private let tracker: (any ReviewTracking)?
     private let bus: ChangeBus
 
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
+    private let now: () -> Date
+
     private(set) var summary: ReviewSummary
-    private(set) var detail: ReviewDetail?
-    private(set) var diffs: [String: FileDiff] = [:]   // ReviewFile.id → diff
-    private var asked: Set<String> = []                 // the diffs read once, so a failed read does not loop
-    /// The text of the last failed call.
+    /// The read of the review. A failed read keeps the old detail, and tries again by itself.
+    private(set) lazy var review = PartReader<ReviewDetail>(
+        fetch: { [source, key, kind] in
+            guard let source else { throw ProviderError.transport("No daemon has this review.") }
+            return try await source.review(key, kind: kind)
+        },
+        onRead: { [unowned self] d in
+            // A Viewed mark keeps the diffs. A new commit drops them.
+            let known = d.files.map(\.change)
+            if known != knownChanges { diffReads = [:] }
+            knownChanges = known
+            summary = d.summary
+            if file == nil || !d.files.contains(where: { $0.id == file }) { file = d.files.first?.id }
+        },
+        now: now, schedule: schedule, changed: { [weak self] in self?.changed() })
+    var detail: ReviewDetail? { review.value }
+    private var knownChanges: [String] = []
+    private var diffReads: [String: PartReader<FileDiff>] = [:]   // ReviewFile.id → read
+    /// ReviewFile.id → diff.
+    var diffs: [String: FileDiff] { diffReads.compactMapValues(\.value) }
+    var loading: Bool { if case .busy = review.state { return true }; return false }
+    /// The text of the last failed write. A failed read shows in its own part.
     private(set) var error: String?
-    private(set) var loading = false
     /// The agent for a new session when the daemon knows no agent of the key.
     var agent: (String) -> AgentLaunchSpec? = { _ in nil }
 
@@ -125,7 +145,8 @@ final class ReviewDesk {
     /// The review runs on this Mac, so its files are on this disk.
     var local = false
 
-    init(summary: ReviewSummary, source: (any ReviewSource)?, tracker: (any ReviewTracking)?, bus: ChangeBus = .shared) {
+    init(summary: ReviewSummary, source: (any ReviewSource)?, tracker: (any ReviewTracking)?, bus: ChangeBus = .shared,
+         schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter, now: @escaping () -> Date = Date.init) {
         machine = summary.machine
         key = summary.key
         kind = summary.kind
@@ -133,13 +154,19 @@ final class ReviewDesk {
         self.source = source
         self.tracker = tracker
         self.bus = bus
+        self.schedule = schedule
+        self.now = now
     }
 
     /// For tests and `--uishots`: a desk with its data and no daemon.
     convenience init(detail: ReviewDetail, diffs: [FileDiff] = [], tracker: (any ReviewTracking)? = nil, bus: ChangeBus = .shared) {
         self.init(summary: detail.summary, source: nil, tracker: tracker, bus: bus)
-        self.detail = detail
-        for d in diffs { self.diffs[d.repo + "/" + d.path] = d }
+        review.seed(Read(value: detail, at: now()))
+        knownChanges = detail.files.map(\.change)
+        for d in diffs {
+            guard let f = detail.files.first(where: { $0.repo == d.repo && $0.path == d.path }) else { continue }
+            diffRead(f).seed(Read(value: d, at: now()))
+        }
         file = detail.files.first?.id
     }
 
@@ -192,38 +219,41 @@ final class ReviewDesk {
 
     // MARK: Calls
 
-    func load() async {
-        guard let source else { return }
-        await MainActor.run { loading = true }
-        do {
-            let d = try await source.review(key, kind: kind)
-            await MainActor.run {
-                // A Viewed mark keeps the diffs. A new commit drops them.
-                if d.files.map(\.change) != (detail?.files ?? []).map(\.change) {
-                    diffs = [:]
-                    asked = []
-                }
-                detail = d
-                summary = d.summary
-                if file == nil || !d.files.contains(where: { $0.id == file }) { file = d.files.first?.id }
-                error = nil
-                loading = false
-                changed()
-            }
-        } catch { await fail(error) }
+    /// Reads the review. `force: false` reads only when `Read.wants` says so.
+    func load(force: Bool = true) async { await review.load(force: force) }
+
+    /// The read of the diff of a file. A failed read keeps the old diff.
+    func diffRead(_ f: ReviewFile) -> PartReader<FileDiff> {
+        if let r = diffReads[f.id] { return r }
+        let r = PartReader<FileDiff>(
+            fetch: { [source, key] in
+                guard let source else { throw ProviderError.transport("No daemon has this review.") }
+                return try await source.diff(key, repo: f.repo, path: f.path, full: true)
+            },
+            now: now, schedule: schedule, changed: { [weak self] in self?.changed() })
+        diffReads[f.id] = r
+        return r
     }
 
+    func shownDiff(_ f: ReviewFile) -> FileDiff? { diffReads[f.id]?.value }
+
     /// The diff of the file. A read keeps it until the review changes.
-    func diff(_ f: ReviewFile) async {
-        guard let source, diffs[f.id] == nil, !asked.contains(f.id) else { return }
-        asked.insert(f.id)
-        do {
-            let d = try await source.diff(key, repo: f.repo, path: f.path, full: true)
-            await MainActor.run {
-                diffs[f.id] = d
-                changed()
-            }
-        } catch { await fail(error) }
+    func diff(_ f: ReviewFile, force: Bool = false) async { await diffRead(f).load(force: force) }
+
+    /// True when the read of the review or of a diff failed.
+    var readFailed: Bool { review.state.didFail || diffReads.values.contains { $0.state.didFail } }
+
+    /// Reads again, with force, each read that failed.
+    func retryReads() async {
+        if review.state.didFail { await review.load(force: true) }
+        for r in Array(diffReads.values) where r.state.didFail { await r.load(force: true) }
+    }
+
+    /// The parts of the tab for the toolbar menu: the review, and the diff of the shown file.
+    func parts(file: ReviewFile?) -> [PagePart] {
+        var out = [review.part(id: "review", title: (kind == .plan ? "Plan review of " : "Review of ") + key)]
+        if kind == .code, let f = file { out.append(diffRead(f).part(id: "diff", title: "Diff of \(f.path)")) }
+        return out
     }
 
     /// The files in the order of the file panel.
@@ -258,7 +288,7 @@ final class ReviewDesk {
 
     /// The fold of the diff of a file, with the opened lines and Full file.
     func fold(_ f: ReviewFile) -> DiffFold? {
-        diffs[f.id].map { DiffFold($0, opened: opened[f.id] ?? [], wholeFile: wholeFile) }
+        shownDiff(f).map { DiffFold($0, opened: opened[f.id] ?? [], wholeFile: wholeFile) }
     }
 
     /// Opens lines of a gap. It gives the new-side number of the line that keeps its place on the screen.
@@ -320,6 +350,7 @@ final class ReviewDesk {
     /// All pending comments become one round. The app writes the tracker parts: the round comment, and Todo for an approved plan.
     func submit(_ verdict: ReviewVerdict, summary text: String?, post: Bool) async throws -> ReviewRound {
         guard let source else { throw ProviderError.transport("No daemon has this review.") }
+        await clearError()
         let batch = pending
         let note = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = note?.isEmpty == false ? note : nil
@@ -343,6 +374,7 @@ final class ReviewDesk {
     /// Merges each repo locally. `setDone` sets the item and its sub-items to Done, with a merge comment.
     func merge(removeGroup: Bool, setDone: Bool) async throws -> MergeResult {
         guard let source else { throw ProviderError.transport("No daemon has this review.") }
+        await clearError()
         do {
             let r = try await source.merge(key, MergeRequest(removeGroup: removeGroup))
             await MainActor.run {
@@ -363,6 +395,7 @@ final class ReviewDesk {
     /// The agent rebases the group and fixes the conflict.
     func fix() async throws -> ReviewRound {
         guard let source else { throw ProviderError.transport("No daemon has this review.") }
+        await clearError()
         do {
             let r = try await source.fix(key)
             await load()
@@ -374,6 +407,7 @@ final class ReviewDesk {
     }
 
     private func run(_ op: @escaping () async throws -> Void) async -> Bool {
+        await clearError()
         do {
             try await op()
             await load()
@@ -387,9 +421,12 @@ final class ReviewDesk {
     private func fail(_ e: Error) async {
         await MainActor.run {
             error = (e as? ProviderError)?.message ?? e.localizedDescription
-            loading = false
             changed()
         }
+    }
+
+    private func clearError() async {
+        await MainActor.run { error = nil }
     }
 
     private func changed() {
