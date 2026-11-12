@@ -8,15 +8,61 @@ final class RelationCache {
 
     private let tracker: (ItemRef) -> (any RelationManaging)?
     private let ref: (String) -> ItemRef?
-    private(set) var byKey: [String: [ItemRelation]] = [:]      // upper-case key → relations
-    private(set) var loading: Set<String> = []
-    private(set) var errors: [String: String] = [:]
+    private let now: () -> Date
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
+    /// Upper-case key → the read of the relations of the item. A failed read keeps the old relations.
+    private var reads: [String: PartReader<[ItemRelation]>] = [:]
     private var seeded: Set<String> = []
 
+    var byKey: [String: [ItemRelation]] { reads.compactMapValues(\.value) }
+    var loading: Set<String> { Set(reads.filter { if case .busy = $0.value.state { return true }; return false }.keys) }
+    /// The text of the last failed read of each key.
+    var errors: [String: String] {
+        reads.compactMapValues {
+            switch $0.state {
+            case .failed(let e), .stale(_, let e): return e
+            default: return nil
+            }
+        }
+    }
+
     /// `ref`: the ItemRef of a key, from the snapshots.
-    init(tracker: @escaping (ItemRef) -> (any RelationManaging)?, ref: @escaping (String) -> ItemRef?) {
+    init(tracker: @escaping (ItemRef) -> (any RelationManaging)?, ref: @escaping (String) -> ItemRef?,
+         now: @escaping () -> Date = Date.init,
+         schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter) {
         self.tracker = tracker
         self.ref = ref
+        self.now = now
+        self.schedule = schedule
+    }
+
+    /// The read of a key. Nil when no load or seed made one.
+    func read(_ key: String) -> PartReader<[ItemRelation]>? { reads[key.uppercased()] }
+
+    /// The part for the toolbar menu and the Planner card.
+    func part(_ key: String) -> PagePart? {
+        read(key)?.part(id: "planner", title: "Planner")
+    }
+
+    private func reader(_ k: String) -> PartReader<[ItemRelation]> {
+        if let r = reads[k] { return r }
+        let r = PartReader<[ItemRelation]>(
+            fetch: { [weak self] in
+                guard let self else { throw ProviderError.transport("The relation cache is gone.") }
+                let found = await MainActor.run { () -> (ItemRef, any RelationManaging)? in
+                    guard let r = self.ref(k), let t = self.tracker(r) else { return nil }
+                    return (r, t)
+                }
+                guard let (r, t) = found else { throw ProviderError.transport("OverSire does not know \(k).") }
+                return try await t.relations(of: r)
+            },
+            now: now, schedule: schedule,
+            changed: { [weak self] in
+                // Later, so a load inside a handler of the notice does not nest.
+                DispatchQueue.main.async { [weak self] in NotificationCenter.default.post(name: Self.changed, object: self) }
+            })
+        reads[k] = r
+        return r
     }
 
     /// Nil until the first load ends.
@@ -32,30 +78,20 @@ final class RelationCache {
         (relations(key) ?? []).filter { $0.kind == .blockedBy && !done($0.item.key) }.map(\.item.key)
     }
 
-    /// Loads the keys that are not loaded. `force` loads them again.
+    /// Loads the keys that are not loaded. `force` loads them again and starts the retry plan again.
+    /// A key with a failed read waits for its retry plan.
     func load(_ keys: [String], force: Bool = false, priority: CallPriority = .user) {
-        for k in Set(keys.map { $0.uppercased() }) where !loading.contains(k) && !seeded.contains(k) && (force || byKey[k] == nil) {
+        for k in Set(keys.map { $0.uppercased() }) where !seeded.contains(k) {
             guard let r = ref(k), let t = tracker(r), t.capabilities.contains(.relations) else { continue }
-            loading.insert(k)
-            CallPriority.task(priority) { [weak self] in
-                let result = await Result(awaiting: { try await t.relations(of: r) })
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.loading.remove(k)
-                    switch result {
-                    case .success(let rels): self.byKey[k] = rels; self.errors[k] = nil
-                    case .failure(let e): self.errors[k] = e.message
-                    }
-                    NotificationCenter.default.post(name: Self.changed, object: self)
-                }
-            }
+            CallPriority.$current.withValue(priority) { reader(k).start(force: force) }
         }
     }
 
     /// After a project refresh: loads again each cached key that changed or that relates to a changed item.
+    /// A failed key that changed loads again too.
     func refresh(changed: Set<String>) {
         let up = Set(changed.map { $0.uppercased() })
-        let stale = byKey.filter { k, rels in up.contains(k) || rels.contains { up.contains($0.item.key.uppercased()) } }.map(\.key)
+        let stale = reads.filter { k, r in up.contains(k) || (r.value ?? []).contains { up.contains($0.item.key.uppercased()) } }.map(\.key)
         load(stale, force: true, priority: .background)
     }
 
@@ -67,7 +103,7 @@ final class RelationCache {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if case .failure(let e) = result { done(e.message); return }
-                let others = (patch.add + patch.remove).map(\.item.key).filter { self.byKey[$0.uppercased()] != nil }
+                let others = (patch.add + patch.remove).map(\.item.key).filter { self.reads[$0.uppercased()]?.value != nil }
                 self.load([key] + others, force: true)
                 done(nil)
             }
@@ -76,7 +112,13 @@ final class RelationCache {
 
     /// For `--uishots` and tests: relations without a tracker. A load does not replace them.
     func seed(_ key: String, _ rels: [ItemRelation]) {
-        byKey[key.uppercased()] = rels
+        reader(key.uppercased()).seed(Read(value: rels))
+        seeded.insert(key.uppercased())
+    }
+
+    /// For `--uishots`: a read in any state. A load does not replace it.
+    func seed(_ key: String, read r: Read<[ItemRelation]>) {
+        self.read(key)?.seed(r) ?? reader(key.uppercased()).seed(r)
         seeded.insert(key.uppercased())
     }
 }

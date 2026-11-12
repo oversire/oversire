@@ -691,6 +691,8 @@ final class CommandRow: NSStackView, NSTextFieldDelegate {
             let mark = Glyph("exclamationmark.triangle", color: Palette.warn, size: 11, label: w)
             mark.toolTip = w
             modelHolder.addArrangedSubview(mark)
+            let part = book.part(cli)
+            modelHolder.addArrangedSubview(ReadAccessory(part, compact: !part.state.didFail))
         }
         if p.hasEffort {
             let levels = AgentProfile.efforts

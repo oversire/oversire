@@ -303,10 +303,18 @@ extension RepoClient: RunSource {}
 struct JobsLoad {
     private(set) var jobs: [Job]?
     private(set) var failed = false
+    /// The time of the last good read.
+    private(set) var at: Date?
 
-    mutating func absorb(_ fetched: [Job]?) {
-        if let fetched { jobs = fetched }
+    mutating func absorb(_ fetched: [Job]?, at t: Date = Date()) {
+        if let fetched { jobs = fetched; at = t }
         failed = jobs == nil
+    }
+
+    /// The state for the toolbar menu. The jobs have no retry plan: the page polls them.
+    var state: ReadState {
+        if failed { return .failed("GitHub did not give the jobs.") }
+        return at.map(ReadState.fresh) ?? .idle
     }
 
     mutating func retry() { failed = false }
@@ -328,8 +336,9 @@ final class RunPage: Page {
     private var jobsLoad = JobsLoad()
     private var jobs: [Job]? { jobsLoad.jobs }
     private var jobId: String?
-    private var log: [String]?
-    private var logFor: String?
+    /// Job id → the read of its log. A failed read keeps the old lines.
+    private var logs: [String: PartReader<[String]>] = [:]
+    private var log: [String]? { jobId.flatMap { logs[$0]?.value } }
     private var follow = true
     private var errorsOnly = false
     private var busy: String?
@@ -409,17 +418,33 @@ final class RunPage: Page {
         jobId = (jobs ?? []).first { JobChip.failed($0) }?.id ?? (jobs ?? []).first { $0.status == "in_progress" }?.id ?? jobs?.first?.id
     }
 
+    /// Reads the log of the shown job when it has ended. A failed read waits for its retry plan.
     private func loadLog() {
         guard let job = jobs?.first(where: { $0.id == jobId }), job.status == "completed" else { return }
-        if logFor == job.id, log != nil { return }
-        logFor = job.id
-        log = nil
-        JobLogs.shared.lines(repo: repo, jobId: job.id) { [weak self] l in
-            guard let self, self.logFor == job.id else { return }
-            self.log = l ?? []
-            self.explainIfNeeded()
-            self.reload()
-        }
+        logRead(job).start()
+    }
+
+    func logRead(_ job: Job) -> PartReader<[String]> {
+        if let r = logs[job.id] { return r }
+        let (repo, id) = (self.repo, job.id)
+        let r = PartReader<[String]>(
+            fetch: {
+                let lines: [String]? = await withCheckedContinuation { c in
+                    DispatchQueue.main.async { JobLogs.shared.lines(repo: repo, jobId: id) { c.resume(returning: $0) } }
+                }
+                guard let lines else { throw ProviderError.transport("GitHub did not give the log.") }
+                return lines
+            },
+            onRead: { [weak self] _ in self?.explainIfNeeded() },
+            changed: { [weak self] in self?.reload() })
+        logs[job.id] = r
+        return r
+    }
+
+    override var parts: [PagePart] {
+        var out = [PagePart(id: "jobs", title: "Jobs", state: jobsLoad.state, retry: nil, refresh: { [weak self] in self?.retryJobs() }, auto: false)]
+        if let job = jobs?.first(where: { $0.id == jobId }), let r = logs[job.id] { out.append(r.part(id: "log", title: "Log of \(job.name)")) }
+        return out
     }
 
     override func build(_ col: NSStackView) {
@@ -496,7 +521,9 @@ final class RunPage: Page {
         }
         if let p = jobsLoad.placeholder(retry: { [weak self] in self?.retryJobs() }) { jobsCard.add(p) }
 
-        let logCard = Card(title: "Log", trailing: [
+        let job = jobs?.first { $0.id == jobId }
+        let logPart = job.flatMap { j in logs[j.id].map { $0.part(id: "log", title: "Log of \(j.name)") } }
+        let logCard = Card(title: "Log", trailing: (logPart.map { [ReadAccessory($0)] } ?? []) + [
             ToggleChip("Follow", on: follow) { [weak self] in self?.follow.toggle(); self?.reload() },
             ToggleChip("Errors only", on: errorsOnly) { [weak self] in self?.errorsOnly.toggle(); self?.reload() },
             ActionButton("Copy", symbol: "doc.on.doc") { [weak self] in
@@ -505,7 +532,6 @@ final class RunPage: Page {
                 NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
             },
         ])
-        let job = jobs?.first { $0.id == jobId }
         if let job, job.status != "completed" {
             logCard.add(NSTextField.text("GitHub gives the log when the job ends. The steps update every 5 seconds.", size: 12, color: Palette.dim, lines: 2))
             let steps = (job.steps ?? []).map { s -> String in
@@ -517,7 +543,11 @@ final class RunPage: Page {
             let lines = errorsOnly ? log.filter(CILog.isError) : log
             let errs = Set(lines.indices.filter { CILog.isError(lines[$0]) })
             logCard.add(NSTextField.text("\(job?.name ?? "") · last \(log.count) lines", size: 11.5, color: Palette.dim, mono: true))
-            logCard.add(TermView(lines: lines.isEmpty ? ["No error lines."] : lines, height: 420, errors: errs))
+            let term = TermView(lines: lines.isEmpty ? ["No error lines."] : lines, height: 420, errors: errs)
+            if logPart?.state.didFail == true { term.alphaValue = 0.6 }
+            logCard.add(term)
+        } else if let job, let logPart, case .failed = logPart.state {
+            logCard.add(ReadNote("The log of \(job.name) did not load.", part: logPart, framed: false))
         } else {
             if let job { logCard.add(InlineSpinner("Loading the log of \(job.name)…")) } else { logCard.add(TermView(lines: [jobsLoad.failed ? "No jobs." : "Pick a job."], height: 120)) }
         }
@@ -589,8 +619,7 @@ final class RunPage: Page {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.busy = nil
             self?.jobsLoad = JobsLoad()
-            self?.log = nil
-            self?.logFor = nil
+            self?.logs = [:]
             self?.load()
         }
     }

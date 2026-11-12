@@ -26,6 +26,8 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     /// Each triage call, in order.
     public var triages: [(intake: String, action: IntakeAction)] { base.lockedValue { triageList } }
     private var writeFailures: [String: Int] = [:]               // item id → failed writes left
+    private var relationReadFailures = 0
+    private var relationReadCount = 0
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
     private var uploadTimes: [Date] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
@@ -130,7 +132,14 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     /// Keeps each relation on both items: A blocks B ⇔ B blockedBy A.
     public func relations(of item: ItemRef) async throws -> [ItemRelation] {
         guard capabilities.contains(.relations) else { throw ProviderError.unsupported(.relations) }
-        return try base.locked { relationList[item.id] ?? [] }
+        return try base.locked {
+            relationReadCount += 1
+            if relationReadFailures > 0 {
+                relationReadFailures -= 1
+                throw ProviderError.transport("Plane did not answer.")
+            }
+            return relationList[item.id] ?? []
+        }
     }
 
     public func apply(_ patch: RelationPatch, to item: ItemRef) async throws {
@@ -181,6 +190,12 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
             if a == .delete || a == .decline { itemList[p.id]?.removeAll { $0.id == i.workItemId } }
         }
     }
+
+    /// The next `times` reads of relations fail.
+    public func failRelationReads(times: Int) { base.lockedValue { relationReadFailures = times } }
+
+    /// The calls of `relations(of:)`.
+    public var relationReads: Int { base.lockedValue { relationReadCount } }
 
     /// The next `times` writes to the item fail: update, comment, relations and triage.
     public func failWrites(to itemId: String, times: Int = 1) { base.lockedValue { writeFailures[itemId] = times } }

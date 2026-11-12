@@ -1,4 +1,7 @@
+import AppKit
 import OverSireCore
+import OverSireTestKit
+import RuntimeDaemon
 import XCTest
 @testable import OverSireApp
 
@@ -162,5 +165,99 @@ final class AgentProfileTests: XCTestCase {
         await fulfillment(of: [done], timeout: 5)
         XCTAssertEqual(book.lists["claude"]?.models.map(\.id), ["m1"], "the default entry drops")
         XCTAssertEqual(book.lists["claude"]?.warning, "No OverSire daemon runs on the sessions machine. The list is from this Mac.")
+    }
+
+    // MARK: A failed daemon read
+
+    private struct ModelRig {
+        let book: AgentModelBook
+        let http: ScriptedHTTP
+        let clock: ManualSchedule
+    }
+
+    private func modelRig() -> ModelRig {
+        let http = ScriptedHTTP()
+        let rt = MachineRuntime(machine: "mbp", client: DaemonClient(base: URL(string: "http://mbp:7690")!, token: "t", http: http))
+        let clock = ManualSchedule()
+        let book = AgentModelBook(daemon: { rt }, local: { _ in [AgentModel(id: "m1", name: "M1")] }, schedule: clock.schedule)
+        return ModelRig(book: book, http: http, clock: clock)
+    }
+
+    private func modelReply(_ ids: [String]) throws -> ScriptedHTTP.Reply {
+        let body = AgentModels(agent: "claude", models: ids.map { AgentModel(id: $0, name: $0) }, source: "wire")
+        return ScriptedHTTP.Reply(body: try JSONEncoder().encode(body))
+    }
+
+    @MainActor
+    func testModelBookReadsAgainAfterADaemonFailure() async throws {
+        let r = modelRig()
+        r.book.load("claude")
+        await r.book.read("claude").settled()
+        guard case .stale = r.book.part("claude").state else { return XCTFail("the state is stale") }
+        XCTAssertEqual(r.book.part("claude").retry?.k, 1)
+
+        r.http.add(try modelReply(["daemon-1"]))
+        r.book.part("claude").refresh()
+        await r.book.read("claude").settled()
+        XCTAssertEqual(r.book.lists["claude"]?.models.map(\.id), ["daemon-1"])
+        XCTAssertNil(r.book.lists["claude"]?.warning)
+        guard case .fresh = r.book.part("claude").state else { return XCTFail("the state is fresh") }
+    }
+
+    @MainActor
+    func testModelBookKeepsTheLocalListWhileTheDaemonFails() async throws {
+        let r = modelRig()
+        r.book.load("claude")
+        await r.book.read("claude").settled()
+        let first = r.book.lists["claude"]
+        XCTAssertEqual(first?.models.map(\.id), ["m1"])
+        XCTAssertTrue(first?.warning?.hasPrefix("mbp cannot list the models: ") == true)
+        XCTAssertTrue(first?.warning?.hasSuffix("The list is from this Mac.") == true)
+
+        r.clock.advance(5)
+        await r.book.read("claude").settled()
+        XCTAssertEqual(r.http.requests.count, 2, "the plan reads again by itself")
+        XCTAssertEqual(r.book.lists["claude"], first, "the list stays")
+        XCTAssertEqual(r.book.part("claude").retry?.k, 2)
+    }
+
+    @MainActor
+    func testAFailedModelReadDoesNotReadOnEachLoad() async throws {
+        let r = modelRig()
+        for _ in 0..<4 {
+            r.book.load("claude")
+            await r.book.read("claude").settled()
+        }
+        XCTAssertEqual(r.http.requests.count, 1)
+    }
+
+    @MainActor
+    func testReloadFailedReadsOnlyTheFailedLists() async throws {
+        let r = modelRig()
+        r.book.load("claude")
+        await r.book.read("claude").settled()
+        r.book.seed(["codex": .init(models: [], warning: nil)])
+        r.book.load("claude")
+        await r.book.read("claude").settled()
+        XCTAssertEqual(r.http.requests.count, 2)
+
+        r.http.add(try modelReply(["daemon-1"]))
+        r.book.reloadFailed()
+        await r.book.read("claude").settled()
+        await r.book.read("codex").settled()
+        XCTAssertEqual(r.http.requests.count, 3, "the fresh list of codex does not read again")
+        XCTAssertEqual(r.book.lists["claude"]?.models.map(\.id), ["daemon-1"])
+    }
+
+    @MainActor
+    func testTheSettingsRowShowsTryAgainWhereTheWarningShows() async throws {
+        let r = modelRig()
+        r.book.load("claude")
+        await r.book.read("claude").settled()
+        let part = r.book.part("claude")
+        XCTAssertTrue(part.state.didFail)
+        let accessory = ReadAccessory(part, compact: !part.state.didFail)
+        func buttons(_ v: NSView) -> [NSButton] { (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(buttons) }
+        XCTAssertTrue(buttons(accessory).contains { $0.title == "Try again" })
     }
 }

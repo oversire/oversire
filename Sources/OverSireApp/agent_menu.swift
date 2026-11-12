@@ -15,54 +15,95 @@ final class AgentModelBook {
         var warning: String?
     }
 
-    private(set) var lists: [String: Entry] = [:]
-    private var loading: Set<String> = []
+    /// CLI → the read of its models. A failed read keeps the list from this Mac, and tries again by itself.
+    private var reads: [String: PartReader<Entry>] = [:]
+    var lists: [String: Entry] { reads.compactMapValues(\.value) }
     private let daemon: () -> MachineRuntime?
     private let local: @Sendable (String) async -> [AgentModel]
+    private let now: () -> Date
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
 
     init(daemon: @escaping () -> MachineRuntime? = { ENV.runtime as? MachineRuntime },
          local: @escaping @Sendable (String) async -> [AgentModel] = { cli in
              ((try? await LocalCLI.shared.runtime.models(Harness(cli))) ?? []).map {
                  AgentModel(id: $0.id, name: $0.name, description: $0.description, isDefault: $0.isDefault)
              }
-         }) {
+         },
+         now: @escaping () -> Date = Date.init,
+         schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter) {
         self.daemon = daemon
         self.local = local
+        self.now = now
+        self.schedule = schedule
     }
 
     /// UI shots and tests set the lists with no call.
-    func seed(_ l: [String: Entry]) { lists = l }
+    func seed(_ l: [String: Entry]) {
+        reads = [:]
+        for (cli, e) in l { read(cli).seed(Read(value: e)) }
+    }
 
     /// Loads the list of a CLI once. `again` reads it again, for example after a machine change.
+    /// A failed read waits for its retry plan.
     func load(_ cli: String, again: Bool = false) {
-        guard !cli.isEmpty, again || lists[cli] == nil, !loading.contains(cli) else { return }
-        loading.insert(cli)
-        let rt = daemon(), local = local
-        Task {
-            var reason: String?
-            var models: [AgentModel] = []
-            if let rt {
-                do {
-                    let m = try await rt.models(agent: cli)
-                    models = m.models
-                    if m.source != "wire" || models.isEmpty { reason = m.reason ?? "\(rt.machine) gives no models for \(cli)." }
-                } catch {
-                    reason = "\(rt.machine) cannot list the models: \((error as? ProviderError)?.message ?? error.localizedDescription)"
-                }
-            } else {
-                reason = "No OverSire daemon runs on the sessions machine."
+        guard !cli.isEmpty else { return }
+        read(cli).start(force: again)
+    }
+
+    /// The part for the Try again action next to the model list of a CLI.
+    func part(_ cli: String) -> PagePart { read(cli).part(id: "models-\(cli)", title: "Models of \(cli)") }
+
+    /// Reads again each list whose last read failed.
+    func reloadFailed() {
+        for r in reads.values where r.state.didFail { r.start(force: true) }
+    }
+
+    /// The read of a CLI. It makes the read when none exists.
+    func read(_ cli: String) -> PartReader<Entry> {
+        if let r = reads[cli] { return r }
+        let r = PartReader<Entry>(
+            fetch: { [weak self] in
+                guard let self else { throw ProviderError.transport("The model list is gone.") }
+                return try await self.fetch(cli)
+            },
+            now: now, schedule: schedule,
+            changed: {
+                // Later, so a load inside a handler of the notice does not nest.
+                DispatchQueue.main.async { [weak self] in NotificationCenter.default.post(name: Self.changed, object: self) }
+            })
+        reads[cli] = r
+        return r
+    }
+
+    /// The daemon answers first. When it fails, the list of this Mac shows with the reason, and the read fails so that the plan runs.
+    private func fetch(_ cli: String) async throws -> Entry {
+        let rt = await MainActor.run { daemon() }
+        var reason: String?
+        var models: [AgentModel] = []
+        var failure: ProviderError?
+        if let rt {
+            do {
+                let m = try await rt.models(agent: cli)
+                models = m.models
+                if m.source != "wire" || models.isEmpty { reason = m.reason ?? "\(rt.machine) gives no models for \(cli)." }
+            } catch {
+                let why = (error as? ProviderError)?.message ?? error.localizedDescription
+                reason = "\(rt.machine) cannot list the models: \(why)"
+                failure = .transport(reason!)
             }
-            if reason != nil {
-                models = await local(cli)
-                reason! += models.isEmpty ? "" : " The list is from this Mac."
-            }
-            let entry = Entry(models: models.filter { $0.id != "default" }, warning: reason)
-            await MainActor.run {
-                self.loading.remove(cli)
-                self.lists[cli] = entry
-                NotificationCenter.default.post(name: Self.changed, object: self)
-            }
+        } else {
+            reason = "No OverSire daemon runs on the sessions machine."
         }
+        if reason != nil {
+            models = await local(cli)
+            reason! += models.isEmpty ? "" : " The list is from this Mac."
+        }
+        let entry = Entry(models: models.filter { $0.id != "default" }, warning: reason)
+        if let failure {
+            await MainActor.run { reads[cli]?.set(entry) }
+            throw failure
+        }
+        return entry
     }
 
     /// The display name of a model, else its id.

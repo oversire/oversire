@@ -223,6 +223,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     override var parts: [PagePart] {
+        if tab == .overview { return data.projectStore.relations.part(key).map { [$0] } ?? [] }
         guard tab == .plan || tab == .changes, let desk = reviewDesk(tab == .plan ? .plan : .code) else { return [] }
         return desk.parts(file: desk.files.first { $0.id == desk.file }) + [REVIEWS.part(machine: desk.summary.machine)]
     }
@@ -770,11 +771,12 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let rc = data.projectStore.relations
         guard rc.supports(item.key) else { return nil }
         let rels = rc.relations(item.key)
+        let part = rc.part(item.key)
         let project = data.projectStore.item(key: item.key)?.snap.summary.ref.storeKey ?? ""
         let areas = self.areas(item) ?? []
         let shown = (rels ?? []).map { r in data.projectStore.item(key: r.item.key)?.item }
         let print = Self.sig(rels, shown, data.projectStore.blockers(of: item.key), self.areas(item), areas.map { data.planner.kind($0, project: project) },
-                             rc.errors[item.key.uppercased()])
+                             part?.state, part?.retry?.k)
         return PageRow("planner", print) { [unowned self] in self.plannerCard(item) }
     }
 
@@ -787,8 +789,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
             editAreas: { [weak self] in self?.editAreas(item) })
         let project = data.projectStore.item(key: item.key)?.snap.summary.ref.storeKey ?? ""
         let planner = data.planner
-        return PlannerCard(relations: rc.relations(item.key), store: data.projectStore, openBlockers: data.projectStore.blockers(of: item.key),
-                            areas: areas(item), kind: { planner.kind($0, project: project) }, error: rc.errors[item.key.uppercased()], actions: actions)
+        return PlannerCard(read: rc.read(item.key)?.last, part: rc.part(item.key), store: data.projectStore,
+                           openBlockers: data.projectStore.blockers(of: item.key), areas: areas(item),
+                           kind: { planner.kind($0, project: project) }, actions: actions)
     }
 
     private func pickRelation(_ kind: RelationKind, for item: Item) {

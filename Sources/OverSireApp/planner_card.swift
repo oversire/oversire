@@ -41,11 +41,12 @@ final class PlannerCard: Card {
     static let groups: [(RelationKind, String)] = [(.blockedBy, "Blocked by"), (.blocks, "Blocks"), (.relatesTo, "Related")]
     private var keep: [MenuAction] = []
 
-    /// `relations` nil shows a skeleton. `areas` nil hides the Areas row (no cloud account).
-    init(relations: [ItemRelation]?, store: ProjectStore, openBlockers: [String], areas: [String]?, kind: (String) -> AreaKind = { _ in .core },
-         error: String?, actions: Actions) {
+    /// A read with no value shows a skeleton while it is idle or busy, and a `ReadNote` when it failed.
+    /// `areas` nil hides the Areas row (no cloud account).
+    init(read: Read<[ItemRelation]>?, part: PagePart?, store: ProjectStore, openBlockers: [String], areas: [String]?,
+         kind: (String) -> AreaKind = { _ in .core }, actions: Actions) {
         let addButton = ActionButton("Add relation…", symbol: "plus")
-        super.init(title: "Planner", trailing: [addButton])
+        super.init(title: "Planner", trailing: (part.map { [ReadAccessory($0)] } ?? []) + [addButton])
         setAccessibilityLabel("Planner")
         addButton.onClick = { [weak self, weak addButton] in
             guard let self, let add = addButton else { return }
@@ -56,12 +57,16 @@ final class PlannerCard: Card {
             self.keep.forEach { m.addItem($0.item) }
             m.popUp(positioning: nil, at: NSPoint(x: 0, y: add.bounds.height + 3), in: add)
         }
-        guard let relations else {
-            for _ in 0..<3 { add(Self.skeletonRow()) }
-            setAccessibilityLabel("Planner. Loading the relations.")
+        guard let relations = read?.value else {
+            if let part, case .failed = part.state {
+                add(ReadNote("The relations did not load.", part: part, framed: false))
+                setAccessibilityLabel("Planner. The relations did not load.")
+            } else {
+                for _ in 0..<3 { add(Self.skeletonRow()) }
+                setAccessibilityLabel("Planner. Loading the relations.")
+            }
             return
         }
-        if let error { add(NSTextField.text("Could not load the relations: \(error)", size: 12, color: Palette.bad, lines: 2)) }
         for (kind, title) in Self.groups {
             let rows = relations.filter { $0.kind == kind }
             for (i, r) in rows.enumerated() {

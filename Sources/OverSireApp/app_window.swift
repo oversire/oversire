@@ -800,6 +800,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         data.projectStore.refresh(data.projectStore.tracked.map(\.ref.storeKey), force: true, priority: .user) { _ in }
         Task { await REVIEWS.refresh() }
         ENV.machines?.refresh(probe: true)
+        AgentModelBook.shared.reloadFailed()
     }
 
     private func syncRefresh() {

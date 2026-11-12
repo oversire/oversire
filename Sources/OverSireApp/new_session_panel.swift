@@ -397,7 +397,13 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
 
     private func buildFooter() -> NSView {
         var lead: [NSView] = []
-        if model.picksAgent { lead = [agentChip()] }
+        if model.picksAgent {
+            lead = [agentChip()]
+            if let cli = PROJECTS_CFG.runtime.profile(model.agent).cli {
+                let part = AgentModelBook.shared.part(cli)
+                if part.state.didFail { lead.append(ReadAccessory(part)) }
+            }
+        }
         let cancel = ActionButton("Cancel") { [weak self] in self?.dismiss() }
         let title: String
         if case .starting(let label) = model.phase { title = label } else { title = "\(model.button)  ⌘↩" }

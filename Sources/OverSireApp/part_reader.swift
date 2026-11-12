@@ -201,9 +201,12 @@ final class PartReader<T> {
         if go { await run() }
     }
 
-    /// For callers that use callbacks.
+    /// For callers that use callbacks. On the main thread the state is busy when this call returns.
     func start(force: Bool = false) {
-        task = Task { await load(force: force) }
+        guard Thread.isMainThread else { task = Task { await load(force: force) }; return }
+        guard last.wants(force: force, now: now(), maxAge: maxAge) else { return }
+        begin(manual: force)
+        task = Task { await run() }
     }
 
     /// Waits for the read that `start` or a retry began. For tests.

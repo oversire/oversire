@@ -229,12 +229,14 @@ enum JobSummary {
 // The end of a job log for the UI. The adapter downloads only the last bytes.
 final class JobLogs {
     static let shared = JobLogs()
+    /// The raw log of a job. Tests replace it.
+    var raw: (String, String) async -> String? = { await REPO_CLIENT.rawLog($0, jobId: $1) }
     private var cache: [String: String] = [:]  // main thread only
 
     func snippet(repo: String, jobId: String, done: @escaping (String?) -> Void) {
         if let s = cache[jobId] { done(s); return }
         Task {
-            let s = await REPO_CLIENT.rawLog(repo, jobId: jobId).map(CILog.errorSnippet)
+            let s = await self.raw(repo, jobId).map(CILog.errorSnippet)
             DispatchQueue.main.async {
                 if let s = s { self.cache[jobId] = s }
                 done(s)
@@ -248,7 +250,7 @@ final class JobLogs {
     func lines(repo: String, jobId: String, done: @escaping ([String]?) -> Void) {
         if let l = logs[jobId] { done(l); return }
         Task {
-            let l = await REPO_CLIENT.rawLog(repo, jobId: jobId).map(CILog.clean)
+            let l = await self.raw(repo, jobId).map(CILog.clean)
             DispatchQueue.main.async {
                 if let l {
                     if self.logs.count >= 40, let k = self.logs.keys.first { self.logs[k] = nil }
