@@ -160,7 +160,8 @@ final class AgentProfileTests: XCTestCase {
 
     func testModelBookFallsBackToThisMac() async {
         let book = AgentModelBook(daemon: { nil }, local: { _ in [AgentModel(id: "default", name: "Default"), AgentModel(id: "m1", name: "M1")] })
-        let done = expectation(forNotification: AgentModelBook.changed, object: book)
+        // The read posts a change when it starts too.
+        let done = expectation(forNotification: AgentModelBook.changed, object: book) { _ in book.lists["claude"] != nil }
         book.load("claude")
         await fulfillment(of: [done], timeout: 5)
         XCTAssertEqual(book.lists["claude"]?.models.map(\.id), ["m1"], "the default entry drops")
