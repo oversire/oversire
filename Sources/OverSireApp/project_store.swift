@@ -40,7 +40,13 @@ final class ProjectStore {
     static let changed = Notification.Name("ProjectStoreChanged")
 
     private(set) var snapshots: [String: ProjectSnapshot] = [:]
-    private(set) var refreshing: Set<String> = []
+    /// The keys that a refresh holds. A refresh lets each key go when its read ends.
+    var refreshing: Set<String> { Set(owner.keys) }
+    /// Key → the refresh that holds it.
+    private var owner: [String: Int] = [:]
+    /// The keys whose read started.
+    private var reading: Set<String> = []
+    private var lastRefresh = 0
     private(set) var lastError: String?
     /// The id of the item that `create` made last.
     private(set) var lastCreated: String?
@@ -162,12 +168,22 @@ final class ProjectStore {
     var plane: PagePart { part(tracked.map(\.ref.storeKey)) }
 
     /// One refresh of a project at a time. A forced refresh of a running project runs once more after it.
+    /// A forced user refresh takes a key that a running refresh did not read yet, so a write does not wait for the other projects.
     /// A workspace in its rate limit pause refreshes after the pause.
     /// A refresh that joins a running refresh keeps the lane of the running one. Its rerun uses the lane of the last caller.
     func refresh(_ keys: [String], force: Bool, priority: CallPriority = .background, done: @escaping (Bool) -> Void) {
-        let running = keys.filter { refreshing.contains($0) }
-        var todo = keys.filter { !refreshing.contains($0) }
+        let takes = force && priority == .user
+        let running = keys.filter { owner[$0] != nil && (!takes || reading.contains($0)) }
+        var todo = keys.filter { !running.contains($0) }
         var done = done
+        // The new refresh reads a taken key after their call, so the callers that wait for a rerun of it wait for this refresh.
+        let taken = todo.filter { owner[$0] != nil }
+        let moved = taken.flatMap { again.removeValue(forKey: $0) ?? [] }
+        againUser.subtract(taken)
+        if !moved.isEmpty {
+            let first = done
+            done = { ok in first(ok); moved.forEach { $0(ok) } }
+        }
         if force, let first = running.first {
             for k in running where again[k] == nil { again[k] = [] }
             if priority == .user { againUser.formUnion(running) }
@@ -180,7 +196,9 @@ final class ProjectStore {
             for k in paused { later(k, at: cooldown[workspace(of: k)!]!) }
         }
         guard !todo.isEmpty else { done(paused.isEmpty); return }
-        for k in todo { refreshing.insert(k) }
+        lastRefresh += 1
+        let id = lastRefresh
+        for k in todo { owner[k] = id }
         for at in waiting.keys { waiting[at]?.subtract(todo) }
         publish(force ? DataChange(.projects, projects: Set(todo), origin: .user) : nil)
         let jobs = tracked.filter { todo.contains($0.ref.storeKey) }.map { p in
@@ -193,15 +211,16 @@ final class ProjectStore {
         if hold { return }
         CallPriority.task(priority) { [weak self] in
             guard let self = self else { return }
-            var fresh: [ProjectSnapshot] = []
-            var gone: [String: Set<String>] = [:]
             var error: String?
-            var errors: [String: String] = [:]
             var limited: [String: TimeInterval] = [:]   // workspace → the pause
-            var skipped: [String] = []
             for (n, (p, client, previous)) in jobs.enumerated() {
-                if limited[p.ref.workspace] != nil { skipped.append(p.ref.storeKey); continue }
+                let key = p.ref.storeKey
+                guard await MainActor.run(body: { self.startRead(key, by: id) }) else { continue }
                 if n > 0, let token { await MainActor.run { self.busy?.update(token, label(n)) } }
+                guard limited[p.ref.workspace] == nil else {
+                    await MainActor.run { self.endRead(key, .skipped, force: force) }
+                    continue
+                }
                 let started = Date()
                 let line = { (level: LogLevel, msg: String) in
                     var e = LogEntry(level: level, area: .sync, job: "Plane poll", subject: p.identifier, host: p.ref.workspace,
@@ -209,53 +228,82 @@ final class ProjectStore {
                     e.verbose = level == .ok ? true : nil
                     APP_LOG.write(e)
                 }
-                guard let client else {
+                let read: ProjectRead
+                if let client {
+                    switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
+                    case .success(let s):
+                        line(.ok, "\(s.items.count) items")
+                        read = .fresh(s, gone: await ProjectStore.gone(client, previous, s))
+                    case .failure(let e):
+                        error = "\(p.ref.workspace): " + e.message
+                        line(.error, e.message)
+                        if case .rateLimited(let after) = e {
+                            let pause = max(minPause, after.map { Double($0.components.seconds) } ?? 0)
+                            limited[p.ref.workspace] = pause
+                            read = .limited(e.message, pause: pause)
+                        } else {
+                            read = .failed(e.message)
+                        }
+                    }
+                } else {
                     let why = self.trackers.trackerError(p.ref.workspace).map { "\(ProjectStore.noToken) (\($0))" } ?? ProjectStore.noToken
                     error = "\(p.ref.workspace): " + why
-                    errors[p.ref.storeKey] = why
                     line(.error, why)
-                    continue
+                    read = .failed(why)
                 }
-                switch await Result(awaiting: { try await ProjectStore.snapshot(client, p, limit: limit, previous: previous) }) {
-                case .success(let s):
-                    fresh.append(s)
-                    gone[p.ref.storeKey] = await ProjectStore.gone(client, previous, s)
-                    line(.ok, "\(s.items.count) items")
-                case .failure(let e):
-                    error = "\(p.ref.workspace): " + e.message
-                    errors[p.ref.storeKey] = e.message
-                    line(.error, e.message)
-                    if case .rateLimited(let after) = e {
-                        limited[p.ref.workspace] = max(minPause, after.map { Double($0.components.seconds) } ?? 0)
-                        skipped.append(p.ref.storeKey)
-                    }
-                }
+                await MainActor.run { self.endRead(key, read, force: force) }
             }
-            let failed = error != nil
             DispatchQueue.main.async {
                 if let token { self.busy?.end(token) }
-                for k in todo { self.refreshing.remove(k); self.errors[k] = errors[k] ?? (skipped.contains(k) ? self.errors[k] : nil) }
                 self.lastError = error
-                for (ws, pause) in limited { self.cooldown[ws] = self.now().addingTimeInterval(pause) }
-                for k in skipped { if let ws = self.workspace(of: k), let end = self.cooldown[ws] { self.later(k, at: end) } }
-                var changed = Set<String>()
-                var projects = force ? Set(todo) : []
-                for snap in fresh {
-                    let key = snap.summary.ref.storeKey
-                    let old = Dictionary((self.snapshots[key]?.items ?? []).map { ($0.id, $0.activityAt) },
-                                         uniquingKeysWith: { a, _ in a })
-                    changed.formUnion(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
-                    let before = self.snapshots[key].map(ProjectStore.digest)
-                    self.absorb(snap, gone: gone[key] ?? [])
-                    if before != self.snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
-                }
-                self.save()
-                self.relations.refresh(changed: changed)
-                self.publish(projects.isEmpty ? nil : DataChange([.projects, .intake], projects: projects, origin: force ? .user : .poll))
-                done(!failed)
-                self.runAgain(todo)
+                done(error == nil)
             }
         }
+    }
+
+    /// The end of the read of one project in a refresh.
+    private enum ProjectRead {
+        case fresh(ProjectSnapshot, gone: Set<String>)
+        case failed(String)
+        case limited(String, pause: TimeInterval)
+        /// The read did not run: an other project of the workspace hit the rate limit.
+        case skipped
+    }
+
+    /// False when a forced refresh took the key.
+    private func startRead(_ key: String, by id: Int) -> Bool {
+        guard owner[key] == id else { return false }
+        reading.insert(key)
+        return true
+    }
+
+    /// Keeps the read, lets the key go and runs the forced refreshes that came during the read.
+    private func endRead(_ key: String, _ read: ProjectRead, force: Bool) {
+        owner[key] = nil
+        reading.remove(key)
+        var projects: Set<String> = force ? [key] : []
+        var changed = Set<String>()
+        switch read {
+        case .fresh(let snap, let gone):
+            errors[key] = nil
+            let old = Dictionary((snapshots[key]?.items ?? []).map { ($0.id, $0.activityAt) }, uniquingKeysWith: { a, _ in a })
+            changed = Set(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
+            let before = snapshots[key].map(ProjectStore.digest)
+            absorb(snap, gone: gone)
+            if before != snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
+            save()
+        case .failed(let why):
+            errors[key] = why
+        case .limited(let why, let pause):
+            errors[key] = why
+            if let ws = workspace(of: key) { cooldown[ws] = now().addingTimeInterval(pause) }
+            fallthrough
+        case .skipped:
+            if let end = workspace(of: key).flatMap({ cooldown[$0] }) { later(key, at: end) }
+        }
+        relations.refresh(changed: changed)
+        publish(projects.isEmpty ? nil : DataChange([.projects, .intake], projects: projects, origin: force ? .user : .poll))
+        runAgain([key])
     }
 
     /// The forced refreshes that came during the refresh of `keys`: one more run for all of them.

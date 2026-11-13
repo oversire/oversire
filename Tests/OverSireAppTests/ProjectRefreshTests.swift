@@ -16,7 +16,7 @@ final class ProjectRefreshTests: XCTestCase {
         var project: ProjectRef { ProjectRef(account: account, id: "p1", key: "SLOW") }
 
         private let lock = NSLock()
-        private var waiting: [CheckedContinuation<Void, Never>] = []
+        private var waiting: [(project: String, go: CheckedContinuation<Void, Never>)] = []
         private var count = 0
         private var seenLimits: [Int] = []
         var limited = false
@@ -24,7 +24,11 @@ final class ProjectRefreshTests: XCTestCase {
         var calls: Int { lock.withLock { count } }
         var blocked: Int { lock.withLock { waiting.count } }
 
-        func release() { lock.withLock { waiting.removeFirst() }.resume() }
+        func release() { lock.withLock { waiting.removeFirst() }.go.resume() }
+        func release(_ project: String) {
+            lock.withLock { waiting.firstIndex { $0.project == project }.map { waiting.remove(at: $0) } }?.go.resume()
+        }
+        func blocked(_ project: String) -> Int { lock.withLock { waiting.filter { $0.project == project }.count } }
 
         func probe() async throws -> Identity { Identity(person: PersonRef(id: "u1", name: "me")) }
         func poll(since: Cursor?) async throws -> EventPage { EventPage(events: [], cursor: Cursor(rawValue: "0")) }
@@ -37,7 +41,7 @@ final class ProjectRefreshTests: XCTestCase {
             return []
         }
         func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
-            await withCheckedContinuation { c in lock.withLock { count += 1; seenLimits.append(limit); waiting.append(c) } }
+            await withCheckedContinuation { c in lock.withLock { count += 1; seenLimits.append(limit); waiting.append((p.id, c)) } }
             return []
         }
         func detail(_ i: ItemRef) async throws -> ItemDetail { throw ProviderError.notFound }
@@ -93,6 +97,48 @@ final class ProjectRefreshTests: XCTestCase {
         await until("the three callers end with the second run") { finished == 3 }
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.calls, 2, "3 forced refreshes during one give 1 more")
+    }
+
+    private func summary(_ id: String) -> ProjectSummary {
+        let ref = ProjectRef(account: AccountID(provider: "slow", id: "ws"), id: id, key: id.uppercased())
+        return ProjectSummary(ref: ref, identifier: id.uppercased(), title: id, url: "https://x/\(id)", closed: false)
+    }
+
+    /// A write waits for its own project only, not for the other projects of a poll.
+    func testForcedUserRefreshTakesAProjectThatThePollDidNotRead() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let a = summary("a"), b = summary("b")
+        var result: Bool?
+        await MainActor.run { store.track([a, b], live: []) }
+        await until("the poll reads a") { t.blocked("a") == 1 }
+        await MainActor.run { store.refresh([b.ref.storeKey], force: true, priority: .user) { result = $0 } }
+        await until("the write refresh reads b at once") { t.blocked("b") == 1 }
+        t.release("b")
+        await until("the write refresh ends while the poll reads a") { result == true }
+        XCTAssertEqual(t.blocked("a"), 1)
+        t.release("a")
+        await until("the poll ends") { store.refreshing.isEmpty }
+        XCTAssertEqual(t.calls, 2, "the poll does not read b again")
+    }
+
+    /// The rerun of a project starts when its read ends, not when the reads of the other projects end.
+    func testRerunStartsWhenTheReadOfItsProjectEnds() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let a = summary("a"), b = summary("b")
+        var result: Bool?
+        await MainActor.run { store.track([a, b], live: []) }
+        await until("the poll reads a") { t.blocked("a") == 1 }
+        await MainActor.run { store.refresh([a.ref.storeKey], force: true, priority: .user) { result = $0 } }
+        t.release("a")
+        await until("the rerun of a and the poll read of b run") { t.blocked("a") == 1 && t.blocked("b") == 1 }
+        XCTAssertNil(result)
+        t.release("a")
+        await until("the caller ends while the poll reads b") { result == true }
+        XCTAssertTrue(store.refreshing.contains(b.ref.storeKey))
+        t.release("b")
+        await until("the poll ends") { store.refreshing.isEmpty }
     }
 
     func testRateLimitPausesTheWorkspace() async throws {
