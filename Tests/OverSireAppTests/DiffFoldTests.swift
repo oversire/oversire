@@ -92,6 +92,17 @@ final class DiffFoldTests: XCTestCase {
         XCTAssertTrue(DiffSelection(column: 0, from: .init(row: 1, offset: 2), to: .init(row: 1, offset: 2)).isEmpty)
     }
 
+    func testCopyPastTheLastRow() {
+        let lines = [DiffLine(kind: .ctx, old: 1, new: 1, text: "a"), DiffLine(kind: .ctx, old: 2, new: 2, text: "b"),
+                     DiffLine(kind: .ctx, old: 3, new: 3, text: "c"), DiffLine(kind: .ctx, old: 4, new: 4, text: "d")]
+        let f = DiffFold(diff([DiffHunk(oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, header: "", lines: lines)]))
+        let items = f.items(split: false, threads: [])
+        XCTAssertEqual(items.count, 4)
+        XCTAssertEqual(DiffSelection(column: 0, from: .init(row: 9, offset: 0), to: .init(row: 12, offset: 1)).text(f, items), "")
+        XCTAssertEqual(DiffSelection(column: 0, from: .init(row: 2, offset: 0), to: .init(row: 12, offset: 1)).text(f, items), "c\nd")
+        XCTAssertEqual(DiffSelection(column: 0, from: .init(row: 0, offset: 0), to: .init(row: 1, offset: 1)).text(f, []), "")
+    }
+
     func testFileStepsFollowThePanelOrder() {
         let s = DiffSteps(files: ["a", "b", "c"])
         XCTAssertEqual(s.file("b", by: 1), "c")

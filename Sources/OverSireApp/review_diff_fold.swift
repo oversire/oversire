@@ -297,8 +297,10 @@ struct DiffSelection: Equatable {
     /// The selected code, one line for each selected line. No line numbers and no marks.
     func text(_ fold: DiffFold, _ items: [DiffItem]) -> String {
         let (a, b) = ordered
+        let lo = max(a.row, 0), hi = min(b.row, items.count - 1)
+        guard lo <= hi else { return "" }
         var out: [String] = []
-        for row in a.row...min(b.row, items.count - 1) {
+        for row in lo...hi {
             guard let l = Self.line(items[row], column: column, in: fold) else { continue }
             let s = l.text as NSString
             if let r = range(row: row, length: s.length) { out.append(s.substring(with: r)) }
