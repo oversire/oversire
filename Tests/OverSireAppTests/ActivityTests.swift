@@ -92,6 +92,21 @@ final class ActivityTests: XCTestCase {
     }
 
     @MainActor
+    func testAwayEntryOpensTheProject() {
+        let d = TestAppData()
+        let before = ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "ENG", title: "Engine", url: "https://plane/eng", closed: false),
+                                     statusOptions: [], items: [plane("u1", key: "ENG-1")], fetchedAt: Date() - 300)
+        let after = ProjectSnapshot(summary: before.summary, statusOptions: [], items: [plane("u1", key: "ENG-1")], fetchedAt: Date())
+        d.projectStore.absorb(before)
+        d.projectStore.absorb(after, away: ["u1"])
+        let e = ActivityFeed.entries(d).first { $0.title == "1 item changed while you were away" }
+        XCTAssertEqual(e?.route, .project("ENG"))
+        XCTAssertEqual(e?.body, "Engine")
+        XCTAssertEqual(e?.projectKey, "ENG")
+        XCTAssertNil(e?.groupKey, "the line does not fold into an item group")
+    }
+
+    @MainActor
     func testOldEntryGetsTheKeyFromItsLink() throws {
         let d = TestAppData()
         let old = ActivityEntry.make(projectKey: "gone/p9", itemId: "u-36", change: .removed, actor: nil,

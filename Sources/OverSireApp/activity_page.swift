@@ -75,6 +75,12 @@ enum ActivityFeed {
         let store = data.projectStore
         var out: [FeedEntry] = []
         for e in store.activity(limit: 200, project: nil) {
+            if case .away = e.change {
+                let identifier = store.snapshots[e.projectKey]?.summary.identifier.uppercased()
+                out.append(FeedEntry(id: "plane|" + e.id, source: .plane, title: e.text, body: e.title ?? "", at: e.at,
+                                     route: identifier.map(Route.project), url: e.url, activityId: e.id, projectKey: identifier))
+                continue
+            }
             let found = store.item(e.itemId)
             let key = found?.item.key ?? e.itemKey ?? ActivityEntry.key(inURL: e.url)
             let source: FeedEntry.Source = { if case .mention = e.change { return .mention }; return .plane }()

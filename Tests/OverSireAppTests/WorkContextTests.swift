@@ -55,8 +55,12 @@ final class WorkContextTests: XCTestCase {
     }
 
     /// SLING-1 with a sub-item, 2 PRs, a failed run on a PR head, a local session, a session on "studio" and an open question.
-    private func seeded(items extra: Int = 0) -> TestAppData {
+    private func seeded(items extra: Int = 0, trackers: TrackerDirectory? = nil) -> TestAppData {
         let d = TestAppData()
+        if let trackers {
+            d.projectStore = ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                          statePath: d.tmp + "/state.json", activityPath: d.tmp + "/activity.jsonl")
+        }
         var items = [item(1, title: "Fix the sync"), item(2, parent: "i1", status: "s2"), item(3)]
         items += (0..<extra).map { item(100 + $0, title: String(repeating: "Long title ", count: 8)) }
         d.projectStore.seed(ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "", closed: false),
@@ -133,6 +137,24 @@ final class WorkContextTests: XCTestCase {
     }
 
     // MARK: Read tools
+
+    func testItemGetReadsTheComments() async {
+        let t = ProjectCommentTests.CommentTracker(workspace: "ocral")
+        defer { t.releaseAll() }
+        t.setComments("i1", (1...3).map { Comment(id: "c\($0)", author: "ada", createdAt: t0 + Double($0), url: "https://plane/c\($0)", body: "Hi \($0)") })
+        let d = seeded(trackers: ProjectCommentTests.Directory(t))
+        let (_, o) = await call(d, "item.get", ["key": .string("SLING-1")])
+        XCTAssertEqual(o["commentCount"] as? Int, 3, "the seeded count is 2")
+        XCTAssertEqual((o["lastComment"] as? [String: Any])?["id"] as? String, "c3")
+        XCTAssertNil(o["commentsNote"])
+        XCTAssertEqual(d.projectStore.item(key: "SLING-1")?.item.commentCount, 2, "the read does not go into the store")
+        XCTAssertEqual(t.lanes, [.user])
+
+        t.limited = true
+        let (_, cached) = await call(d, "item.get", ["key": .string("SLING-1")])
+        XCTAssertEqual(cached["commentCount"] as? Int, 2, "the cached count")
+        XCTAssertEqual(cached["commentsNote"] as? String, "Plane did not answer. The count is from the last read.")
+    }
 
     func testReadToolsAreReadKind() {
         let kind = Dictionary(uniqueKeysWithValues: TestAppData().actions.all.map { ($0.id, $0.kind) })

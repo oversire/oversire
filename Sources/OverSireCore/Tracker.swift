@@ -131,6 +131,8 @@ public struct Item: Codable, Hashable, Sendable {
     public var commentCount: Int
     public var lastComment: Comment?
     public var mentionsMe: Bool
+    /// The `activityAt` that the comment fields belong to. A comment made after it is news. Nil: read at `activityAt`.
+    public var commentsAt: Date? = nil
     public var body: String? = nil   // Markdown
     public var parentId: String? = nil
 
@@ -155,6 +157,9 @@ public struct Item: Codable, Hashable, Sendable {
         self.body = body
         self.parentId = parentId
     }
+
+    /// True when the item has activity that its comment fields do not cover yet.
+    public var commentsDue: Bool { (commentsAt ?? activityAt) < activityAt }
 
     public func isMine(_ me: String?) -> Bool {
         guard let me = me?.lowercased(), !me.isEmpty else { return false }
@@ -461,6 +466,8 @@ public enum ItemChange: Codable, Hashable, Sendable {
     case field(name: String, from: String?, to: String?)
     case assigned(String), unassigned(String)
     case comments(new: Int, last: Comment)
+    /// One line for the items that changed during a long break.
+    case away(items: Int)
 
     public var text: String {
         switch self {
@@ -478,6 +485,7 @@ public enum ItemChange: Codable, Hashable, Sendable {
         case .comments(let n, let last):
             let who = last.author ?? "someone"
             return n == 1 ? "New comment by \(who)" : "\(n) new comments"
+        case .away(let n): return n == 1 ? "1 item changed while you were away" : "\(n) items changed while you were away"
         }
     }
 

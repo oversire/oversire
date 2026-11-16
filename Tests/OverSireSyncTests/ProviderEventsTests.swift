@@ -104,6 +104,11 @@ final class ProviderEventsTests: XCTestCase {
         XCTAssertEqual(Set(TrackerEvents.links(new)), [ItemLink(item: "OVERSIRE-377", parent: nil), ItemLink(item: "OVERSIRE-382", parent: "OVERSIRE-377")])
     }
 
+    func testAwayGivesNoRow() {
+        let s = snap([item("i1", "OVERSIRE-377", state: "s1", at: now)])
+        XCTAssertTrue(TrackerEvents.drafts([("", .away(items: 2))], old: s, new: s, provider: "plane", machine: "mba").isEmpty)
+    }
+
     func testTrackerFieldsAndComments() {
         let s = snap([item("i1", "OVERSIRE-377", state: "s1", at: now)])
         let c = Comment(id: "c9", author: "fritz", createdAt: now, url: "https://plane/c9", body: "Looks good\nmore")

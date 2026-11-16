@@ -754,12 +754,12 @@ final class FeedRow: NSView {
             addSubview(Dot(color: C_RUNNING, frame: NSRect(x: 10, y: 30, width: 6, height: 6)))
         }
         let actor = entry.actor ?? "Someone"
-        let head = NSTextField(labelWithString: "\(actor) · \(entry.text)")
+        let head = NSTextField(labelWithString: entry.itemId.isEmpty ? entry.text : "\(actor) · \(entry.text)")
         head.font = .systemFont(ofSize: 12, weight: .medium)
         head.lineBreakMode = .byTruncatingTail
         head.frame = NSRect(x: 24, y: 26, width: w - 120, height: 16)
         addSubview(head)
-        let sub = NSTextField(labelWithString: "\(itemTitle) · \(project)" + (status.map { " · \($0)" } ?? ""))
+        let sub = NSTextField(labelWithString: (entry.itemId.isEmpty ? project : "\(itemTitle) · \(project)") + (status.map { " · \($0)" } ?? ""))
         sub.font = .systemFont(ofSize: 11); sub.textColor = .secondaryLabelColor
         sub.lineBreakMode = .byTruncatingTail
         sub.frame = NSRect(x: 24, y: 8, width: w - 120, height: 14)
@@ -908,8 +908,8 @@ extension TabVC {
                 lastDay = day
             }
             let item = store.item(e.itemId)
-            let title = item?.item.title ?? "Item"
-            let project = item?.snap.summary.title ?? e.projectKey
+            let title = item?.item.title ?? e.title ?? "Item"
+            let project = item?.snap.summary.title ?? store.snapshots[e.projectKey]?.summary.title ?? e.projectKey
             let status = item?.snap.statusName(item?.item.statusOptionId)
             let row = FeedRow(e, itemTitle: title, project: project, status: status, w: w, expanded: expandedItem == e.id)
             row.onToggle = { [weak self, weak store] in

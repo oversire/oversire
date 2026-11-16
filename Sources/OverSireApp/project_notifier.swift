@@ -65,6 +65,8 @@ final class ProjectNotifier {
             return mine ? settings.closed.mine : settings.closed.any
         case .field, .removed, .unassigned:
             return mine ? settings.otherFields.mine : settings.otherFields.any
+        case .away:
+            return false
         }
     }
 

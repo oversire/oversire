@@ -83,6 +83,21 @@ final class LiveSyncTests: XCTestCase {
         XCTAssertEqual(plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }, ["ws2/*", "ws/p1"])
     }
 
+    func testCommentEventsGiveHints() {
+        let tracker = FakeTracker(account: "ws")
+        let item = ItemRef(project: tracker.project, id: "i1", key: "FAKE-1", url: URL(string: "https://tracker.fake/FAKE-1")!)
+        let plan = RefreshPlan([
+            ev("1", .comment, "workitem.comment.created", .item(item)),
+            ev("2", .item, "updated", .item(ItemRef(project: tracker.project, id: "i2", key: "FAKE-2", url: URL(string: "https://tracker.fake/FAKE-2")!))),
+            ev("3", .item, "workitem.comment.updated", .project(tracker.project)),
+        ], knownRepos: [])
+        XCTAssertEqual(plan.comments, [CommentHint(workspace: "ws", project: "p1", item: "i1"),
+                                       CommentHint(workspace: "ws", project: "p1", item: nil)])
+        XCTAssertEqual(plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }, ["ws/p1"], "the projects are as before")
+        let none = RefreshPlan([ev("4", .item, "updated", .item(item))], knownRepos: [])
+        XCTAssertTrue(none.comments.isEmpty)
+    }
+
     func testTheOldCloudCursorMoves() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "oversire-tests-\(UUID())"))
         defaults.set(42, forKey: "relayCursor")

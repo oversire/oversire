@@ -1335,8 +1335,8 @@ extension GHActionsBar: RelaySink {
         }
     }
 
-    func relayProjectRefresh(_ events: [(workspace: String, project: String?)], done: @escaping (Bool) -> Void) {
-        projectStore.refreshForEvents(events, done: done)
+    func relayProjectRefresh(_ events: [(workspace: String, project: String?)], comments: [CommentHint], done: @escaping (Bool) -> Void) {
+        projectStore.refreshForEvents(events, comments: comments, done: done)
     }
 
     func relayStateChanged() {

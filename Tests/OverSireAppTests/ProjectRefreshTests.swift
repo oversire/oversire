@@ -612,10 +612,10 @@ final class ProjectRefreshTests: XCTestCase {
         http.on("\(ws)/projects/P1/issues/i3/", rows[2])
         http.on("\(ws)/projects/P1/issues/i4/", rows[3])
         http.on("\(ws)/projects/P1/issues/i4/comments/", #"{"results":[]}"#)
+        let before = http.paths.count
         let second = try await ProjectStore.snapshot(p, summary, limit: 50, previous: previous)
         XCTAssertEqual(second.items.map(\.id).sorted(), ["i1", "i2", "i3", "i4"])
-        XCTAssertFalse(http.paths.contains { $0.hasSuffix("/i3/comments/") }, "a joined item loads no comments")
-        XCTAssertTrue(http.paths.contains { $0.hasSuffix("/i4/comments/") }, "a new item loads its comments")
+        XCTAssertFalse(http.paths.suffix(from: before).contains { $0.contains("/comments/") }, "the list makes no comment call")
 
         let store = try store(p)
         await MainActor.run {

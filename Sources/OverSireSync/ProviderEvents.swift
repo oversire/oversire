@@ -211,7 +211,7 @@ public enum TrackerEvents {
                                       machine: machine, provider: provider, actorType: last.author == nil ? .provider : .human,
                                       actor: last.author ?? provider, via: "poll", summary: text,
                                       payload: ["comment": .string(last.id), "url": .string(last.url)]))
-            case .removed, .closed, .reopened, .mention: continue
+            case .removed, .closed, .reopened, .mention, .away: continue
             }
         }
         for (id, names) in fields.sorted(by: { $0.key < $1.key }) {

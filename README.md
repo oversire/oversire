@@ -374,7 +374,7 @@ The Markdown renderer uses [markdown-it](https://github.com/markdown-it/markdown
 - The 10-second poll runs only while the popover is open. Closed, OverSire falls back to the normal interval — measured on a real machine, that took a long CI run from 1,148 GitHub API calls/hour down to 382.
 - PR actions (approve, comment, merge, close) call `gh pr review`, `gh pr comment`, `gh pr merge`, and `gh pr close` respectively.
 - With live updates on, a workflow or pull request event refreshes only the repo it is about. A project event refreshes the matching project. The footer dot shows the cloud state (green = live, grey = polling, orange = cloud error). The footer also shows the REST and GraphQL quotas side by side.
-- Project snapshots come from the Plane REST API (`/api/v1`, with the `X-Api-Key` header). OverSire reads comments only for items with new activity. The first snapshot of a project creates no activity, so launch stays quiet.
+- Project snapshots come from the Plane REST API (`/api/v1`, with the `X-Api-Key` header). The list shows first. Then OverSire reads comments in the background. With live updates, it reads only the items that a comment event names. With polling, it reads your items with new activity, at most 20 for each poll. After more than a day away, the feed shows one line for each project, for example "12 items changed while you were away", and OverSire reads no comments. The first snapshot of a project creates no activity, so launch stays quiet.
 - Runs as a macOS accessory app (no Dock icon, no Cmd+Tab entry).
 - Notifications use the native `UserNotifications` framework — respects Do Not Disturb and Focus modes.
 

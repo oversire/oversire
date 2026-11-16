@@ -8,6 +8,13 @@ struct NewItem {
     var fieldOptions: [String: String]      // field id ("state", "priority") → option id
 }
 
+/// A comment event: the project, and the item when the event names it.
+struct CommentHint: Equatable {
+    let workspace: String
+    let project: String
+    let item: String?
+}
+
 /// The tracker accounts. AppEnvironment gives the real ones. Tests give fakes.
 protocol TrackerDirectory: AnyObject {
     /// The tracker account ids, for example the Plane workspace slugs.
@@ -102,6 +109,20 @@ final class ProjectStore {
     var onChange: ((DataChange) -> Void)?
     var busy: BusyTracker?
     var hold = false   // `--uishots` loading mode: fetches never end
+    /// The most items that one comment read takes.
+    var commentCap = 20
+    /// After a break longer than this, a read writes one feed line for the project and reads no comments.
+    var awayAfter: TimeInterval = 86400
+    /// Store key → the item ids that comment events name.
+    private var commentWant: [String: Set<String>] = [:]
+    /// Store key → the time of the oldest comment event that names no item.
+    private var commentAny: [String: Date] = [:]
+    /// Store key → the item ids that wait for a comment read, and the order of the keys.
+    private var commentQueue: [String: Set<String>] = [:]
+    private var commentOrder: [String] = []
+    /// The comment read that runs now. `releaseStuckReads` stops it after `maxRead`.
+    private var commentRun: (id: Int, key: String, started: Date, task: Task<Void, Never>)?
+    private var commentRuns = 0
 
     static let noToken = "Add a token for this account in Settings › Accounts and sync."
 
@@ -225,7 +246,7 @@ final class ProjectStore {
                 guard await MainActor.run(body: { self.owner[key]?.run == id }) else { continue }
                 if n > 0, let token { await MainActor.run { self.busy?.update(token, label(n)) } }
                 guard limited[p.ref.workspace] == nil else {
-                    await MainActor.run { self.endRead(key, .skipped, by: id, force: force) }
+                    await MainActor.run { self.endRead(key, .skipped, by: id, force: force, started: nil) }
                     continue
                 }
                 let r: ProjectRead? = await withCheckedContinuation { (c: CheckedContinuation<ProjectRead?, Never>) in
@@ -326,7 +347,7 @@ final class ProjectStore {
     private func finishRead(_ key: String, by id: Int, _ r: ProjectRead) {
         guard let read = reads[key], read.run == id else { return }
         reads[key] = nil
-        endRead(key, r, by: id, force: read.force)
+        endRead(key, r, by: id, force: read.force, started: read.started)
         read.resume(r)
     }
 
@@ -352,6 +373,15 @@ final class ProjectStore {
             publish(DataChange(.projects, projects: [key]))
             runAgain([key])
         }
+        if let run = commentRun, now().timeIntervalSince(run.started) > maxRead {
+            let seconds = Int(now().timeIntervalSince(run.started))
+            run.task.cancel()
+            commentRun = nil
+            let p = tracked.first { $0.ref.storeKey == run.key }
+            APP_LOG.write(LogEntry(level: .warn, area: .sync, job: "Plane comments", subject: p?.identifier ?? run.key, host: p?.ref.workspace,
+                                   message: "No answer from Plane after \(seconds) s. OverSire stopped the comment read.", ms: seconds * 1000))
+        }
+        pumpComments()
     }
 
     /// A page shows this project. A snapshot older than `viewMaxAge` is read again as a user call.
@@ -388,21 +418,27 @@ final class ProjectStore {
     }
 
     /// Keeps the read, lets the key go and runs the forced refreshes that came during the read.
-    private func endRead(_ key: String, _ read: ProjectRead, by id: Int, force: Bool) {
+    private func endRead(_ key: String, _ read: ProjectRead, by id: Int, force: Bool, started: Date?) {
         guard owner[key]?.run == id else { return }
         owner[key] = nil
         reads[key] = nil
         var projects: Set<String> = force ? [key] : []
         var changed = Set<String>()
         switch read {
-        case .fresh(let snap, let gone):
+        case .fresh(var snap, let gone):
             errors[key] = nil
-            let old = Dictionary((snapshots[key]?.items ?? []).map { ($0.id, $0.activityAt) }, uniquingKeysWith: { a, _ in a })
-            changed = Set(snap.items.filter { old[$0.id] != $0.activityAt }.map(\.key))
-            let before = snapshots[key].map(ProjectStore.digest)
-            absorb(snap, gone: gone)
+            let prior = snapshots[key]
+            snap = ProjectStore.carried(snap, from: prior)
+            let old = Dictionary((prior?.items ?? []).map { ($0.id, $0.activityAt) }, uniquingKeysWith: { a, _ in a })
+            let moved = snap.items.filter { old[$0.id] != $0.activityAt }
+            changed = Set(moved.map(\.key))
+            let away = prior.map { now().timeIntervalSince($0.fetchedAt) > awayAfter } ?? false
+            if away { snap = ProjectStore.settled(snap) }
+            let before = prior.map(ProjectStore.digest)
+            absorb(snap, gone: gone, away: away ? Set(moved.map(\.id)) : nil)
             if before != snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
             save()
+            queueComments(key, prior: away ? nil : prior, started: started)
         case .failed(let why):
             errors[key] = why
         case .limited(let why, let pause):
@@ -417,6 +453,97 @@ final class ProjectStore {
         relations.refresh(changed: changed)
         publish(projects.isEmpty ? nil : DataChange([.projects, .intake], projects: projects, origin: force ? .user : .poll))
         runAgain([key])
+        pumpComments()
+    }
+
+    /// True while comment reads wait or run.
+    var commentsPending: Bool { commentRun != nil || !commentOrder.isEmpty }
+
+    /// Picks the items for the comment read after a list read. A first read and a read after a long break pick none.
+    private func queueComments(_ key: String, prior: ProjectSnapshot?, started: Date?) {
+        guard let prior, let snap = snapshots[key] else {
+            commentWant[key] = nil
+            commentAny[key] = nil
+            commentQueue[key] = nil
+            return
+        }
+        let live = liveKeys.contains(key) && relayIsLive()
+        let named = commentWant.removeValue(forKey: key) ?? []
+        var anyComment = false
+        if let at = commentAny[key], let started, at <= started {
+            anyComment = true
+            commentAny[key] = nil
+        }
+        let t = ProjectStore.commentTargets(old: prior, new: snap, live: live, named: named, anyComment: anyComment, cap: commentCap)
+        if !t.read.isEmpty {
+            commentQueue[key, default: []].formUnion(t.read)
+            if !commentOrder.contains(key) { commentOrder.append(key) }
+        }
+        if live && !t.rest.isEmpty { commentWant[key] = Set(t.rest) }
+    }
+
+    /// Reads the comments of the queued items, one project at a time, when no list read holds a key.
+    private func pumpComments() {
+        guard commentRun == nil, owner.isEmpty, !hold else { return }
+        while !commentOrder.isEmpty {
+            let key = commentOrder.removeFirst()
+            guard let ids = commentQueue.removeValue(forKey: key), let snap = snapshots[key],
+                  tracked.contains(where: { $0.ref.storeKey == key }),
+                  let client = trackers.tracker(snap.summary.ref.workspace) else { continue }
+            let live = liveKeys.contains(key) && relayIsLive()
+            let targets = snap.items.filter { ids.contains($0.id) && (live || $0.commentsDue) }
+                .sorted { $0.activityAt > $1.activityAt }.prefix(commentCap)
+                .compactMap { i in i.ref(in: snap.summary.ref).map { (id: i.id, at: i.activityAt, ref: $0) } }
+            if targets.isEmpty { continue }
+            let summary = snap.summary
+            commentRuns += 1
+            let id = commentRuns
+            let task = CallPriority.task(.background) { [weak self] in
+                guard let self = self else { return }
+                let r = await ProjectStore.readComments(client, summary, targets)
+                await MainActor.run {
+                    guard self.commentRun?.id == id else { return }
+                    self.commentRun = nil
+                    self.mergeComments(key, r)
+                    self.pumpComments()
+                }
+            }
+            commentRun = (id, key, now(), task)
+            DispatchQueue.main.asyncAfter(wallDeadline: .now() + maxRead + 1) { [weak self] in self?.releaseStuckReads() }
+            return
+        }
+    }
+
+    /// One comment call for each item. A failed call leaves its item due. A rate limit stops the read.
+    private static func readComments(_ t: any Tracker, _ p: ProjectSummary,
+                                     _ targets: [(id: String, at: Date, ref: ItemRef)]) async -> [String: (at: Date, comments: [Comment])] {
+        let started = Date()
+        var out: [String: (at: Date, comments: [Comment])] = [:]
+        var limited = false
+        for target in targets {
+            guard !Task.isCancelled else { break }
+            do { out[target.id] = (target.at, try await t.comments(target.ref)) } catch ProviderError.rateLimited {
+                limited = true
+                break
+            } catch {}
+        }
+        var e = LogEntry(level: limited ? .warn : .ok, area: .sync, job: "Plane comments", subject: p.identifier, host: p.ref.workspace,
+                         message: limited ? "Plane limits the rate. Read \(out.count) of \(targets.count) items."
+                                          : "\(out.count) of \(targets.count) items",
+                         ms: Int(Date().timeIntervalSince(started) * 1000))
+        e.verbose = limited ? nil : true
+        APP_LOG.write(e)
+        return out
+    }
+
+    /// Applies a comment read to the current snapshot. The change goes through `absorb`: feed lines, notifications and event rows.
+    private func mergeComments(_ key: String, _ read: [String: (at: Date, comments: [Comment])]) {
+        guard tracked.contains(where: { $0.ref.storeKey == key }), let cur = snapshots[key],
+              let merged = ProjectStore.merged(cur, read) else { return }
+        let before = ProjectStore.digest(cur)
+        absorb(merged)
+        save()
+        if before != snapshots[key].map(ProjectStore.digest) { publish(DataChange(.projects, projects: [key], origin: .poll)) }
     }
 
     /// The forced refreshes that came during the refresh of `keys`: one more run for all of them.
@@ -443,11 +570,19 @@ final class ProjectStore {
     }
 
     // A nil project means all tracked projects of the workspace. No events means all.
-    func refreshForEvents(_ events: [(workspace: String, project: String?)], done: @escaping (Bool) -> Void) {
+    func refreshForEvents(_ events: [(workspace: String, project: String?)], comments: [CommentHint] = [],
+                          done: @escaping (Bool) -> Void) {
         let keys = tracked.map(\.ref).filter { ref in
             events.isEmpty || events.contains { $0.workspace == ref.workspace && ($0.project == nil || $0.project == ref.id) }
         }.map(\.storeKey)
         if keys.isEmpty { done(true); return }
+        for hint in comments {
+            for ref in tracked.map(\.ref) where ref.workspace == hint.workspace && ref.id == hint.project {
+                if let item = hint.item { commentWant[ref.storeKey, default: []].insert(item) } else if commentAny[ref.storeKey] == nil {
+                    commentAny[ref.storeKey] = now()
+                }
+            }
+        }
         // Both Macs get the same cloud events. The Mac that does not lead waits, so the two do not load at once.
         guard leads() else {
             let at = now().addingTimeInterval(otherMacDelay)
@@ -518,7 +653,7 @@ final class ProjectStore {
     private func unreadRows() -> (count: Int, items: Set<String>) {
         if let unread { return unread }
         var n = 0, items = Set<String>()
-        for e in activityCache.prefix(500) where isUnread(e) {
+        for e in activityCache.prefix(500) where isUnread(e) && !e.itemId.isEmpty {
             n += 1
             items.insert(e.itemId)
         }
@@ -535,7 +670,7 @@ final class ProjectStore {
     func isUnread(itemId: String) -> Bool { unreadRows().items.contains(itemId) }
 
     func markRead(itemId: String) {
-        guard readItems.insert(itemId).inserted else { return }
+        guard !itemId.isEmpty, readItems.insert(itemId).inserted else { return }
         save()
         publish(DataChange(.projects, origin: .user))
     }
@@ -923,8 +1058,8 @@ final class ProjectStore {
             let oldA = Set(prev.assignees), newA = Set(item.assignees)
             for a in newA.subtracting(oldA).sorted() { out.append((item.id, .assigned(a))) }
             for a in oldA.subtracting(newA).sorted() { out.append((item.id, .unassigned(a))) }
-            // Comments load only on new activity, so an old comment can appear here first. Skip it.
-            if let last = item.lastComment, last.id != prev.lastComment?.id, last.createdAt > old.fetchedAt {
+            // A comment that the stamp already covers is not news.
+            if let last = item.lastComment, last.id != prev.lastComment?.id, last.createdAt > (prev.commentsAt ?? old.fetchedAt) {
                 let n = prev.lastComment == nil ? 1 : max(1, item.commentCount - prev.commentCount)
                 out.append((item.id, .comments(new: n, last: last)))
                 if item.mentionsMe { out.append((item.id, .mention)) }
@@ -974,7 +1109,8 @@ final class ProjectStore {
         return out
     }
 
-    func absorb(_ snap: ProjectSnapshot, gone: Set<String> = []) {
+    /// `away`: the ids of the items that changed during a long break. They get one feed line in place of one line each.
+    func absorb(_ snap: ProjectSnapshot, gone: Set<String> = [], away: Set<String>? = nil) {
         let key = snap.summary.ref.storeKey
         let old = snapshots[key]
         let all = ProjectStore.diff(old, snap)
@@ -993,6 +1129,15 @@ final class ProjectStore {
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
         EVENTS.tracker(changes, old: old, new: snap, skipState: suppressNotify)
+        if let away, old != nil {
+            let n = away.subtracting(back).count
+            if n > 0 {
+                append([ActivityEntry.make(projectKey: key, itemId: "", change: .away(items: n), actor: nil, url: snap.summary.url,
+                                           at: snap.fetchedAt, itemKey: nil, title: snap.summary.title)])
+            }
+            suppressNotify.subtract(changes.map(\.itemId))
+            return
+        }
         guard old != nil, !changes.isEmpty else { return }
         let at = snap.fetchedAt
         let me = snap.me?.lowercased()
@@ -1109,7 +1254,7 @@ final class ProjectStore {
 }
 
 extension ProjectStore {
-    // Items with new activity get their comments again. Other items keep the comment data of `previous`.
+    /// The list of a project. It makes no comment calls: the comment fields come from `previous`, and the stamp tells which items are due.
     static func snapshot(_ t: any Tracker, _ summary: ProjectSummary, limit: Int,
                          previous: ProjectSnapshot?) async throws -> ProjectSnapshot {
         var ref = summary.ref
@@ -1119,30 +1264,21 @@ extension ProjectStore {
         // Before the items: the tracker then knows the pending intake items and does not load them as parents.
         let intake = try? await (t as? any IntakeTriaging)?.intake(ref)
         let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        // An item that only joins the snapshot loads no comments, as in a first snapshot.
+        // An item that only joins the snapshot has no news, as in a first snapshot.
         let indexed = Set(previous?.index?.map(\.id) ?? [])
         var items: [Item] = []
         for var item in try await t.items(ref, since: nil, limit: limit) {
-            let prev = prevById[item.id]
-            if let prev, prev.activityAt == item.activityAt {
+            if let prev = prevById[item.id] {
                 item.commentCount = prev.commentCount
                 item.lastComment = prev.lastComment
                 item.mentionsMe = prev.mentionsMe
-            } else if previous != nil, prev != nil || !indexed.contains(item.id), let iref = item.ref(in: ref) {
-                let list: [Comment]
-                do { list = try await t.comments(iref) } catch ProviderError.rateLimited(let after) {
-                    throw ProviderError.rateLimited(retryAfter: after)
-                } catch {
-                    // Keep the old item, so its comments load again at the next refresh.
-                    items.append(prev ?? item)
-                    continue
-                }
-                item.commentCount = list.count
-                item.lastComment = list.last
-                let since = previous?.fetchedAt ?? .distantPast
-                let fresh = list.filter { $0.createdAt > since }.compactMap(\.body)
-                let text = prev == nil ? fresh + [item.body ?? ""] : fresh
-                item.mentionsMe = text.contains { $0.localizedCaseInsensitiveContains("@" + me.name) }
+                item.commentsAt = prev.commentsAt ?? prev.activityAt
+            } else if let previous, !indexed.contains(item.id) {
+                // A new item: its comments are news from the last read. The body is in the list.
+                item.commentsAt = previous.fetchedAt
+                item.mentionsMe = (item.body ?? "").localizedCaseInsensitiveContains("@" + me.name)
+            } else {
+                item.commentsAt = item.activityAt
             }
             items.append(item)
         }
@@ -1152,6 +1288,71 @@ extension ProjectStore {
         return ProjectSnapshot(summary: summary, statusOptions: states, items: items, fetchedAt: Date(),
                                fields: fields, me: me.name, meId: me.id, index: try? await (t as? any ItemIndexing)?.index(ref),
                                intake: intake)
+    }
+}
+
+extension ProjectStore {
+    static func withItems(_ s: ProjectSnapshot, _ items: [Item]) -> ProjectSnapshot {
+        ProjectSnapshot(summary: s.summary, statusOptions: s.statusOptions, items: items, fetchedAt: s.fetchedAt,
+                        fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake)
+    }
+
+    /// Copies the comment fields of `cur` to the items that both snapshots have. A merge that landed during a list read stays.
+    static func carried(_ snap: ProjectSnapshot, from cur: ProjectSnapshot?) -> ProjectSnapshot {
+        guard let cur else { return snap }
+        let byId = Dictionary(cur.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return withItems(snap, snap.items.map { i in
+            guard let c = byId[i.id] else { return i }
+            var i = i
+            i.commentCount = c.commentCount
+            i.lastComment = c.lastComment
+            i.mentionsMe = c.mentionsMe
+            i.commentsAt = c.commentsAt ?? c.activityAt
+            return i
+        })
+    }
+
+    /// Marks the due items as read, with no news. For a read after a long break.
+    static func settled(_ snap: ProjectSnapshot) -> ProjectSnapshot {
+        withItems(snap, snap.items.map { i in
+            guard i.commentsDue else { return i }
+            var i = i
+            i.commentsAt = i.activityAt
+            i.mentionsMe = false
+            return i
+        })
+    }
+
+    /// Applies a comment read to the items whose activity is still the one that was read. Nil when no item applies.
+    static func merged(_ cur: ProjectSnapshot, _ read: [String: (at: Date, comments: [Comment])]) -> ProjectSnapshot? {
+        var applied = false
+        let name = cur.me ?? ""
+        let items = cur.items.map { i -> Item in
+            guard let r = read[i.id], r.at == i.activityAt else { return i }
+            applied = true
+            var i = i
+            let since = i.commentsAt ?? cur.fetchedAt
+            i.commentCount = r.comments.count
+            i.lastComment = r.comments.last
+            i.mentionsMe = !name.isEmpty && r.comments.contains {
+                $0.createdAt > since && ($0.body ?? "").localizedCaseInsensitiveContains("@" + name)
+            }
+            i.commentsAt = i.activityAt
+            return i
+        }
+        return applied ? withItems(cur, items) : nil
+    }
+
+    /// The items for the next comment read, newest activity first. `rest` holds the items beyond `cap`.
+    /// Live: the items that comment events name, and all changed items when an event names none. Polling: my due items.
+    static func commentTargets(old: ProjectSnapshot, new: ProjectSnapshot, live: Bool, named: Set<String>, anyComment: Bool,
+                               cap: Int) -> (read: [String], rest: [String]) {
+        let before = Dictionary(old.items.map { ($0.id, $0.activityAt) }, uniquingKeysWith: { a, _ in a })
+        let picked = new.items.filter { i in
+            if live { return named.contains(i.id) || (anyComment && before[i.id] != i.activityAt) }
+            return i.commentsDue && i.isMine(new.me)
+        }.sorted { $0.activityAt > $1.activityAt }.map(\.id)
+        return (Array(picked.prefix(cap)), Array(picked.dropFirst(cap)))
     }
 }
 

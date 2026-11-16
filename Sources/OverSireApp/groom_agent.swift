@@ -247,7 +247,8 @@ final class GroomAgent {
         Task {
             do {
                 let details = await Self.intakeDetails(plan.intake, tracker: tracker, project: snap.summary.ref)
-                let (items, intake) = Self.items(plan, snap: snap, intakeKeys: keys, details: details, areas: areas)
+                let counts = await Self.commentCounts(plan.backlog, tracker: tracker, project: snap.summary.ref)
+                let (items, intake) = Self.items(plan, snap: snap, intakeKeys: keys, details: details, comments: counts, areas: areas)
                 let data = try GroomInput.jsonLines(items)
                 let name = "groom-\(snap.summary.identifier.lowercased()).jsonl"
                 let paths = try await rt.writeFiles([HostFile(name: name, data: data)], workspacePath: root,
@@ -290,9 +291,21 @@ final class GroomAgent {
         return out
     }
 
+    /// The comment count of the due items: those with activity that the list does not cover. Newest first, at most `cap`.
+    /// The other items already have their current count.
+    static func commentCounts(_ items: [Item], tracker: (any Tracker)?, project: ProjectRef, cap: Int = 30) async -> [String: Int] {
+        guard let tracker else { return [:] }
+        var out: [String: Int] = [:]
+        for i in items.filter(\.commentsDue).sorted(by: { $0.activityAt > $1.activityAt }).prefix(cap) {
+            guard let ref = i.ref(in: project), let list = try? await tracker.comments(ref) else { continue }
+            out[i.id] = list.count
+        }
+        return out
+    }
+
     /// The lines of the input file, and the intake item of each intake key. An intake item with no number yet is left out.
     static func items(_ plan: Plan, snap: ProjectSnapshot, intakeKeys: [String: Int], details: [String: IntakeDetail],
-                      areas: (String) -> [String]) -> (items: [GroomItem], intake: [String: IntakeItem]) {
+                      comments: [String: Int] = [:], areas: (String) -> [String]) -> (items: [GroomItem], intake: [String: IntakeItem]) {
         let id = snap.summary.identifier
         var intake: [String: IntakeItem] = [:]
         let notes = plan.intake.compactMap { i -> GroomItem? in
@@ -304,7 +317,7 @@ final class GroomAgent {
         }
         return (notes + plan.backlog.map { i in
             GroomItem(key: i.key, title: i.title, body: i.body ?? "", state: snap.option(i.statusOptionId)?.name ?? "", labels: i.labels,
-                      areas: areas(i.key), updated: i.updatedAt, comments: i.commentCount, markers: OverSireBlock.markers)
+                      areas: areas(i.key), updated: i.updatedAt, comments: comments[i.id] ?? i.commentCount, markers: OverSireBlock.markers)
         }, intake)
     }
 

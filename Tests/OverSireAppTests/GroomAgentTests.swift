@@ -136,6 +136,33 @@ final class GroomAgentTests: XCTestCase {
         XCTAssertEqual(label.backlog.map(\.key), ["FAKE-1"])
     }
 
+    func testCommentCountsReadOnlyDueItems() async throws {
+        let t = ProjectCommentTests.CommentTracker()
+        defer { t.releaseAll() }
+        let at = Date(timeIntervalSince1970: 1_790_000_000)
+        func item(_ id: String, activity: Date, read: Date, count: Int) -> Item {
+            var i = Item(id: id, key: "FAKE-\(id)", title: id, url: "https://x/\(id)", statusOptionId: "s-todo", fields: [:], assignees: [], labels: [],
+                         author: nil, updatedBy: nil, updatedAt: activity, activityAt: activity, commentCount: count, lastComment: nil, mentionsMe: false)
+            i.commentsAt = read
+            return i
+        }
+        let a = item("a", activity: at + 100, read: at, count: 1)
+        let b = item("b", activity: at, read: at, count: 2)
+        let c = item("c", activity: at + 50, read: at, count: 3)
+        t.setComments("a", (1...5).map { Comment(id: "c\($0)", author: nil, createdAt: at, url: "") })
+        let project = FakeTracker().project
+        let counts = await GroomAgent.commentCounts([c, b, a], tracker: t, project: project, cap: 1)
+        XCTAssertEqual(counts, ["a": 5])
+        XCTAssertEqual(t.read, ["a"], "one call, for the newest due item")
+
+        let fake = FakeTracker()
+        let snap = ProjectSnapshot(summary: try await fake.projects()[0], statusOptions: try await fake.statuses(fake.project),
+                                   items: [a, b, c], fetchedAt: at)
+        let plan = GroomAgent.Plan(intake: [], backlog: [a, b, c], skipped: [], stale: 0)
+        let out = GroomAgent.items(plan, snap: snap, intakeKeys: [:], details: [:], comments: counts, areas: { _ in [] })
+        XCTAssertEqual(out.items.map(\.comments), [5, 2, 3], "a is read, b and c are cached")
+    }
+
     func testStartWritesTheFileAndOneKeyedSessionInPlace() async throws {
         let r = try await make()
         await start(r)

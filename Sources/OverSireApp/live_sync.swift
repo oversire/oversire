@@ -12,7 +12,7 @@ let FALLBACK_CURSORS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("cur
 // The consumer of the events. GHActionsBar implements it.
 protocol RelaySink: AnyObject {
     func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, String)], done: @escaping (Bool) -> Void)
-    func relayProjectRefresh(_ events: [(workspace: String, project: String?)], done: @escaping (Bool) -> Void)
+    func relayProjectRefresh(_ events: [(workspace: String, project: String?)], comments: [CommentHint], done: @escaping (Bool) -> Void)
     func relayFullRefresh(done: @escaping (Bool) -> Void)
     func relayStateChanged()
 }
@@ -23,6 +23,8 @@ struct RefreshPlan {
     var includePRs = false
     var completedRuns: [(String, String)] = []
     var projects: [(workspace: String, project: String?)] = []   // nil project: all projects of the tracker account
+    /// The comment events. The item is nil when the event names only the project.
+    var comments: [CommentHint] = []
     /// The machines whose sessions changed. AgentIndex polls them.
     var sessionMachines: [String] = []
     /// The machines whose daemon has a new question or a new waiting session.
@@ -35,14 +37,19 @@ struct RefreshPlan {
         for a in resyncs { project(a.id, nil) }
         for e in events {
             if e.kind == .change { includePRs = true }
+            let isComment = e.kind == .comment || e.action.lowercased().contains("comment")
             switch e.subject {
             case .run(let r):
                 if let path = repo(r.repo?.path, byLower), e.kind == .run, e.action == "completed" { completedRuns.append((path, r.id)) }
             case .job(let j): _ = repo(j.run.repo?.path, byLower)
             case .change(let c): _ = repo(c.repo.path, byLower)
             case .repo(let r): _ = repo(r.path, byLower)
-            case .project(let p): project(p.account.id, p.id)
-            case .item(let i): project(i.project.account.id, i.project.id)
+            case .project(let p):
+                project(p.account.id, p.id)
+                if isComment, !p.id.isEmpty { comments.append(CommentHint(workspace: p.account.id, project: p.id, item: nil)) }
+            case .item(let i):
+                project(i.project.account.id, i.project.id)
+                if isComment { comments.append(CommentHint(workspace: i.project.account.id, project: i.project.id, item: i.id)) }
             case .session:
                 let machine = e.account.id
                 guard machines.contains(machine) else { break }
@@ -377,7 +384,7 @@ final class LiveSync {
         }
         if plan.wantsProjectRefresh {
             log.info("Sync: refresh \(plan.projects.count) project(s)")
-            sink.relayProjectRefresh(plan.projects) { _ in }
+            sink.relayProjectRefresh(plan.projects, comments: plan.comments) { _ in }
         }
     }
 

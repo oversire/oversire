@@ -4,7 +4,7 @@ import OverSireAI
 import OverSireAssistant
 
 // The read actions of the assistant. They read what the app holds and make no tracker or code host calls,
-// except the jobs of one run. Each result has a short summary and JSON data of at most `JSONValue.readLimit` bytes.
+// except the jobs of one run and the comment read of item.get. Each result has a short summary and JSON data of at most `JSONValue.readLimit` bytes.
 struct ReadActions {
     let link: ActionLink
 
@@ -29,14 +29,25 @@ struct ReadActions {
         let link = link
         return ActionSpec(id: "item.get", title: "Item", help: "Reads one item: title, status, group, priority, assignees, labels, parent, Markdown body, "
                    + "sub-items, comment count and the last comment.", kind: .read, input: ActionSpec.args(["key": ItemActions.key], required: ["key"])) { a in
-            await link.item(a) { _, f, done in
+            await link.item(a) { d, f, done in
                 var o = JSONValue(encoding: WorkContext.itemFacts(f.item, snap: f.snap, maxBody: nil))?.object ?? [:]
                 o["subItems"] = JSONValue(encoding: f.snap.children(of: f.item.id).map {
                     WorkFacts.SubItem(key: $0.key, title: $0.title, status: f.snap.statusName($0.statusOptionId), done: f.snap.isFinished($0))
                 })
-                o["commentCount"] = .int(f.item.commentCount)
-                if let c = f.item.lastComment { o["lastComment"] = JSONValue(encoding: c) }
-                done(Self.ok("\(f.item.key): \(f.item.title)", .object(o)))
+                // The list holds no current comment data, so read the comments now. The store keeps nothing of this read.
+                d.projectStore.comments(key: f.item.key) { r in
+                    var count = f.item.commentCount, last = f.item.lastComment
+                    switch r {
+                    case .success(let list):
+                        count = list.count
+                        last = list.last
+                    case .failure:
+                        o["commentsNote"] = .string("Plane did not answer. The count is from the last read.")
+                    }
+                    o["commentCount"] = .int(count)
+                    if let last { o["lastComment"] = JSONValue(encoding: last) }
+                    done(Self.ok("\(f.item.key): \(f.item.title)", .object(o)))
+                }
             }
         }
     }

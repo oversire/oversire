@@ -249,6 +249,31 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertTrue(e.unread)
     }
 
+    func testAwayText() throws {
+        XCTAssertEqual(ItemChange.away(items: 1).text, "1 item changed while you were away")
+        XCTAssertEqual(ItemChange.away(items: 12).text, "12 items changed while you were away")
+        let e = ActivityEntry.make(projectKey: "acme/4", itemId: "", change: .away(items: 12), actor: nil, url: "", at: Date(timeIntervalSince1970: 10),
+                                   title: "Board")
+        let back = try JSONDecoder().decode(ActivityEntry.self, from: JSONEncoder().encode(e))
+        XCTAssertEqual(back, e)
+        XCTAssertEqual(back.change, .away(items: 12))
+    }
+
+    func testOldItemHasNoCommentStamp() throws {
+        var i = item("1", status: nil)
+        XCTAssertNil(i.commentsAt)
+        XCTAssertFalse(i.commentsDue, "a saved item counts as read at its activity")
+        let data = try JSONEncoder().encode(i)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(json["commentsAt"])
+        json["commentsAt"] = nil
+        let old = try JSONDecoder().decode(Item.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(old.commentsAt)
+        i.commentsAt = i.activityAt - 10
+        XCTAssertTrue(i.commentsDue)
+        XCTAssertEqual(try JSONDecoder().decode(Item.self, from: JSONEncoder().encode(i)).commentsAt, i.commentsAt)
+    }
+
     func testItemPatch() {
         XCTAssertTrue(ItemPatch().isEmpty)
         XCTAssertFalse(ItemPatch(status: "s1").isEmpty)
