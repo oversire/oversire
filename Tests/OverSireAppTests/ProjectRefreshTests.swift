@@ -19,6 +19,7 @@ final class ProjectRefreshTests: XCTestCase {
         private var waiting: [(project: String, go: CheckedContinuation<Void, Never>)] = []
         private var count = 0
         private var seenLimits: [Int] = []
+        private var seenLanes: [(project: String, lane: CallPriority)] = []
         var limited = false
         var limits: [Int] { lock.withLock { seenLimits } }
         var calls: Int { lock.withLock { count } }
@@ -29,6 +30,8 @@ final class ProjectRefreshTests: XCTestCase {
             lock.withLock { waiting.firstIndex { $0.project == project }.map { waiting.remove(at: $0) } }?.go.resume()
         }
         func blocked(_ project: String) -> Int { lock.withLock { waiting.filter { $0.project == project }.count } }
+        /// The lane of each call of items() for a project, in call order.
+        func lanes(_ project: String) -> [CallPriority] { lock.withLock { seenLanes.filter { $0.project == project }.map(\.lane) } }
 
         func probe() async throws -> Identity { Identity(person: PersonRef(id: "u1", name: "me")) }
         func poll(since: Cursor?) async throws -> EventPage { EventPage(events: [], cursor: Cursor(rawValue: "0")) }
@@ -41,7 +44,9 @@ final class ProjectRefreshTests: XCTestCase {
             return []
         }
         func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
-            await withCheckedContinuation { c in lock.withLock { count += 1; seenLimits.append(limit); waiting.append((p.id, c)) } }
+            await withCheckedContinuation { c in lock.withLock {
+                count += 1; seenLimits.append(limit); seenLanes.append((p.id, CallPriority.current)); waiting.append((p.id, c))
+            } }
             return []
         }
         func detail(_ i: ItemRef) async throws -> ItemDetail { throw ProviderError.notFound }
@@ -122,23 +127,259 @@ final class ProjectRefreshTests: XCTestCase {
         XCTAssertEqual(t.calls, 2, "the poll does not read b again")
     }
 
-    /// The rerun of a project starts when its read ends, not when the reads of the other projects end.
-    func testRerunStartsWhenTheReadOfItsProjectEnds() async throws {
+    // MARK: Page view, wake and watchdog (OVERSIRE-463)
+
+    /// Swaps APP_LOG for the test.
+    private func capture() -> (lines: IOLogTests.Lines, restore: () -> Void) {
+        let lines = IOLogTests.Lines(), saved = APP_LOG
+        APP_LOG = lines
+        return (lines, { APP_LOG = saved })
+    }
+
+    private func pollLines(_ l: IOLogTests.Lines, _ level: LogLevel) -> [LogEntry] {
+        l.all.filter { $0.job == "Plane poll" && $0.level == level }
+    }
+
+    private func snap(_ p: ProjectSummary, at: Date) -> ProjectSnapshot {
+        ProjectSnapshot(summary: p, statusOptions: [], items: [], fetchedAt: at)
+    }
+
+    /// The poll reads a. A user refresh takes the key and its read parks. The call of the poll is still parked.
+    private func takeA(_ t: SlowTracker, _ store: ProjectStore, _ a: ProjectSummary, done: @escaping (Bool) -> Void) async {
+        await until("the poll reads a") { t.blocked("a") == 1 }
+        await MainActor.run { store.refresh([a.ref.storeKey], force: true, priority: .user, done: done) }
+        await until("the user read of a runs") { t.blocked("a") == 2 }
+    }
+
+    func testUserRefreshTakesTheKeyFromABackgroundRead() async throws {
         let t = SlowTracker()
         let store = try store(t)
+        let (lines, restore) = capture()
+        defer { restore() }
         let a = summary("a"), b = summary("b")
         var result: Bool?
         await MainActor.run { store.track([a, b], live: []) }
-        await until("the poll reads a") { t.blocked("a") == 1 }
-        await MainActor.run { store.refresh([a.ref.storeKey], force: true, priority: .user) { result = $0 } }
+        await takeA(t, store, a) { result = $0 }
+        XCTAssertEqual(t.lanes("a"), [.background, .user])
+        await until("the poll goes on to b without the old call of a") { t.blocked("b") == 1 }
         t.release("a")
-        await until("the rerun of a and the poll read of b run") { t.blocked("a") == 1 && t.blocked("b") == 1 }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(store.refreshing.contains(a.ref.storeKey), "the stale answer does not end the hold of the user")
         XCTAssertNil(result)
         t.release("a")
-        await until("the caller ends while the poll reads b") { result == true }
-        XCTAssertTrue(store.refreshing.contains(b.ref.storeKey))
+        await until("the caller ends") { result == true }
         t.release("b")
         await until("the poll ends") { store.refreshing.isEmpty }
+        XCTAssertEqual(t.calls, 3, "no fourth read of a")
+        XCTAssertTrue(pollLines(lines, .error).isEmpty)
+    }
+
+    /// A user read is not cancelled. The second user refresh runs once more after it.
+    func testRerunOfAUserReadStartsWhenItsReadEnds() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let a = summary("a")
+        var first: Bool?, second: Bool?
+        await MainActor.run { store.track([a], live: []) }
+        await takeA(t, store, a) { first = $0 }
+        t.release("a")
+        await MainActor.run { store.refresh([a.ref.storeKey], force: true, priority: .user) { second = $0 } }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.blocked("a"), 1, "no cancel")
+        t.release("a")
+        await until("the rerun runs") { t.blocked("a") == 1 && t.calls == 3 }
+        t.release("a")
+        await until("both callers end") { first != nil && second == true }
+        await until("the refresh ends") { store.refreshing.isEmpty }
+    }
+
+    private final class ProbeTrackers: TrackerDirectory {
+        let t: ProjectPriorityTests.Probe
+        init(_ t: ProjectPriorityTests.Probe) { self.t = t }
+        var trackerIds: [String] { [t.account.id] }
+        func tracker(_ id: String) -> (any Tracker)? { id == t.account.id ? t : nil }
+    }
+
+    func testViewOfAStaleProjectReadsItAsAUserCall() async throws {
+        let probe = ProjectPriorityTests.Probe()
+        let store = try store(ProbeTrackers(probe))
+        let p = try await probe.projects()[0]
+        let key = p.ref.storeKey
+        await MainActor.run { store.track([p], live: []) }
+        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        probe.clear()
+        await MainActor.run { store.viewed(key) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(probe.priorities("items").isEmpty, "a fresh snapshot reads nothing")
+        store.now = { Date() + 120 }
+        await MainActor.run { store.viewed(key) }
+        await until("the view reads once") { probe.priorities("items").count == 1 }
+        XCTAssertEqual(probe.priorities("items"), [.user])
+    }
+
+    func testViewOfAFreshProjectReadsNothing() async throws {
+        let t = OrderTracker()
+        let store = try store(t)
+        let key = order.ref.storeKey
+        await MainActor.run { store.track([order], live: []) }
+        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        store.now = { Date() + 10 }
+        await MainActor.run { store.viewed(key) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.calls.filter { $0 == "items" }.count, 1)
+    }
+
+    func testViewDuringAUserReadAddsNoRead() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let a = summary("a")
+        await MainActor.run { store.track([a], live: []) }
+        await takeA(t, store, a) { _ in }
+        t.release("a")
+        await MainActor.run { store.viewed(a.ref.storeKey) }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.blocked("a"), 1)
+        t.release("a")
+        await until("the refresh ends") { store.refreshing.isEmpty }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.calls, 2, "no rerun")
+    }
+
+    func testViewOfAnUntrackedKeyDoesNothing() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        await MainActor.run { store.viewed("nope") }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.calls, 0)
+        XCTAssertTrue(store.refreshing.isEmpty)
+    }
+
+    func testKeyForIdentifier() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let p = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        await MainActor.run { store.track([p], live: []) }
+        XCTAssertEqual(store.key(identifier: "slow"), p.ref.storeKey)
+        XCTAssertNil(store.key(identifier: "other"))
+        await until("the poll reads") { t.blocked == 1 }
+        t.release()
+        await until("the poll ends") { store.refreshing.isEmpty }
+    }
+
+    func testStuckReadLetsTheKeyGoAndWarns() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let (lines, restore) = capture()
+        defer { restore() }
+        let a = summary("a"), b = summary("b")
+        let ka = a.ref.storeKey
+        await MainActor.run { store.track([a, b], live: []) }
+        await until("the poll reads a") { t.blocked("a") == 1 }
+        store.now = { Date() + 200 }
+        await MainActor.run { store.releaseStuckReads() }
+        XCTAssertFalse(store.refreshing.contains(ka))
+        XCTAssertNotNil(store.errors[ka])
+        await until("the loop reads b") { t.blocked("b") == 1 }
+        let warns = pollLines(lines, .warn)
+        XCTAssertEqual(warns.count, 1)
+        XCTAssertEqual([warns[0].area.rawValue, warns[0].job, warns[0].subject, warns[0].host], ["sync", "Plane poll", "A", "ws"])
+        await MainActor.run { store.poll() }
+        await until("the poll reads a again") { t.blocked("a") == 2 }
+        t.release("a")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertNil(store.snapshots[ka], "the stale answer writes nothing")
+        t.release("a")
+        t.release("b")
+        await until("all reads end") { store.refreshing.isEmpty }
+        XCTAssertNotNil(store.snapshots[ka])
+    }
+
+    func testWatchdogKeepsAYoungRead() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let (lines, restore) = capture()
+        defer { restore() }
+        let a = summary("a")
+        await MainActor.run { store.track([a], live: []) }
+        await until("the poll reads a") { t.blocked("a") == 1 }
+        store.now = { Date() + 100 }
+        await MainActor.run { store.releaseStuckReads() }
+        XCTAssertTrue(store.refreshing.contains(a.ref.storeKey))
+        XCTAssertTrue(pollLines(lines, .warn).isEmpty)
+        t.release("a")
+        await until("the poll ends") { store.refreshing.isEmpty }
+    }
+
+    func testWakeReadsTheShownProjectFirstThenTheOldest() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let a = summary("a"), b = summary("b"), c = summary("c")
+        await MainActor.run { store.track([a, b, c], live: []) }
+        for k in ["a", "b", "c"] {
+            await until("the first sweep reads \(k)") { t.blocked(k) == 1 }
+            t.release(k)
+        }
+        await until("the first sweep ends") { store.refreshing.isEmpty }
+        await MainActor.run {
+            store.seed(snap(a, at: Date()))
+            store.seed(snap(b, at: Date() - 3600))
+            store.seed(snap(c, at: .distantPast))
+            store.wake(first: a.ref.storeKey)
+        }
+        await until("a reads as a user call and c reads first") { t.blocked("a") == 1 && t.blocked("c") == 1 }
+        XCTAssertEqual(t.lanes("a"), [.background, .user])
+        XCTAssertEqual(t.lanes("c"), [.background, .background])
+        XCTAssertEqual(t.blocked("b"), 0, "b waits for c")
+        t.release("c")
+        await until("b reads after c") { t.blocked("b") == 1 }
+        XCTAssertEqual(t.lanes("b"), [.background, .background])
+        t.release("a")
+        t.release("b")
+        await until("all reads end") { store.refreshing.isEmpty }
+        XCTAssertEqual(t.lanes("a"), [.background, .user], "the sweep does not read a")
+    }
+
+    func testWakeLetsAReadFromBeforeTheSleepGo() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let (lines, restore) = capture()
+        defer { restore() }
+        let a = summary("a")
+        await MainActor.run { store.track([a], live: []) }
+        await until("the poll reads a") { t.blocked("a") == 1 }
+        store.now = { Date() + 3600 }
+        await MainActor.run { store.wake(first: nil) }
+        await until("a reads again") { t.blocked("a") == 2 }
+        XCTAssertEqual(pollLines(lines, .warn).count, 1)
+        XCTAssertEqual(t.lanes("a"), [.background, .background])
+        t.release("a")
+        t.release("a")
+        await until("the reads end") { store.refreshing.isEmpty }
+    }
+
+    func testOldestFirst() {
+        let ps = ["a", "b", "c", "d"].map(summary)
+        let t = Date()
+        let snaps = [ps[0], ps[1], ps[3]].enumerated().reduce(into: [String: ProjectSnapshot]()) { m, e in
+            m[e.element.ref.storeKey] = snap(e.element, at: e.element.identifier == "B" ? t - 3600 : t)
+        }
+        XCTAssertEqual(ProjectStore.oldestFirst(ps, snapshots: snaps).map(\.identifier), ["C", "B", "A", "D"])
+    }
+
+    func testSweepReadsTheOldestSnapshotFirst() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let a = summary("a"), b = summary("b")
+        await MainActor.run {
+            store.seed(snap(a, at: Date()))
+            store.seed(snap(b, at: Date() - 3600))
+            store.track([a, b], live: [])
+        }
+        await until("b reads first") { t.blocked("b") == 1 && t.blocked("a") == 0 }
+        t.release("b")
+        await until("a reads next") { t.blocked("a") == 1 }
+        t.release("a")
+        await until("the sweep ends") { store.refreshing.isEmpty }
     }
 
     func testRateLimitPausesTheWorkspace() async throws {

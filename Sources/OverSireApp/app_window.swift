@@ -272,6 +272,9 @@ class Page: NSViewController {
 
     func detach() { isShown = false }
 
+    /// The page is now in front of the person. A page that reads its own data can refresh it here.
+    func viewed() {}
+
     // The data changed while the page was in the cache.
     func markStale() { stale = true }
 
@@ -525,6 +528,15 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         updateNav()
         reloadSidebar()
         syncRefresh()
+        if isVisible { page?.viewed() }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) { page?.viewed() }
+
+    /// The identifier of the project page in front, when the window shows it.
+    var frontProject: String? {
+        guard let w = window, w.isVisible, !w.isMiniaturized, case .project(let id)? = page?.route else { return nil }
+        return id
     }
 
     // The bus gives one change for each burst. Pages that do not show the changed data drop it.

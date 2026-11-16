@@ -402,6 +402,7 @@ class TabVC: NSViewController {
         app?.selectedProject = selectedProject
         app?.projectStatusFilter = statusFilter
         app?.projectShowAll = showAllProjects
+        if selectedTab == .projects, let k = selectedProject { app?.projectStore.viewed(k) }
     }
 
     @objc func projectViewChanged(_ sender: NSSegmentedControl) {

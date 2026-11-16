@@ -324,6 +324,8 @@ To connect a Mac, get a pairing code in the console. Then open **Settings › Ac
 
 Each Plane workspace gets one webhook to `https://<cloud>/plane/<slug>`. **Settings › Accounts and sync › Live updates › Plane webhooks** shows one row per workspace. OverSire adds the webhook when you add a workspace, and deletes it when you remove the workspace. The cloud keeps the secret of each webhook and checks the `X-Plane-Signature` of each delivery. A workspace without a webhook polls every `pollMinutes` (5 by default). Note: Plane sends no webhook event for changes made through its v1 API. OverSire refreshes after its own changes. Plane has no intake webhook events. An intake item is also a work item, so its changes come as work item events. OverSire then reads the intake list again.
 
+A project page that you open reads its project again when its data is older than a minute. After the Mac wakes, OverSire reads all projects, the project in view first, and a read that gets no answer for 3 minutes stops with a warning in the log.
+
 A Cat Eye relay (v3) that you deployed before also works. OverSire moves its URL and token on the first start.
 
 - **Synced state:** a Mac that is paired with an account syncs its own state with the cloud: queue lanes, ignored failures, pins, snoozes, notes, agent links, memory, jobs, suggestions and work orders. Each write goes to disk at once and waits in an outbox (`~/.config/oversire/sync/<device>/`) until the cloud accepts it, so OverSire works offline. The last write wins for each record. The web console (`https://<cloud>/console`) shows the suggestions, and you can accept or dismiss them from a phone. Without a cloud account, OverSire makes no cloud calls.

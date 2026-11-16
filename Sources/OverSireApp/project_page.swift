@@ -188,6 +188,12 @@ final class ProjectPage: Page {
     private var projectKey: String { if case .project(let k) = route { return k }; return "" }
 
     override var watches: DataDomains { [.projects, .intake, .agents, .runs, .summaries, .config] }
+    override var parts: [PagePart] { data.projectStore.key(identifier: projectKey).map { [data.projectStore.part([$0])] } ?? [] }
+
+    override func viewed() {
+        data.projectStore.key(identifier: projectKey).map(data.projectStore.viewed)
+    }
+
     override var shownProjects: Set<String>? { snapshot.map { [$0.summary.ref.storeKey] } }
 
     private var snapshot: ProjectSnapshot? { data.projectStore.snapshots.values.first { $0.summary.identifier.uppercased() == projectKey } }

@@ -79,6 +79,18 @@ final class PageSectionsTests: XCTestCase {
         let page = ProjectPage(.project("NOPE"), data: TestAppData(), router: Router())
         XCTAssertEqual(ids(page.sections()), ["top/header", "top/lookup"])
     }
+
+    @MainActor
+    func testProjectPageHasAPlanePart() {
+        let d = TestAppData()
+        d.projectStore.hold = true
+        let page = ProjectPage(.project("SLING"), data: d, router: Router())
+        XCTAssertTrue(page.parts.isEmpty, "an untracked project has no part")
+        let ref = ProjectRef(account: AccountID(provider: "plane", id: "ws"), id: "p1", key: "SLING")
+        d.projectStore.track([ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "", closed: false)], live: [])
+        XCTAssertEqual(page.parts.map(\.id), ["plane"])
+        XCTAssertEqual(page.parts.first?.title, "Plane project SLING")
+    }
 }
 
 final class PopoverReconcileTests: XCTestCase {
@@ -121,5 +133,36 @@ final class PopoverReconcileTests: XCTestCase {
         XCTAssertEqual(vc.builds, 1)
         vc.update(grouped: [], prGrouped: [], updated: Date(), loading: true)
         XCTAssertEqual(vc.builds, 2)
+    }
+}
+
+/// The window tells a page when it comes to the front (OVERSIRE-463).
+final class PageViewedTests: XCTestCase {
+    private final class Counting: Page {
+        var views = 0
+        override func viewed() { views += 1 }
+    }
+
+    @MainActor
+    func testDisplayOfARouteInAVisibleWindowCallsViewed() {
+        _ = NSApplication.shared
+        var pages: [Counting] = []
+        let w = AppWindow(data: TestAppData()) { r, d, router in
+            let p = Counting(r, data: d, router: router)
+            pages.append(p)
+            return p
+        }
+        defer { w.window?.orderOut(nil) }
+        w.window?.orderFront(nil)
+        XCTAssertNil(w.frontProject)
+        w.go(.project("SLING"))
+        XCTAssertEqual(pages.last?.views, 1)
+        XCTAssertEqual(w.frontProject, "SLING")
+        w.go(.project("SLING"))
+        XCTAssertEqual(pages.last?.views, 2, "the same page counts as a view")
+        w.window?.orderOut(nil)
+        XCTAssertNil(w.frontProject)
+        w.go(.project("OTHER"))
+        XCTAssertEqual(pages.last?.views, 0, "a hidden window gives no view")
     }
 }

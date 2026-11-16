@@ -224,6 +224,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if tab == .changes, let f = desk.files.first(where: { $0.id == desk.file }) { Task { await desk.diff(f) } }
     }
 
+    override func viewed() {
+        if let pk = data.projectStore.item(key: key)?.key { data.projectStore.viewed(pk) }
+    }
+
     override var parts: [PagePart] {
         var out: [PagePart] = []
         if let pk = data.projectStore.item(key: key)?.0 { out.append(data.projectStore.part([pk])) }

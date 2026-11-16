@@ -348,6 +348,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.questions.didWake()
             self?.machineHub.refresh()
             if let o = self?.automations { Task { await o.refresh() } }
+            self?.whenOnline { self?.projectStore.wake(first: self?.viewedProjectKey()) }
         }
         // A Mac that sleeps gives the automations to the other Macs.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
@@ -1204,11 +1205,33 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             keptWindowBack = keepWindowBack
             if keepWindowBack { appWindow.activateBehind() } else { NSApp.activate(ignoringOtherApps: true) }
             popover.show(relativeTo: statusItem.button!.bounds, of: statusItem.button!, preferredEdge: .minY)
-            // No refresh here. makeTabVC() snapshots `grouped` at build time and
-            // never re-reads it, so a fetch started now lands in a view nobody is
-            // looking at — and doRefresh() already refreshes before
-            // it calls toggle(), so it would double the cost.
+            // The panel reads only the picked project, and only when its data is older than `viewMaxAge`.
+            // makeTabVC() snapshots `grouped` at build time, so a wider refresh lands in a view nobody sees.
+            if let k = popoverProjectKey { projectStore.viewed(k) }
             updatePolling()
+        }
+    }
+
+    /// The project that the open panel shows: one project picked on the Projects tab.
+    private var popoverProjectKey: String? {
+        guard popover.isShown, let tab = popover.contentViewController as? TabVC, tab.selectedTab == .projects else { return nil }
+        return tab.selectedProject
+    }
+
+    /// The project in view: the project page in front, else the project of the open panel.
+    func viewedProjectKey() -> String? {
+        appWindow.frontProject.flatMap(projectStore.key(identifier:)) ?? popoverProjectKey
+    }
+
+    /// Runs `f` once, when the network path is up.
+    private func whenOnline(_ f: @escaping () -> Void) {
+        var id: UUID?
+        var fired = false
+        id = NetworkPath.shared.watch {
+            guard !fired else { return }
+            fired = true
+            id.map(NetworkPath.shared.remove)
+            f()
         }
     }
 
