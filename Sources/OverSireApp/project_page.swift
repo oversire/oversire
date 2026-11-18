@@ -176,6 +176,10 @@ final class ProjectPage: Page {
     override var fillsHeight: Bool { !board }
     // List, unless the person picked Board.
     private var board = Layout(rawValue: UserDefaults.standard.string(forKey: ProjectPage.layoutKey) ?? "") == .board
+    // Group by epic, for all projects like the layout. A shot starts with Status and keeps the choice in memory.
+    private static let groupKey = "projectGroupByEpic"
+    private(set) var groupByEpic = !UIShots.shooting && UserDefaults.standard.bool(forKey: ProjectPage.groupKey)
+    private var foldedEpics: Set<String> = []
     private var onlyAgent = false
     private var onlyFailing = false
     private var onlyMine = false
@@ -219,15 +223,31 @@ final class ProjectPage: Page {
         let open = snap.notDoneCount(snap.rootItems)
         let intake = snap.intake?.count ?? 0
         let board = board, ident = snap.summary.identifier
-        let header = PageRow("header", snap.summary.title, snap.summary.url, open, intake, board) { [weak self] in
+        let hasEpics = snap.epics != nil
+        let byEpic = Self.groupsByEpic(snap: snap, board: board, preferred: groupByEpic)
+        let header = PageRow("header", snap.summary.title, snap.summary.url, open, intake, board, hasEpics, groupByEpic) { [weak self] in
             var actions: [NSView] = []
             if intake > 0 {
                 actions.append(ActionButton("\(intake) intake", symbol: "tray.and.arrow.down") { self?.go(.intake(key)) })
+            }
+            if Self.showsGroupBy(snap: snap, board: board) {
+                let group = NSSegmentedControl(labels: ["Status", "Epic"], trackingMode: .selectOne, target: self, action: #selector(ProjectPage.groupChanged(_:)))
+                group.selectedSegment = byEpic ? 1 : 0
+                group.setAccessibilityLabel("Group by")
+                actions.append(group)
             }
             let seg = NSSegmentedControl(labels: ["List", "Board"], trackingMode: .selectOne, target: self, action: #selector(ProjectPage.layoutChanged(_:)))
             seg.selectedSegment = board ? 1 : 0
             seg.setAccessibilityLabel("Layout")
             actions.append(seg)
+            if hasEpics {
+                let new = ActionButton("New epic", symbol: "plus") { [weak self] in
+                    guard let self else { return }
+                    NewEpicSheet.present(over: self.view.window, snap: snap, data: self.data)
+                }
+                new.toolTip = "Make an epic in \(snap.summary.title)"
+                actions.append(new)
+            }
             actions.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: snap.summary.url)!) })
             let gear = ActionButton("", symbol: "gearshape") { self?.go(.projectSettings(key, .appearance)) }
             gear.toolTip = "Project settings (⌘,)"
@@ -237,7 +257,8 @@ final class ProjectPage: Page {
                               caption: { "\(open) open · updated \($0)" }, actions: actions)
         }
         let flags = [onlyMine, onlyAgent, onlyFailing, showSubItems, showDone]
-        let filters = PageRow("filters", flags) { [weak self] in
+        let caption = byEpic ? "Grouped by epic · nearest target date first · then priority" : "Favorites first · grouped by status · sorted by priority, Done by last change"
+        let filters = PageRow("filters", flags, byEpic) { [weak self] in
             NSStackView(h: [
                 ToggleChip("Mine", on: flags[0]) { self?.flip(\.onlyMine) },
                 ToggleChip("Has session", on: flags[1]) { self?.flip(\.onlyAgent) },
@@ -245,11 +266,12 @@ final class ProjectPage: Page {
                 ToggleChip("Sub-items", on: flags[3]) { self?.flip(\.showSubItems) },
                 ToggleChip("Show done", on: flags[4]) { self?.flip(\.showDone) },
                 Spacer(),
-                NSTextField.text("Favorites first · grouped by status · sorted by priority, Done by last change", size: 12, color: Palette.dim),
+                NSTextField.text(caption, size: 12, color: Palette.dim),
             ], spacing: 6)
         }
         let top = PageSection("top", rows: [header, filters])
 
+        if byEpic { return [top, PageSection("items", rows: [epicTable(snap, items, ws, job)])] }
         let groups = statusGroups(snap, items)
         if board {
             let hash = PageRow.hash(groups.map { g -> AnyHashable in
@@ -274,6 +296,75 @@ final class ProjectPage: Page {
         if rows.isEmpty { rows = [PageRow("empty", 0) { EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle") }] }
         let table = table
         return [top, PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
+    }
+
+    /// The list grouped by epic: one sticky row for each epic, then its items. "No epic" is last.
+    private func epicTable(_ snap: ProjectSnapshot, _ items: [Item], _ ws: WorkstreamIndex, _ job: StatusJob) -> PageRow {
+        let data = self.data, store = data.projectStore
+        let blocked = Set(snap.items.filter { $0.epicId != nil && !store.blockers(of: $0.key).isEmpty }.map(\.id))
+        let filtered = onlyMine || onlyAgent || onlyFailing
+        let ident = snap.summary.identifier
+        var rows: [PageRow] = []
+        for g in Self.epicGroups(snap: snap, items: snap.groupSorted(items), blocked: blocked) {
+            // Done items hide as in the status groups. An empty open epic shows, unless a filter is on.
+            let hidden = showDone ? [] : g.items.filter { snap.isHiddenDone($0, afterDays: PROJECTS_CFG.hideDoneAfterDays) }
+            let shown = g.items.filter { i in !hidden.contains(i) }
+            if shown.isEmpty, hidden.isEmpty, filtered || g.epic == nil { continue }
+            let folded = foldedEpics.contains(g.id)
+            let fold = GroupFold(expanded: !folded) { [weak self] in
+                if self?.foldedEpics.remove(g.id) == nil { self?.foldedEpics.insert(g.id) }
+                self?.reload()
+            }
+            if let r = g.epic {
+                let epic = r.epic
+                let args: [String: JSONValue] = ["project": .string(ident), "epic": .string(epic.id.rawValue)]
+                let lead = EpicGroupHeader.leadName(epic, snap: snap)
+                rows.append(StickyListCard.group(g.id, g.title, count: shown.count, extra: [r, lead] as [AnyHashable], fold: fold, showCount: false, lead: {
+                    EpicGroupHeader.lead(r)
+                }, trailing: { [weak self] in
+                    EpicGroupHeader.trailing(r, lead: lead, open: { self?.go(.epic(ident, epic.id.rawValue, .overview)) }, close: r.readyToClose ? {
+                        guard let self else { return }
+                        self.data.actions.click("epic.close", args, in: self.view.window, confirm: "Close \(epic.title)?")
+                    } : nil)
+                }))
+            } else {
+                rows.append(StickyListCard.group(g.id, g.title, count: shown.count, fold: fold, lead: { [Glyph("circle.dashed", color: Palette.dim, size: 13)] }))
+            }
+            guard fold.expanded else { continue }
+            let m = more["epic." + g.id] ?? MoreRows()
+            more["epic." + g.id] = m
+            rows += PageRow.limited(shown, more: m, reload: { [weak self] in self?.reload() }) { [weak self, table, commands] i in
+                let stream = ws.stream(i.key), st = job.item(i.key), cleanup = data.cleaner.lines(i.key, data: data)
+                return PageRow(i.key, hash: ItemLine.hash(i, snap: snap, stream: stream, status: st, cleanup: cleanup)) {
+                    ItemLine(i, snap: snap, stream: stream, status: st, layout: table, commands: commands, cleanup: cleanup) { self?.go($0) }
+                }
+            }.map { r in r.id == "more" ? PageRow("more.epic.\(g.id)", hash: r.hash, make: r.make) : r }
+            if !hidden.isEmpty {
+                rows.append(PageRow("hidden.\(g.id)", hidden.count) {
+                    let n = hidden.count
+                    let b = ActionButton("Show done", style: .link) { [weak self] in self?.flip(\.showDone) }
+                    let row = NSStackView(h: [NSTextField.text("\(n) done item\(n == 1 ? "" : "s") hidden", size: 12, color: Palette.dim), b, Spacer()], spacing: 6)
+                    row.edgeInsets = NSEdgeInsets(top: 6, left: 56, bottom: 6, right: 10)
+                    return row
+                })
+            }
+        }
+        if rows.isEmpty { rows = [PageRow("empty", 0) { EmptyNote("No items match the filters.", symbol: "line.3.horizontal.decrease.circle") }] }
+        let table = table
+        return PageRow.list("table", rows: rows) { StickyListCard.table(table) }
+    }
+
+    /// The Group by control shows in the list layout of a project with epics.
+    static func showsGroupBy(snap: ProjectSnapshot, board: Bool) -> Bool { !board && snap.epics != nil }
+
+    static func groupsByEpic(snap: ProjectSnapshot, board: Bool, preferred: Bool) -> Bool { preferred && showsGroupBy(snap: snap, board: board) }
+
+    /// The epics in the order of `ProjectSnapshot.epicGroups`, with their progress. The items with no epic are last.
+    static func epicGroups(snap: ProjectSnapshot, items: [Item], blocked: Set<String> = [], now: Date = Date())
+        -> [(id: String, title: String, epic: EpicRollup?, items: [Item])] {
+        snap.epicGroups(items).map { g in
+            g.epic.map { ($0.id.rawValue, $0.title, snap.rollup($0, blocked: blocked, now: now), g.items) } ?? ("none", "No epic", nil, g.items)
+        }
     }
 
     private func statusGroups(_ snap: ProjectSnapshot, _ items: [Item]) -> [(StatusOption, [Item])] {
@@ -318,6 +409,12 @@ final class ProjectPage: Page {
 
     private func flip(_ k: ReferenceWritableKeyPath<ProjectPage, Bool>) {
         self[keyPath: k].toggle()
+        reload()
+    }
+
+    @objc fileprivate func groupChanged(_ s: NSSegmentedControl) {
+        groupByEpic = s.selectedSegment == 1
+        if !UIShots.shooting { UserDefaults.standard.set(groupByEpic, forKey: ProjectPage.groupKey) }
         reload()
     }
 

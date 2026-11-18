@@ -1478,26 +1478,34 @@ extension StickyListCard {
         addGroup { StickyListCard.groupHead(title, count: count, lead: lead, trailing: trailing) }
     }
 
-    static func groupHead(_ title: String, count: Int, fold: GroupFold? = nil, lead: () -> [NSView] = { [] }, trailing: () -> [NSView] = { [] }) -> Row {
+    static func groupHead(_ title: String, count: Int, fold: GroupFold? = nil, showCount: Bool = true,
+                          lead: () -> [NSView] = { [] }, trailing: () -> [NSView] = { [] }) -> Row {
         let head = GroupHead(fold: fold)
-        head.show(groupViews(title, count: count, fold: fold, lead: lead(), trailing: trailing()), title: title, count: count)
+        head.show(groupViews(title, count: count, fold: fold, showCount: showCount, lead: lead(), trailing: trailing()), title: title, count: count)
         return head
     }
 
-    private static func groupViews(_ title: String, count: Int, fold: GroupFold?, lead: [NSView], trailing: [NSView]) -> [NSView] {
-        let chevron = fold.map { [Glyph($0.expanded ? "chevron.down" : "chevron.right", color: Palette.mut, size: 10)] } ?? []
-        return chevron + lead + [NSTextField.text(title, size: 12.5, weight: .semibold), NSTextField.text("\(count)", size: 12, color: Palette.dim), Spacer()] + trailing
+    private static func groupViews(_ title: String, count: Int, fold: GroupFold?, showCount: Bool, lead: [NSView], trailing: [NSView]) -> [NSView] {
+        var views: [NSView] = []
+        if let fold { views.append(Glyph(fold.expanded ? "chevron.down" : "chevron.right", color: Palette.mut, size: 10)) }
+        views += lead
+        views.append(NSTextField.text(title, size: 12.5, weight: .semibold))
+        if showCount { views.append(NSTextField.text("\(count)", size: 12, color: Palette.dim)) }
+        views.append(Spacer())
+        return views + trailing
     }
 
     /// The group row of `apply`. Its hash is the title and the count, plus `extra` for the views of `lead` and `trailing`.
     /// With `fold`, the row folds the group. A change updates the row in place, so it keeps the focus.
-    static func group(_ id: String, _ title: String, count: Int, extra: AnyHashable = 0, fold: GroupFold? = nil,
+    /// `showCount` false hides the count in the row. The spoken label keeps it.
+    static func group(_ id: String, _ title: String, count: Int, extra: AnyHashable = 0, fold: GroupFold? = nil, showCount: Bool = true,
                       lead: @escaping () -> [NSView] = { [] }, trailing: @escaping () -> [NSView] = { [] }) -> PageRow {
-        var r = PageRow("group." + id, title, count, extra, fold?.expanded, update: { v in
+        let parts: [AnyHashable] = [title, count, extra, fold?.expanded, showCount]
+        var r = PageRow("group." + id, hash: PageRow.hash(parts), update: { v in
             guard let head = v as? GroupHead else { return }
             head.fold = fold
-            head.show(groupViews(title, count: count, fold: fold, lead: lead(), trailing: trailing()), title: title, count: count)
-        }) { StickyListCard.groupHead(title, count: count, fold: fold, lead: lead, trailing: trailing) }
+            head.show(groupViews(title, count: count, fold: fold, showCount: showCount, lead: lead(), trailing: trailing()), title: title, count: count)
+        }) { StickyListCard.groupHead(title, count: count, fold: fold, showCount: showCount, lead: lead, trailing: trailing) }
         r.group = true
         return r
     }
