@@ -40,6 +40,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var streamChecked = Date.distantPast
     private var tailAt = Date.distantPast
     private var saving: String?
+    private weak var epicChipView: NSView?
     private var refining = false
     private var note: (Tone, String)?
     private var cleanupOff: Set<String> = []   // safe cleanup lines that the user unchecked
@@ -365,7 +366,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let cleanup = data.cleaner.lines(item.key, data: data)
         return PageRow("head", item, snap.summary, snap.statusOptions, prog.done, prog.total, snap.openSubItems(of: item.id),
                        snap.canCloseParent(item), data.questions.count(key: key), saving, data.queue.contains(key),
-                       Self.sig(cleanup, data.statusJob.item(key)), canEnhance, refining) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
+                       Self.sig(cleanup, data.statusJob.item(key)), canEnhance, refining,
+                       Self.sig(epicRollup(snap, item), item.otherEpicIds)) { [unowned self] in self.head(snap: snap, item: item, cleanup: cleanup) }
     }
 
     private var enhanceTarget: EnhanceTarget? {
@@ -400,6 +402,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             chips.append(b)
         }
         chips.append(priorityChip(item))
+        if let c = epicChip(snap: snap, item: item) { chips.append(c) }
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
         if !item.assignees.isEmpty { chips.append(Chiplet(item.assignees.joined(separator: ", "), symbol: "person")) }
         let at = item.activityAt
@@ -584,6 +587,93 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
     }
 
+    // MARK: Epic
+
+    /// "Epic: Review desk · 6/8 ▾" or "No epic ▾". `conflict`: the tracker has the item in more than one epic.
+    static func epicChipText(snap: ProjectSnapshot, item: Item) -> (text: String, conflict: Bool) {
+        let conflict = !(item.otherEpicIds ?? []).isEmpty
+        guard let id = snap.epicId(of: item.id), let epic = snap.epic(id) else { return ("No epic ▾", conflict) }
+        let r = snap.rollup(epic)
+        let name = epic.title.count > 36 ? String(epic.title.prefix(35)) + "…" : epic.title
+        return ("Epic: \(name) · \(r.done)/\(r.total) ▾", conflict)
+    }
+
+    private func epicRollup(_ snap: ProjectSnapshot, _ item: Item) -> EpicRollup? {
+        guard snap.epics != nil, let id = snap.epicId(of: item.id), let e = snap.epic(id) else { return nil }
+        return snap.rollup(e)
+    }
+
+    /// The chip shows only when the project has epics (`snap.epics` is nil without the capability or with Modules off).
+    private func epicChip(snap: ProjectSnapshot, item: Item) -> NSView? {
+        guard snap.epics != nil else { return nil }
+        let (text, conflict) = Self.epicChipText(snap: snap, item: item)
+        let roll = epicRollup(snap, item)
+        let glyph = roll.map { EpicGlyph($0.epic.state, late: $0.lateDays != nil, size: 12) as NSView }
+        let chip = Chiplet((conflict ? "▲ " : "") + text, symbol: roll == nil ? "target" : nil, icon: glyph, color: Palette.fg) { [weak self] in self?.showEpicPicker() }
+        if roll != nil { chip.border = EpicColor.accent }
+        chip.setAccessibilityRole(.popUpButton)
+        var label = roll.map { "Epic: \($0.epic.title), \($0.done) of \($0.total) done" } ?? "No epic"
+        if conflict {
+            let n = (item.otherEpicIds ?? []).count + 1
+            let noun = ENV.descriptor(snap.summary.ref.account).flatMap { d in d.epicNoun.map { "\(d.displayName) \($0)s" } } ?? "epics"
+            let why = "This item is in \(n) \(noun). Pick one."
+            chip.toolTip = why
+            label += ". " + why
+        } else {
+            chip.toolTip = "Move \(item.key) to an epic"
+        }
+        chip.setAccessibilityLabel(label)
+        epicChipView = chip
+        return chip
+    }
+
+    /// The picker of the epic chip. ⌘K › Move to epic… calls it.
+    func showEpicPicker() {
+        guard let (_, snap, item) = data.projectStore.item(key: key), snap.epics != nil else { return }
+        let anchor = epicChipView?.window != nil ? epicChipView! : view
+        EpicPicker.show(for: item, snap: snap, data: data, from: anchor, started: { [weak self] in
+            self?.saving = "epic"
+            self?.note = nil
+            self?.reload()
+        }, done: { [weak self] _ in
+            self?.saving = nil
+            self?.reload()
+        })
+    }
+
+    /// The Epic card: the progress, the due line and the next item that can start.
+    private func epicRow(snap: ProjectSnapshot, item: Item) -> PageRow? {
+        guard let r = epicRollup(snap, item) else { return nil }
+        let store = data.projectStore
+        let blocked = Set(snap.items.filter { $0.epicId == r.epic.id && !store.blockers(of: $0.key).isEmpty }.map(\.id))
+        let next = snap.nextReady(in: r.epic.id, blocked: blocked).first { $0.id != item.id }?.key
+        return PageRow("epic", r, next, snap.summary.identifier) { [unowned self] in self.epicCard(snap: snap, rollup: r, next: next) }
+    }
+
+    private func epicCard(snap: ProjectSnapshot, rollup r: EpicRollup, next: String?) -> NSView {
+        let e = r.epic
+        let ident = snap.summary.identifier
+        let open = ActionButton("Open ›", style: .link) { [weak self] in self?.go(.epic(ident, e.id.rawValue, .overview)) }
+        open.setAccessibilityLabel("Open epic \(e.title)")
+        let card = Card(title: "Epic", trailing: [open])
+        let late = r.lateDays != nil
+        let name = NSStackView(h: [EpicGlyph(e.state, late: late), NSTextField.text(e.title, size: 14, weight: .semibold)], spacing: 8)
+        let bar = EpicBar(done: r.done, started: r.started, total: r.total)
+        let due = EpicBoard.due(r)
+        let progress = r.total == 0 ? "No items" : "\(r.done) of \(r.total) done"
+        let line = NSStackView(h: [NSTextField.text(progress, size: 12.5, color: Palette.mut),
+                                   NSTextField.text(due, size: 12.5, weight: late ? .semibold : .regular, color: late ? Palette.bad : Palette.mut), Spacer()], spacing: 12)
+        card.add(name)
+        card.add(bar)
+        card.add(line)
+        if let next {
+            let go = ActionButton(next, style: .link) { [weak self] in self?.go(.item(next, .overview)) }
+            go.setAccessibilityLabel("Next in the epic: \(next)")
+            card.add(NSStackView(h: [NSTextField.text("Next in the epic after this:", size: 12, color: Palette.dim), go, Spacer()], spacing: 4))
+        }
+        return card
+    }
+
     // `what` names the busy chip. `action` takes the key and one option id.
     private func save(_ what: String, _ action: String, _ option: String) {
         saving = what
@@ -622,6 +712,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         }
         if let r = plannerRow(item) { rows.append(r) }
         if let r = attachmentRow(snap: snap, item: item) { rows.append(r) }
+        if let r = epicRow(snap: snap, item: item) { rows.append(r) }
         let open = descriptionOpen, hasSummary = summary != nil
         rows.append(PageRow("description", body, hasSummary, open, pk) { [unowned self] in
             self.descriptionCard(body, pk: pk, hasSummary: hasSummary, open: open)

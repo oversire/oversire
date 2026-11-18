@@ -149,6 +149,9 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
             out.append(Entry(title: spec.title, detail: on.isEmpty ? spec.help : on, symbol: spec.kind == .outward ? "arrow.up.forward.circle" : "bolt",
                              kind: "Action") { [weak owner] in data.actions.click(spec.id, args, in: owner?.window) })
         }
+        let route = owner.router.current
+        let movable = data.has(.epics) && { if case .item(let k, _) = route { return data.projectStore.item(key: k)?.snap.epics != nil }; return false }()
+        if let e = Self.moveToEpicEntry(route: route, capable: movable, run: { [weak owner] in (owner?.page as? ItemPage)?.showEpicPicker() }) { out.append(e) }
         let pages: [(Route, String, String)] = [
             (.home, "Home", "house"), (.work(.items), "Work › Items", "person.crop.circle"),
             (.work(.epics), "Work › Epics", "target"),
@@ -174,6 +177,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
                                  favorite: FAVORITES.contains(i.key), run: go(.item(i.key, .overview))))
             }
         }
+        out += Self.epicEntries(data.projectStore.snapshots) { go(.epic($0, $1.rawValue, .overview))() }
         out += Self.intakeEntries(data.projectStore.snapshots, keys: data.projectStore.intakeKeys) { pk, id in
             go(data.projectStore.intakeRoute(pk, id: id))()
         }
@@ -196,6 +200,27 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(owner.router.current.url.absoluteString, forType: .string)
         })
+        return out
+    }
+
+    /// "Move to epic…" on the page of an item whose project has epics.
+    static func moveToEpicEntry(route: Route, capable: Bool, run: @escaping () -> Void) -> Entry? {
+        guard capable, case .item = route else { return nil }
+        return Entry(title: "Move to epic…", detail: "Pick the epic of this item", symbol: "target", kind: "Action", run: run)
+    }
+
+    /// One entry for each epic. `open` gets the identifier of the project and the epic id.
+    static func epicEntries(_ snapshots: [String: ProjectSnapshot], open: @escaping (String, EpicID) -> Void) -> [Entry] {
+        var out: [Entry] = []
+        for s in snapshots.values.sorted(by: { $0.summary.identifier < $1.summary.identifier }) {
+            for e in s.epics ?? [] {
+                let r = s.rollup(e)
+                let progress = r.total == 0 ? "No items" : "\(r.done) of \(r.total) done"
+                out.append(Entry(title: e.title, detail: "\(s.summary.identifier) · \(progress)", symbol: "target", kind: "Epic") {
+                    open(s.summary.identifier, e.id)
+                })
+            }
+        }
         return out
     }
 

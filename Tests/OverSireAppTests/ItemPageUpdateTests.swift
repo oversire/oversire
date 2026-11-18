@@ -51,4 +51,17 @@ final class ItemPageUpdateTests: XCTestCase {
         NotificationCenter.default.removeObserver(o)
         XCTAssertEqual(keys, ["ENG-1", "ENG-1"])
     }
+
+    func testEpicChipText() {
+        let snap = EpicFixture.snap(deskOthers: ["e2"])
+        func chip(_ n: Int) -> (text: String, conflict: Bool) {
+            ItemPage.epicChipText(snap: snap, item: snap.items.first { $0.key == "ENG-\(n)" }!)
+        }
+        XCTAssertEqual(chip(8).text, "Epic: Review desk · 6/8 ▾")
+        XCTAssertFalse(chip(8).conflict)
+        XCTAssertEqual(chip(11).text, "No epic ▾")
+        XCTAssertEqual(chip(12).text, "No epic ▾", "an epic that the project does not list counts as no epic")
+        XCTAssertEqual(chip(7).text, "Epic: Review desk · 6/8 ▾")
+        XCTAssertTrue(chip(7).conflict, "the tracker has the item in two modules")
+    }
 }

@@ -1119,6 +1119,11 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             AlertConfirm.show(CloseGuard.spec(key: k, state: "Done", open: 3), in: w.window)
                         }
+                    } else if p == "epicpicker" {
+                        // epicpicker: the picker of the epic chip on the open item page.
+                        if let page = w.page as? ItemPage { page.showEpicPicker() } else { print("UISHOTS no item page \(p)") }
+                    } else if p == "newepic", let snap = self.projectStore.snapshot("OVERSIRE") {
+                        NewEpicSheet.present(over: w.window, snap: snap, data: self)
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {
@@ -1132,7 +1137,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:"), let s = w.window?.attachedSheet { w.window?.endSheet(s) }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:"), let s = w.window?.attachedSheet { w.window?.endSheet(s) }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1180,7 +1185,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         let panel: Int? = snapPanel?.windowNumber ?? basketPanel?.windowNumber ?? sessionWindow?.windowNumber ?? glance?.windowNumber
         let popup: Int? = QueuePage.windowNumber ?? GroomSheet.windowNumber ?? MachineSheets.windowNumber ?? CommandPalette.windowNumber
-        let tip: Int? = HoverSummary.windowNumber ?? ExplainPopover.windowNumber
+        let tip: Int? = HoverSummary.windowNumber ?? ExplainPopover.windowNumber ?? EpicPicker.windowNumber
         p.arguments = ["-x", "-o", "-l", "\(panel ?? popup ?? tip ?? num)", out]
         try? p.run()
         p.waitUntilExit()
