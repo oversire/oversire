@@ -26,6 +26,7 @@ public struct PlaneWorkspace: Codable, Hashable, Sendable {
 
     public func projectURL(_ id: String) -> String { "\(webURL)/\(slug)/projects/\(id)/issues/" }
     public func itemURL(_ key: String) -> String { "\(webURL)/\(slug)/browse/\(key)/" }
+    public func moduleURL(project: String, module: String) -> String { "\(webURL)/\(slug)/projects/\(project)/modules/\(module)/" }
 }
 
 /// The Plane REST calls of one workspace. Answers are JSONSerialization objects.
@@ -35,6 +36,7 @@ struct PlaneAPI: Sendable {
     let http: any HTTPTransport
 
     var ws: String { "/api/v1/workspaces/\(workspace.slug)" }
+    var v2: String { "/api/v2/workspaces/\(workspace.slug)" }
 
     static func id(_ value: Any?) -> String? {
         if let s = value as? String, !s.isEmpty { return s }
@@ -68,6 +70,22 @@ struct PlaneAPI: Sendable {
             cursor = next
         }
         return out
+    }
+
+    /// Follows the offset of a v2 list (`{data, next}` or a bare array) until max rows or the last page.
+    func listOffset(_ path: String, query: [URLQueryItem] = [], max: Int) async throws -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        let size = min(100, Swift.max(1, max))
+        while out.count < max {
+            let q = query + [URLQueryItem(name: "per_page", value: String(size)), URLQueryItem(name: "offset", value: String(out.count))]
+            let obj = try await send("GET", path, query: q)
+            let o = obj as? [String: Any]
+            let rows = (obj as? [[String: Any]]) ?? o?["data"] as? [[String: Any]] ?? []
+            out += rows
+            let last = o.map { $0.keys.contains("next") && ($0["next"] == nil || $0["next"] is NSNull) } ?? true
+            if rows.count < size || last { break }
+        }
+        return Array(out.prefix(max))
     }
 
     /// A multipart POST to presigned storage, with no API key. The form fields come before the file, as S3 needs.

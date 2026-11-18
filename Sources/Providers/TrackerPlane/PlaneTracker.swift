@@ -7,18 +7,21 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch] }
+    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch, .epics] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
 
     let api: PlaneAPI
-    private let lock = NSLock()
+    let lock = NSLock()
     private var meCache: PersonRef?
     private var memberCache: (people: [PersonDetail], names: [String: String], at: Date)?
     private var identifiers: [String: String] = [:]                    // project id → "ENG"
-    private var indexCache: [String: (stubs: [ItemStub], at: Date)] = [:]
-    private var itemCache: [String: [String: Item]] = [:]               // project id → the last items
+    var indexCache: [String: (stubs: [ItemStub], at: Date)] = [:]
+    var itemCache: [String: [String: Item]] = [:]                       // project id → the last items
+    var membership: [String: [String: [EpicID]]] = [:]                  // project id → item id → its modules, first is the epic
+    var moduleCache: [String: (epics: [Epic], at: Date)] = [:]          // project id → the modules, in sort order
+    var modulesOn: [String: (on: Bool, at: Date)] = [:]                 // project id → the Modules feature
     private var fullAt: [String: Date] = [:]                            // project id → the last full list
     private var refCache: [String: ItemRef] = [:]                       // item id → ref, for relations
     private var statusCache: [String: (options: [StatusOption], at: Date)] = [:]
@@ -26,6 +29,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     static let fullEvery: TimeInterval = 600
     static let statusMaxAge: TimeInterval = 600
     var indexMaxAge: TimeInterval = 10
+    var epicsMaxAge: TimeInterval = 60
 
     public init(workspace: PlaneWorkspace, token: String, http: any HTTPTransport) {
         api = PlaneAPI(workspace: workspace, token: token, http: http)
@@ -116,7 +120,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         if let index {
             let want = Self.wanted(index, closed: await closedStates(p), limit: limit, since: since)
             if !previous.isEmpty, let last, -last.timeIntervalSinceNow < Self.fullEvery {
-                let need = Set(want.filter { $0.activityAt == nil || previous[$0.id]?.activityAt != $0.activityAt }.map(\.id))
+                let need = Set(want.filter { $0.activityAt == nil || previous[$0.id]?.updatedAt != $0.activityAt }.map(\.id))
                 kept = want.compactMap { need.contains($0.id) ? nil : previous[$0.id] }
                 // Changed items have the newest activity, so they are near the top of the list.
                 let depth = (want.lastIndex { need.contains($0.id) } ?? 0) + 10
@@ -152,7 +156,14 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
             kept += reused
         }
         // A write during the refresh can give one id in a list page and in a tree row.
-        let items = ProjectSnapshot.unique(kept + rows.compactMap { parseItem($0, identifier: identifier, names: names) })
+        var items = ProjectSnapshot.unique(kept + rows.compactMap { parseItem($0, identifier: identifier, names: names) })
+        if index != nil, let members = lock.withLock({ membership[p.id] }) {
+            for n in items.indices {
+                let ids = members[items[n].id] ?? []
+                items[n].epicId = ids.first
+                items[n].otherEpicIds = ids.count > 1 ? Array(ids.dropFirst()) : nil
+            }
+        }
         lock.withLock { itemCache[p.id] = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
         return items
     }
@@ -250,16 +261,30 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     /// Kept for 10 s, so a call right after items(...) costs nothing.
     public func index(_ p: ProjectRef) async throws -> [ItemStub] { try await index(p, maxAge: indexMaxAge) }
 
-    /// All items of the project, with only the fields for the tree. About 150 bytes per item.
+    /// All items of the project, with only the fields for the tree and the modules. About 200 bytes per item.
+    /// It reads the v2 list, which is the only one with `module_ids`.
     func index(_ p: ProjectRef, maxAge: TimeInterval) async throws -> [ItemStub] {
         if let c = lock.withLock({ indexCache[p.id] }), -c.at.timeIntervalSinceNow < maxAge { return c.stubs }
-        let q = [URLQueryItem(name: "fields", value: "id,parent,state,last_activity_at")]
-        let rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: q, max: 5000)
-        let stubs = rows.compactMap { r in
-            PlaneAPI.id(r["id"]).map { ItemStub(id: $0, parentId: PlaneAPI.id(r["parent"]), stateId: PlaneAPI.id(r["state"]),
-                                                activityAt: parseISO(r["last_activity_at"] as? String)) }
+        let q = [URLQueryItem(name: "fields", value: "id,parent_id,state_id,module_ids,sequence_id,updated_at")]
+        let rows = try await api.listOffset("\(api.v2)/projects/\(p.id)/work-items/", query: q, max: 5000)
+        let moduleIds = { (r: [String: Any]) in (r["module_ids"] as? [Any] ?? []).compactMap { PlaneAPI.id($0) } }
+        var order: [String: Int] = [:]
+        if rows.contains(where: { moduleIds($0).count > 1 }), let list = try? await moduleList(p) {
+            order = Dictionary(list.enumerated().map { ($1.id.rawValue, $0) }, uniquingKeysWith: { a, _ in a })
         }
-        lock.withLock { indexCache[p.id] = (stubs, Date()) }
+        let identifier = try? await identifier(of: p)
+        var members: [String: [EpicID]] = [:]
+        var stubs: [ItemStub] = []
+        for r in rows {
+            guard let id = PlaneAPI.id(r["id"]) else { continue }
+            let ids = moduleIds(r).enumerated().sorted { (order[$0.element] ?? .max, $0.offset) < (order[$1.element] ?? .max, $1.offset) }
+                .map { EpicID(rawValue: $0.element) }
+            if !ids.isEmpty { members[id] = ids }
+            stubs.append(ItemStub(id: id, parentId: PlaneAPI.id(r["parent_id"]), stateId: PlaneAPI.id(r["state_id"]),
+                                  activityAt: parseISO(r["updated_at"] as? String), epicId: ids.first,
+                                  key: identifier.flatMap { i in PlaneAPI.int(r["sequence_id"]).map { "\(i)-\($0)" } }))
+        }
+        lock.withLock { indexCache[p.id] = (stubs, Date()); membership[p.id] = members }
         return stubs
     }
 
@@ -288,7 +313,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         let tree = Self.tree(of: loaded, index: index)
         var kept: [Item] = [], need: Set<String> = []
         for id in tree.subtracting(loaded) {
-            if let prev = previous[id], prev.activityAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
+            if let prev = previous[id], prev.updatedAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
         }
         do {
             let (rows, old) = try await load(p, need, depth: 2000, previous: previous)
@@ -341,7 +366,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         lock.withLock { pendingIntake[p.id] ?? [] }
     }
 
-    private func identifier(of p: ProjectRef) async throws -> String {
+    func identifier(of p: ProjectRef) async throws -> String {
         if let k = p.key ?? lock.withLock({ identifiers[p.id] }) { return k }
         let o = try await api.send("GET", "\(ws)/projects/\(p.id)/") as? [String: Any]
         let k = o?["identifier"] as? String ?? ""
@@ -364,7 +389,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         if let d = r["start_date"] as? String, !d.isEmpty { fields["Start"] = d }
         let labels = (r["labels"] as? [Any] ?? []).compactMap { ($0 as? [String: Any])?["name"] as? String }
         let html = r["description_html"] as? String ?? ""
-        let updated = parseISO(r["updated_at"] as? String) ?? Date()
+        let updated = parseISO(r["updated_at"] as? String) ?? parseISO(r["last_activity_at"] as? String) ?? Date()
         return Item(id: id, key: key, title: title, url: workspace.itemURL(key), statusOptionId: state,
                     fields: fields, assignees: (r["assignees"] as? [Any] ?? []).compactMap(person),
                     labels: labels, author: person(r["created_by"]), updatedBy: person(r["updated_by"]),

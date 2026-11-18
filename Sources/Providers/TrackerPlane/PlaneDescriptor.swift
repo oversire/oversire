@@ -11,7 +11,8 @@ extension PlaneTracker {
         fields: [ConfigField(key: "workspace", label: "Workspace", kind: .text, help: "The slug in the Plane URL."),
                  ConfigField(key: "host", label: "Host", kind: .url, required: false, help: PlaneWorkspace.cloudHost),
                  ConfigField(key: "token", label: "API token", kind: .secret)],
-        auth: [.token], docsURL: URL(string: "https://developers.plane.so/api-reference/introduction")
+        auth: [.token], docsURL: URL(string: "https://developers.plane.so/api-reference/introduction"),
+        epicFields: [.goal, .startDate, .targetDate, .lead], epicNoun: "module"
     ) { config, env in
         let slug = config.values["workspace"] ?? config.account.id
         let host = config.values["host"].flatMap { $0.isEmpty ? nil : $0 } ?? PlaneWorkspace.cloudHost
