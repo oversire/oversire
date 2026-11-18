@@ -123,6 +123,26 @@ Replace each `throw ProviderError.unsupported(...)` in the template with a vendo
 - Relations (optional): map the vendor types to `blockedBy`, `blocks` and `relatesTo`. Drop the other types. `apply` adds before it removes. The Planner card, the lane board and the queue gate read the relations. Relations live only in the tracker.
 - Project settings (optional): fill the fields of `ProjectSettings` that the vendor has. Leave the others empty. Put only the features that the vendor has in `features`. Put a feature that you can read but not switch in `readOnlyFeatures`. List the fields that you can write in `editableSettings`. The settings page shows "Edit in <vendor>" for the others. Also set `ProjectSummary.logo` in `projects` when the vendor has a project logo.
 
+### Epics
+
+An epic groups the items for one goal. Add `.epics` and conform to `EpicTracking` (`epics`, `createEpic`, `updateEpic`, `setEpic`).
+
+- Map the vendor epic to `Epic`. Map its state to `EpicState` and keep the vendor value in `nativeState`. The goal is Markdown.
+- Fill `Item.epicId`, `ItemStub.epicId` and `ItemStub.key`. An item is in one epic. If the vendor lets an item be in more, give the first as `epicId` and the others in `otherEpicIds`. `setEpic` adds the item to the new epic first, then removes it from the others.
+- If the vendor makes an epic an item (Jira, GitHub), remove the epics from `items`. Split the parent chain: the nearest ancestor of the epic type becomes `epicId`, and the other parents stay `parentId`. Never give an epic as `parentId`.
+- Declare `epicFields` (the fields that the vendor has) and `epicNoun` (the vendor name, for example "module") in the descriptor. The UI hides the other fields.
+- When the project has no epics (the feature is off), throw `.unsupported(.epics)`. The UI then hides the epics of that project.
+- `TrackerConformance.epics(_:item:project:)` makes or finds "Conformance epic", sets it active, moves an item in and out, then closes it.
+
+Vendor map:
+
+| Vendor | Epic | Membership |
+|---|---|---|
+| Plane | Module | `module_ids` of the work item |
+| Linear | Project | `projectId` of the issue (one for each issue) |
+| Jira | Issue of type Epic | `parent` of the issue |
+| GitHub | Issue of type Epic | Sub-issues. Fallback: Milestone |
+
 ### Code host
 
 - `repos`, `changes`, `commitMessage`.
@@ -159,6 +179,7 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.itemSearch` | `ItemSearching` |
 | `.changeSearch` | `ChangeSearching` |
 | `.collaborators` | `CollaboratorListing` |
+| `.epics` | `EpicTracking` |
 
 Add the capability to `capabilities` and conform to the protocol. The suite fails when one is there without the other. The UI hides a feature that no account supports.
 
@@ -215,7 +236,7 @@ To run a suite against the real vendor, add a test to `Tests/LiveTests`. These t
 
 ## 8. Events
 
-The app maps each poll to rows of the events table (see `docs/events.md`). The mappers work on the protocol, not on the vendor: `TrackerEvents`, `ChangeEvents` and `CIEvents` in `Sources/OverSireSync/ProviderEvents.swift`. Thus an adapter that fills the protocol types needs no event code.
+The app maps each poll to rows of the events table (see `docs/events.md`). The mappers work on the protocol, not on the vendor: `TrackerEvents`, `EpicEvents`, `ChangeEvents` and `CIEvents` in `Sources/OverSireSync/ProviderEvents.swift`. Thus an adapter that fills the protocol types needs no event code.
 
 1. Give stable ids. The row id is `<provider>:<native id>`. The cloud webhook of the same change must give the same id.
 2. Add a kind only for activity that the protocol does not cover. Add it to `Contract/schema/event-kinds.json` first, with the fixture `Contract/fixtures/event/<kind>.json`, and map it in the mapper of the layer.
