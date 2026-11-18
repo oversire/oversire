@@ -52,6 +52,16 @@ final class RegistryTests: XCTestCase {
         XCTAssertEqual(p.token, "t-1")
     }
 
+    func testDescriptorEpicFieldsDefaultEmpty() {
+        let d = descriptor("tracker-a", .tracker)
+        XCTAssertEqual(d.epicFields, [])
+        XCTAssertNil(d.epicNoun)
+        let m = ProviderDescriptor(id: "m", layer: .tracker, displayName: "M", symbol: "x", fields: [], auth: [],
+                                   epicFields: [.goal, .targetDate], epicNoun: "module") { _, _ in throw ProviderError.unsupported(.epics) }
+        XCTAssertEqual(m.epicFields, [.goal, .targetDate])
+        XCTAssertEqual(m.epicNoun, "module")
+    }
+
     func testReplaceKeepsOrder() {
         let r = ProviderRegistry()
         r.register(descriptor("a", .tracker))

@@ -135,10 +135,14 @@ public struct Item: Codable, Hashable, Sendable {
     public var commentsAt: Date? = nil
     public var body: String? = nil   // Markdown
     public var parentId: String? = nil
+    public var epicId: EpicID? = nil
+    /// The other epics of an item that sits in more than one. `epicId` is the first.
+    public var otherEpicIds: [EpicID]? = nil
 
     public init(id: String, key: String, title: String, url: String, statusOptionId: String?, fields: [String: String],
                 assignees: [String], labels: [String], author: String?, updatedBy: String?, updatedAt: Date, activityAt: Date,
-                commentCount: Int, lastComment: Comment?, mentionsMe: Bool, body: String? = nil, parentId: String? = nil) {
+                commentCount: Int, lastComment: Comment?, mentionsMe: Bool, body: String? = nil, parentId: String? = nil,
+                epicId: EpicID? = nil, otherEpicIds: [EpicID]? = nil) {
         self.id = id
         self.key = key
         self.title = title
@@ -156,6 +160,8 @@ public struct Item: Codable, Hashable, Sendable {
         self.mentionsMe = mentionsMe
         self.body = body
         self.parentId = parentId
+        self.epicId = epicId
+        self.otherEpicIds = otherEpicIds
     }
 
     /// True when the item has activity that its comment fields do not cover yet.
@@ -204,12 +210,16 @@ public struct ItemStub: Codable, Hashable, Sendable {
     public let parentId: String?
     public let stateId: String?
     public let activityAt: Date?
+    public let epicId: EpicID?
+    public let key: String?
 
-    public init(id: String, parentId: String?, stateId: String?, activityAt: Date?) {
+    public init(id: String, parentId: String?, stateId: String?, activityAt: Date?, epicId: EpicID? = nil, key: String? = nil) {
         self.id = id
         self.parentId = parentId
         self.stateId = stateId
         self.activityAt = activityAt
+        self.epicId = epicId
+        self.key = key
     }
 }
 
@@ -241,10 +251,12 @@ public struct ProjectSnapshot: Codable, Sendable {
     /// Item id → number of sub-items at all levels that are not closed.
     private var openBelow: [String: Int] = [:]
     public var intake: [IntakeItem]? = nil   // pending intake items; nil when the project has no intake
+    /// All epics of the project. Nil: the provider has no epics or did not load them. Empty: none.
+    public var epics: [Epic]? = nil
 
     public init(summary: ProjectSummary, statusOptions: [StatusOption], items: [Item], fetchedAt: Date,
                 fields: [ProjectField] = [], me: String? = nil, meId: String? = nil,
-                index: [ItemStub]? = nil, intake: [IntakeItem]? = nil) {
+                index: [ItemStub]? = nil, intake: [IntakeItem]? = nil, epics: [Epic]? = nil) {
         self.summary = summary
         self.statusOptions = statusOptions
         self.items = ProjectSnapshot.unique(items)
@@ -254,10 +266,11 @@ public struct ProjectSnapshot: Codable, Sendable {
         self.meId = meId
         self.index = index
         self.intake = intake
+        self.epics = epics
         openBelow = countOpenBelow()
     }
 
-    private enum CodingKeys: String, CodingKey { case summary, statusOptions, items, fetchedAt, fields, me, meId, index, intake }
+    private enum CodingKeys: String, CodingKey { case summary, statusOptions, items, fetchedAt, fields, me, meId, index, intake, epics }
 
     // A saved snapshot from an older version can hold one id two times.
     public init(from decoder: Decoder) throws {
@@ -270,7 +283,8 @@ public struct ProjectSnapshot: Codable, Sendable {
                   me: try c.decodeIfPresent(String.self, forKey: .me),
                   meId: try c.decodeIfPresent(String.self, forKey: .meId),
                   index: try c.decodeIfPresent([ItemStub].self, forKey: .index),
-                  intake: try c.decodeIfPresent([IntakeItem].self, forKey: .intake))
+                  intake: try c.decodeIfPresent([IntakeItem].self, forKey: .intake),
+                  epics: try c.decodeIfPresent([Epic].self, forKey: .epics))
     }
 
     public var statusFieldId: String? { statusOptions.isEmpty ? nil : ProjectSnapshot.statusFieldId }

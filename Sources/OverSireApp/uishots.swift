@@ -415,7 +415,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             return (try? JSONSerialization.data(withJSONObject: o)).flatMap { try? JSONDecoder().decode(Item.self, from: $0) } ?? i
         }
         let copy = ProjectSnapshot(summary: snap.summary, statusOptions: snap.statusOptions, items: items, fetchedAt: snap.fetchedAt,
-                                   fields: snap.fields, me: snap.me, meId: snap.meId, index: snap.index, intake: snap.intake)
+                                   fields: snap.fields, me: snap.me, meId: snap.meId, index: snap.index, intake: snap.intake, epics: snap.epics)
         projectStore.seed(copy)
 
         // Three finished items: one safe, one with changes and an open PR, one with a live agent.

@@ -72,6 +72,7 @@ public enum ProviderConformance {
         (.itemSearch, "ItemSearching", { $0 is any ItemSearching }),
         (.changeSearch, "ChangeSearching", { $0 is any ChangeSearching }),
         (.collaborators, "CollaboratorListing", { $0 is any CollaboratorListing }),
+        (.epics, "EpicTracking", { $0 is any EpicTracking }),
     ]
 
     /// The capabilities agree with the protocols. No I/O.

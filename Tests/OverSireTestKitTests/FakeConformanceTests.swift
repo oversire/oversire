@@ -78,6 +78,47 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertEqual(lossy.problems, ["update did not change the title"])
     }
 
+    func testFakeTrackerPassesTheEpicSuite() async throws {
+        let t = FakeTracker()
+        let ref = try await t.create(ItemDraft(title: "Seed"), in: t.project)
+        let r = await TrackerConformance.epics(t, item: ref, project: t.project)
+        XCTAssertTrue(r.passed, r.description)
+        let list = try await t.epics(in: t.project)
+        XCTAssertEqual(list.map(\.title), ["Conformance epic"])
+        let off = FakeTracker(capabilities: [])
+        let none = await TrackerConformance.epics(off, item: ref, project: t.project)
+        XCTAssertTrue(none.passed, "no capability: no step")
+        do {
+            _ = try await off.epics(in: off.project)
+            XCTFail("a fake without the capability must throw")
+        } catch { XCTAssertEqual(error as? ProviderError, .unsupported(.epics)) }
+    }
+
+    func testEpicConflictFlag() async throws {
+        let t = FakeTracker()
+        let i1 = try await t.create(ItemDraft(title: "One"), in: t.project)
+        let a = try await t.createEpic(EpicDraft(title: "A"), in: t.project)
+        let b = try await t.createEpic(EpicDraft(title: "B"), in: t.project)
+        t.putInEpics(i1.id, [a.id, b.id])
+        var item = try await t.items(t.project, since: nil, limit: 10)[0]
+        XCTAssertEqual(item.epicId, a.id)
+        XCTAssertEqual(item.otherEpicIds, [b.id])
+        try await t.setEpic(b.id, for: i1)
+        item = try await t.items(t.project, since: nil, limit: 10)[0]
+        XCTAssertEqual(item.epicId, b.id)
+        XCTAssertNil(item.otherEpicIds)
+        do {
+            try await t.setEpic("nope", for: i1)
+            XCTFail("an unknown epic must throw")
+        } catch { XCTAssertEqual(error as? ProviderError, .notFound) }
+    }
+
+    func testCapabilityNeedsEpicTracking() {
+        let r = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.epics]))
+        XCTAssertTrue(r.problems.contains("capability epics needs EpicTracking"), r.description)
+        XCTAssertTrue(ProviderConformance.capabilities(FakeTracker()).passed)
+    }
+
     func testSearchSteps() async {
         let tracker = await TrackerConformance.run { SearchingTracker(blind: false) }
         XCTAssertTrue(tracker.passed, tracker.description)

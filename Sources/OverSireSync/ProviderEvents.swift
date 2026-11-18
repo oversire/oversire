@@ -242,3 +242,79 @@ public enum TrackerEvents {
         }
     }
 }
+
+/// The rows of epic changes: epic.created, epic.item_added, epic.item_removed and epic.closed.
+public enum EpicEvents {
+    /// The rows of one poll. Without an old snapshot with epics, it writes the whole history (backfill).
+    /// `mine`: the item ids that this app moved. Their rows name `me` as the human actor.
+    public static func drafts(old: ProjectSnapshot?, new snap: ProjectSnapshot, provider: String, machine: String,
+                              mine: Set<String> = [], me: String? = nil) -> [EventDraft] {
+        guard let epics = snap.epics else { return [] }
+        let project = snap.summary.identifier.lowercased()
+        let backfill = old?.epics == nil
+        var keys: [String: String] = [:]
+        for s in [old, snap] {
+            for i in s?.items ?? [] { keys[i.id] = i.key }
+            for i in s?.index ?? [] { if let k = i.key { keys[i.id] = k } }
+        }
+        var out: [EventDraft] = []
+        func row(_ kind: Event.Kind, _ id: String, at: Date, item: String?, parent: String?, itemId: String? = nil, _ summary: String,
+                 _ payload: [String: JSONValue]) {
+            let human = itemId.map(mine.contains) == true && me != nil
+            out.append(EventDraft(id: "\(provider):\(id)", at: at, kind: kind, item: item, parentItem: parent, project: project, machine: machine,
+                                  provider: provider, actorType: human ? .human : .provider, actor: human ? me! : provider, via: "poll",
+                                  summary: summary, payload: payload))
+        }
+        func ms(_ d: Date) -> Int64 { Int64(d.timeIntervalSince1970 * 1000) }
+        func title(_ id: EpicID) -> String { (epics.first { $0.id == id } ?? old?.epic(id))?.title ?? id.rawValue }
+        func add(_ e: Epic, _ itemId: String, from: EpicID?) {
+            guard let key = keys[itemId] else { return }
+            let known = e.linkedAt?[itemId]
+            let at = known ?? (backfill ? e.createdAt ?? snap.fetchedAt : snap.fetchedAt)
+            var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title)]
+            if let from { p["from"] = .string(from.rawValue) }
+            row(.epicItemAdded, "epic-\(e.id):add:\(itemId):\(ms(at))", at: at, item: key, parent: e.eventKey, itemId: itemId,
+                "Added to \(e.title)", p)
+        }
+        func remove(_ id: EpicID, _ itemId: String, to: EpicID?) {
+            guard let key = keys[itemId] else { return }
+            let e = epics.first { $0.id == id } ?? old?.epic(id)
+            var p: [String: JSONValue] = ["epic": .string(id.rawValue), "title": .string(title(id))]
+            if let to { p["to"] = .string(to.rawValue) }
+            row(.epicItemRemoved, "epic-\(id):remove:\(itemId):\(ms(snap.fetchedAt))", at: snap.fetchedAt, item: key,
+                parent: e?.eventKey, itemId: itemId, "Removed from \(title(id))", p)
+        }
+        func closed(_ e: Epic) {
+            let at = e.updatedAt ?? snap.fetchedAt
+            let state = e.state == .done ? "done" : "canceled"
+            var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title), "state": .string(state)]
+            p["open"] = .int(snap.rollup(e).open)
+            row(.epicClosed, "epic-\(e.id):closed:\(ms(at))", at: at, item: e.eventKey, parent: nil, "\(e.title) \(state)", p)
+        }
+        func created(_ e: Epic) {
+            var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title)]
+            if let t = e.targetDate { p["targetDate"] = .string(t.formatted(.iso8601)) }
+            row(.epicCreated, "epic-\(e.id):created", at: e.createdAt ?? snap.fetchedAt, item: e.eventKey, parent: nil, e.title, p)
+        }
+
+        if backfill {
+            for e in epics {
+                created(e)
+                for m in snap.members(of: e.id).sorted(by: { $0.id < $1.id }) { add(e, m.id, from: nil) }
+                if e.state.isClosed { closed(e) }
+            }
+            return out
+        }
+        let known = Set((old?.epics ?? []).map(\.id))
+        for e in epics where !known.contains(e.id) { created(e) }
+        for e in epics where known.contains(e.id) && e.state.isClosed && old?.epic(e.id)?.state.isClosed == false { closed(e) }
+        let ids = Set(snap.items.map(\.id) + (snap.index ?? []).map(\.id))
+        for id in ids.sorted() {
+            let (was, now) = (old?.epicId(of: id), snap.epicId(of: id))
+            guard was != now else { continue }
+            if let was { remove(was, id, to: now) }
+            if let now, let e = snap.epic(now) { add(e, id, from: was) }
+        }
+        return out
+    }
+}

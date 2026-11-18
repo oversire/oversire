@@ -1248,7 +1248,7 @@ final class ProjectStore {
         let e = JSONEncoder()
         e.outputFormatting = .sortedKeys
         let bare = ProjectSnapshot(summary: s.summary, statusOptions: s.statusOptions, items: s.items, fetchedAt: .distantPast,
-                                   fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake)
+                                   fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake, epics: s.epics)
         return (try? e.encode(bare)) ?? Data()
     }
 }
@@ -1294,7 +1294,7 @@ extension ProjectStore {
 extension ProjectStore {
     static func withItems(_ s: ProjectSnapshot, _ items: [Item]) -> ProjectSnapshot {
         ProjectSnapshot(summary: s.summary, statusOptions: s.statusOptions, items: items, fetchedAt: s.fetchedAt,
-                        fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake)
+                        fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake, epics: s.epics)
     }
 
     /// Copies the comment fields of `cur` to the items that both snapshots have. A merge that landed during a list read stays.

@@ -9,10 +9,15 @@ public struct ProviderDescriptor: Sendable {
     public let fields: [ConfigField]          // the settings form
     public let auth: [AuthKind]
     public let docsURL: URL?
+    /// The epic fields that the vendor has. The UI hides the others.
+    public let epicFields: Set<EpicField>
+    /// What the vendor calls an epic, for example "module".
+    public let epicNoun: String?
     public let make: @Sendable (AccountConfig, ProviderEnvironment) throws -> any Provider
 
     public init(id: ProviderID, layer: Layer, displayName: String, symbol: String, fields: [ConfigField], auth: [AuthKind],
-                docsURL: URL? = nil, make: @escaping @Sendable (AccountConfig, ProviderEnvironment) throws -> any Provider) {
+                docsURL: URL? = nil, epicFields: Set<EpicField> = [], epicNoun: String? = nil,
+                make: @escaping @Sendable (AccountConfig, ProviderEnvironment) throws -> any Provider) {
         self.id = id
         self.layer = layer
         self.displayName = displayName
@@ -20,6 +25,8 @@ public struct ProviderDescriptor: Sendable {
         self.fields = fields
         self.auth = auth
         self.docsURL = docsURL
+        self.epicFields = epicFields
+        self.epicNoun = epicNoun
         self.make = make
     }
 }

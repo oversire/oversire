@@ -46,7 +46,7 @@ The table `item_links` keeps the parent of each item. The app sends the links fr
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |
-| tracker | `item.created`, `item.updated`, `comment.created`, `intake.created`, `intake.accepted` |
+| tracker | `item.created`, `item.updated`, `comment.created`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed` |
 | system | `queue.picked`, `queue.held`, `runbook.step_started`, `runbook.step_ended`, `job.ran`, `automation.ran`, `item.state_changed` (actor `parent-guard`, payload `reason: open-sub-items`) |
 
 A reader keeps a row of a kind that it does not know.

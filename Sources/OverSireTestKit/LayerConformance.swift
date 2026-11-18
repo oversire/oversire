@@ -53,6 +53,7 @@ public enum TrackerConformance {
         }
         r.merge(await settings(t, project: p))
         r.merge(await relations(t, item: ref, project: p))
+        r.merge(await epics(t, item: ref, project: p))
         r.merge(await attachments(t, item: ref))
         r.merge(await intakeAndAttachments(t, project: p))
         return r
@@ -128,6 +129,37 @@ public enum TrackerConformance {
         _ = await r.step("duplicate remove", { try await rm.apply(RelationPatch(remove: [same]), to: ref) })
         if let list = await r.step("relations after the duplicate remove", { try await rm.relations(of: ref) }) {
             r.expect(!list.contains { $0.item.id == dup.id }, "remove did not remove the duplicate")
+        }
+        return r
+    }
+
+    /// Makes or finds "Conformance epic", moves `item` in and out of it, then closes it.
+    public static func epics(_ t: any Tracker, item ref: ItemRef, project p: ProjectRef) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let et = t as? any EpicTracking, t.capabilities.contains(.epics),
+              let before = await r.step("epics", { try await et.epics(in: p) }) else { return r }
+        r.expect(Set(before.map(\.id)).count == before.count, "epics gives one id more than one time")
+        let name = "Conformance epic"
+        var existing = before.first { $0.title == name }
+        if existing == nil { existing = await r.step("createEpic", { try await et.createEpic(EpicDraft(title: name), in: p) }) }
+        guard let found = existing else { return r }
+        r.expect(found.title == name && !found.url.isEmpty, "the epic has the title \(found.title) and the url \(found.url)")
+        guard let active = await r.step("updateEpic active", { try await et.updateEpic(found, EpicPatch(state: .active)) }) else { return r }
+        r.expect(active.state == .active, "updateEpic gave the state \(active.state)")
+        _ = await r.step("setEpic", { try await et.setEpic(found.id, for: ref) })
+        if let list = await r.step("items in the epic", { try await t.items(p, since: nil, limit: 200) }) {
+            r.expect(list.first { $0.id == ref.id }?.epicId == found.id, "items does not show the epic of \(ref.key)")
+        }
+        _ = await r.step("setEpic nil", { try await et.setEpic(nil, for: ref) })
+        if let list = await r.step("items out of the epic", { try await t.items(p, since: nil, limit: 200) }) {
+            r.expect(list.first { $0.id == ref.id }?.epicId == nil, "setEpic nil did not remove the epic of \(ref.key)")
+        }
+        _ = await r.step("updateEpic done", { try await et.updateEpic(active, EpicPatch(state: .done)) })
+        if let after = await r.step("epics after done", { try await et.epics(in: p) }) {
+            r.expect(after.first { $0.id == found.id }?.state.isClosed == true, "the epic is not closed after updateEpic done")
+            let snap = ProjectSnapshot(summary: ProjectSummary(ref: p, identifier: p.key ?? "X", title: "X", url: "", closed: false),
+                                       statusOptions: [], items: [], fetchedAt: Date(), epics: after)
+            r.expectEvents(EpicEvents.drafts(old: nil, new: snap, provider: t.account.provider.rawValue, machine: "conformance"), "epic")
         }
         return r
     }

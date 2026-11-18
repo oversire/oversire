@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory tracker with one project "FAKE" and four statuses.
-public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, @unchecked Sendable {
+public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, EpicTracking, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -19,6 +19,8 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var relationList: [String: [ItemRelation]] = [:]   // item id → relations
     private var intakeList: [String: [IntakeItem]] = [:]       // project id → pending intake items
     private var declinedList: [String: Item] = [:]             // work item id → the item that decline removed
+    private var epicList: [String: [Epic]] = [:]             // project id → epics
+    private var epicOf: [String: [EpicID]] = [:]               // item id → epic ids, the first wins
     private var edits: [IntakeEdit] = []
     /// The `update` actions, in order.
     public var intakeEdits: [IntakeEdit] { base.lockedValue { edits } }
@@ -36,7 +38,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
     public init(account: String = "fake",
-                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead]) {
+                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]
@@ -71,14 +73,14 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     public func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
         try base.locked {
             let all = (itemList[p.id] ?? []).sorted { $0.activityAt > $1.activityAt }
-            return Array(all.filter { since == nil || $0.activityAt >= since! }.prefix(limit))
+            return Array(all.filter { since == nil || $0.activityAt >= since! }.prefix(limit)).map(inEpics)
         }
     }
 
     public func detail(_ i: ItemRef) async throws -> ItemDetail {
         try base.locked {
             guard let item = itemList[i.project.id]?.first(where: { $0.id == i.id }) else { throw ProviderError.notFound }
-            return ItemDetail(item: item, comments: commentList[i.id] ?? [])
+            return ItemDetail(item: inEpics(item), comments: commentList[i.id] ?? [])
         }
     }
 
@@ -160,6 +162,66 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
             base.emit(.item, "updated", .item(item))
         }
     }
+
+    // MARK: Epics
+
+    private func inEpics(_ item: Item) -> Item {
+        var i = item
+        let ids = epicOf[item.id] ?? []
+        i.epicId = ids.first
+        i.otherEpicIds = ids.count > 1 ? Array(ids.dropFirst()) : nil
+        return i
+    }
+
+    public func epics(in p: ProjectRef) async throws -> [Epic] {
+        guard capabilities.contains(.epics) else { throw ProviderError.unsupported(.epics) }
+        return base.lockedValue { epicList[p.id] ?? [] }
+    }
+
+    public func createEpic(_ d: EpicDraft, in p: ProjectRef) async throws -> Epic {
+        guard capabilities.contains(.epics) else { throw ProviderError.unsupported(.epics) }
+        return try base.locked {
+            guard projectList.contains(where: { $0.ref.id == p.id }) else { throw ProviderError.notFound }
+            let n = (epicList[p.id]?.count ?? 0) + 1
+            let now = base.now()
+            let e = Epic(id: EpicID(rawValue: "e\(n)"), title: d.title, goal: d.goal, state: d.state, nativeState: d.state.rawValue,
+                         lead: d.lead, startDate: d.startDate, targetDate: d.targetDate, url: "https://tracker.fake/epics/e\(n)",
+                         project: p, createdAt: now, updatedAt: now)
+            epicList[p.id, default: []].append(e)
+            return e
+        }
+    }
+
+    public func updateEpic(_ e: Epic, _ patch: EpicPatch) async throws -> Epic {
+        guard capabilities.contains(.epics) else { throw ProviderError.unsupported(.epics) }
+        return try base.locked {
+            guard let at = epicList[e.project.id]?.firstIndex(where: { $0.id == e.id }) else { throw ProviderError.notFound }
+            var o = epicList[e.project.id]![at]
+            o.title = patch.title ?? o.title
+            if let s = patch.state { (o.state, o.nativeState) = (s, s.rawValue) }
+            o.goal = patch.clear.contains(.goal) ? nil : patch.goal ?? o.goal
+            o.lead = patch.clear.contains(.lead) ? nil : patch.lead ?? o.lead
+            o.startDate = patch.clear.contains(.startDate) ? nil : patch.startDate ?? o.startDate
+            o.targetDate = patch.clear.contains(.targetDate) ? nil : patch.targetDate ?? o.targetDate
+            o.updatedAt = base.now()
+            epicList[e.project.id]![at] = o
+            return o
+        }
+    }
+
+    public func setEpic(_ epic: EpicID?, for item: ItemRef) async throws {
+        guard capabilities.contains(.epics) else { throw ProviderError.unsupported(.epics) }
+        try base.locked {
+            guard itemList[item.project.id]?.contains(where: { $0.id == item.id }) == true else { throw ProviderError.notFound }
+            if let epic, epicList[item.project.id]?.contains(where: { $0.id == epic }) != true { throw ProviderError.notFound }
+            try failWrite(item.id)
+            epicOf[item.id] = epic.map { [$0] }
+            base.emit(.item, "updated", .item(item))
+        }
+    }
+
+    /// Puts the item in the epics, to make an item that sits in more than one. The first id is `epicId`.
+    public func putInEpics(_ itemId: String, _ ids: [EpicID]) { base.lockedValue { epicOf[itemId] = ids.isEmpty ? nil : ids } }
 
     // MARK: Intake and attachments
 

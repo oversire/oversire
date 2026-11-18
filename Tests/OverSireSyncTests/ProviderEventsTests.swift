@@ -120,6 +120,119 @@ final class ProviderEventsTests: XCTestCase {
         for d in rows { XCTAssertEqual(EventCatalog.repo.problems(d), [], d.id) }
     }
 
+    // MARK: Epics
+
+    func epic(_ id: String, _ title: String, state: EpicState = .active, created: Date? = nil, updated: Date? = nil,
+              linked: [String: Date]? = nil) -> Epic {
+        Epic(id: EpicID(rawValue: id), title: title, state: state, url: "https://plane/\(id)",
+             project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"),
+             createdAt: created, updatedAt: updated, linkedAt: linked)
+    }
+
+    func epicSnap(_ items: [(String, String, String?)], index: [ItemStub]? = nil, epics: [Epic]?, at: Date? = nil) -> ProjectSnapshot {
+        let list = items.map { id, key, e -> Item in
+            var i = item(id, key, state: "s1", at: now)
+            i.epicId = e.map(EpicID.init(rawValue:))
+            return i
+        }
+        let base = snap(list)
+        return ProjectSnapshot(summary: base.summary, statusOptions: base.statusOptions, items: list, fetchedAt: at ?? now, index: index, epics: epics)
+    }
+
+    func epicRows(old: ProjectSnapshot?, new: ProjectSnapshot, mine: Set<String> = [], me: String? = nil) -> [EventDraft] {
+        EpicEvents.drafts(old: old, new: new, provider: "plane", machine: "mba", mine: mine, me: me)
+    }
+
+    func testEpicBackfillOnFirstSync() {
+        let d1 = now.addingTimeInterval(-86400 * 3), d2 = now.addingTimeInterval(-86400 * 2)
+        let epics = [epic("ma", "Alpha", created: d1, linked: ["i1": d1, "i2": d2]), epic("mb", "Beta", created: d2, linked: ["i3": d2])]
+        let new = epicSnap([("i1", "OVERSIRE-1", "ma"), ("i2", "OVERSIRE-2", "ma"), ("i3", "OVERSIRE-3", "mb"), ("i4", "OVERSIRE-4", nil)], epics: epics)
+        let rows = epicRows(old: nil, new: new)
+        XCTAssertEqual(rows.filter { $0.kind == .epicCreated }.map(\.at), [d1, d2])
+        let added = rows.filter { $0.kind == .epicItemAdded }
+        XCTAssertEqual(added.map(\.item), ["OVERSIRE-1", "OVERSIRE-2", "OVERSIRE-3"])
+        XCTAssertEqual(added.map(\.at), [d1, d2, d2])
+        XCTAssertEqual(added[0].parentItem, epics[0].eventKey)
+        XCTAssertEqual(added[0].id, "plane:epic-ma:add:i1:\(Int64(d1.timeIntervalSince1970 * 1000))")
+        XCTAssertEqual(rows.count, 5)
+        XCTAssertEqual(rows.map(\.id), epicRows(old: snap([]), new: new).map(\.id), "an old snapshot without epics backfills too")
+        XCTAssertEqual(rows.map(\.id), epicRows(old: nil, new: new).map(\.id))
+        let noDates = epicSnap([("i1", "OVERSIRE-1", "ma")], epics: [epic("ma", "Alpha", created: d1)])
+        XCTAssertEqual(epicRows(old: nil, new: noDates).map(\.at), [d1, d1], "no link date: the epic date")
+        let bare = epicSnap([("i1", "OVERSIRE-1", "ma")], epics: [epic("ma", "Alpha")])
+        XCTAssertEqual(Set(epicRows(old: nil, new: bare).map(\.at)), [now], "no date at all: the fetch time")
+    }
+
+    func testEpicDiffMove() {
+        let epics = [epic("ma", "Alpha"), epic("mb", "Beta")]
+        let old = epicSnap([("i1", "OVERSIRE-1", "ma")], epics: epics)
+        let later = now.addingTimeInterval(600)
+        let new = epicSnap([("i1", "OVERSIRE-1", "mb")], epics: epics, at: later)
+        let rows = epicRows(old: old, new: new)
+        XCTAssertEqual(rows.map(\.kind), [.epicItemRemoved, .epicItemAdded])
+        XCTAssertEqual(rows[0].payload, ["epic": .string("ma"), "title": .string("Alpha"), "to": .string("mb")])
+        XCTAssertEqual(rows[1].payload, ["epic": .string("mb"), "title": .string("Beta"), "from": .string("ma")])
+        XCTAssertEqual(rows[0].parentItem, epics[0].eventKey)
+        XCTAssertEqual(rows[1].parentItem, epics[1].eventKey)
+        XCTAssertEqual(rows.map(\.at), [later, later])
+        XCTAssertEqual(rows[1].summary, "Added to Beta")
+        XCTAssertEqual(epicRows(old: new, new: new), [], "no change gives no row")
+        let created = epicRows(old: new, new: epicSnap([("i1", "OVERSIRE-1", "mb")], epics: epics + [epic("mc", "Gamma")]))
+        XCTAssertEqual(created.map(\.kind), [.epicCreated])
+        let out = epicRows(old: new, new: epicSnap([("i1", "OVERSIRE-1", nil)], epics: epics))
+        XCTAssertEqual(out.map(\.kind), [.epicItemRemoved])
+        XCTAssertNil(out[0].payload?["to"])
+    }
+
+    func testEpicClosedOnce() {
+        let done = now.addingTimeInterval(-60)
+        let open = epicSnap([("i1", "OVERSIRE-1", "ma")], epics: [epic("ma", "Alpha")])
+        let closed = epicSnap([("i1", "OVERSIRE-1", "ma")], epics: [epic("ma", "Alpha", state: .done, updated: done)])
+        let rows = epicRows(old: open, new: closed)
+        XCTAssertEqual(rows.map(\.kind), [.epicClosed])
+        XCTAssertEqual(rows[0].id, "plane:epic-ma:closed:\(Int64(done.timeIntervalSince1970 * 1000))")
+        XCTAssertEqual(rows[0].item, epic("ma", "Alpha").eventKey)
+        XCTAssertNil(rows[0].parentItem)
+        XCTAssertEqual(rows[0].payload, ["epic": .string("ma"), "title": .string("Alpha"), "state": .string("done"), "open": .int(1)])
+        XCTAssertEqual(rows[0].summary, "Alpha done")
+        XCTAssertEqual(epicRows(old: closed, new: closed), [])
+    }
+
+    func testEpicRowsFollowTheCatalog() {
+        let d = now.addingTimeInterval(-86400)
+        let epics = [epic("ma", "Alpha", created: d, linked: ["i1": d]), epic("mb", "Beta", state: .canceled, created: d, updated: d)]
+        let new = epicSnap([("i1", "OVERSIRE-1", "ma"), ("i2", "OVERSIRE-2", "mb")], epics: epics)
+        let moved = epicSnap([("i1", "OVERSIRE-1", "mb"), ("i2", "OVERSIRE-2", nil)], epics: epics)
+        let rows = epicRows(old: nil, new: new) + epicRows(old: new, new: moved)
+        XCTAssertEqual(Set(rows.map(\.kind)), [.epicCreated, .epicItemAdded, .epicItemRemoved, .epicClosed])
+        for r in rows { XCTAssertEqual(EventCatalog.repo.problems(r), [], r.id) }
+    }
+
+    func testEpicRowsByMeAreHuman() {
+        let old = epicSnap([("i1", "OVERSIRE-1", nil), ("i2", "OVERSIRE-2", nil)], epics: [epic("ma", "Alpha")])
+        let new = epicSnap([("i1", "OVERSIRE-1", "ma"), ("i2", "OVERSIRE-2", "ma")], epics: [epic("ma", "Alpha")])
+        let rows = epicRows(old: old, new: new, mine: ["i1"], me: "fritz")
+        XCTAssertEqual(rows.map(\.actorType), [.human, .provider])
+        XCTAssertEqual(rows.map(\.actor), ["fritz", "plane"])
+        XCTAssertEqual(epicRows(old: old, new: new, mine: ["i1"]).map(\.actorType), [.provider, .provider], "no name: the provider")
+    }
+
+    func testNoEpicRowsWithoutEpics() {
+        let s = epicSnap([("i1", "OVERSIRE-1", nil)], epics: nil)
+        XCTAssertEqual(epicRows(old: nil, new: s), [])
+        XCTAssertEqual(epicRows(old: epicSnap([], epics: []), new: s), [])
+    }
+
+    func testIndexOnlyMemberUsesStubKey() {
+        let stubs = [ItemStub(id: "x1", parentId: nil, stateId: "s1", activityAt: nil, epicId: "ma", key: "OVERSIRE-9"),
+                     ItemStub(id: "x2", parentId: nil, stateId: "s1", activityAt: nil, epicId: "ma", key: nil)]
+        let new = epicSnap([], index: stubs, epics: [epic("ma", "Alpha")])
+        let rows = epicRows(old: nil, new: new).filter { $0.kind == .epicItemAdded }
+        XCTAssertEqual(rows.map(\.item), ["OVERSIRE-9"])
+        let old = epicSnap([], index: stubs.map { ItemStub(id: $0.id, parentId: nil, stateId: "s1", activityAt: nil) }, epics: [epic("ma", "Alpha")])
+        XCTAssertEqual(epicRows(old: old, new: new).map(\.item), ["OVERSIRE-9"])
+    }
+
     func testSenderKeepsRowsUntilTheDaemonAnswers() async throws {
         let d = FakeDaemon()
         d.online = false

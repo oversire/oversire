@@ -61,6 +61,7 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let itemSearch: Capability = "itemSearch"
     public static let changeSearch: Capability = "changeSearch"
     public static let collaborators: Capability = "collaborators"
+    public static let epics: Capability = "epics"
 }
 
 /// The user of a token.
