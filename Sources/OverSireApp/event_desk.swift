@@ -113,6 +113,12 @@ final class EventDesk: @unchecked Sendable {
         Task { [outlet] in await outlet.link(links) }
     }
 
+    /// The epic rows of one tracker poll. mine: the items whose epic this app set.
+    func epics(old: ProjectSnapshot?, new snap: ProjectSnapshot, mine: Set<String>) {
+        let p = snap.summary.ref.account.provider.rawValue
+        send(EpicEvents.drafts(old: old, new: snap, provider: p, machine: machine(), mine: mine, me: snap.me))
+    }
+
     // MARK: Your actions
 
     /// A row of an action that you did in this app. verb makes the id unique with the time.

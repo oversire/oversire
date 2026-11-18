@@ -169,6 +169,87 @@ final class ActionCatalogTests: XCTestCase {
         }
     }
 
+    // MARK: Epics
+
+    private func args(_ o: [String: JSONValue]) -> ActionArgs { ActionArgs(.object(o)) }
+
+    func testEpicActionsNeedTheCapability() {
+        let d = TestAppData()
+        let ids = ["item.setEpic", "epic.list", "epic.create", "epic.update", "epic.close", "epic.addItems"]
+        XCTAssertEqual(d.actions.all.filter { $0.id.hasPrefix("epic.") || $0.id == "item.setEpic" }.map(\.id).sorted(), ids.sorted())
+        XCTAssertTrue(d.actions.supported(d).filter { ids.contains($0.id) }.isEmpty)
+        d.caps = [.epics]
+        XCTAssertEqual(d.actions.supported(d).filter { ids.contains($0.id) }.count, ids.count)
+    }
+
+    func testSetEpicByTitleAndNone() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        let set = await rig.d.actions.run("item.setEpic", args(["key": .string(key), "epic": .string("review DESK")]))
+        XCTAssertEqual(set, .ok(summary: "\(key) is in Review desk."))
+        var snap = await rig.snapshot()
+        XCTAssertEqual(snap?.epicId(of: rig.items[0].id), rig.epic.id)
+        let none = await rig.d.actions.run("item.setEpic", args(["key": .string(key), "epic": .string("none")]))
+        XCTAssertEqual(none, .ok(summary: "\(key) is in no epic."))
+        snap = await rig.snapshot()
+        XCTAssertNil(snap?.epicId(of: rig.items[0].id))
+        let bad = await rig.d.actions.run("item.setEpic", args(["key": .string(key), "epic": .string("Nope")]))
+        XCTAssertEqual(bad, .notAllowed("FAKE has no epic Nope. It has: Review desk."))
+    }
+
+    func testCloseEpicRefusesOpenItems() async throws {
+        let rig = try await EpicRig()
+        for i in rig.items.prefix(2) { try await rig.fake.setEpic(rig.epic.id, for: i) }
+        await rig.reload()
+        let close = args(["project": .string("FAKE"), "epic": .string(rig.epic.id.rawValue)])
+        let refused = await rig.d.actions.run("epic.close", close)
+        XCTAssertEqual(refused, .notAllowed("2 items are open."))
+        for i in rig.items.prefix(2) { try await rig.fake.update(i, ItemPatch(status: "s-done")) }
+        await rig.reload()
+        let ok = await rig.d.actions.run("epic.close", close)
+        XCTAssertEqual(ok, .ok(summary: "Epic Review desk is done."))
+        let snap = await rig.snapshot()
+        XCTAssertEqual(snap?.epic(rig.epic.id)?.state, .done)
+    }
+
+    func testCreateItemWithEpic() async throws {
+        let rig = try await EpicRig()
+        let r = await rig.d.actions.run("item.create", args(["project": .string("FAKE"), "title": .string("New one"), "epic": .string("Review desk")]))
+        guard case .ok(let summary, let data, _) = r else { return XCTFail("\(r)") }
+        XCTAssertTrue(summary.hasSuffix(" in Review desk."), summary)
+        let key = try XCTUnwrap(data?["key"]?.string)
+        let snap = await rig.snapshot()
+        let made = try XCTUnwrap(snap?.items.first { $0.key == key })
+        XCTAssertEqual(made.epicId, rig.epic.id)
+        let bad = await rig.d.actions.run("item.create", args(["project": .string("FAKE"), "title": .string("Two"), "epic": .string("Nope")]))
+        XCTAssertEqual(bad, .notAllowed("FAKE has no epic Nope. It has: Review desk."))
+    }
+
+    func testEpicListCreateUpdateAndAddItems() async throws {
+        let rig = try await EpicRig()
+        let make = await rig.d.actions.run("epic.create", args(["project": .string("FAKE"), "title": .string("Billing"), "targetDate": .string("2030-01-31")]))
+        guard case .ok(_, let data, _) = make else { return XCTFail("\(make)") }
+        let id = try XCTUnwrap(data?["id"]?.string)
+        let bad = await rig.d.actions.run("epic.create", args(["project": .string("FAKE"), "title": .string("X"), "targetDate": .string("soon")]))
+        XCTAssertEqual(bad, .notAllowed("targetDate must be a date as YYYY-MM-DD."))
+        let upd = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Billing"), "state": .string("active"), "targetDate": .string("none")]))
+        XCTAssertEqual(upd, .ok(summary: "Epic Billing is updated."))
+        let snap = await rig.snapshot()
+        XCTAssertEqual(snap?.epic(EpicID(rawValue: id))?.state, .active)
+        XCTAssertNil(snap?.epic(EpicID(rawValue: id))?.targetDate)
+        let none = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Billing")]))
+        XCTAssertEqual(none, .notAllowed("Give a field to change."))
+        let keys = rig.items.prefix(2).map { JSONValue.string($0.key) }
+        let add = await rig.d.actions.run("epic.addItems", args(["project": .string("FAKE"), "epic": .string(id), "keys": .array(keys)]))
+        XCTAssertEqual(add, .ok(summary: "2 items are in Billing."))
+        let list = await rig.d.actions.run("epic.list", args(["project": .string("FAKE")]))
+        guard case .ok(_, let rows?, _) = list else { return XCTFail("\(list)") }
+        let billing = try XCTUnwrap(rows.array?.first { $0["title"]?.string == "Billing" })
+        XCTAssertEqual(billing["progress"]?.string, "0 of 2 done")
+        let missing = await rig.d.actions.run("epic.addItems", args(["project": .string("FAKE"), "epic": .string(id), "keys": .array([.string("FAKE-99")])]))
+        XCTAssertEqual(missing, .notAllowed("FAKE has no loaded item FAKE-99."))
+    }
+
     /// All alerts go through AlertConfirm.
     func testNoAlertOutsideTheHelper() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
@@ -186,7 +267,7 @@ final class ActionCatalogTests: XCTestCase {
         }
         XCTAssertGreaterThan(pages.count, 10)
         let mutator = try NSRegularExpression(pattern: #"""
-            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate)\(|\
+            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate|setEpic|createEpic|updateEpic)\(|\
             (projectStore|store)\.update\(itemId|queue\.(add|remove|move|start)\(|agentIndex\.(send|reveal|start)\(|\
             statusJob\.(approve|hold|markBlocked|snooze)\(|job\.(approve|hold|markBlocked|snooze)\(|questions\.(answer|dismiss)\(|\
             cleaner\.run\(|REPO_CLIENT\.(perform|rerunJob)\(|suggestions\.(accept|dismiss)\(

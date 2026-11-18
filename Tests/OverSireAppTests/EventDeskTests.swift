@@ -89,4 +89,27 @@ final class EventDeskTests: XCTestCase {
         XCTAssertEqual(r[0].onBehalf, "fritz@example.com")
         XCTAssertEqual(EventCatalog.repo.problems(r[0]), [])
     }
+
+    func testEpicsSendsBackfillOnce() async {
+        let o = Outlet()
+        let d = desk(o) { self.start }
+        let p = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE")
+        let epic = Epic(id: "m1", title: "Review desk", state: .active, url: "", project: p, createdAt: start)
+        var item = Item(id: "i1", key: "OVERSIRE-382", title: "Capture", url: "", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
+                        author: "fritz", updatedBy: "fritz", updatedAt: start, activityAt: start, commentCount: 0, lastComment: nil,
+                        mentionsMe: false, parentId: nil)
+        item.epicId = "m1"
+        let snap = ProjectSnapshot(summary: ProjectSummary(ref: p, identifier: "OVERSIRE", title: "OverSire", url: "", closed: false),
+                                   statusOptions: [StatusOption(id: "s1", name: "Todo", color: "", group: "unstarted")],
+                                   items: [item], fetchedAt: start, epics: [epic])
+        d.epics(old: nil, new: snap, mine: [])
+        let first = await rows(o, count: 2)
+        XCTAssertEqual(Set(first.map(\.kind)), [.epicCreated, .epicItemAdded])
+        XCTAssertEqual(first.first { $0.kind == .epicItemAdded }?.parentItem, epic.eventKey)
+        for r in first { XCTAssertEqual(EventCatalog.repo.problems(r), [], r.id) }
+        d.epics(old: snap, new: snap, mine: [])
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        let all = await o.rows
+        XCTAssertEqual(all.count, 2, "a poll with no change sends no row")
+    }
 }

@@ -26,7 +26,9 @@ final class TestAppData: AppData {
     lazy var bus = ChangeBus(schedule: clock.schedule)
     let tmp = NSTemporaryDirectory() + "oversire-tests-" + UUID().uuidString
     lazy var writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: tmp + "/store")))
-    lazy var projectStore = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+    /// The trackers of the project store. Nil: the global ENV.
+    let trackers: TrackerDirectory?
+    lazy var projectStore = ProjectStore(trackers: trackers ?? ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
                                          statePath: tmp + "/state.json", activityPath: tmp + "/activity.jsonl")
     lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()
@@ -65,7 +67,10 @@ final class TestAppData: AppData {
     lazy var actions = AppActionCatalog(data: self)
     var assistant: AssistantController? { nil }
 
-    init() { try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true) }
+    init(trackers: TrackerDirectory? = nil) {
+        self.trackers = trackers
+        try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+    }
     deinit { try? FileManager.default.removeItem(atPath: tmp) }
 
     func has(_ c: Capability) -> Bool { caps.contains(c) }

@@ -126,7 +126,8 @@ struct ItemActions {
             ActionSpec(id: "item.create", title: "New item", help: "Makes a work item in a project. Returns its key.", kind: .change,
                        input: ActionSpec.args(["project": Self.project, "title": ("string", "The title."), "body": ("string", "The Markdown description."),
                                                "status": ("string", "A status name."), "priority": ("string", "A priority name."),
-                                               "parent": ("string", "The key of the parent item.")], required: ["project", "title"])) { a in
+                                               "parent": ("string", "The key of the parent item."),
+                                               "epic": ("string", "The epic id or title in the project.")], required: ["project", "title"])) { a in
                 await link.run { d, done in
                     guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else { done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return }
                     var options: [String: String] = [:]
@@ -140,12 +141,25 @@ struct ItemActions {
                         options[ProjectSnapshot.priorityFieldId] = o.id
                     }
                     let parent = a.string("parent").flatMap { d.projectStore.item(key: $0) }
+                    var epic: Epic?
+                    if let text = a.string("epic") {
+                        guard d.has(.epics), let e = snap.findEpic(text) else { done(.notAllowed(snap.unknownEpic(text))); return }
+                        epic = e
+                    }
                     let new = NewItem(projectKey: snap.summary.ref.storeKey, title: a.string("title") ?? "", body: a.string("body") ?? "", fieldOptions: options)
                     d.projectStore.create(new) { ok, err in
                         guard ok, let id = d.projectStore.lastCreated, let made = d.projectStore.item(id) else { done(.failed(err ?? "The tracker did not make the item.")); return }
-                        guard let parent else { done(.ok(summary: "\(made.item.key) is made.", data: .object(["key": .string(made.item.key)]))); return }
+                        let key = made.item.key
+                        let finish = { (note: String) in
+                            guard let epic else { done(.ok(summary: "\(key) is made\(note).", data: .object(["key": .string(key)]))); return }
+                            d.projectStore.setEpic(epic.id, itemId: id) { ok in
+                                let tail = ok ? " in \(epic.title)" : ". It is not in \(epic.title): \(d.projectStore.lastError ?? "the tracker refused")"
+                                done(.ok(summary: "\(key) is made\(note)\(tail).", data: .object(["key": .string(key)])))
+                            }
+                        }
+                        guard let parent else { finish(""); return }
                         d.projectStore.update(itemId: id, ItemPatch(parent: parent.item.id), failure: "Could not set the parent") { _ in
-                            done(.ok(summary: "\(made.item.key) is made under \(parent.item.key).", data: .object(["key": .string(made.item.key)])))
+                            finish(" under \(parent.item.key)")
                         }
                     }
                 }

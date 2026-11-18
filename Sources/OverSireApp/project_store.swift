@@ -80,6 +80,10 @@ final class ProjectStore {
     private var optionCache: [String: (options: ItemOptions, at: Date)] = [:]
     private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
     private var suppressNotify = Set<String>()
+    /// The ids of the items whose epic this app set. The next poll names the user as the actor of their epic rows.
+    private(set) var epicWrites: Set<String> = []
+    /// Takes the epic rows. Tests set their own desk.
+    var events: EventDesk = EVENTS
     private var assetCache: [String: (url: String, at: Date)] = [:]
     private(set) lazy var relations = RelationCache(
         tracker: { [weak self] in self?.trackers.tracker($0.project.workspace) as? any RelationManaging },
@@ -746,6 +750,58 @@ final class ProjectStore {
         }
     }
 
+    /// A nil epic removes the item from its epic.
+    func setEpic(_ epic: EpicID?, itemId: String, done: @escaping (Bool) -> Void) {
+        epicWrites.insert(itemId)
+        write(itemId, failure: nil, done: { [weak self] ok in
+            self?.epicWrites.remove(itemId)
+            done(ok)
+        }) { c, ref in
+            guard let t = c as? any EpicTracking else { throw ProviderError.unsupported(.epics) }
+            try await t.setEpic(epic, for: ref)
+        }
+    }
+
+    func createEpic(_ d: EpicDraft, projectKey: String, done: @escaping (Result<Epic, ProviderError>) -> Void) {
+        epicCall(projectKey, done: done) { t, snap in try await t.createEpic(d, in: snap.summary.ref) }
+    }
+
+    func updateEpic(_ e: Epic, _ patch: EpicPatch, done: @escaping (Bool) -> Void) {
+        epicCall(e.project.storeKey, done: { done($0.isOk) }) { t, _ in try await t.updateEpic(e, patch) }
+    }
+
+    /// One epic write, then a user refresh of the project. A failure sets `lastError`.
+    private func epicCall<T: Sendable>(_ key: String, done: @escaping (Result<T, ProviderError>) -> Void,
+                                       _ op: @escaping @Sendable (any EpicTracking, ProjectSnapshot) async throws -> T) {
+        guard let snap = snapshots[key], let client = trackers.tracker(snap.summary.ref.workspace) else {
+            lastError = "OverSire has no loaded project \(key)."
+            done(.failure(.unauthorized))
+            return
+        }
+        CallPriority.task(.user) { [weak self] in
+            let result = await Result(awaiting: {
+                guard let t = client as? any EpicTracking else { throw ProviderError.unsupported(.epics) }
+                return try await op(t, snap)
+            })
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if case .failure(let e) = result { self.lastError = e.message }
+                self.refresh([key], force: true, priority: .user) { _ in done(result) }
+            }
+        }
+    }
+
+    /// An epic of a project, by store key or identifier.
+    func epic(_ projectKey: String, _ id: EpicID) -> (snap: ProjectSnapshot, epic: Epic)? {
+        guard let snap = snapshot(projectKey), let epic = snap.epic(id) else { return nil }
+        return (snap, epic)
+    }
+
+    /// All epics of all loaded projects.
+    var allEpics: [(snap: ProjectSnapshot, epic: Epic)] {
+        snapshots.values.sorted { $0.summary.identifier < $1.summary.identifier }.flatMap { s in (s.epics ?? []).map { (s, $0) } }
+    }
+
     func assignMe(itemId: String, done: @escaping (Bool) -> Void) {
         write(itemId, failure: "Could not assign the item", done: done) { c, ref in try await ProjectStore.assignMe(c, ref) }
     }
@@ -1129,6 +1185,8 @@ final class ProjectStore {
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
         EVENTS.tracker(changes, old: old, new: snap, skipState: suppressNotify)
+        events.epics(old: old, new: snap, mine: epicWrites)
+        epicWrites.subtract(snap.items.map(\.id).filter { old?.epicId(of: $0) != snap.epicId(of: $0) })
         if let away, old != nil {
             let n = away.subtracting(back).count
             if n > 0 {
@@ -1263,6 +1321,8 @@ extension ProjectStore {
         let states = try await t.statuses(ref)
         // Before the items: the tracker then knows the pending intake items and does not load them as parents.
         let intake = try? await (t as? any IntakeTriaging)?.intake(ref)
+        // Before the items too: the adapter then has a fresh member cache. A failure hides the epics and keeps the snapshot.
+        let epics = t.capabilities.contains(.epics) ? try? await (t as? any EpicTracking)?.epics(in: ref) : nil
         let prevById = Dictionary((previous?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         // An item that only joins the snapshot has no news, as in a first snapshot.
         let indexed = Set(previous?.index?.map(\.id) ?? [])
@@ -1287,7 +1347,7 @@ extension ProjectStore {
                                    options: StatusOption.priorities.filter { $0.id != "none" })]
         return ProjectSnapshot(summary: summary, statusOptions: states, items: items, fetchedAt: Date(),
                                fields: fields, me: me.name, meId: me.id, index: try? await (t as? any ItemIndexing)?.index(ref),
-                               intake: intake)
+                               intake: intake, epics: epics)
     }
 }
 
