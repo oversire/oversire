@@ -21,16 +21,9 @@ final class RecordedPlane: HTTPTransport, @unchecked Sendable {
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        var key = (request.httpMethod ?? "GET") + " " + (request.url?.path(percentEncoded: false) ?? "")
-        let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
-        var cursor = items?.first { $0.name == "cursor" }?.value
-        // The v2 index with no answer of its own reads the v1 list mock, as the rows of both lists agree.
-        let v2Index = key.hasSuffix("/work-items/") && key.contains("/api/v2/") && lock.withLock { answers[key] == nil && pages[key] == nil }
-        if v2Index {
-            key = key.replacingOccurrences(of: "/api/v2/", with: "/api/v1/").replacingOccurrences(of: "/work-items/", with: "/issues/")
-            cursor = (items?.first { $0.name == "offset" }?.value).flatMap(Int.init).flatMap { $0 == 0 ? nil : "c\($0 / 100)" }
-        }
-        var (status, body) = lock.withLock {
+        let key = (request.httpMethod ?? "GET") + " " + (request.url?.path(percentEncoded: false) ?? "")
+        let cursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cursor" }?.value
+        let (status, body) = lock.withLock {
             requests.append(request)
             if let list = pages[key] {
                 let n = cursor.flatMap { Int($0.dropFirst()) } ?? 0
@@ -38,17 +31,6 @@ final class RecordedPlane: HTTPTransport, @unchecked Sendable {
                 return (200, #"{"results":[\#(list[n].joined(separator: ","))],"next_page_results":\#(more),"next_cursor":"c\#(n + 1)"}"#)
             }
             return answers[key] ?? (404, #"{"detail":"no answer for \#(key)"}"#)
-        }
-        if v2Index, status == 200, var o = try? JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any] {
-            let rows = (o["results"] as? [[String: Any]] ?? []).map { r -> [String: Any] in
-                var r = r
-                r["parent_id"] = r.removeValue(forKey: "parent")
-                r["state_id"] = r.removeValue(forKey: "state")
-                if r["updated_at"] == nil { r["updated_at"] = r["last_activity_at"] }
-                return r
-            }
-            o = ["data": rows, "next": o["next_page_results"] as? Bool == true ? "more" : NSNull()]
-            body = String(decoding: try JSONSerialization.data(withJSONObject: o), as: UTF8.self)
         }
         return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
@@ -190,6 +172,24 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(fullLists(), 1, "no full list between the full refreshes")
         XCTAssertEqual(Set(http.requests.compactMap { $0.url?.path() }.filter { $0.hasSuffix("i2/") || $0.hasSuffix("i3/") }),
                        ["\(list)i2/", "\(list)i3/"])
+    }
+
+    func testCommentMovesActivityAndReloadsTheItem() async throws {
+        // A comment moves last_activity_at but not updated_at. The index must see it.
+        let list = "\(ws)/projects/P1/issues/"
+        func row(_ at: String) -> String {
+            #"{"id":"i1","name":"Item 1","sequence_id":1,"state":"s1","updated_at":"2026-10-16T09:00:00Z","last_activity_at":"\#(at)"}"#
+        }
+        http.on("GET", list, #"{"results":[\#(row("2026-10-16T09:00:00Z"))],"next_page_results":false}"#)
+        let first = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(first.first?.activityAt, ISO8601DateFormatter().date(from: "2026-10-16T09:00:00Z"))
+
+        plane.indexMaxAge = 0
+        http.on("GET", list, #"{"results":[\#(row("2026-10-16T10:00:00Z"))],"next_page_results":false}"#)
+        http.on("GET", "\(list)i1/", row("2026-10-16T10:00:00Z"))
+        let items = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertTrue(http.requests.contains { $0.url?.path() == "\(list)i1/" }, "i1 loads again")
+        XCTAssertEqual(items.first?.activityAt, ISO8601DateFormatter().date(from: "2026-10-16T10:00:00Z"))
     }
 
     // MARK: Open items over the limit (OVERSIRE-457)

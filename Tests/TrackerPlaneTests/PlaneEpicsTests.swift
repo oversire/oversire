@@ -36,13 +36,13 @@ final class ModulesPlane: HTTPTransport, @unchecked Sendable {
                 if method == "PATCH" { for (k, v) in body { modules[n][k] = v } }
                 return (200, modules[n])
             case ("GET", _) where path.hasSuffix("/work-items/"):
-                return (200, ["data": members.map { ["id": $0.key, "state_id": "s1", "sequence_id": 1, "module_ids": $0.value,
-                                                      "updated_at": "2026-11-10T10:00:00Z"] as [String: Any] }, "next": NSNull()])
+                return (200, ["data": members.filter { !$0.value.isEmpty }.map { ["id": $0.key, "module_ids": $0.value] as [String: Any] },
+                              "next": NSNull()])
             case ("GET", _) where parts.contains("work-items"):
                 return (200, ["id": parts.last ?? "", "module_ids": members[parts.last ?? ""] ?? []])
             case ("GET", _) where path.hasSuffix("/issues/"):
                 return (200, ["results": members.keys.map { ["id": $0, "name": "Item", "sequence_id": 1, "state": "s1",
-                                                              "updated_at": "2026-11-10T10:00:00Z"] as [String: Any] },
+                                                              "last_activity_at": "2026-11-10T10:00:00Z"] as [String: Any] },
                               "next_page_results": false])
             default: return (404, ["detail": "no route \(method) \(path)"])
             }
@@ -76,6 +76,7 @@ final class PlaneEpicsTests: XCTestCase {
     private func loadFixtures() throws {
         http.on("GET", "\(v2)/projects/P1/modules/", try fixture("modules"))
         http.on("GET", "\(v2)/projects/P1/work-items/", try fixture("work-items-v2"))
+        http.on("GET", "\(ws)/projects/P1/issues/", try fixture("issues-index"))
     }
 
     private var posts: [(path: String, body: [String: Any])] {
@@ -115,10 +116,38 @@ final class PlaneEpicsTests: XCTestCase {
         let i1 = try XCTUnwrap(index.first { $0.id == "i1" })
         XCTAssertEqual(i1.epicId, "m1", "module_ids is [m2, m1], and m1 has the lower sort order")
         XCTAssertEqual(i1.key, "ENG-1")
-        XCTAssertEqual(i1.activityAt, ISO8601DateFormatter().date(from: "2026-11-10T10:00:00Z"))
+        XCTAssertEqual(i1.activityAt, ISO8601DateFormatter().date(from: "2026-11-10T10:00:00Z"), "last_activity_at, which a comment moves")
         XCTAssertEqual(index.first { $0.id == "i2" }?.parentId, "i1")
         XCTAssertEqual(index.first { $0.id == "i2" }?.stateId, "s1")
         XCTAssertNil(index.first { $0.id == "i3" }?.epicId)
+    }
+
+    func testIndexMakesTwoRequestsWithNoModules() async throws {
+        http.on("GET", "\(ws)/projects/P1/issues/", try fixture("issues-index"))
+        http.on("GET", "\(v2)/projects/P1/work-items/", #"{"data":[],"next":null,"previous":null,"total_count":0,"pagination":{"style":"offset"}}"#)
+        let index = try await plane.index(project)
+        XCTAssertEqual(index.count, 3)
+        XCTAssertTrue(index.allSatisfy { $0.epicId == nil })
+        XCTAssertEqual(http.requests.count, 2, "one v1 list page and one v2 membership call")
+        let q = http.requests.last?.url?.query() ?? ""
+        XCTAssertTrue(q.contains("module_id__isnull=false") && q.contains("per_page=200") && q.contains("fields=id,module_ids"), q)
+    }
+
+    func testIndexSkipsMembershipWhenModulesAreOff() async throws {
+        http.on("GET", "\(ws)/projects/P1/", #"{"id":"P1","identifier":"ENG","module_view":false}"#)
+        http.on("GET", "\(ws)/projects/P1/issues/", try fixture("issues-index"))
+        do { _ = try await plane.epics(in: project); XCTFail("no error") } catch {}
+        let before = http.requests.count
+        _ = try await plane.index(project)
+        XCTAssertEqual(http.requests.count - before, 1, "no v2 call")
+    }
+
+    func testIndexSurvivesAFailedMembershipCall() async throws {
+        http.on("GET", "\(ws)/projects/P1/issues/", try fixture("issues-index"))
+        http.on("GET", "\(v2)/projects/P1/work-items/", status: 400, #"{"error":"Modules are off"}"#)
+        let index = try await plane.index(project)
+        XCTAssertEqual(index.count, 3)
+        XCTAssertTrue(index.allSatisfy { $0.epicId == nil })
     }
 
     func testItemInTwoModulesGetsFirstAndFlag() async throws {

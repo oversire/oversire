@@ -73,9 +73,9 @@ struct PlaneAPI: Sendable {
     }
 
     /// Follows the offset of a v2 list (`{data, next}` or a bare array) until max rows or the last page.
-    func listOffset(_ path: String, query: [URLQueryItem] = [], max: Int) async throws -> [[String: Any]] {
+    func listOffset(_ path: String, query: [URLQueryItem] = [], size: Int = 100, max: Int) async throws -> [[String: Any]] {
         var out: [[String: Any]] = []
-        let size = min(100, Swift.max(1, max))
+        let size = min(size, Swift.max(1, max))
         while out.count < max {
             let q = query + [URLQueryItem(name: "per_page", value: String(size)), URLQueryItem(name: "offset", value: String(out.count))]
             let obj = try await send("GET", path, query: q)

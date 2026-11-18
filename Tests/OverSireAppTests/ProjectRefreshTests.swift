@@ -485,7 +485,6 @@ final class ProjectRefreshTests: XCTestCase {
         http.on("\(ws)/members/", #"[{"member":{"id":"u1","display_name":"Ada"}}]"#)
         http.on("\(ws)/projects/P1/states/", ##"{"results":[{"id":"s1","name":"Todo","color":"#888888","group":"unstarted","sequence":1}]}"##)
         http.on("\(ws)/projects/P1/issues/", #"{"results":[{"id":"i1","name":"One","sequence_id":1,"state":"s1","updated_at":"2026-10-16T10:00:00Z","last_activity_at":"2026-10-16T10:00:00Z"},{"id":"i2","name":"Two","sequence_id":2,"state":"s1","parent":"i1","updated_at":"2026-10-16T11:00:00Z","last_activity_at":"2026-10-16T11:00:00Z"}],"next_page_results":false}"#)
-        http.on("/api/v2/workspaces/acme/projects/P1/work-items/", #"{"data":[{"id":"i1","state_id":"s1","sequence_id":1,"updated_at":"2026-10-16T10:00:00Z"},{"id":"i2","parent_id":"i1","state_id":"s1","sequence_id":2,"updated_at":"2026-10-16T11:00:00Z"}],"next":null}"#)
         http.on("\(ws)/projects/P1/issues/i1/comments/", #"{"results":[]}"#)
         http.on("\(ws)/projects/P1/issues/i2/comments/", #"{"results":[]}"#)
         let p = PlaneTracker(workspace: PlaneWorkspace(slug: "acme"), token: "tok", http: http)
@@ -534,7 +533,6 @@ final class ProjectRefreshTests: XCTestCase {
         // The index tells that i2 changed. Its load fails, so the old i2 stays.
         http.fail("\(ws)/projects/P1/issues/i2/")
         http.on("\(ws)/projects/P1/issues/", #"{"results":[{"id":"i1","name":"One","sequence_id":1,"state":"s1","updated_at":"2026-10-16T10:00:00Z","last_activity_at":"2026-10-16T10:00:00Z"},{"id":"i2","parent":"i1","state":"s1","last_activity_at":"2026-10-17T11:00:00Z"}],"next_page_results":false}"#)
-        http.on("/api/v2/workspaces/acme/projects/P1/work-items/", #"{"data":[{"id":"i1","state_id":"s1","sequence_id":1,"updated_at":"2026-10-16T10:00:00Z"},{"id":"i2","parent_id":"i1","state_id":"s1","sequence_id":2,"updated_at":"2026-10-17T11:00:00Z"}],"next":null}"#)
         let second = try await ProjectStore.snapshot(p, summary, limit: 50, previous: first)
         XCTAssertEqual(second.items.map(\.id).sorted(), ["i1", "i2"], "no item drops out")
     }
@@ -611,7 +609,6 @@ final class ProjectRefreshTests: XCTestCase {
                     #"{"id":"i3","name":"Three","sequence_id":3,"state":"s1","last_activity_at":"2026-10-01T10:00:00Z"}"#,
                     #"{"id":"i4","name":"Four","sequence_id":4,"state":"s1","last_activity_at":"2026-10-17T10:00:00Z"}"#]
         http.on("\(ws)/projects/P1/issues/", #"{"results":[\#(rows.joined(separator: ","))],"next_page_results":false}"#)
-        http.on("/api/v2/workspaces/acme/projects/P1/work-items/", #"{"data":[{"id":"i1","state_id":"s1","sequence_id":1,"updated_at":"2026-10-16T10:00:00Z"},{"id":"i2","parent_id":"i1","state_id":"s1","sequence_id":2,"updated_at":"2026-10-16T11:00:00Z"},{"id":"i3","state_id":"s1","sequence_id":3,"updated_at":"2026-10-01T10:00:00Z"},{"id":"i4","state_id":"s1","sequence_id":4,"updated_at":"2026-10-17T10:00:00Z"}],"next":null}"#)
         http.on("\(ws)/projects/P1/issues/i3/", rows[2])
         http.on("\(ws)/projects/P1/issues/i4/", rows[3])
         http.on("\(ws)/projects/P1/issues/i4/comments/", #"{"results":[]}"#)

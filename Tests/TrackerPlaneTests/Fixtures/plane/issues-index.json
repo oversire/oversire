@@ -1,0 +1,28 @@
+{
+ "results": [
+  {
+   "id": "i1",
+   "parent": null,
+   "state": "s1",
+   "last_activity_at": "2026-11-10T10:00:00.000000Z",
+   "sequence_id": 1
+  },
+  {
+   "id": "i2",
+   "parent": "i1",
+   "state": "s1",
+   "last_activity_at": "2026-11-10T10:00:00.000000Z",
+   "sequence_id": 2
+  },
+  {
+   "id": "i3",
+   "parent": null,
+   "state": "s1",
+   "last_activity_at": "2026-11-10T10:00:00.000000Z",
+   "sequence_id": 3
+  }
+ ],
+ "next_page_results": false,
+ "next_cursor": "1000:1:0",
+ "count": 3
+}

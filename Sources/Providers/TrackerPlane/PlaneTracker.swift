@@ -120,7 +120,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         if let index {
             let want = Self.wanted(index, closed: await closedStates(p), limit: limit, since: since)
             if !previous.isEmpty, let last, -last.timeIntervalSinceNow < Self.fullEvery {
-                let need = Set(want.filter { $0.activityAt == nil || previous[$0.id]?.updatedAt != $0.activityAt }.map(\.id))
+                let need = Set(want.filter { $0.activityAt == nil || previous[$0.id]?.activityAt != $0.activityAt }.map(\.id))
                 kept = want.compactMap { need.contains($0.id) ? nil : previous[$0.id] }
                 // Changed items have the newest activity, so they are near the top of the list.
                 let depth = (want.lastIndex { need.contains($0.id) } ?? 0) + 10
@@ -261,31 +261,41 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     /// Kept for 10 s, so a call right after items(...) costs nothing.
     public func index(_ p: ProjectRef) async throws -> [ItemStub] { try await index(p, maxAge: indexMaxAge) }
 
-    /// All items of the project, with only the fields for the tree and the modules. About 200 bytes per item.
-    /// It reads the v2 list, which is the only one with `module_ids`.
+    /// All items of the project, with only the fields for the tree. About 150 bytes per item.
+    /// The v1 list has `last_activity_at`, which a comment moves. Only v2 has `module_ids`, so a second call reads them.
     func index(_ p: ProjectRef, maxAge: TimeInterval) async throws -> [ItemStub] {
         if let c = lock.withLock({ indexCache[p.id] }), -c.at.timeIntervalSinceNow < maxAge { return c.stubs }
-        let q = [URLQueryItem(name: "fields", value: "id,parent_id,state_id,module_ids,sequence_id,updated_at")]
-        let rows = try await api.listOffset("\(api.v2)/projects/\(p.id)/work-items/", query: q, max: 5000)
-        let moduleIds = { (r: [String: Any]) in (r["module_ids"] as? [Any] ?? []).compactMap { PlaneAPI.id($0) } }
-        var order: [String: Int] = [:]
-        if rows.contains(where: { moduleIds($0).count > 1 }), let list = try? await moduleList(p) {
-            order = Dictionary(list.enumerated().map { ($1.id.rawValue, $0) }, uniquingKeysWith: { a, _ in a })
-        }
+        let q = [URLQueryItem(name: "fields", value: "id,parent,state,last_activity_at,sequence_id")]
+        let rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: q, max: 5000)
+        let members = await moduleMembers(p)
         let identifier = try? await identifier(of: p)
-        var members: [String: [EpicID]] = [:]
-        var stubs: [ItemStub] = []
-        for r in rows {
-            guard let id = PlaneAPI.id(r["id"]) else { continue }
-            let ids = moduleIds(r).enumerated().sorted { (order[$0.element] ?? .max, $0.offset) < (order[$1.element] ?? .max, $1.offset) }
-                .map { EpicID(rawValue: $0.element) }
-            if !ids.isEmpty { members[id] = ids }
-            stubs.append(ItemStub(id: id, parentId: PlaneAPI.id(r["parent_id"]), stateId: PlaneAPI.id(r["state_id"]),
-                                  activityAt: parseISO(r["updated_at"] as? String), epicId: ids.first,
-                                  key: identifier.flatMap { i in PlaneAPI.int(r["sequence_id"]).map { "\(i)-\($0)" } }))
+        let stubs = rows.compactMap { r -> ItemStub? in
+            guard let id = PlaneAPI.id(r["id"]) else { return nil }
+            return ItemStub(id: id, parentId: PlaneAPI.id(r["parent"]), stateId: PlaneAPI.id(r["state"]),
+                            activityAt: parseISO(r["last_activity_at"] as? String), epicId: members[id]?.first,
+                            key: identifier.flatMap { i in PlaneAPI.int(r["sequence_id"]).map { "\(i)-\($0)" } })
         }
         lock.withLock { indexCache[p.id] = (stubs, Date()); membership[p.id] = members }
         return stubs
+    }
+
+    /// Item id → its modules, first is the epic. One v2 call for the items in a module. Empty on any failure (Modules off).
+    private func moduleMembers(_ p: ProjectRef) async -> [String: [EpicID]] {
+        if lock.withLock({ modulesOn[p.id]?.on }) == false { return [:] }
+        let q = [URLQueryItem(name: "fields", value: "id,module_ids"), URLQueryItem(name: "module_id__isnull", value: "false")]
+        guard let rows = try? await api.listOffset("\(api.v2)/projects/\(p.id)/work-items/", query: q, size: 200, max: 5000) else { return [:] }
+        var out: [String: [String]] = [:]
+        for r in rows {
+            if let id = PlaneAPI.id(r["id"]) { out[id] = (r["module_ids"] as? [Any] ?? []).compactMap { PlaneAPI.id($0) } }
+        }
+        var order: [String: Int] = [:]
+        if out.values.contains(where: { $0.count > 1 }), let list = try? await moduleList(p) {
+            order = Dictionary(list.enumerated().map { ($1.id.rawValue, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+        return out.compactMapValues { ids in
+            ids.isEmpty ? nil : ids.enumerated().sorted { (order[$0.element] ?? .max, $0.offset) < (order[$1.element] ?? .max, $1.offset) }
+                .map { EpicID(rawValue: $0.element) }
+        }
     }
 
     /// The ids, their parents, and the sub-items of each, so that each tree is complete.
@@ -313,7 +323,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         let tree = Self.tree(of: loaded, index: index)
         var kept: [Item] = [], need: Set<String> = []
         for id in tree.subtracting(loaded) {
-            if let prev = previous[id], prev.updatedAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
+            if let prev = previous[id], prev.activityAt == byId[id]?.activityAt { kept.append(prev) } else { need.insert(id) }
         }
         do {
             let (rows, old) = try await load(p, need, depth: 2000, previous: previous)

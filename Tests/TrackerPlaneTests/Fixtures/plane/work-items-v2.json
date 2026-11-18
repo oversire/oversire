@@ -2,37 +2,22 @@
  "data": [
   {
    "id": "i1",
-   "parent_id": null,
-   "state_id": "s1",
    "module_ids": [
     "m2",
     "m1"
-   ],
-   "sequence_id": 1,
-   "updated_at": "2026-11-10T10:00:00.000000Z"
+   ]
   },
   {
    "id": "i2",
-   "parent_id": "i1",
-   "state_id": "s1",
    "module_ids": [
     "m3"
-   ],
-   "sequence_id": 2,
-   "updated_at": "2026-11-10T10:00:00.000000Z"
-  },
-  {
-   "id": "i3",
-   "parent_id": null,
-   "state_id": "s1",
-   "module_ids": [],
-   "sequence_id": 3,
-   "updated_at": "2026-11-10T10:00:00.000000Z"
+   ]
   }
  ],
  "next": null,
+ "previous": null,
+ "total_count": 2,
  "pagination": {
   "style": "offset"
- },
- "total_count": 3
+ }
 }
