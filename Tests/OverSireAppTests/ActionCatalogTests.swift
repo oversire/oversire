@@ -91,6 +91,15 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertTrue(d.actions.palette(.home, data: d).isEmpty)
     }
 
+    func testPaletteOnEpicRoute() {
+        let d = TestAppData()
+        d.caps = [.epics]
+        let entries = d.actions.palette(.epic("FAKE", "e1", .overview), data: d)
+        let close = entries.first { $0.0.id == "epic.close" }
+        XCTAssertEqual(close?.1, ["project": .string("FAKE"), "epic": .string("e1")])
+        XCTAssertFalse(entries.contains { $0.0.id == "epic.addItems" }, "epic.addItems needs keys")
+    }
+
     func testQueueActions() async {
         let d = seeded()
         let add = await d.actions.run("queue.add", ActionArgs(.object(["key": .string("sling-1")])))

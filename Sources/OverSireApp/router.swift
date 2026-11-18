@@ -5,8 +5,9 @@ import OverSireCore
 enum Route: Equatable {
     enum RunFilter: String, CaseIterable { case all, running, failed, linked, unlinked }
     // Lanes is the board of the queue lanes. It has no tab: the Up next group links to it.
-    enum WorkTab: String, CaseIterable { case items, review, worktrees, lanes }
+    enum WorkTab: String, CaseIterable { case items, epics, review, worktrees, lanes }
     enum ItemTab: String, CaseIterable { case overview, plan, runbook, session, changes, subitems, activity }
+    enum EpicTab: String, CaseIterable { case overview, items, timeline }
     enum SettingsPage: String, CaseIterable {
         case general, accounts, projects, agents, machines, ai, notifications, logs
 
@@ -78,6 +79,7 @@ enum Route: Equatable {
     case project(String)            // project identifier, for example FRITZ
     case projectSettings(String, ProjectSettingsSection)
     case item(String, ItemTab)      // item key, for example FRITZ-17
+    case epic(String, String, EpicTab) // project identifier, epic id
 
     var path: String {
         switch self {
@@ -95,6 +97,7 @@ enum Route: Equatable {
         case .project(let k): return "project/\(k)"
         case .projectSettings(let k, let s): return "project/\(k)/settings/\(s.rawValue)"
         case .item(let k, let t): return t == .overview ? "item/\(k)" : "item/\(k)/\(t.rawValue)"
+        case .epic(let p, let id, let t): return "epic/\(p)/\(id)/\(t.rawValue)"
         }
     }
 
@@ -157,6 +160,9 @@ enum Route: Equatable {
         case "item":
             guard let k = rest.first, k.contains("-") else { return nil }
             self = .item(k.uppercased(), rest.count > 1 ? ItemTab(rawValue: rest[1].lowercased()) ?? .overview : .overview)
+        case "epic":
+            guard rest.count > 1, !rest[0].isEmpty, !rest[1].isEmpty else { return nil }
+            self = .epic(rest[0].uppercased(), rest[1], rest.count > 2 ? EpicTab(rawValue: rest[2].lowercased()) ?? .overview : .overview)
         default: return nil
         }
     }
@@ -182,6 +188,7 @@ enum Route: Equatable {
         case .settings: return "settings"
         case .item(let k, _): return "project/" + (k.split(separator: "-").first.map(String.init) ?? k)
         case .projectSettings(let k, _): return "project/" + k
+        case .epic: return "work"
         default: return path
         }
     }
@@ -195,6 +202,7 @@ enum Route: Equatable {
         case (.run(let a, let x), .run(let b, let y)): return a == b && x == y
         case (.project(let a), .project(let b)): return a == b
         case (.projectSettings(let a, _), .projectSettings(let b, _)): return a == b
+        case (.epic(let a, let x, _), .epic(let b, let y, _)): return a == b && x == y
         default: return self == other
         }
     }
@@ -214,6 +222,7 @@ enum Route: Equatable {
         case .project(let k): return k
         case .projectSettings: return "Project settings"
         case .item(let k, _): return k
+        case .epic: return "Epic"
         }
     }
 
@@ -228,17 +237,18 @@ enum Route: Equatable {
         case .item(let k, _):
             guard let dash = k.lastIndex(of: "-") else { return ["Projects"] }
             return ["Projects", String(k[..<dash])]
+        case .epic(let p, _, _): return [p, "Epics"]
         default: return []
         }
     }
 
     // Every route kind once, for the selftest and the palette.
     static let samples: [Route] = [
-        .home, .intake(nil), .intake("SLING"), .intakeItem("FRITZ", "i1"), .activity, .work(.items), .work(.review), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
+        .home, .intake(nil), .intake("SLING"), .intakeItem("FRITZ", "i1"), .activity, .work(.items), .work(.epics), .work(.review), .work(.worktrees), .work(.lanes), .runs(.all), .runs(.unlinked),
         .run(repo: "oversire/oversire", id: "123"), .prs, .insights, .settings(.ai), .settings(.general), .settings(.accounts), .settings(.agents),
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
-        .item("FRITZ-17", .changes), .item("OVERSIRE-349", .plan),
+        .item("FRITZ-17", .changes), .item("OVERSIRE-349", .plan), .epic("OVERSIRE", "uishots-epic", .overview),
     ]
 }
 

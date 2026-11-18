@@ -151,6 +151,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         }
         let pages: [(Route, String, String)] = [
             (.home, "Home", "house"), (.work(.items), "Work › Items", "person.crop.circle"),
+            (.work(.epics), "Work › Epics", "target"),
             (.work(.worktrees), "Work › Worktrees", "cpu"), (.work(.lanes), "Work › Lane board", "list.number"),
             (.intake(nil), "Intake", "tray.and.arrow.down"),
             (.runs(.all), "Runs", "play.circle"), (.prs, "Pull requests", "arrow.triangle.pull"), (.insights, "Insights", "chart.bar"),

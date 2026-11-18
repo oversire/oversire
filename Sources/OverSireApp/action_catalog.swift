@@ -102,6 +102,8 @@ extension Route {
         case .intake(let key): return (["intake"], key.map { ["project": .string($0)] } ?? [:])
         case .intakeItem(let key, let id): return (["intake"], ["project": .string(key), "id": .string(id)])
         case .run(let repo, let id): return (["run"], ["repo": .string(repo), "runId": .string(id)])
+        case .epic(let p, let id, _): return (["epic"], ["project": .string(p), "epic": .string(id)])
+        case .work(.epics): return (["epic"], [:])
         case .work(.lanes): return (["queue", "plan"], [:])
         case .work: return (["worktree"], [:])
         case .settings(.machines, _, _): return (["machine"], [:])
