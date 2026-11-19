@@ -2,7 +2,7 @@ import AppKit
 import OverSireCore
 import OverSireAssistant
 
-// The page of one epic: the goal, the items, the progress with the burn-up chart, the sessions and the recent activity.
+// The page of one epic: the goal, the steps in order, the items, the progress with the burn-up chart, the sessions and the recent activity.
 final class EpicPage: Page {
     private let markdown = MarkdownView(width: 600)
     private var markdownHeight: NSLayoutConstraint?
@@ -10,6 +10,8 @@ final class EpicPage: Page {
     private var saving = false
     private var note: (Tone, String)?
     private var allDone = false
+    private var stepsDone = false
+    private var popover: NSPopover?
     private static let sideWidth: CGFloat = 340
     private static let doneShown = 3
 
@@ -33,6 +35,7 @@ final class EpicPage: Page {
         if case .epic(let p, let id, _) = r, p != project || id != epicID.rawValue {
             editor = nil
             allDone = false
+            stepsDone = false
             note = nil
         }
         super.show(r)
@@ -42,6 +45,10 @@ final class EpicPage: Page {
     override var shownProjects: Set<String>? { found().map { [$0.snap.summary.ref.storeKey] } }
     override var shownItems: Set<String>? { found().map { [$0.epic.eventKey] } }
     override var isEditing: Bool { super.isEditing || editor != nil }
+
+    override func viewed() {
+        if let (snap, _) = found() { data.projectStore.loadPlan(snap.summary.ref.storeKey) }
+    }
 
     override var parts: [PagePart] {
         guard let (snap, epic) = found() else { return [data.projectStore.plane] }
@@ -75,12 +82,14 @@ final class EpicPage: Page {
             ])]
         }
         let r = snap.rollup(epic, blocked: blocked(snap), now: Date())
-        var top = [headRow(snap, r)]
+        let plan = EpicPlan(snap, epic: epic, data: data)
+        var top = [headRow(snap, r, plan)]
         if let note { top.append(PageRow("note", "\(note.0.word)", note.1) { Banner(note.0, title: note.1) }) }
         top.append(tabsRow(r))
         let rows: [PageRow]
         switch tab {
         case .overview: rows = [overview(snap, r)]
+        case .steps: rows = stepsRows(snap, r, plan)
         case .items: rows = [itemsRow(snap, r)]
         case .timeline: rows = [timelineRow(r)]
         }
@@ -89,15 +98,15 @@ final class EpicPage: Page {
 
     // MARK: Head
 
-    private func headRow(_ snap: ProjectSnapshot, _ r: EpicRollup) -> PageRow {
+    private func headRow(_ snap: ProjectSnapshot, _ r: EpicRollup, _ plan: EpicPlan) -> PageRow {
         let next = snap.nextReady(in: r.epic.id, blocked: blocked(snap)).prefix(5).map(\.key)
-        return PageRow("head", r, snap.summary, next, saving) { [unowned self] in self.head(snap, r) }
+        return PageRow("head", r, snap.summary, next, saving, plan.next?.key, plan.forecast.lateBy) { [unowned self] in self.head(snap, r, plan) }
     }
 
-    private func head(_ snap: ProjectSnapshot, _ r: EpicRollup) -> NSView {
+    private func head(_ snap: ProjectSnapshot, _ r: EpicRollup, _ plan: EpicPlan) -> NSView {
         let e = r.epic
         let desc = ENV.descriptor(snap.summary.ref.account)
-        let late = r.lateDays != nil
+        let late = r.lateDays != nil || plan.forecast.isLate
         let title = NSTextField.text(e.title, size: 20, weight: .semibold, lines: 2)
         title.setContentHuggingPriority(.init(1), for: .horizontal)
 
@@ -105,11 +114,12 @@ final class EpicPage: Page {
         if let d = desc, let noun = d.epicNoun { chips.append(Chiplet("\(d.displayName) \(noun)", symbol: "square.stack.3d.up")) }
         chips.append(Chiplet(snap.summary.title, symbol: "folder", color: Palette.acc) { [weak self] in self?.go(.project(snap.summary.identifier)) })
         if let lead = e.lead { chips.append(Chiplet("Lead \(lead)", symbol: "person")) }
-        if e.targetDate != nil || late { chips.append(Chiplet(r.due, symbol: late ? nil : "calendar", color: late ? Palette.bad : Palette.mut)) }
-        if let c = chips.last as? Chiplet, late { c.setAccessibilityLabel(r.due.replacingOccurrences(of: "▲ ", with: "Late: ")) }
+        let due = plan.lateText ?? r.due
+        if e.targetDate != nil || late { chips.append(Chiplet(due, symbol: late ? nil : "calendar", color: late ? Palette.bad : Palette.mut)) }
+        if let c = chips.last as? Chiplet, late { c.setAccessibilityLabel(due.replacingOccurrences(of: "▲ ", with: "Late: ")) }
         if saving { chips.append(NSStackView(h: [Spinner(size: .mini), NSTextField.text("Saving…", size: 12, color: Palette.dim)], spacing: 5)) }
 
-        let buttons = actions(snap, r)
+        let buttons = actions(snap, r, plan)
         let line = NSStackView(h: [title, Spacer()] + buttons, spacing: 8)
         let chipRow = Wrap(chips)
         let column = NSStackView(v: [line, chipRow], spacing: 8)
@@ -119,18 +129,21 @@ final class EpicPage: Page {
         return NSStackView(h: [glyph, column], spacing: 12, align: .top)
     }
 
-    private func actions(_ snap: ProjectSnapshot, _ r: EpicRollup) -> [NSView] {
+    private func actions(_ snap: ProjectSnapshot, _ r: EpicRollup, _ plan: EpicPlan) -> [NSView] {
         let e = r.epic
         let args: [String: JSONValue] = ["project": .string(snap.summary.identifier), "epic": .string(e.id.rawValue)]
         var out: [NSView] = []
         let ready = snap.nextReady(in: e.id, blocked: blocked(snap)).prefix(5)
-        if !e.state.isClosed, let first = ready.first {
-            let go = ActionButton("Start next: \(first.key)", symbol: "play.fill", style: .primary)
+        // The plan picks the next step. Without relations it has no order, so the ready list picks.
+        let step = plan.next.flatMap { s in snap.items.first { $0.key.uppercased() == s.key } }
+        if !e.state.isClosed, let first = step ?? ready.first {
+            let go = ActionButton("Start next step", symbol: "play.fill", style: .primary)
             go.onClick = { [weak self, weak go] in
                 guard let self, let go else { return }
                 SessionStartMenu(self.data).start(first, snap: snap, at: go)
             }
-            go.setAccessibilityLabel("Start next item, \(first.key)")
+            go.setAccessibilityLabel("Start next step, \(first.key)")
+            go.toolTip = "\(first.key)  \(first.title)"
             var views: [NSView] = [go]
             if ready.count > 1 {
                 let more = ActionButton("", symbol: "chevron.down", style: .primary)
@@ -174,14 +187,257 @@ final class EpicPage: Page {
         let tab = self.tab, total = r.total
         return PageRow("tabs", tab.rawValue, total) { [unowned self] in
             let tabs = Route.EpicTab.allCases
-            let strip = TabStrip(tabs: [TabStrip.Tab(title: "Overview"), TabStrip.Tab(title: "Items", count: total), TabStrip.Tab(title: "Timeline")],
-                                 selected: tabs.firstIndex(of: tab) ?? 0)
+            let strip = TabStrip(tabs: tabs.map { t in
+                switch t {
+                case .overview: return TabStrip.Tab(title: "Overview")
+                case .steps: return TabStrip.Tab(title: "Steps")
+                case .items: return TabStrip.Tab(title: "Items", count: total)
+                case .timeline: return TabStrip.Tab(title: "Timeline")
+                }
+            }, selected: tabs.firstIndex(of: tab) ?? 0)
             strip.onSelect = { [weak self] i in
                 guard let self, case .epic(let p, let id, _) = self.route else { return }
                 self.go(.epic(p, id, tabs[i]))
             }
             return NSStackView(h: [strip, Spacer()], spacing: 8)
         }
+    }
+
+    // MARK: Steps
+
+    private func stepsRows(_ snap: ProjectSnapshot, _ r: EpicRollup, _ plan: EpicPlan) -> [PageRow] {
+        let e = r.epic
+        let sentence = plan.steps.whereWeAre(rollup: r, forecast: plan.forecast) { plan.graph.nodes[$0]?.title ?? $0 }
+        let whereRow = PageRow("where", r, e.goal, sentence) { [unowned self] in self.whereCard(r, sentence) }
+        let gists = plan.steps.open.map { data.itemSummaries.summary($0.key)?.gist }
+        let questions = plan.steps.open.map { plan.questions[$0.key]?.id.rawValue }
+        let stepsRow = PageRow("steps", plan.signature, gists, questions, stepsDone, snap.summary) { [unowned self] in
+            self.stepsCard(snap, plan)
+        }
+        return [whereRow, stepsRow]
+    }
+
+    /// The goal, where the epic is now, and the bar with its legend.
+    private func whereCard(_ r: EpicRollup, _ sentence: String) -> NSView {
+        let box = Box()
+        let label = NSTextField.text("GOAL", size: 11, weight: .semibold, color: Palette.dim)
+        label.attributedStringValue = NSAttributedString(string: "GOAL", attributes: [.kern: 0.5, .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                                                                                    .foregroundColor: Palette.dim])
+        let headline = Self.headline(r.epic.goal)
+        let goal = NSTextField.text(headline ?? "No goal yet.", size: 14.5, weight: headline == nil ? .regular : .semibold,
+                                    color: headline == nil ? Palette.dim : Palette.fg, lines: 2)
+        goal.toolTip = r.epic.goal
+        let now = NSTextField.text("Where we are: " + sentence, size: 12.5, color: Palette.mut, lines: 3)
+        let left = NSStackView(v: [label, goal, now], spacing: 6)
+        for v in [goal, now] { v.widthAnchor.constraint(equalTo: left.widthAnchor).isActive = true }
+        left.setContentHuggingPriority(.init(1), for: .horizontal)
+
+        let pct = r.total == 0 ? 0 : Int((Double(r.done) / Double(r.total) * 100).rounded())
+        let counts = NSStackView(h: [NSTextField.text(r.total == 0 ? "No items" : "\(r.done) of \(r.total) done", size: 12.5), Spacer(),
+                                     NSTextField.text("\(pct)%", size: 12.5, color: Palette.mut)], spacing: 6)
+        let todo = max(0, r.total - r.done - r.started)
+        func legend(_ shape: String, _ word: String, _ n: Int, _ color: NSColor) -> NSView {
+            let v = NSStackView(h: [NSTextField.text(shape, size: 11.5, color: color), NSTextField.text("\(word) \(n)", size: 11.5, color: Palette.dim)], spacing: 3)
+            v.setAccessibilityElement(true)
+            v.setAccessibilityLabel("\(word), \(n)")
+            return v
+        }
+        let keys = NSStackView(h: [legend("■", "done", r.done, Palette.ok), legend("■", "doing", r.started, Palette.run),
+                                   legend("□", "to do", todo, Palette.dim), Spacer()], spacing: 12)
+        let bar = EpicBar(done: r.done, started: r.started, total: r.total, height: 8)
+        let right = NSStackView(v: [counts, bar, keys], spacing: 6)
+        for v in right.arrangedSubviews { v.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true }
+        right.widthAnchor.constraint(equalToConstant: 260).isActive = true
+
+        let row = NSStackView(h: [left, right], spacing: 28)
+        box.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 18), row.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -18),
+            row.topAnchor.constraint(equalTo: box.topAnchor, constant: 14), row.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -14),
+        ])
+        box.setAccessibilityElement(true)
+        box.setAccessibilityRole(.group)
+        box.setAccessibilityLabel("Where we are")
+        return box
+    }
+
+    /// The first line of the goal, with no Markdown marks.
+    static func headline(_ goal: String?) -> String? {
+        let line = (goal ?? "").split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+        guard var text = line else { return nil }
+        while let f = text.first, "#->*".contains(f) { text = text.dropFirst().trimmingCharacters(in: .whitespaces) }
+        text = text.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "").replacingOccurrences(of: "`", with: "")
+        return text.isEmpty ? nil : text
+    }
+
+    private func stepsCard(_ snap: ProjectSnapshot, _ plan: EpicPlan) -> NSView {
+        let c = Card(padding: 14, spacing: 0)
+        c.add(NSStackView(h: [NSTextField.text("Steps, in order", size: 13, weight: .bold),
+                              NSTextField.text("done first, then by the schedule · the gist is the AI summary of the item", size: 12, color: Palette.dim),
+                              Spacer()], spacing: 8))
+        let steps = plan.steps
+        if steps.done.isEmpty && steps.open.isEmpty {
+            c.add(NSTextField.text("The epic has no loaded items. Use Add items.", size: 12.5, color: Palette.dim))
+            return c
+        }
+        if !steps.done.isEmpty {
+            c.add(Self.rule())
+            c.add(doneFold(steps.done, plan))
+            if stepsDone {
+                for (i, k) in steps.done.enumerated() { c.add(doneLine(i + 1, k, plan)) }
+            }
+        }
+        for (i, step) in steps.open.enumerated() {
+            c.add(Self.rule())
+            c.add(stepLine(snap, step, plan, last: i == steps.open.count - 1))
+        }
+        return c
+    }
+
+    private static func rule() -> NSView {
+        let v = Box(fill: Palette.line, border: nil, radius: 0)
+        v.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return v
+    }
+
+    private func doneFold(_ done: [String], _ plan: EpicPlan) -> NSView {
+        let titles = done.map { plan.graph.nodes[$0]?.title ?? $0 }
+        let range = done.count == 1 ? "Step 1 done" : "Steps 1–\(done.count) done"
+        let text = NSTextField.text("\(range): " + titles.joined(separator: ", "), size: 12.5, color: Palette.dim)
+        text.setContentHuggingPriority(.init(1), for: .horizontal)
+        let toggle = ActionButton(stepsDone ? "Hide" : "Show", style: .link) { [weak self] in
+            self?.stepsDone.toggle()
+            self?.reload()
+        }
+        toggle.setAccessibilityLabel(stepsDone ? "Hide the done steps" : "Show the done steps")
+        return Row([Glyph("checkmark.circle.fill", color: Palette.ok, size: 16, label: "done"), text, toggle], height: 34, inset: 0, label: "\(range)")
+    }
+
+    private func doneLine(_ number: Int, _ key: String, _ plan: EpicPlan) -> NSView {
+        let title = plan.graph.nodes[key]?.title ?? key
+        let t = NSTextField.text(title, size: 13, color: Palette.mut)
+        t.setContentHuggingPriority(.init(1), for: .horizontal)
+        return Row([StepMarker(number, state: .done, line: false), t, NSTextField.text(key, size: 11.5, color: Palette.dim, mono: true)], height: 32, inset: 0,
+                   label: "Step \(number), \(title), \(key), done") { [weak self] in self?.go(.item(key, .overview)) }
+    }
+
+    private func stepLine(_ snap: ProjectSnapshot, _ step: PlanSteps.Step, _ plan: EpicPlan, last: Bool) -> NSView {
+        let key = step.key
+        let item = snap.items.first { $0.key.uppercased() == key }
+        let displayKey = item?.key ?? key
+        let title = plan.graph.nodes[key]?.title ?? key
+        let titleField = NSTextField.text(title, size: 14, weight: .semibold)
+        let keyField = NSTextField.text(displayKey, size: 11.5, color: Palette.dim, mono: true)
+        keyField.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleField.setContentHuggingPriority(.init(1), for: .horizontal)
+        var line: [NSView] = [titleField, keyField]
+        let (word, color) = stepState(step, plan)
+        let state = NSTextField.text(word, size: 12, color: color)
+        state.setContentCompressionResistancePriority(.required, for: .horizontal)
+        line.append(state)
+        if step.state == .ready, let item {
+            let start = ActionButton("Start", style: .primary)
+            start.controlSize = .small
+            start.onClick = { [weak self, weak start] in
+                guard let self, let start else { return }
+                SessionStartMenu(self.data).start(item, snap: snap, at: start)
+            }
+            start.setAccessibilityLabel("Start step \(step.number), \(displayKey)")
+            line.append(start)
+        } else if step.state == .nospec {
+            let planButton = ActionButton("Plan") { [weak self] in self?.go(.item(displayKey, .plan)) }
+            planButton.controlSize = .small
+            planButton.setAccessibilityLabel("Plan step \(step.number), \(displayKey)")
+            line.append(planButton)
+        }
+        let head = NSStackView(h: line, spacing: 10)
+        head.distribution = .fill
+        var body: [NSView] = [head]
+        var label = "Step \(step.number), \(title), \(displayKey), \(word)"
+        if let gist = data.itemSummaries.summary(key)?.gist {
+            body.append(NSTextField.text(gist, size: 12.5, color: Palette.mut, lines: 2))
+            label += ". \(gist)"
+        }
+        if let wait = step.waitsOnStep.map({ "Waits on step \($0)." }) ?? step.waitsOnKey.map({ "Waits on \($0)." }) {
+            body.append(NSTextField.text(wait, size: 12.5, color: Palette.mut))
+            label += ". \(wait)"
+        }
+        if let q = plan.questions[key] { body.append(questionBox(q)) }
+        let column = NSStackView(v: body, spacing: 6)
+        for v in body { v.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true }
+        column.setContentHuggingPriority(.init(1), for: .horizontal)
+
+        let marker = StepMarker(step.number, state: step.state, line: !last)
+        let row = Row([marker, column], height: 40, inset: 0, label: label) { [weak self] in self?.go(.item(displayKey, .overview)) }
+        row.stack.alignment = .top
+        row.stack.distribution = .fill
+        row.stack.spacing = 12
+        marker.bottomAnchor.constraint(equalTo: row.bottomAnchor).isActive = true
+        return row
+    }
+
+    /// The state text of a step: a glyph and a word, so the state never relies on color.
+    private func stepState(_ step: PlanSteps.Step, _ plan: EpicPlan) -> (String, NSColor) {
+        let key = step.key
+        func age(_ d: Date?) -> String { d.map { " · " + relativeTime($0).replacingOccurrences(of: " ago", with: "") } ?? "" }
+        switch step.state {
+        case .working:
+            let a = plan.agents[key]
+            let who = a.map { " · \($0.agent.rawValue)" } ?? ""
+            return ("● working\(who)\(age(a.map { $0.startedAt ?? $0.since }))", Palette.run)
+        case .input:
+            let at = plan.questions[key]?.question.askedAt ?? plan.agents[key]?.since
+            return ("▲ needs your answer\(age(at))", Palette.warn)
+        case .ready: return ("○ ready", Palette.dim)
+        case .nospec: return ("◌ no spec", Palette.dim)
+        case .waits: return ("⏸ waits", Palette.dim)
+        case .done: return ("✓ done", Palette.ok)
+        }
+    }
+
+    /// The question of a step in one line, with Answer. Answer opens the question card in a popover.
+    private func questionBox(_ e: QuestionBoard.Entry) -> NSView {
+        let box = Box(fill: Palette.raise, border: Palette.warn.withAlphaComponent(0.35), radius: 8)
+        let first = e.question.items.first
+        let more = e.question.items.count - 1
+        let text = NSTextField.text((first?.text ?? "The agent asks a question.") + (more > 0 ? "  (+\(more) more)" : ""), size: 12.5, lines: 2)
+        text.setContentHuggingPriority(.init(1), for: .horizontal)
+        let answer = ActionButton("Answer")
+        answer.controlSize = .small
+        answer.onClick = { [weak self, weak answer] in
+            guard let self, let answer else { return }
+            self.openAnswer(e, at: answer)
+        }
+        answer.setAccessibilityLabel("Answer the question: \(first?.text ?? "")")
+        let row = NSStackView(h: [NSTextField.text("?", size: 13, weight: .bold, color: Palette.warn), text, answer], spacing: 10)
+        box.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10), row.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
+            row.topAnchor.constraint(equalTo: box.topAnchor, constant: 7), row.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7),
+        ])
+        return box
+    }
+
+    private func openAnswer(_ e: QuestionBoard.Entry, at anchor: NSView) {
+        popover?.close()
+        let card = data.questions.card(e)
+        let holder = NSView()
+        holder.translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 8), card.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -8),
+            card.topAnchor.constraint(equalTo: holder.topAnchor, constant: 8), card.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -8),
+            holder.widthAnchor.constraint(equalToConstant: 480),
+        ])
+        holder.layoutSubtreeIfNeeded()
+        let vc = NSViewController()
+        vc.view = holder
+        let p = NSPopover()
+        p.behavior = .transient
+        p.contentViewController = vc
+        p.contentSize = holder.fittingSize
+        popover = p
+        p.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     // MARK: Overview
@@ -493,6 +749,58 @@ final class EpicPage: Page {
             }
             return c
         }
+    }
+}
+
+/// The plan of one epic: the numbered steps and the forecast. The graph holds all open epics of the project,
+/// so a blocker in another epic counts. Keys are upper case.
+struct EpicPlan {
+    let epic: Epic
+    let graph: PlanGraph
+    let schedule: PlanSchedule
+    let steps: PlanSteps
+    let forecast: EpicForecast
+    let agents: [String: AgentSession]
+    let questions: [String: QuestionBoard.Entry]
+
+    init(_ snap: ProjectSnapshot, epic: Epic, data: AppData, today: Date = Date()) {
+        var agents: [String: AgentSession] = [:], questions: [String: QuestionBoard.Entry] = [:]
+        var signals = PlanSignals()
+        for i in snap.items where i.epicId != nil {
+            let k = i.key.uppercased()
+            if let q = data.questions.open(key: i.key).first {
+                questions[k] = q
+                signals.input[k] = q.question.items.first?.text ?? ""
+            }
+            guard let a = data.agentIndex.agent(k) else { continue }
+            agents[k] = a
+            if a.needsInput {
+                signals.input[k] = signals.input[k] ?? AgentSession.question(in: a.message) ?? ""
+            } else if a.phase == .starting || a.phase == .working {
+                signals.working[k] = a.agent.rawValue
+            }
+        }
+        self.epic = epic
+        self.agents = agents
+        self.questions = questions
+        graph = PlanGraph.build(snap, epics: snap.epics ?? [], relations: data.projectStore.relations.byKey, signals: signals, today: today)
+        schedule = PlanSchedule.build(graph)
+        steps = PlanSteps.build(epic: epic.id, graph: graph, schedule: schedule)
+        forecast = schedule.forecast(epic, in: graph, today: today)
+    }
+
+    /// The first ready step. A ready step has no open blocker.
+    var next: PlanSteps.Step? { steps.open.first { $0.state == .ready } }
+
+    /// "▲ 2 days late · due Nov 16". Nil when the forecast is not late.
+    var lateText: String? {
+        guard let late = forecast.lateBy, late > 0 else { return nil }
+        return "▲ \(late) day\(late == 1 ? "" : "s") late" + (epic.targetDate.map { " · due " + EpicBoard.day($0) } ?? "")
+    }
+
+    /// Changes when the steps change.
+    var signature: [String] {
+        steps.done + steps.open.map { "\($0.number) \($0.key) \($0.state.rawValue) \($0.waitsOnStep ?? 0) \($0.waitsOnKey ?? "")" }
     }
 }
 

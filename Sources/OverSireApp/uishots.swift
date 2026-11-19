@@ -1122,6 +1122,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p == "epicpicker" {
                         // epicpicker: the picker of the epic chip on the open item page.
                         if let page = w.page as? ItemPage { page.showEpicPicker() } else { print("UISHOTS no item page \(p)") }
+                    } else if p == "epic-steps" || p == "epic-steps-question" {
+                        self.epicStepsState(p, in: w)
                     } else if p == "newepic", let snap = self.projectStore.snapshot("OVERSIRE") {
                         NewEpicSheet.present(over: w.window, snap: snap, data: self)
                     } else if MachinesSnapshot.scenes.contains(p) {

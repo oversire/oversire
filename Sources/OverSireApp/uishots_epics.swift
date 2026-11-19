@@ -86,3 +86,57 @@ extension UIShots {
         print("UISHOTS epics \(desk.map(\.key))")
     }
 }
+
+extension UIShots {
+    /// epic-steps: the Steps tab of "Review desk" with 5 open steps: working, ready, ready, no spec, and one that waits on a step.
+    /// epic-steps-question: the same, and the first ready step waits on an answer.
+    func epicStepsState(_ scene: String, in w: AppWindow) {
+        guard let snap = projectStore.snapshot("OVERSIRE") else { print("UISHOTS no OVERSIRE project"); return }
+        var open = snap.items.filter { $0.epicId == Self.epicID && !snap.isFinished($0) }
+        let todo = snap.statusOptions.first { $0.group == "unstarted" }, backlog = snap.statusOptions.first { $0.group == "backlog" }
+        let extra = snap.rootItems.filter { $0.epicId == nil && !snap.isClosed($0.statusOptionId) }.sorted { $0.key < $1.key }.prefix(max(0, 5 - open.count))
+        open = (open + extra).sorted { PlanGraph.keyOrder($0.key, $1.key) }
+        guard open.count == 5, let todo, let backlog else { print("UISHOTS epic-steps: needs 5 open items and the unstarted and backlog states"); return }
+        let status: [String: String] = [open[1].id: todo.id, open[2].id: todo.id, open[3].id: backlog.id, open[4].id: todo.id]
+        let items = snap.items.map { i -> Item in
+            let inEpic = open.contains { $0.id == i.id }
+            guard inEpic, var o = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(i))) as? [String: Any] else { return i }
+            o["epicId"] = Self.epicID.rawValue
+            if let s = status[i.id] { o["statusOptionId"] = s }
+            return (try? JSONSerialization.data(withJSONObject: o)).flatMap { try? JSONDecoder().decode(Item.self, from: $0) } ?? i
+        }
+        projectStore.seed(ProjectSnapshot(summary: snap.summary, statusOptions: snap.statusOptions, items: items, fetchedAt: snap.fetchedAt,
+                                          fields: snap.fields, me: snap.me, meId: snap.meId, index: snap.index, intake: snap.intake, epics: snap.epics))
+
+        let ref = snap.summary.ref
+        for i in open { projectStore.relations.seed(i.key, []) }
+        if let blocker = open[2].ref(in: ref) { projectStore.relations.seed(open[4].key, [ItemRelation(kind: .blockedBy, item: blocker)]) }
+
+        let now = Date()
+        agentIndex.hold = true
+        agentIndex.seed(open[0].key, AgentSession(phase: .working, since: now.addingTimeInterval(-14 * 60), card: "uishots-steps", paneKey: "p-steps",
+                                                  agent: .claude, repo: "oversire", startedAt: now.addingTimeInterval(-14 * 60)))
+        let gists = ["Add Open, Revert and Copy path to the right-click menu of a changed file.",
+                     "Block Approve until CI is green and no thread is open.",
+                     "J and K move between files; A approves; R asks for changes.",
+                     "Write the page of the review desk in the docs.",
+                     "Show the review desk of each Mac in one list."]
+        for (i, item) in open.enumerated() {
+            itemSummaries.seed(item.key, ItemSummary(gist: gists[i], hash: ItemSummary.hash((item.body ?? "").trimmingCharacters(in: .whitespacesAndNewlines))))
+        }
+
+        let account = ENV.machines?.sessions?.account ?? AccountID(provider: .daemon, id: "mba")
+        let session = SessionRef(workspace: WorkspaceRef(account: account, id: "w-steps"), id: "term-steps")
+        let id = QuestionID(rawValue: "daemon:mba:steps")
+        var entries = questions.entries.filter { $0.id != id }
+        if scene == "epic-steps-question" {
+            let ask = QuestionItem(id: "q1", header: "CI", text: "Count a skipped CI job as green?", why: "A skipped job has no result.", kind: .single,
+                                   options: [.init(label: "Yes"), .init(label: "No")], allowsOther: true)
+            let at = now.addingTimeInterval(-2 * 86_400)
+            entries.append(QuestionBoard.Entry(question: SessionQuestion(id: id, session: session, origin: .session, items: [ask], via: .form, askedAt: at),
+                                               state: .open, firstSeen: at))
+        }
+        questions.seed(entries, keys: [session: open[1].key])
+        w.router.go(.epic("OVERSIRE", Self.epicID.rawValue, .steps))
+    }
+}

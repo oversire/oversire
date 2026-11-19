@@ -7,7 +7,7 @@ enum Route: Equatable {
     // Lanes is the board of the queue lanes. It has no tab: the Up next group links to it.
     enum WorkTab: String, CaseIterable { case items, epics, review, worktrees, lanes }
     enum ItemTab: String, CaseIterable { case overview, plan, runbook, session, changes, subitems, activity }
-    enum EpicTab: String, CaseIterable { case overview, items, timeline }
+    enum EpicTab: String, CaseIterable { case overview, steps, items, timeline }
     enum SettingsPage: String, CaseIterable {
         case general, accounts, projects, agents, machines, ai, notifications, logs
 
@@ -249,6 +249,7 @@ enum Route: Equatable {
         .settings(.projects, tab: .repos), .settings(.agents, anchor: "queue"),
         .project("FRITZ"), .projectSettings("FRITZ", .appearance), .item("FRITZ-17", .overview), .item("FRITZ-17", .session),
         .item("FRITZ-17", .changes), .item("OVERSIRE-349", .plan), .epic("OVERSIRE", "uishots-epic", .overview),
+        .epic("OVERSIRE", "uishots-epic", .steps),
     ]
 }
 

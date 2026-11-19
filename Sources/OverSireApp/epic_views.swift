@@ -271,3 +271,72 @@ final class BurnUpChart: NSView {
         (square ? NSBezierPath(rect: rect) : NSBezierPath(ovalIn: rect)).fill()
     }
 }
+
+/// The number mark of one step: a check (done), a fill (working), a ring (input or ready), a dashed ring (waits or no spec).
+/// A line under the mark joins it to the next step.
+final class StepMarker: NSView {
+    static let side: CGFloat = 22
+    private let number: Int
+    private let state: PlanState
+    private let line: Bool
+
+    init(_ number: Int, state: PlanState, line: Bool) {
+        self.number = number
+        self.state = state
+        self.line = line
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 28).isActive = true
+        heightAnchor.constraint(greaterThanOrEqualToConstant: Self.side).isActive = true
+        setContentHuggingPriority(.required, for: .horizontal)
+        setAccessibilityElement(false)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let s = Self.side
+        let r = NSRect(x: (bounds.width - s) / 2, y: 0, width: s, height: s)
+        if line, bounds.height > s + 8 {
+            Palette.line.setFill()
+            NSRect(x: bounds.midX - 1, y: s + 4, width: 2, height: bounds.height - s - 4).fill()
+        }
+        var text = Palette.dim
+        switch state {
+        case .done:
+            Palette.ok.setFill()
+            NSBezierPath(ovalIn: r).fill()
+            let t = NSBezierPath()
+            t.move(to: NSPoint(x: r.minX + s * 0.3, y: r.midY + s * 0.01))
+            t.line(to: NSPoint(x: r.minX + s * 0.44, y: r.minY + s * 0.66))
+            t.line(to: NSPoint(x: r.minX + s * 0.72, y: r.minY + s * 0.36))
+            t.lineWidth = 1.7
+            t.lineCapStyle = .round
+            Palette.side.setStroke()
+            t.stroke()
+            return
+        case .working:
+            Palette.acc.setFill()
+            NSBezierPath(ovalIn: r).fill()
+            text = Palette.side
+        case .input, .ready:
+            let color = state == .input ? Palette.warn : Palette.dim
+            let p = NSBezierPath(ovalIn: r.insetBy(dx: 0.75, dy: 0.75))
+            p.lineWidth = 1.5
+            color.setStroke()
+            p.stroke()
+            text = state == .input ? Palette.warn : Palette.mut
+        case .waits, .nospec:
+            let p = NSBezierPath(ovalIn: r.insetBy(dx: 0.75, dy: 0.75))
+            p.lineWidth = 1.5
+            p.setLineDash([3, 2.5], count: 2, phase: 0)
+            Palette.dim.withAlphaComponent(0.8).setStroke()
+            p.stroke()
+        }
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: number > 99 ? 9.5 : 12, weight: .bold), .foregroundColor: text]
+        let str = NSAttributedString(string: "\(number)", attributes: attrs)
+        let size = str.size()
+        str.draw(at: NSPoint(x: r.midX - size.width / 2, y: r.midY - size.height / 2))
+    }
+}
