@@ -120,6 +120,18 @@ final class ProviderEventsTests: XCTestCase {
         for d in rows { XCTAssertEqual(EventCatalog.repo.problems(d), [], d.id) }
     }
 
+    func testMarkedItemNamesTheAgent() {
+        let s = snap([item("i1", "OVERSIRE-377", state: "s1", at: now), item("i2", "OVERSIRE-382", state: "s1", at: now)])
+        let c = Comment(id: "c9", author: "fritz", createdAt: now, url: "https://plane/c9", body: "Done")
+        let changes: [(itemId: String, ItemChange)] = [("i1", .assigned("bob")), ("i1", .comments(new: 1, last: c)), ("i2", .assigned("bob"))]
+        let agent = EventActor(type: .agent, name: "codex s1")
+        let rows = TrackerEvents.drafts(changes, old: s, new: s, provider: "plane", machine: "mba", actors: ["i1": agent, "i2": .user])
+        XCTAssertEqual(rows.map(\.item), ["OVERSIRE-377", "OVERSIRE-377", "OVERSIRE-382"])
+        XCTAssertEqual(rows.prefix(2).map(\.actorType), [.agent, .agent])
+        XCTAssertEqual(rows.prefix(2).map(\.actor), ["codex s1", "codex s1"])
+        XCTAssertEqual(rows[2].actorType, .human, "a human mark keeps the tracker user")
+    }
+
     // MARK: Epics
 
     func epic(_ id: String, _ title: String, state: EpicState = .active, created: Date? = nil, updated: Date? = nil,

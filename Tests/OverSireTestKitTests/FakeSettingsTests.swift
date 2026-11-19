@@ -39,6 +39,8 @@ final class FakeSettingsTests: XCTestCase {
                                          "IntakeCreating needs the capability intakeCreate",
                                          "AttachmentUploading needs the capability attachments",
                                          "AttachmentReading needs the capability attachmentsRead",
+                                         "LinkManaging needs the capability links",
+                                         "LabelManaging needs the capability labels",
                                          "EpicTracking needs the capability epics"])
     }
 }

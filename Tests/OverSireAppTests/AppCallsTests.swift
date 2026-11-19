@@ -25,7 +25,25 @@ final class AppCallsTests: XCTestCase {
 
     func testAllowsItemReads() {
         for id in ["item.get", "item.list", "item.markdown"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
-        XCTAssertFalse(AppCalls.allowed.contains("item.setStatus"))
+    }
+
+    func testAllowsItemWrites() {
+        let ids = ["item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start",
+                   "item.reopen", "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all"]
+        for id in ids { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        for id in ["item.closeSubItems", "intake.delete", "pr.merge"] { XCTAssertFalse(AppCalls.allowed.contains(id), id) }
+    }
+
+    func testRunsItemCommentForCli() async throws {
+        let rig = try await EpicRig()
+        let item = rig.items[0]
+        let posted = Posted()
+        let calls = AppCalls(catalog: rig.d.actions) { await posted.add($0) }
+        await calls.handle(AppCall(id: "c5", action: "item.comment", args: .object(["key": .string(item.key), "body": .string("Done in the CLI.")]), agent: "codex"))
+        let r = await posted.results
+        XCTAssertEqual(r.first?.status, .ok, r.first?.summary ?? "")
+        let comments = try await rig.fake.comments(item)
+        XCTAssertEqual(comments.map(\.body), ["Done in the CLI."])
     }
 
     func testRunsItemMarkdown() async throws {

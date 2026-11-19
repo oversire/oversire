@@ -26,8 +26,9 @@ final class EpicRig {
     var epic: Epic!
 
     /// `items`: the number of items. `epics`: the titles. `tracking`: false skips the first snapshot.
-    init(items n: Int = 3, epics titles: [String] = ["Review desk"], tracking: Bool = true) async throws {
-        fake = FakeTracker()
+    /// `capabilities`: the capabilities of the fake. The default is the full set.
+    init(items n: Int = 3, epics titles: [String] = ["Review desk"], tracking: Bool = true, capabilities: Set<Capability>? = nil) async throws {
+        fake = capabilities.map { FakeTracker(capabilities: $0) } ?? FakeTracker()
         for i in 1...n { items.append(try await fake.create(ItemDraft(title: "Item \(i)"), in: fake.project)) }
         for t in titles {
             let e = try await fake.createEpic(EpicDraft(title: t), in: fake.project)
@@ -57,6 +58,15 @@ final class EpicRig {
         await withCheckedContinuation { c in
             DispatchQueue.main.async { self.d.projectStore.refresh([self.fake.project.storeKey], force: true, priority: .user) { _ in c.resume() } }
         }
+    }
+
+    /// The first row of the kind. It waits for the row.
+    func row(_ kind: Event.Kind) async -> EventDraft? {
+        for _ in 0..<200 {
+            if let r = await outlet.rows.first(where: { $0.kind == kind }) { return r }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return nil
     }
 
     func rows(count: Int) async -> [EventDraft] {
@@ -119,7 +129,7 @@ final class ProjectStoreEpicTests: XCTestCase {
         let ok: Bool = await withCheckedContinuation { c in
             DispatchQueue.main.async {
                 rig.d.projectStore.setEpic(rig.epic.id, itemId: item.id) { c.resume(returning: $0) }
-                XCTAssertEqual(rig.d.projectStore.epicWrites, [item.id: .user])
+                XCTAssertEqual(rig.d.projectStore.writeActors, [item.id: .user])
             }
         }
         XCTAssertTrue(ok)
@@ -128,7 +138,7 @@ final class ProjectStoreEpicTests: XCTestCase {
         XCTAssertEqual(rows[1].actorType, .human)
         XCTAssertEqual(rows[1].item, item.key)
         XCTAssertEqual(rows[1].parentItem, rig.epic.eventKey)
-        let left = await MainActor.run { rig.d.projectStore.epicWrites }
+        let left = await MainActor.run { rig.d.projectStore.writeActors }
         XCTAssertEqual(left, [:])
         let snap = await rig.snapshot()
         XCTAssertEqual(snap?.epicId(of: item.id), rig.epic.id)
@@ -140,7 +150,7 @@ final class ProjectStoreEpicTests: XCTestCase {
             DispatchQueue.main.async { rig.d.projectStore.setEpic("nope", itemId: rig.items[0].id) { c.resume(returning: $0) } }
         }
         XCTAssertFalse(ok)
-        let left = await MainActor.run { rig.d.projectStore.epicWrites }
+        let left = await MainActor.run { rig.d.projectStore.writeActors }
         XCTAssertEqual(left, [:])
     }
 

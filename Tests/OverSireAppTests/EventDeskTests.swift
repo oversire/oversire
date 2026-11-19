@@ -56,6 +56,24 @@ final class EventDeskTests: XCTestCase {
         XCTAssertEqual(EventCatalog.repo.problems(r[0]), [])
     }
 
+    func testStateSetWithAgent() async {
+        let o = Outlet()
+        let d = desk(o) { self.start }
+        let p = ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE")
+        let item = Item(id: "i1", key: "OVERSIRE-382", title: "Capture", url: "", statusOptionId: "s1", fields: [:], assignees: [], labels: [],
+                        author: "fritz", updatedBy: "fritz", updatedAt: start, activityAt: start, commentCount: 0, lastComment: nil,
+                        mentionsMe: false, parentId: nil)
+        let snap = ProjectSnapshot(summary: ProjectSummary(ref: p, identifier: "OVERSIRE", title: "OverSire", url: "", closed: false),
+                                   statusOptions: [StatusOption(id: "s1", name: "Todo", color: "", group: "unstarted"),
+                                                   StatusOption(id: "s2", name: "Done", color: "", group: "completed")],
+                                   items: [item], fetchedAt: start)
+        d.stateSet(item, in: snap, to: "s2", actor: EventActor(type: .agent, name: "codex s1"))
+        let r = await rows(o, count: 1)
+        XCTAssertEqual(r[0].actorType, .agent)
+        XCTAssertEqual(r[0].actor, "codex s1")
+        XCTAssertEqual(EventCatalog.repo.problems(r[0]), [])
+    }
+
     func testViewedAtMostOnceEachTenMinutes() async {
         let o = Outlet()
         var t = start
