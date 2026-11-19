@@ -48,10 +48,12 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |
-| tracker | `item.created`, `item.updated`, `comment.created`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed`, `epic.updated` |
+| tracker | `item.created`, `item.updated`, `comment.created`, `item.link_added`, `item.attachment_added`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed`, `epic.updated` |
 | system | `queue.picked`, `queue.held`, `runbook.step_started`, `runbook.step_ended`, `job.ran`, `automation.ran`, `item.state_changed` (actor `parent-guard`, payload `reason: open-sub-items`) |
 
 A reader keeps a row of a kind that it does not know.
+
+A write from an `oversire` command (an app call) names the agent as the actor. This holds for `item.state_changed`, `item.link_added`, `item.attachment_added` and the poll rows `item.created`, `item.updated` and `comment.created` of that write. The app marks the item until the refresh after the write ends.
 
 ## The path
 

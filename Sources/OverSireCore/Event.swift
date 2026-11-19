@@ -204,6 +204,8 @@ extension Event {
         public static let itemViewed: Kind = "item.viewed"
         public static let itemFavorited: Kind = "item.favorited"
         public static let itemUnfavorited: Kind = "item.unfavorited"
+        public static let itemLinkAdded: Kind = "item.link_added"
+        public static let itemAttachmentAdded: Kind = "item.attachment_added"
         public static let worktreeAdded: Kind = "worktree.added"
         public static let worktreeRemoved: Kind = "worktree.removed"
         public static let gitCommit: Kind = "git.commit"

@@ -18,6 +18,8 @@ struct EventTag: Equatable {
         case "item.shipped": self.init("shipped", Palette.ok)
         case "item.viewed": self.init("viewed", Palette.dim)
         case "item.favorited", "item.unfavorited": self.init("favorite", Palette.dim)
+        case "item.link_added": self.init("link", Palette.acc)
+        case "item.attachment_added": self.init("file", Palette.acc)
         case "question.answered": self.init("answer", Palette.intake)
         case "pr.opened", "pr.updated", "pr.merged", "pr.closed": self.init("PR", Palette.ok)
         case "ci.queued", "ci.started", "ci.completed", "ci.rerun": self.init("CI", Palette.warn)
