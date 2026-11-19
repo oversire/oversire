@@ -216,6 +216,7 @@ extension Event {
         public static let epicItemAdded: Kind = "epic.item_added"
         public static let epicItemRemoved: Kind = "epic.item_removed"
         public static let epicClosed: Kind = "epic.closed"
+        public static let projectNorthStarSet: Kind = "project.north_star_set"
         public static let queuePicked: Kind = "queue.picked"
         public static let queueHeld: Kind = "queue.held"
         public static let runbookStepStarted: Kind = "runbook.step_started"

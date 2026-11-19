@@ -1126,6 +1126,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.epicStepsState(p, in: w)
                     } else if p == "newepic", let snap = self.projectStore.snapshot("OVERSIRE") {
                         NewEpicSheet.present(over: w.window, snap: snap, data: self)
+                    } else if p.hasPrefix("project-plan") {
+                        self.planState(p, in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {

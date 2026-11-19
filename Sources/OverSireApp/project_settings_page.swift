@@ -439,10 +439,10 @@ final class ProjectSettingsPage: Page {
     private func memory(_ body: NSStackView, _ p: ProjectSummary) {
         let mem = data.memory
         let saved = mem.vision(of: p.ref)
-        let c = card("Vision", local: true)
+        let c = card("North star", local: true)
         c.add(NSTextField.text("The true north of \(p.title). Triage and the queue order read it. Keep it short.", size: 12, color: Palette.dim, lines: 2))
         let text = visionDraft ?? saved?.text ?? ""
-        let input = LimitedInput(text, placeholder: "What this project is for, and what is out of scope.", label: "Project vision", lines: 5)
+        let input = LimitedInput(text, placeholder: "What this project is for, and what is out of scope.", label: "North star", lines: 5)
         let counter = NSTextField.text("", size: 11.5, color: Palette.dim)
         let revert = ActionButton("Revert") { [weak self] in self?.revertVision() }
         let save = ActionButton("Save", style: .primary) { [weak self] in self?.saveVision(p) }
@@ -462,9 +462,9 @@ final class ProjectSettingsPage: Page {
         input.onRevert = { [weak self] in self?.revertVision() }
         update(text)
         c.add(input)
-        let who = saved.map { "Last saved by \(source($0)) · \(relativeTime($0.updatedAt))" } ?? "No vision yet"
+        let who = saved.map { "Last saved by \(source($0)) · \(relativeTime($0.updatedAt))" } ?? "No north star yet"
         c.add(NSStackView(h: [counter, NSTextField.text("·", size: 11.5, color: Palette.dim), NSTextField.text(who, size: 11.5, color: Palette.dim), Spacer(), revert, save], spacing: 6))
-        c.add(NSTextField.text("⌘S saves. Esc reverts. One vision for each project, at most \(MemoryDraft.maxText) characters.", size: 11, color: Palette.dim))
+        c.add(NSTextField.text("⌘S saves. Esc reverts. One north star for each project, at most \(MemoryDraft.maxText) characters.", size: 11, color: Palette.dim))
         body.addFull(c)
 
         let facts = mem.facts(of: p.ref)
@@ -528,16 +528,23 @@ final class ProjectSettingsPage: Page {
         reload()
     }
 
+    // A text goes through the action, so that each edit makes an event. An empty text removes the north star.
     private func saveVision(_ p: ProjectSummary) {
         guard let t = visionDraft else { return }
+        guard t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            data.actions.click("project.setNorthStar", ["project": .string(p.identifier), "text": .string(t)], in: view.window) { [weak self] r in
+                guard let self else { return }
+                if case .ok = r { (self.visionDraft, self.note) = (nil, nil) }
+                self.reload()
+            }
+            return
+        }
         do {
             try data.memory.saveVision(t, of: p.ref)
             visionDraft = nil
             note = nil
-        } catch ProjectMemory.SaveError.tooLong(let n) {
-            note = (.warning, "The vision has at most \(MemoryDraft.maxText) characters. It has \(n). Make it shorter to save.")
         } catch {
-            note = (.bad, "Could not save the vision: \(error.localizedDescription)")
+            note = (.bad, "Could not remove the north star: \(error.localizedDescription)")
         }
         reload()
     }

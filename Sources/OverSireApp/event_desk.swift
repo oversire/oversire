@@ -121,12 +121,13 @@ final class EventDesk: @unchecked Sendable {
 
     // MARK: Your actions
 
-    /// A row of an action that you did in this app. verb makes the id unique with the time.
-    func action(_ kind: Event.Kind, item: String?, project: String? = nil, verb: String, _ summary: String, payload: [String: JSONValue]? = nil) {
+    /// A row of an action in this app. verb makes the id unique with the time. An agent caller gives its actor.
+    func action(_ kind: Event.Kind, item: String?, project: String? = nil, verb: String, _ summary: String, payload: [String: JSONValue]? = nil,
+                actorType: ActorType = .human, actor: String? = nil) {
         let at = now()
         let id = "app:\(machine()):\(item ?? "-"):\(verb):\(Int64(at.timeIntervalSince1970 * 1000))"
-        send([EventDraft(id: id, at: at, kind: kind, item: item, project: project?.lowercased(), machine: machine(), actorType: .human,
-                         actor: actor, via: via, summary: summary, payload: payload)])
+        send([EventDraft(id: id, at: at, kind: kind, item: item, project: project?.lowercased(), machine: machine(), actorType: actorType,
+                         actor: actor ?? self.actor, via: via, summary: summary, payload: payload)])
     }
 
     /// A row of the app itself, for you: the queue.

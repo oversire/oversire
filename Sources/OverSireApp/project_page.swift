@@ -169,13 +169,30 @@ enum ProjectLookup: Hashable {
     }
 }
 
-// Items of one project: a list grouped by status, or a board.
-final class ProjectPage: Page {
-    private enum Layout: String { case list, board }
-    private static let layoutKey = "projectLayout"
-    override var fillsHeight: Bool { !board }
-    // List, unless the person picked Board.
-    private var board = Layout(rawValue: UserDefaults.standard.string(forKey: ProjectPage.layoutKey) ?? "") == .board
+/// The three tabs of a project page. Plan is the default. The key "projectView" replaces "projectLayout".
+enum ProjectTab: String, CaseIterable {
+    case plan, list, board
+
+    static let key = "projectView"
+
+    var title: String { rawValue.capitalized }
+
+    static func stored(_ defaults: UserDefaults = .standard) -> ProjectTab {
+        ProjectTab(rawValue: defaults.string(forKey: key) ?? "") ?? .plan
+    }
+}
+
+// One project: the plan, a list grouped by status, or a board.
+final class ProjectPage: Page, PlanHost {
+    override var fillsHeight: Bool { tab == .list || (tab == .plan && plan.segment != .summary) }
+    private(set) var tab = UIShots.shooting ? .plan : ProjectTab.stored() {
+        didSet { if !UIShots.shooting { UserDefaults.standard.set(tab.rawValue, forKey: ProjectTab.key) } }
+    }
+    private var board: Bool { tab == .board }
+    let plan = PlanControls()
+    /// A place on the plan that another page asks for, by project identifier. The page shows it, then clears it.
+    static var pending: [String: PlanFocus] = [:]
+    private var memoryWatch: NSObjectProtocol?
     // Group by epic, for all projects like the layout. A shot starts with Status and keeps the choice in memory.
     private static let groupKey = "projectGroupByEpic"
     private(set) var groupByEpic = !UIShots.shooting && UserDefaults.standard.bool(forKey: ProjectPage.groupKey)
@@ -191,12 +208,44 @@ final class ProjectPage: Page {
 
     private var projectKey: String { if case .project(let k) = route { return k }; return "" }
 
-    override var watches: DataDomains { [.projects, .intake, .agents, .runs, .summaries, .config] }
+    override var watches: DataDomains { [.projects, .intake, .agents, .runs, .summaries, .config, .relations, .questions] }
     override var parts: [PagePart] { data.projectStore.key(identifier: projectKey).map { [data.projectStore.part([$0])] } ?? [] }
 
     override func viewed() {
         data.projectStore.key(identifier: projectKey).map(data.projectStore.viewed)
+        if let f = Self.pending.removeValue(forKey: projectKey) { show(plan: f.segment, focus: f.key, epic: f.epic) }
+        // The page builds before it shows, so a new visit builds again with its `since`.
+        if tab == .plan, enterPlan() { reload(reason: "plan visit") }
+        memoryWatch = memoryWatch ?? NotificationCenter.default.addObserver(forName: ProjectMemory.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.tab == .plan else { return }
+            self.reload(reason: "north star")
+        }
     }
+
+    override func detach() {
+        super.detach()
+        PlanVisits.shared.leave(projectKey)
+    }
+
+    deinit { memoryWatch.map(NotificationCenter.default.removeObserver) }
+
+    @discardableResult
+    private func enterPlan() -> Bool {
+        data.projectStore.key(identifier: projectKey).map(data.projectStore.loadPlan)
+        return PlanVisits.shared.enter(projectKey)
+    }
+
+    /// Shows the plan in this segment. A key or an epic is the place to show; Map and Timeline use it.
+    func show(plan segment: PlanView.Segment, focus key: String? = nil, epic: EpicID? = nil) {
+        let entering = tab != .plan
+        tab = .plan
+        plan.segment = segment
+        plan.focus = key != nil || epic != nil ? PlanFocus(segment: segment, key: key, epic: epic) : nil
+        if entering { enterPlan() }
+        reload()
+    }
+
+    func planChanged() { reload() }
 
     override var shownProjects: Set<String>? { snapshot.map { [$0.summary.ref.storeKey] } }
 
@@ -225,20 +274,21 @@ final class ProjectPage: Page {
         let board = board, ident = snap.summary.identifier
         let hasEpics = snap.epics != nil
         let byEpic = Self.groupsByEpic(snap: snap, board: board, preferred: groupByEpic)
-        let header = PageRow("header", snap.summary.title, snap.summary.url, open, intake, board, hasEpics, groupByEpic) { [weak self] in
+        let shown = tab
+        let header = PageRow("header", snap.summary.title, snap.summary.url, open, intake, shown, hasEpics, groupByEpic) { [weak self] in
             var actions: [NSView] = []
             if intake > 0 {
                 actions.append(ActionButton("\(intake) intake", symbol: "tray.and.arrow.down") { self?.go(.intake(key)) })
             }
-            if Self.showsGroupBy(snap: snap, board: board) {
+            if shown != .plan, Self.showsGroupBy(snap: snap, board: board) {
                 let group = NSSegmentedControl(labels: ["Status", "Epic"], trackingMode: .selectOne, target: self, action: #selector(ProjectPage.groupChanged(_:)))
                 group.selectedSegment = byEpic ? 1 : 0
                 group.setAccessibilityLabel("Group by")
                 actions.append(group)
             }
-            let seg = NSSegmentedControl(labels: ["List", "Board"], trackingMode: .selectOne, target: self, action: #selector(ProjectPage.layoutChanged(_:)))
-            seg.selectedSegment = board ? 1 : 0
-            seg.setAccessibilityLabel("Layout")
+            let seg = NSSegmentedControl(labels: ProjectTab.allCases.map(\.title), trackingMode: .selectOne, target: self, action: #selector(ProjectPage.layoutChanged(_:)))
+            seg.selectedSegment = ProjectTab.allCases.firstIndex(of: shown) ?? 0
+            seg.setAccessibilityLabel("Project view")
             actions.append(seg)
             if hasEpics {
                 let new = ActionButton("New epic", symbol: "plus") { [weak self] in
@@ -268,6 +318,15 @@ final class ProjectPage: Page {
                 Spacer(),
                 NSTextField.text(caption, size: 12, color: Palette.dim),
             ], spacing: 6)
+        }
+        if shown == .plan {
+            let model = PlanModel.build(data: data, snap: snap, controls: plan)
+            let controls = plan
+            return [PageSection("top", rows: [header]), PageSection("plan", rows: [
+                PageRow("plan", hash: model.fingerprint, update: { ($0 as? PlanView)?.show(model) }) { [weak self] in
+                    self.map { PlanView(model, controls: controls, host: $0) } ?? NSView()
+                },
+            ])]
         }
         let top = PageSection("top", rows: [header, filters])
 
@@ -419,8 +478,11 @@ final class ProjectPage: Page {
     }
 
     @objc fileprivate func layoutChanged(_ s: NSSegmentedControl) {
-        board = s.selectedSegment == 1
-        UserDefaults.standard.set((board ? Layout.board : .list).rawValue, forKey: ProjectPage.layoutKey)
+        let picked = ProjectTab.allCases[max(0, s.selectedSegment)]
+        guard picked != tab else { return }
+        if tab == .plan { PlanVisits.shared.leave(projectKey) }
+        tab = picked
+        if tab == .plan { enterPlan() }
         reload()
     }
 }
