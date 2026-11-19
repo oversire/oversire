@@ -272,9 +272,16 @@ final class EpicPage: Page {
 
     private func stepsCard(_ snap: ProjectSnapshot, _ plan: EpicPlan) -> NSView {
         let c = Card(padding: 14, spacing: 0)
-        c.add(NSStackView(h: [NSTextField.text("Steps, in order", size: 13, weight: .bold),
-                              NSTextField.text("done first, then by the schedule · the gist is the AI summary of the item", size: 12, color: Palette.dim),
-                              Spacer()], spacing: 8))
+        let ident = snap.summary.identifier, id = plan.epic.id
+        let show = { [weak self] (segment: PlanView.Segment) in
+            ProjectPage.pending[ident.uppercased()] = PlanFocus(segment: segment, key: nil, epic: id)
+            self?.go(.project(ident))
+        }
+        let note = NSTextField.text("done first, then by the schedule · the gist is the AI summary of the item", size: 12, color: Palette.dim)
+        note.setContentHuggingPriority(.init(1), for: .horizontal)
+        c.add(NSStackView(h: [NSTextField.text("Steps, in order", size: 13, weight: .bold), note,
+                              ActionButton("Show on map ›", style: .link) { show(.map) },
+                              ActionButton("Show on timeline ›", style: .link) { show(.timeline) }], spacing: 8))
         let steps = plan.steps
         if steps.done.isEmpty && steps.open.isEmpty {
             c.add(NSTextField.text("The epic has no loaded items. Use Add items.", size: 12.5, color: Palette.dim))

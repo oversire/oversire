@@ -64,7 +64,7 @@ final class PlanView: NSStackView {
         guard let host else { return NSView() }
         switch segment {
         case .summary: return PlanSummaryView(model, controls: controls, host: host)
-        case .map: return EmptyNote("Map comes next.", symbol: "point.3.connected.trianglepath.dotted")
+        case .map: return PlanMapPane(model, controls: controls, host: host)
         case .timeline: return PlanGanttSegment(model, controls: controls, host: host)
         }
     }

@@ -7,6 +7,7 @@ import OverSireCore
 
 extension UIShots {
     func planState(_ scene: String, in w: AppWindow) {
+        defer { if scene.hasPrefix("project-plan-map") { planMapScene(scene, in: w) } }
         guard let snap = projectStore.snapshot("OVERSIRE") else { print("UISHOTS no OVERSIRE project"); return }
         // Leave the page of a scene before, so its visit ends before the seed.
         w.router.go(.activity)
