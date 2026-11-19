@@ -244,16 +244,21 @@ struct ProjectsConfig: Codable {
 
     init() {}
 
+    /// Drops the picks and the all-of flags of accounts that are not tracker accounts.
+    mutating func dropStale(trackers: Set<String>) {
+        picked.removeAll { !trackers.contains($0.split(separator: "/").first.map(String.init) ?? "") }
+        allOf.removeAll { !trackers.contains($0) }
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         workspaces = try c.decodeIfPresent([PlaneWorkspace].self, forKey: .workspaces) ?? []
-        // Keys of GitHub projects ("owner/3") and of removed workspaces are stale.
-        let slugs = Set(workspaces.map(\.slug))
+        // Keys of GitHub projects ("owner/3") are stale. dropStale removes picks of removed accounts.
         picked = (try c.decodeIfPresent([String].self, forKey: .picked) ?? []).filter { k in
             let parts = k.split(separator: "/")
-            return parts.count == 2 && slugs.contains(String(parts[0])) && parts[1].count == 36
+            return parts.count == 2 && parts[1].count == 36
         }
-        allOf = (try c.decodeIfPresent([String].self, forKey: .allOf) ?? []).filter { slugs.contains($0) }
+        allOf = try c.decodeIfPresent([String].self, forKey: .allOf) ?? []
         pollMinutes = min(30, max(2, try c.decodeIfPresent(Int.self, forKey: .pollMinutes) ?? 5))
         itemsPerProject = try c.decodeIfPresent(Int.self, forKey: .itemsPerProject) ?? 10
         hideDoneAfterDays = try c.decodeIfPresent(Int.self, forKey: .hideDoneAfterDays) ?? 1
@@ -1144,6 +1149,7 @@ func loadConfig(save: Bool = true) {
     if let m = c.machines { MACHINES = m }
     MY_EMAIL = c.email
     ACCOUNTS = AppEnvironment.accounts(from: c)
+    PROJECTS_CFG.dropStale(trackers: Set(ACCOUNTS.filter { ENV.registry.descriptor($0.account.provider)?.layer == .tracker }.map(\.account.id)))
     let moved = LegacyMigration.moveOrca(&ACCOUNTS, machines: &MACHINES, environment: PROJECTS_CFG.orca.legacyEnvironment)
     AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
     ENV.load(ACCOUNTS)

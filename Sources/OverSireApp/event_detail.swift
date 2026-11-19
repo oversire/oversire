@@ -410,7 +410,10 @@ final class EventDetailCard: Box {
         var head: [NSView] = [NSTextField.text("\(tag.word.prefix(1).uppercased() + tag.word.dropFirst()) by \(who) · \(dayTime(e.at, now: now))",
                                                size: 13, weight: .semibold), Spacer()]
         if case .string(let s)? = e.payload?["url"], let url = URL(string: s) {
-            let where_ = e.provider == "plane" || e.kind == .commentCreated ? "Open in Plane" : e.kind.domain == "ci" ? "Open run" : "Open"
+            let tracker = e.provider.flatMap { ENV.registry.descriptor(ProviderID(rawValue: $0)) }
+            let layer = tracker?.layer
+            let where_ = layer == .tracker || e.kind == .commentCreated ? "Open in \(tracker?.displayName ?? ENV.trackerNames())"
+                : e.kind.domain == "ci" ? "Open run" : "Open"
             head.append(ActionButton(where_, symbol: "arrow.up.right.square", style: .ghost) { NSWorkspace.shared.open(url) })
         }
         if let k = e.item, k.uppercased() != pageKey.uppercased() {

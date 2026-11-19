@@ -161,11 +161,7 @@ final class ProjectSettingsPage: Page {
     private var key: String { if case .projectSettings(let k, _) = route { return k }; return "" }
     private var section: ProjectSettingsSection { if case .projectSettings(_, let s) = route { return s }; return .appearance }
     private var project: ProjectSummary? { data.projectStore.tracked.first { $0.identifier.uppercased() == key } }
-    private var trackerName: String {
-        guard let p = project else { return "the tracker" }
-        let id = p.ref.account.provider.rawValue
-        return id == "plane" ? "Plane" : id.prefix(1).uppercased() + id.dropFirst()
-    }
+    private var trackerName: String { project.map { ENV.trackerName($0.ref.account) } ?? "the tracker" }
     private var local: ProjectLocalSettings { PROJECTS_CFG.local(key) }
 
     override var fillsHeight: Bool { project != nil }

@@ -25,7 +25,12 @@ final class MenuChip: Chiplet {
 final class ItemPage: Page, NSTextFieldDelegate {
     override var fillsHeight: Bool { tab == .subitems || tab == .changes }
     private let subTable = ColumnLayout(id: "subitems-2", columns: ItemLine.columns())
-    private enum Source: String, CaseIterable { case all = "All", plane = "Plane", github = "GitHub", orca = "Orca", oversire = "OverSire" }
+    private enum Source: String, CaseIterable {
+        case all = "All", tracker = "Tracker", github = "GitHub", orca = "Orca", oversire = "OverSire"
+
+        /// The tracker source shows the name of the tracker of the item.
+        func title(_ tracker: String) -> String { self == .tracker ? tracker : rawValue }
+    }
 
     private let markdown = MarkdownView(width: 600)
     private var markdownHeight: NSLayoutConstraint?
@@ -401,7 +406,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             b.toolTip = "All sub-items are finished. Set \(item.key) to \(done.name)."
             chips.append(b)
         }
-        chips.append(priorityChip(item))
+        if snap.hasPriority { chips.append(priorityChip(item)) }
         if let c = epicChip(snap: snap, item: item) { chips.append(c) }
         chips += item.labels.prefix(4).map { Chiplet($0, symbol: "tag") as NSView }
         if !item.assignees.isEmpty { chips.append(Chiplet(item.assignees.joined(separator: ", "), symbol: "person")) }
@@ -456,7 +461,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(Route.item(self.key, .overview).url.absoluteString, forType: .string)
             },
-            ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: item.url)!) },
+            ActionButton("Open in \(ENV.trackerName(snap.summary.ref.account))", symbol: "arrow.up.right.square") {
+                if let url = URL(string: item.url) { NSWorkspace.shared.open(url) }
+            },
         ]
         let v = NSStackView(v: [], spacing: 7)
         v.addFull(keyLine)
@@ -502,7 +509,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private func openSubItemsBanner(snap: ProjectSnapshot, item: Item, open: [String]) -> NSView {
         let total = snap.progress(of: item.id).total
         let closeTitle = "Close \(open.count) sub-item\(open.count == 1 ? "" : "s")"
-        return Banner(.warning, title: "Plane says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(open.count) of \(max(total, open.count)) sub-items are open.",
+        return Banner(.warning, title: "\(ENV.trackerName(snap.summary.ref.account)) says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(open.count) of \(max(total, open.count)) sub-items are open.",
                       body: "OverSire counts this item as not finished. Close the sub-items, or move the parent back to In progress.",
                       actions: [
                         ActionButton(closeTitle, symbol: "checkmark.circle", style: .primary) { [weak self] in self?.closeSubItems(open, snap: snap, item: item) },
@@ -1215,7 +1222,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         guard let s = summary else {
             let why = !AI_CFG.enabled ? "Turn on AI in Settings › AI to summarize sessions."
                 : !AI_CFG.sessionSummary ? "Session summaries are off in Settings › AI."
-                : "No summary yet. OverSire writes one when the session ends" + (AGENTS.writeBack.sessionComment ? ", and posts it as one Plane comment." : ".")
+                : "No summary yet. OverSire writes one when the session ends" + (AGENTS.writeBack.sessionComment ? ", and posts it as one \(data.projectStore.trackerName(of: key)) comment." : ".")
             c.add(EmptyNote(why, symbol: "sparkles"))
             return c
         }
@@ -1309,8 +1316,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 }
             }
             if progress.total > kids.count {
-                list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in Plane", size: 12, color: Palette.acc)], height: 32) {
-                    NSWorkspace.shared.open(URL(string: item.url)!) })
+                list.add(Row([NSTextField.text("\(progress.total - kids.count) more sub-items in \(ENV.trackerName(snap.summary.ref.account))", size: 12, color: Palette.acc)], height: 32) {
+                    if let url = URL(string: item.url) { NSWorkspace.shared.open(url) } })
             }
             if list.isEmpty { list.add(EmptyNote("No sub-items.", symbol: "list.bullet.indent")) }
             return list
@@ -1326,9 +1333,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         var out: [Event] = []
         for e in timeline ?? [] {
             if case .comments(_, let c) = e.change {
-                out.append(Event(source: .plane, text: "\(c.author ?? "Someone") commented", at: c.createdAt, body: c.body))
+                out.append(Event(source: .tracker, text: "\(c.author ?? "Someone") commented", at: c.createdAt, body: c.body))
             } else {
-                out.append(Event(source: .plane, text: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at))
+                out.append(Event(source: .tracker, text: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at))
             }
         }
         for r in stream?.runs.prefix(20) ?? [] {
@@ -1364,8 +1371,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let shown = all.filter { source == .all || $0.source == source }
         return lead + [
             PageRow("filters", source) { [unowned self] in
-                NSStackView(h: Source.allCases.map { s in
-                    ToggleChip(s.rawValue, on: source == s) { [weak self] in self?.activitySource = s; self?.reload() } as NSView
+                let tracker = self.data.projectStore.trackerName(of: self.key)
+                return NSStackView(h: Source.allCases.map { s in
+                    ToggleChip(s.title(tracker), on: source == s) { [weak self] in self?.activitySource = s; self?.reload() } as NSView
                 } + [Spacer()], spacing: 6)
             },
             PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
@@ -1551,6 +1559,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     private func activityList(_ shown: [Event], pending: String?, loading: Bool) -> NSView {
         let list = ListCard()
+        let tracker = data.projectStore.trackerName(of: key)
         if let pending {
             list.add(Row([Spinner(size: .mini), NSTextField.text(pending, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
                          height: 34, label: "Sending comment: \(pending)"))
@@ -1570,18 +1579,18 @@ final class ItemPage: Page, NSTextFieldDelegate {
             }
             let text = NSStackView(v: col, spacing: 4)
             text.setContentHuggingPriority(.init(1), for: .horizontal)
-            let src = Chiplet(e.source.rawValue)
+            let src = Chiplet(e.source.title(tracker))
             let srcBox = NSView()
             srcBox.translatesAutoresizingMaskIntoConstraints = false
             srcBox.addSubview(src)
             NSLayoutConstraint.activate([
-                srcBox.widthAnchor.constraint(equalToConstant: 64), srcBox.heightAnchor.constraint(equalTo: src.heightAnchor),
+                srcBox.widthAnchor.constraint(equalToConstant: 72), srcBox.heightAnchor.constraint(equalTo: src.heightAnchor),
                 src.leadingAnchor.constraint(equalTo: srcBox.leadingAnchor), src.topAnchor.constraint(equalTo: srcBox.topAnchor),
             ])
             let route = e.route
             let at = e.at
             let row = Row([srcBox, text, RelativeTimeLabel({ at })], height: 34,
-                          label: "\(e.source.rawValue): \(e.text)", onClick: route.map { r in { [weak self] in self?.go(r) } })
+                          label: "\(e.source.title(tracker)): \(e.text)", onClick: route.map { r in { [weak self] in self?.go(r) } })
             row.stack.alignment = .top
             list.add(row)
         }

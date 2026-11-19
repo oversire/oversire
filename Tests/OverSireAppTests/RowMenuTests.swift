@@ -10,7 +10,8 @@ final class RowMenuTests: XCTestCase {
         ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "https://plane/sling", closed: false),
                         statusOptions: [StatusOption(id: "s1", name: "Todo", color: "#000", group: "unstarted"),
                                         StatusOption(id: "s2", name: "Done", color: "#000", group: "completed")],
-                        items: [], fetchedAt: Date())
+                        items: [], fetchedAt: Date(),
+                        fields: [ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority", options: StatusOption.priorities)])
     }
 
     private func item(assignees: [String] = []) -> Item {
@@ -34,7 +35,7 @@ final class RowMenuTests: XCTestCase {
     func testItemMenu() {
         var local = ProjectLocalSettings()
         local.branchTemplate = "{KEY}-{slug}"
-        let m = RowMenu.item(item(), snap: snap, stream: nil, local: local, caps: all)
+        let m = RowMenu.item(item(), snap: snap, stream: nil, local: local, caps: all, tracker: "Plane")
         XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Copy ID", "Copy link", "Copy ID and title", "Copy branch name", "Add to Favorites",
                                   "Status", "Assign to me", "Priority", "Start session in Orca…", "Plan…"])
         XCTAssertEqual(m.command("Plan…"), .refine(key: "SLING-7"))
@@ -46,10 +47,18 @@ final class RowMenuTests: XCTestCase {
         XCTAssertTrue(prios.contains(.action("High", .priority(itemId: "i1", priorityId: "high"), checked: true)))
     }
 
+    func testItemMenuWithoutPriorityHidesIt() {
+        var s = snap
+        s.fields = []
+        let m = RowMenu.item(item(), snap: s, stream: nil, local: ProjectLocalSettings(), caps: all, tracker: "Big Timer")
+        XCTAssertFalse(m.titles.contains("Priority"))
+        XCTAssertTrue(m.titles.contains("Open in Big Timer"))
+    }
+
     func testItemMenuWithoutRuntimeOrForMyItem() {
         var s = snap
         s.me = "ada"
-        let m = RowMenu.item(item(assignees: ["ada"]), snap: s, stream: nil, local: ProjectLocalSettings(), caps: [])
+        let m = RowMenu.item(item(assignees: ["ada"]), snap: s, stream: nil, local: ProjectLocalSettings(), caps: [], tracker: "Plane")
         XCTAssertFalse(m.titles.contains("Assign to me"))
         XCTAssertFalse(m.titles.contains("Start session in Orca…"))
         XCTAssertFalse(m.titles.contains("Plan…"))
@@ -58,7 +67,7 @@ final class RowMenuTests: XCTestCase {
     }
 
     func testItemMenuEnhanceNeedsSessionHistory() {
-        let m = RowMenu.item(item(), snap: snap, stream: nil, local: ProjectLocalSettings(), caps: all.union([.sessionHistory]))
+        let m = RowMenu.item(item(), snap: snap, stream: nil, local: ProjectLocalSettings(), caps: all.union([.sessionHistory]), tracker: "Plane")
         XCTAssertEqual(m.titles.last, "Enhance")
         XCTAssertEqual(m.command("Enhance"), .enhance(key: "SLING-7"))
         XCTAssertNil(RowCommand.enhance(key: "SLING-7").action(key: { $0 }), "a UI command")
@@ -122,19 +131,19 @@ final class RowMenuTests: XCTestCase {
     }
 
     func testActivityMenuHasNoReadState() {
-        let e = FeedEntry(id: "a1", source: .plane, title: "t", body: "b", at: Date(), route: .item("SLING-7", .overview),
+        let e = FeedEntry(id: "a1", source: .tracker, title: "t", body: "b", at: Date(), route: .item("SLING-7", .overview),
                           url: "https://plane/SLING-7", itemKey: "SLING-7", itemURL: "https://plane/SLING-7")
-        let m = RowMenu.activity(e, projectKey: "SLING", canTriage: true)
+        let m = RowMenu.activity(e, projectKey: "SLING", canTriage: true, tracker: "Plane")
         XCTAssertEqual(m.titles, ["Open", "Open in Plane", "Copy ID", "Copy link", "Only this project"])
     }
 
     func testSidebarMenu() {
         let p = ProjectSummary(ref: ref, identifier: "sling", title: "sling", url: "https://plane/sling", closed: false)
-        let m = RowMenu.sidebarProject(p, hasTrackerIcon: false)
+        let m = RowMenu.sidebarProject(p, hasTrackerIcon: false, tracker: "Plane")
         XCTAssertEqual(m.titles, ["Open sling", "Project settings…", "Links and Orca workspace…", "Open in Plane", "Copy link",
                                   "Refresh project", "Set icon…", "Hide from sidebar"])
         XCTAssertEqual(m.command("Hide from sidebar"), .hideProject("SLING"))
-        XCTAssertTrue(RowMenu.sidebarProject(p, hasTrackerIcon: true).titles.contains("Use tracker icon"))
+        XCTAssertTrue(RowMenu.sidebarProject(p, hasTrackerIcon: true, tracker: "Plane").titles.contains("Use tracker icon"))
     }
 
     func testTidyDropsExtraSeparators() {

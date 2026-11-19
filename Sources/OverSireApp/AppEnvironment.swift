@@ -3,6 +3,7 @@ import OverSireCore
 import OverSireSync
 import GitHubKit
 import TrackerPlane
+import TrackerBigTimer
 import CodeHostGitHub
 import CIGitHubActions
 import RuntimeDaemon
@@ -26,7 +27,7 @@ final class AppEnvironment: @unchecked Sendable {
 
     init(secrets: KeychainSecrets = KeychainSecrets()) {
         self.secrets = secrets
-        for d in [PlaneTracker.descriptor, GitHubCodeHost.descriptor, ActionsCI.descriptor] {
+        for d in [PlaneTracker.descriptor, BigTimerTracker.descriptor, GitHubCodeHost.descriptor, ActionsCI.descriptor] {
             registry.register(d)
         }
     }
@@ -88,6 +89,19 @@ final class AppEnvironment: @unchecked Sendable {
     }
 
     func descriptor(_ a: AccountID) -> ProviderDescriptor? { registry.descriptor(a.provider) }
+
+    /// The display name of the tracker of the account, for UI text.
+    func trackerName(_ a: AccountID) -> String { descriptor(a)?.displayName ?? a.provider.rawValue }
+
+    /// The names of the connected trackers, for text that names no single one.
+    func trackerNames() -> String {
+        var names: [String] = []
+        for a in accounts(.tracker) {
+            let n = trackerName(a.account)
+            if !names.contains(n) { names.append(n) }
+        }
+        return names.isEmpty ? "your tracker" : names.joined(separator: " or ")
+    }
 
     /// The daemons of the group. Each machine is one runtime account (provider `daemon`, id the machine name).
     weak var machines: MachineHub?
@@ -191,6 +205,8 @@ extension AppEnvironment: RepoAccounts {}
 // ─── Optional features of the adapters ───────────────────────────────────────
 
 extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeListing, LabelIdReading, ItemReading {}
+
+extension BigTimerTracker: MemberListing, SelfAssigning, ItemReading, OwnerEmail {}
 
 extension PlaneTracker: OwnerEmail {
     func ownerEmail() async -> String? {
@@ -315,7 +331,7 @@ extension AppEnvironment {
         }
         for k in ACCOUNTS.first(where: { $0.account == id })?.secretKeys ?? [] { secrets.delete(k) }
         ACCOUNTS.removeAll { $0.account == id }
-        if id.provider == .plane {
+        if descriptor(id)?.layer == .tracker {
             PROJECTS_CFG.allOf.removeAll { $0 == id.id }
             PROJECTS_CFG.picked.removeAll { $0.hasPrefix(id.id + "/") }
         }

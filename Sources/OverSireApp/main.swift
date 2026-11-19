@@ -102,7 +102,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var assistantHotKey: GlobalHotKey?
     lazy var snap = SnapController(projects: { [weak self] in self?.projectStore.tracked ?? [] })
     lazy var newSession = NewSessionController(projects: { [weak self] in self?.projectStore.tracked ?? [] },
-                                               states: { [weak self] k in self?.projectStore.snapshots[k]?.statusOptions ?? [] })
+                                               states: { [weak self] k in self?.projectStore.snapshots[k]?.statusOptions ?? [] },
+                                               priority: { [weak self] k in self?.projectStore.snapshots[k]?.hasPriority ?? false })
     let workstreams = WorkstreamIndex()
     let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
@@ -796,7 +797,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     // Workspaces of the tracked projects that have a token.
     func trackedPlaneWorkspaces() -> [String] {
         var seen = Set<String>()
-        return projectCatalog.resolve(PROJECTS_CFG).map(\.ref.workspace).filter {
+        return projectCatalog.resolve(PROJECTS_CFG).filter { $0.ref.account.provider == .plane }.map(\.ref.workspace).filter {
             ENV.tracker($0) != nil && seen.insert($0).inserted
         }
     }

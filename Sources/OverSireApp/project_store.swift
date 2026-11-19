@@ -385,8 +385,9 @@ final class ProjectStore {
             run.task.cancel()
             commentRun = nil
             let p = tracked.first { $0.ref.storeKey == run.key }
-            APP_LOG.write(LogEntry(level: .warn, area: .sync, job: "Plane comments", subject: p?.identifier ?? run.key, host: p?.ref.workspace,
-                                   message: "No answer from Plane after \(seconds) s. OverSire stopped the comment read.", ms: seconds * 1000))
+            let name = p.map { "\(ENV.trackerName($0.ref.account)) comments" } ?? "Tracker comments"
+            APP_LOG.write(LogEntry(level: .warn, area: .sync, job: name, subject: p?.identifier ?? run.key, host: p?.ref.workspace,
+                                   message: "No answer from \(p.map { ENV.trackerName($0.ref.account) } ?? "the tracker") after \(seconds) s. OverSire stopped the comment read.", ms: seconds * 1000))
         }
         pumpComments()
     }
@@ -534,8 +535,8 @@ final class ProjectStore {
                 break
             } catch {}
         }
-        var e = LogEntry(level: limited ? .warn : .ok, area: .sync, job: "Plane comments", subject: p.identifier, host: p.ref.workspace,
-                         message: limited ? "Plane limits the rate. Read \(out.count) of \(targets.count) items."
+        var e = LogEntry(level: limited ? .warn : .ok, area: .sync, job: "\(ENV.trackerName(p.ref.account)) comments", subject: p.identifier, host: p.ref.workspace,
+                         message: limited ? "\(ENV.trackerName(p.ref.account)) limits the rate. Read \(out.count) of \(targets.count) items."
                                           : "\(out.count) of \(targets.count) items",
                          ms: Int(Date().timeIntervalSince(started) * 1000))
         e.verbose = limited ? nil : true
@@ -906,7 +907,7 @@ final class ProjectStore {
         }
         let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
-                              priority: new.fieldOptions[ProjectSnapshot.priorityFieldId])
+                              priority: snap.hasPriority ? new.fieldOptions[ProjectSnapshot.priorityFieldId] : nil)
         let project = snap.summary.ref
         CallPriority.task(.user) { [weak self] in
             let added = await Result(awaiting: { try await client.create(draft, in: project).id })
@@ -1365,9 +1366,11 @@ extension ProjectStore {
             }
             items.append(item)
         }
-        let fields = [ProjectField(id: ProjectSnapshot.statusFieldId, name: "Status", options: states),
-                      ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority",
-                                   options: StatusOption.priorities.filter { $0.id != "none" })]
+        var fields = [ProjectField(id: ProjectSnapshot.statusFieldId, name: "Status", options: states)]
+        if t.capabilities.contains(.priority) {
+            fields.append(ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority",
+                                       options: StatusOption.priorities.filter { $0.id != "none" }))
+        }
         return ProjectSnapshot(summary: summary, statusOptions: states, items: items, fetchedAt: Date(),
                                fields: fields, me: me.name, meId: me.id, index: try? await (t as? any ItemIndexing)?.index(ref),
                                intake: intake, epics: epics)

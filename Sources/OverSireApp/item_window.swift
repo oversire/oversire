@@ -57,7 +57,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     private var mode = MarkdownView.Mode.rendered
     private var fullDescription = false
     private var edit: ItemEdit?
-    private var saving: String?          // the chip that waits for Plane
+    private var saving: String?          // the chip that waits for the tracker
     private var error: String?
     private var entries: [ActivityEntry]?
     private var options: ItemOptions?
@@ -202,7 +202,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         crumb.lineBreakMode = .byTruncatingTail
         crumb.frame = NSRect(x: x, y: y + 3, width: w - x - 230, height: 16)
         content.addSubview(crumb)
-        let open = button("Open in Plane", #selector(openInPlane), in: content)
+        let open = button("Open in \(ENV.trackerName(snap.summary.ref.account))", #selector(openInTracker), in: content)
         open.frame.origin = NSPoint(x: w - pad - open.frame.width, y: y)
         let copy = button("Copy link", #selector(copyLink), in: content)
         copy.frame.origin = NSPoint(x: open.frame.minX - copy.frame.width - 6, y: y)
@@ -283,10 +283,12 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         }
         let opt = snap.option(item.statusOptionId)
         chip("state", opt?.name ?? "No status", dot: projectColor(opt?.color ?? "GRAY"), tip: "Change the status")
-        let pri = item.fields["Priority"]
-        chip("priority", pri ?? "No priority",
-             dot: pri.flatMap { p in StatusOption.priorities.first { $0.name == p } }.map { projectColor($0.color) },
-             tip: "Change the priority")
+        if snap.hasPriority {
+            let pri = item.fields["Priority"]
+            chip("priority", pri ?? "No priority",
+                 dot: pri.flatMap { p in StatusOption.priorities.first { $0.name == p } }.map { projectColor($0.color) },
+                 tip: "Change the priority")
+        }
         chip("labels", item.labels.isEmpty ? "No labels" : item.labels.joined(separator: ", "), tip: "Add or remove labels")
         chip("assignees", item.assignees.isEmpty ? "No assignee" : item.assignees.joined(separator: ", "),
              tip: "Add or remove assignees")
@@ -511,7 +513,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         }
         if progress.total > kids.count {
             let n = progress.total - kids.count
-            let note = SubItemNote("\(n) more sub-item\(n == 1 ? "" : "s") in Plane", url: item.url, w: w)
+            let note = SubItemNote("\(n) more sub-item\(n == 1 ? "" : "s") in \(ENV.trackerName(snap.summary.ref.account))", url: item.url, w: w)
             note.frame.origin = NSPoint(x: 0, y: y + 4)
             doc.addSubview(note)
             y += 30
@@ -643,7 +645,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         switch field {
         case "state":
             for o in snap.statusOptions { add(o.name, value: o.id, on: o.id == item.statusOptionId, color: o.color) }
-        case "priority":
+        case "priority" where snap.hasPriority:
             for p in StatusOption.priorities {
                 add(p.name, value: p.id, on: (item.fields["Priority"] ?? "None") == p.name, color: p.color)
             }
@@ -848,7 +850,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         guard let id = itemId, let p = store.item(id)?.item.parentId else { return }
         open(p, push: true)
     }
-    @objc private func openInPlane() {
+    @objc private func openInTracker() {
         if let id = itemId, let u = store.item(id).flatMap({ URL(string: $0.item.url) }) { NSWorkspace.shared.open(u) }
     }
     @objc private func copyLink() {

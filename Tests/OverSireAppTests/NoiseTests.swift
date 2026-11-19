@@ -4,7 +4,7 @@ import OverSireCore
 
 final class NoiseTests: XCTestCase {
     private func plane(_ id: String, key: String?, at: TimeInterval) -> FeedEntry {
-        FeedEntry(id: "plane|" + id, source: .plane, title: key ?? "", body: "ada: change \(id)", at: Date(timeIntervalSince1970: at),
+        FeedEntry(id: "plane|" + id, source: .tracker, title: key ?? "", body: "ada: change \(id)", at: Date(timeIntervalSince1970: at),
                   route: nil, activityId: id, itemKey: key)
     }
 

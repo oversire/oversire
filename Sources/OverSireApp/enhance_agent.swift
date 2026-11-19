@@ -408,6 +408,9 @@ final class EnhanceAgent {
         return nil
     }
 
+    /// False when the tracker of the project has no priority. An unloaded project keeps the priority.
+    func hasPriority(_ projectKey: String) -> Bool { store.snapshots[projectKey]?.hasPriority ?? true }
+
     // MARK: Review
 
     func isChecked(_ t: EnhanceTarget, _ p: Pick) -> Bool { !(picks[t.id] ?? []).contains(p) }
@@ -419,11 +422,11 @@ final class EnhanceAgent {
     /// The checked properties as one edit. Label names and relation keys that the project does not know drop,
     /// and so does a relation that makes a cycle in `graph`. A ticket has no duplicate action: its duplicate is a "relates to".
     func edit(_ item: EnhanceTarget, _ result: EnhanceResult, run: Run, labels: [StatusOption], keep: [String], items: [String: ItemRef],
-              graph: BlockGraph = BlockGraph()) -> IntakeEdit {
+              graph: BlockGraph = BlockGraph(), hasPriority: Bool = true) -> IntakeEdit {
         var graph = graph
         var patch = ItemPatch()
         if isChecked(item, .description) { patch.bodyMarkdown = result.description(keeping: run.original) }
-        if let p = result.priority, isChecked(item, .priority) { patch.priority = p }
+        if hasPriority, let p = result.priority, isChecked(item, .priority) { patch.priority = p }
         let add = result.labels.filter { isChecked(item, .label($0)) }.compactMap { name in
             labels.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.id
         }
@@ -468,7 +471,7 @@ final class EnhanceAgent {
                 let labeler = tracker as? any LabelManaging
                 var labels = (try? await labeler?.labels(snap.summary.ref)) ?? []
                 let keep = (try? r.get())?.labels.compactMap { n in labels.first { $0.name == n }?.id } ?? []
-                var edit = ready.map { self.edit(target, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph) } ?? IntakeEdit()
+                var edit = ready.map { self.edit(target, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph, hasPriority: snap.hasPriority) } ?? IntakeEdit()
                 let dup = ready.flatMap { self.duplicate(target, $0.0, items: known) }
                 if queue, dup == nil, !startLabel.isEmpty {
                     var id = labels.first { $0.name.caseInsensitiveCompare(startLabel) == .orderedSame }?.id
@@ -509,7 +512,7 @@ final class EnhanceAgent {
         CallPriority.task(.user) {
             let labels = (try? await (tracker as? any LabelManaging)?.labels(snap.summary.ref)) ?? []
             let keep = item.labels.compactMap { n in labels.first { $0.name == n }?.id }
-            let edit = self.edit(target, result, run: run, labels: labels, keep: keep, items: known, graph: graph)
+            let edit = self.edit(target, result, run: run, labels: labels, keep: keep, items: known, graph: graph, hasPriority: snap.hasPriority)
             await MainActor.run { self.write(edit, to: item.id, target: target, run: run, done: done) }
         }
     }
@@ -625,11 +628,13 @@ final class EnhancePanel: Card {
     private let agent: EnhanceAgent
     private let item: EnhanceTarget
     private var picks: [EnhanceAgent.Pick] = []
+    private let hasPriority: Bool
 
     init(_ state: EnhanceAgent.State, projectKey: String, target item: EnhanceTarget, agent: EnhanceAgent, questions: QuestionHub,
          after: @escaping (String?) -> Void) {
         self.agent = agent
         self.item = item
+        hasPriority = agent.hasPriority(projectKey)
         super.init(title: nil, padding: 12, spacing: 8, fill: Palette.raise)
         var head: [NSView] = [Glyph("sparkles", color: Palette.acc, size: 13), NSTextField.text("Enhance", size: 12.5, weight: .semibold),
                               Chiplet("Runs on: \(agent.place)", mono: false),
@@ -687,7 +692,7 @@ final class EnhancePanel: Card {
         sides.distribution = .fillEqually
         add(sides)
         var boxes: [NSView] = [check(.description, "Description")]
-        if let p = res.priority { boxes.append(check(.priority, "Priority: \(p.capitalized)")) }
+        if hasPriority, let p = res.priority { boxes.append(check(.priority, "Priority: \(p.capitalized)")) }
         boxes += res.labels.map { check(.label($0), "Label: \($0)") }
         boxes += res.relations.map { r in
             let dup = item.isTicket ? "Relates to (duplicate)" : "Duplicate of"

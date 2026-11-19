@@ -322,9 +322,10 @@ func runSelfTest() {
     let oldProjects = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"picked":["a/1"],"pollMinutes":5}"#.utf8))
     check(oldProjects?.order == [] && oldProjects?.folded == [] && oldProjects?.capture == CaptureConfig()
             && oldProjects?.picked == [] && oldProjects?.hideDoneAfterDays == 1, "old GitHub picks are dropped")
-    let planeCfg = try? JSONDecoder().decode(ProjectsConfig.self, from: Data("""
-    {"workspaces":[{"slug":"acme"}],"picked":["acme/\(wsUUID)","gone/\(wsUUID)","acme/3"],"allOf":["acme","gone"]}
+    var planeCfg = try? JSONDecoder().decode(ProjectsConfig.self, from: Data("""
+    {"workspaces":[{"slug":"acme"}],"picked":["acme/\(wsUUID)","gone/\(wsUUID)"],"allOf":["acme","gone"]}
     """.utf8))
+    planeCfg?.dropStale(trackers: ["acme"])
     check(planeCfg?.picked == ["acme/\(wsUUID)"] && planeCfg?.allOf == ["acme"], "picks of unknown workspaces are dropped")
     var orderCfg = ProjectsConfig()
     orderCfg.order = ["zed/9", "ACME/2", "gone/7"]

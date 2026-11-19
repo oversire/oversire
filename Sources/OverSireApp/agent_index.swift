@@ -552,7 +552,7 @@ final class AgentIndex: NSObject {
 
     var holdCheckCount: Int { holdChecks.count }
 
-    static let browseRE = try! NSRegularExpression(pattern: "/browse/([A-Za-z][A-Za-z0-9]*-[0-9]+)\\b")
+    static let browseRE = try! NSRegularExpression(pattern: "(?:/browse/|bigtimer://issue/|oversire item show )([A-Za-z][A-Za-z0-9]*-[0-9]+)\\b")
     static let keyRE = try! NSRegularExpression(pattern: "^[A-Za-z][A-Za-z0-9]*-[0-9]+$")
     static let keyPrefixRE = try! NSRegularExpression(pattern: "^([A-Za-z][A-Za-z0-9]*-[0-9]+)[/_]")
 

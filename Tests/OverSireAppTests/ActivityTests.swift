@@ -4,7 +4,7 @@ import OverSireTestKit
 @testable import OverSireApp
 
 final class ActivityTests: XCTestCase {
-    private func entry(_ id: String, project: String?, source: FeedEntry.Source = .plane, at: Date = Date()) -> FeedEntry {
+    private func entry(_ id: String, project: String?, source: FeedEntry.Source = .tracker, at: Date = Date()) -> FeedEntry {
         var e = FeedEntry(id: id, source: source, title: id, body: "", at: at, route: nil)
         e.projectKey = project
         return e
@@ -39,7 +39,7 @@ final class ActivityTests: XCTestCase {
     }
 
     func testCounts() {
-        XCTAssertEqual(ActivityPage.counts(list) { $0.source.rawValue }, ["Plane": 1, "Mention": 1, "GitHub": 1, "Orca": 1])
+        XCTAssertEqual(ActivityPage.counts(list) { $0.source.rawValue }, ["Tracker": 1, "Mention": 1, "GitHub": 1, "Orca": 1])
         XCTAssertEqual(ActivityPage.counts(list) { $0.projectKey ?? FeedFilter.noProject }, ["SLING": 1, "TREBI": 1, FeedFilter.noProject: 2])
     }
 
@@ -55,7 +55,7 @@ final class ActivityTests: XCTestCase {
     @MainActor
     func testActivityRowHasNoUnreadState() {
         let row = FeedLine(entry("a", project: "SLING")) {}
-        XCTAssertEqual(row.accessibilityLabel(), "Plane: a. ")
+        XCTAssertEqual(row.accessibilityLabel(), "Tracker: a. ")
         XCTAssertNil(FeedLine.layout.columns.first { $0.id == "unread" }, "no unread dot")
     }
 
@@ -131,7 +131,7 @@ final class ActivityTests: XCTestCase {
         XCTAssertEqual(e.title, "Title of OVERSIRE-2")
         XCTAssertEqual(e.itemKey, "OVERSIRE-2")
         XCTAssertEqual(e.projectKey, "OVERSIRE")
-        XCTAssertTrue(FeedLine(e) {}.accessibilityLabel()?.hasPrefix("OVERSIRE-2 Plane: ") == true)
+        XCTAssertTrue(FeedLine(e) {}.accessibilityLabel()?.hasPrefix("OVERSIRE-2 Tracker: ") == true)
     }
 
     @MainActor

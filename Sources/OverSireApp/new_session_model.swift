@@ -13,6 +13,7 @@ struct NewSessionModel: Equatable {
         var root: String?       // the Orca workspace folder
         var states: [StatusOption] = []
         var agent: String? = nil    // the agent of the project; nil: the default agent
+        var hasPriority = true
     }
 
     enum Mode: String, Codable, CaseIterable {

@@ -40,7 +40,7 @@ final class ProjectListView: NSStackView {
     private func row(_ p: ProjectSummary) -> NSView {
         let key = p.identifier.uppercased()
         let s = PROJECTS_CFG.local(key)
-        var meta = ["\(trackerName(p.ref.account)) \(p.ref.workspace)"]
+        var meta = ["\(ENV.trackerName(p.ref.account)) \(p.ref.workspace)"]
         meta.append(s.github.isEmpty ? "no repos" : s.github.count == 1 ? "1 repo" : "\(s.github.count) repos")
         if let root = s.orcaRoot { meta.append("Orca " + (root as NSString).abbreviatingWithTildeInPath) }
         if s.notifications != nil { meta.append("custom notifications") }
@@ -101,10 +101,6 @@ final class ProjectListView: NSStackView {
             }
         }
         return d
-    }
-
-    private func trackerName(_ account: AccountID) -> String {
-        ENV.descriptor(account)?.displayName ?? account.provider.rawValue
     }
 
     // MARK: Changes

@@ -143,7 +143,7 @@ final class GlanceVC: NSViewController {
             let row = Row([Glyph(tone), TwoLine(e.item.title, sub)], height: 40,
                           label: "\(e.item.title), \(sub)") { [weak self] in self?.open(.item(e.item.key, .overview)) }
             row.toolTip = st.map(\.tip)
-            row.itemActions(url: e.item.url, key: e.item.key)
+            row.itemActions(url: e.item.url, key: e.item.key, tracker: data.projectStore.trackerName(of: e.item.key))
             return row
         }, more: ordered.count > 5 ? ("All my items", .work(.items)) : nil, empty: data.projectStore.snapshots.isEmpty ? "Loading projects…" : "No open items are yours.")
 
@@ -200,7 +200,7 @@ final class GlanceVC: NSViewController {
         let row = Row([Glyph(tone), TwoLine(title, sub)], height: 40,
                       label: "\(tone.word): \(title), \(sub)") { [weak self] in self?.open(.item(key, .overview)) }
         row.toolTip = st.map(\.tip)
-        if let url = data.projectStore.item(key: key)?.item.url { row.itemActions(url: url, key: key) }
+        if let url = data.projectStore.item(key: key)?.item.url { row.itemActions(url: url, key: key, tracker: data.projectStore.trackerName(of: key)) }
         if a.card != nil {
             row.stack.addArrangedSubview(orcaButton(key))
             row.hoverViews.append(orcaButton(key))
@@ -215,7 +215,7 @@ final class GlanceVC: NSViewController {
         if case .run(let repo, let id) = n.route, let r = data.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == id }) {
             row.runActions(url: r.url, name: "\(r.workflowName ?? r.name) #\(r.number)")
         } else if let url = data.projectStore.item(key: n.key)?.item.url {
-            row.itemActions(url: url, key: n.key)
+            row.itemActions(url: url, key: n.key, tracker: data.projectStore.trackerName(of: n.key))
         }
         if row.hoverViews != actions { row.hoverViews += actions }
         return row

@@ -167,7 +167,7 @@ final class SidebarVC: NSViewController, NSTableViewDelegate, NSTableViewDataSou
         let row = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
         guard row >= 0, case .entry(let e) = lines[row], case .project(let key) = e.route, let commander,
               let p = commander.data.projectStore.tracked.first(where: { $0.identifier.uppercased() == key }) else { return }
-        let entries = RowMenu.sidebarProject(p, hasTrackerIcon: p.logo != nil)
+        let entries = RowMenu.sidebarProject(p, hasTrackerIcon: p.logo != nil, tracker: ENV.trackerName(p.ref.account))
         commander.items(entries, anchor: table.view(atColumn: 0, row: row, makeIfNecessary: false)).forEach { menu.addItem($0) }
     }
 }

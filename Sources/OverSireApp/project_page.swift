@@ -34,8 +34,9 @@ final class ItemLine: TableRow {
         if let who = item.assignees.first { cells["who"] = Avatar(who) }
         let parts = [finish?.accessibilityLabel() ?? opt?.name, status?.label, stream?.ci.map { "CI \($0.word)" }, item.fields["Priority"]].compactMap { $0 }
         super.init(layout, cells: cells, label: "\(item.key) \(item.title). " + parts.joined(separator: ", ")) { go(.item(item.key, .overview)) }
-        itemActions(url: item.url, key: item.key)
-        commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
+        itemActions(url: item.url, key: item.key, tracker: ENV.trackerName(snap.summary.ref.account))
+        commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0,
+                                          tracker: ENV.trackerName(snap.summary.ref.account)) }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -44,7 +45,7 @@ final class ItemLine: TableRow {
         if snap.isDoneWithOpenSubItems(item) {
             let n = snap.openSubItems(of: item.id)
             let c = Chiplet("Done · \(n) open", symbol: "exclamationmark.triangle.fill", color: Palette.bad)
-            c.toolTip = "Plane says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(n) sub-item\(n == 1 ? " is" : "s are") open."
+            c.toolTip = "\(ENV.trackerName(snap.summary.ref.account)) says \(snap.option(item.statusOptionId)?.name ?? "Done"), but \(n) sub-item\(n == 1 ? " is" : "s are") open."
             c.setAccessibilityLabel("Done, \(n) sub-item\(n == 1 ? "" : "s") open")
             return c
         }
@@ -109,8 +110,9 @@ final class BoardCard: Row {
         if !chips.isEmpty { col.addArrangedSubview(NSStackView(h: chips + [Spacer()], spacing: 5)) }
         super.init([col], height: 54, inset: 10, label: "\(item.key) \(item.title)") { go(.item(item.key, .overview)) }
         restFill = Palette.raise; restBorder = Palette.line; radius = 8
-        itemActions(url: item.url, key: item.key)
-        commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0) }
+        itemActions(url: item.url, key: item.key, tracker: ENV.trackerName(snap.summary.ref.account))
+        commands?.attach(self) { RowMenu.item(item, snap: snap, stream: stream, local: PROJECTS_CFG.local(snap.summary.identifier), caps: $0,
+                                          tracker: ENV.trackerName(snap.summary.ref.account)) }
     }
     required init?(coder: NSCoder) { fatalError() }
 }
@@ -148,16 +150,17 @@ enum ProjectLookup: Hashable {
     func view(key: String, data: AppData?) -> NSView {
         switch self {
         case .loading: return LoadingNote("Loading the items of \(key)…")
-        case .looking: return LoadingNote("Looking for \(key) in Plane…")
+        case .looking: return LoadingNote("Looking for \(key) in \(ENV.trackerNames())…")
         case .failed(let error):
             let retry = ActionButton("Try again", symbol: "arrow.clockwise") {
                 guard let store = data?.projectStore, let p = store.tracked.first(where: { $0.identifier.uppercased() == key }) else { return }
                 store.refresh([p.ref.storeKey], force: true, priority: .user) { _ in }
             }
-            return Banner(.bad, title: "Plane did not give the items of \(key)", body: error, actions: [retry])
+            let name = data?.projectStore.tracked.first { $0.identifier.uppercased() == key }.map { ENV.trackerName($0.ref.account) } ?? ENV.trackerNames()
+            return Banner(.bad, title: "\(name) did not give the items of \(key)", body: error, actions: [retry])
         case .untracked(let canTrack):
             guard canTrack, let p = data?.projectCatalog.project(key: key) else {
-                return EmptyNote("OverSire does not track \(key). Plane has no open project with this key.", symbol: "questionmark.folder")
+                return EmptyNote("OverSire does not track \(key). \(ENV.trackerNames()) has no open project with this key.", symbol: "questionmark.folder")
             }
             let track = ActionButton("Track \(key)", symbol: "plus") {
                 if !PROJECTS_CFG.picked.contains(p.ref.storeKey) { PROJECTS_CFG.picked.append(p.ref.storeKey) }
@@ -298,7 +301,9 @@ final class ProjectPage: Page, PlanHost {
                 new.toolTip = "Make an epic in \(snap.summary.title)"
                 actions.append(new)
             }
-            actions.append(ActionButton("Open in Plane", symbol: "arrow.up.right.square") { NSWorkspace.shared.open(URL(string: snap.summary.url)!) })
+            actions.append(ActionButton("Open in \(ENV.trackerName(snap.summary.ref.account))", symbol: "arrow.up.right.square") {
+                if let url = URL(string: snap.summary.url) { NSWorkspace.shared.open(url) }
+            })
             let gear = ActionButton("", symbol: "gearshape") { self?.go(.projectSettings(key, .appearance)) }
             gear.toolTip = "Project settings (⌘,)"
             gear.setAccessibilityLabel("Project settings")
@@ -434,7 +439,7 @@ final class ProjectPage: Page, PlanHost {
         opt.id == Favorites.groupId ? Favorites.glyph(size: 13) : StatusGlyph(category: opt.category, color: projectColor(opt.color), name: opt.name).sized(16)
     }
 
-    // Favorites first, also when Done. Then the Plane states in their rank order. Without Show done, Done items follow
+    // Favorites first, also when Done. Then the tracker states in their rank order. Without Show done, Done items follow
     // the "Hide Done items" setting. A Done item with open sub-items goes in the first started group (`listStateId`).
     static func statusGroups(_ snap: ProjectSnapshot, _ items: [Item], showDone: Bool, hideDoneAfterDays days: Int,
                              favorite: (String) -> Bool = { _ in false }) -> [(StatusOption, [Item])] {

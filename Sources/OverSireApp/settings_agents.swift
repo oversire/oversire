@@ -101,8 +101,8 @@ extension SettingsPage {
         }
         label.widthAnchor.constraint(equalToConstant: 120).isActive = true
         bot.widthAnchor.constraint(equalToConstant: 150).isActive = true
-        label.toolTip = "A Plane label that adds the item to the queue."
-        bot.toolTip = "A Plane user that adds the item to the queue when assigned."
+        label.toolTip = "A \(ENV.trackerNames()) label that adds the item to the queue."
+        bot.toolTip = "A \(ENV.trackerNames()) user that adds the item to the queue when assigned."
         b.addFull(section(.queue, [
             SwitchRow("Auto start", note: "Start the next item when a slot is free and its condition holds.", on: AGENTS.autoStart) { AGENTS.autoStart = $0 },
             FieldRow("AI checks on quiet sessions", note: "Ask me shows a card. Auto acts at once.",
@@ -112,7 +112,7 @@ extension SettingsPage {
                 AGENTS.quietMinutes = Double(quiet[i])
                 settingsChanged()
             }),
-            FieldRow("Add to the queue by", note: "Label or assignee in Plane.", NSStackView(h: [label, bot], spacing: 8)),
+            FieldRow("Add to the queue by", note: "Label or assignee in \(ENV.trackerNames()).", NSStackView(h: [label, bot], spacing: 8)),
             FieldRow("Tell me about a question", note: "One notification when a session waits for an answer, or a runbook waits for you.",
                      Segmented(notices.map(\.label), selected: notices.firstIndex(of: AGENTS.questionNotice) ?? 1, label: "Tell me about a question") {
                 AGENTS.questionNotice = notices[$0]

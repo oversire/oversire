@@ -246,7 +246,8 @@ final class IntakeListPage: Page {
             return true
         }
         let canTriage = agent.available && agent.state(.intake(item)) == nil
-        commands.attach(r) { _ in RowMenu.activity(e, projectKey: nil, canTriage: canTriage, canRefine: canRefine) }
+        commands.attach(r) { _ in RowMenu.activity(e, projectKey: nil, canTriage: canTriage, canRefine: canRefine,
+                                                     tracker: self.data.projectStore.trackerName(of: pk)) }
         guard let state = agent.state(.intake(item)) else { return r }
         let panel = EnhancePanel(state, projectKey: pk, target: .intake(item), agent: agent, questions: data.questions) { [weak self] err in
             self?.note = err

@@ -38,6 +38,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
     private let fieldsHolder = NSStackView(v: [], spacing: 0)
     private let statePop = NSPopUpButton()
     private let priorityPop = NSPopUpButton()
+    private var priorityColumn: NSView?
     private let comboBox = Box(fill: Palette.bg, border: Palette.line, radius: 7)
     private let comboKey = NSStackView(h: [], spacing: 0)
     private let comboTag = NSTextField.text("last used", size: 11, color: Palette.dim)
@@ -190,7 +191,9 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         let col = { (name: String, pop: NSPopUpButton) in
             NSStackView(v: [NSTextField.text(name, size: 11.5, color: Palette.dim), pop], spacing: 4, align: .leading)
         }
-        let row = NSStackView(h: [col("State", statePop), col("Priority", priorityPop), Spacer()], spacing: 16)
+        let priority = col("Priority", priorityPop)
+        priorityColumn = priority
+        let row = NSStackView(h: [col("State", statePop), priority, Spacer()], spacing: 16)
         fieldsHolder.addFull(row)
         return fieldsHolder
     }
@@ -334,6 +337,7 @@ final class NewSessionPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate, Q
         if let id = model.itemState, let i = statePop.itemArray.firstIndex(where: { $0.representedObject as? String == id }) { statePop.selectItem(at: i) }
         if let i = priorityPop.itemArray.firstIndex(where: { $0.representedObject as? String == model.priority }) { priorityPop.selectItem(at: i) }
         priorityPop.isEnabled = !model.isStarting
+        priorityColumn?.isHidden = !(sel?.hasPriority ?? true)
     }
 
     private func buildList() -> NSView {
@@ -714,6 +718,7 @@ final class NewSessionController {
 
     private let projects: () -> [ProjectSummary]
     private let states: (String) -> [StatusOption]
+    private let priority: (String) -> Bool
     private(set) var panel: NewSessionPanel?
     var created: (String) -> Void = { _ in }     // gets the store key of the project with a new item
     private(set) var toast: SessionToast?
@@ -727,10 +732,12 @@ final class NewSessionController {
         hostFiles: { ENV.runtime as? HostFileWriting },
         root: { [weak self] k in self?.summary(k).flatMap { PROJECTS_CFG.orcaRoot($0) } })
 
-    /// `states` gives the status options of a project by its store key.
-    init(projects: @escaping () -> [ProjectSummary], states: @escaping (String) -> [StatusOption] = { _ in [] }) {
+    /// `states` gives the status options of a project by its store key. `priority` tells if its tracker has priority.
+    init(projects: @escaping () -> [ProjectSummary], states: @escaping (String) -> [StatusOption] = { _ in [] },
+         priority: @escaping (String) -> Bool = { _ in true }) {
         self.projects = projects
         self.states = states
+        self.priority = priority
     }
 
     var cfg: SessionConfig { PROJECTS_CFG.capture.session }
@@ -813,7 +820,8 @@ final class NewSessionController {
 
     func choices() -> [NewSessionModel.Choice] {
         projects().map { NewSessionModel.Choice(key: $0.identifier, name: $0.title, store: $0.ref.storeKey, root: PROJECTS_CFG.orcaRoot($0),
-                                                states: states($0.ref.storeKey), agent: PROJECTS_CFG.local($0.identifier).agent.flatMap { $0.isEmpty ? nil : $0 }) }
+                                                states: states($0.ref.storeKey), agent: PROJECTS_CFG.local($0.identifier).agent.flatMap { $0.isEmpty ? nil : $0 },
+                                                hasPriority: priority($0.ref.storeKey)) }
     }
 
     private func chooseRoot(_ store: String) {

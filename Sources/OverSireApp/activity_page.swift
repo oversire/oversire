@@ -1,13 +1,13 @@
 import Cocoa
 import OverSireCore
 
-// One line of the feed, from Plane, GitHub, Orca, the AI checks or the intake.
+// One line of the feed, from the tracker, GitHub, Orca, the AI checks or the intake.
 struct FeedEntry {
     enum Source: String, CaseIterable {
-        case plane = "Plane", mention = "Mention", run = "GitHub", agent = "Orca", ai = "AI", intake = "Intake"
+        case tracker = "Tracker", mention = "Mention", run = "GitHub", agent = "Orca", ai = "AI", intake = "Intake"
         var color: NSColor {
             switch self {
-            case .plane, .run: return Palette.mut
+            case .tracker, .run: return Palette.mut
             case .mention: return Palette.acc
             case .agent: return Palette.warn
             case .ai: return Palette.acc
@@ -25,7 +25,7 @@ struct FeedEntry {
     var url: String? = nil
     var intake: (projectKey: String, item: IntakeItem)? = nil
     var activityId: String? = nil
-    /// The other Plane changes of the same item and day, in this one line.
+    /// The other tracker changes of the same item and day, in this one line.
     var groupedIds: [String] = []
     var itemKey: String? = nil
     var itemURL: String? = nil
@@ -40,7 +40,7 @@ struct FeedEntry {
 
     /// The ID cell of an intake line. "SLING-–" while the number loads: never the work item UUID.
     var shownID: String { intakeKey ?? "\(projectKey ?? "")-–" }
-    /// The item of a Plane change, also when the item is gone.
+    /// The item of a tracker change, also when the item is gone.
     var groupKey: String? = nil
 }
 
@@ -60,7 +60,9 @@ struct FeedFilter: Codable, Equatable {
     }
 
     static func load(_ d: UserDefaults = .standard) -> FeedFilter {
-        FeedFilter(projects: Set(d.stringArray(forKey: projectsKey) ?? []), sources: Set(d.stringArray(forKey: sourcesKey) ?? []))
+        // Older versions saved the tracker source as "Plane".
+        let sources = (d.stringArray(forKey: sourcesKey) ?? []).map { $0 == "Plane" ? FeedEntry.Source.tracker.rawValue : $0 }
+        return FeedFilter(projects: Set(d.stringArray(forKey: projectsKey) ?? []), sources: Set(sources))
     }
 
     func save(_ d: UserDefaults = .standard) {
@@ -77,13 +79,13 @@ enum ActivityFeed {
         for e in store.activity(limit: 200, project: nil) {
             if case .away = e.change {
                 let identifier = store.snapshots[e.projectKey]?.summary.identifier.uppercased()
-                out.append(FeedEntry(id: "plane|" + e.id, source: .plane, title: e.text, body: e.title ?? "", at: e.at,
+                out.append(FeedEntry(id: "plane|" + e.id, source: .tracker, title: e.text, body: e.title ?? "", at: e.at,
                                      route: identifier.map(Route.project), url: e.url, activityId: e.id, projectKey: identifier))
                 continue
             }
             let found = store.item(e.itemId)
             let key = found?.item.key ?? e.itemKey ?? ActivityEntry.key(inURL: e.url)
-            let source: FeedEntry.Source = { if case .mention = e.change { return .mention }; return .plane }()
+            let source: FeedEntry.Source = { if case .mention = e.change { return .mention }; return .tracker }()
             let title = found?.item.title ?? e.title ?? (key.map { "\($0) (not in OverSire now)" } ?? "An item not in OverSire now")
             var f = FeedEntry(id: "plane|" + e.id, source: source, title: title, body: (e.actor.map { "\($0): " } ?? "") + e.text, at: e.at,
                               route: found == nil ? nil : key.map { .item($0, .activity) }, url: e.url, activityId: e.id,
@@ -145,12 +147,12 @@ enum ActivityFeed {
         return out.sorted { $0.at > $1.at }
     }
 
-    /// One line for the Plane changes of one item on one day. The newest change shows, plus the count.
+    /// One line for the tracker changes of one item on one day. The newest change shows, plus the count.
     static func grouped(_ list: [FeedEntry], calendar: Calendar = .current) -> [FeedEntry] {
         var out: [FeedEntry] = []
         var at: [String: Int] = [:]
         for e in list.sorted(by: { $0.at > $1.at }) {
-            guard e.source == .plane, let key = e.groupKey ?? e.itemKey, e.activityId != nil else { out.append(e); continue }
+            guard e.source == .tracker, let key = e.groupKey ?? e.itemKey, e.activityId != nil else { out.append(e); continue }
             let k = "\(key)|\(calendar.startOfDay(for: e.at).timeIntervalSince1970)"
             guard let i = at[k] else { at[k] = out.count; out.append(e); continue }
             out[i].groupedIds.append(e.activityId!)
@@ -222,7 +224,7 @@ final class ActivityPage: Page {
             self.filter.projects = [k]
             return true
         }
-        let header = PageRow("header", 0) { PageHeader("Activity", caption: "Plane, GitHub, Orca and AI in one feed. The newest is first.") }
+        let header = PageRow("header", 0) { PageHeader("Activity", caption: "Tracker, GitHub, Orca and AI in one feed. The newest is first.") }
         let bar = filterBarRow(all)
         let shown = all.filter(filter.pass)
         var rows = PageRow.limited(shown, more: more, reload: { [weak self] in self?.reload() }) { [weak self] e in
@@ -308,9 +310,10 @@ final class ActivityPage: Page {
             r.hoverViews = [IconButton("link", label: "Copy link", tip: "Copy link (⇧⌘C)", copy: url),
                             IconButton("arrow.up.right.square", label: "Open on GitHub", tip: "Open on GitHub") { NSWorkspace.shared.open(URL(string: url)!) }]
         } else if let key = e.itemKey, let url = e.itemURL {
-            r.itemActions(url: url, key: key)
+            r.itemActions(url: url, key: key, tracker: data.projectStore.trackerName(of: key))
         }
-        commands.attach(r) { _ in RowMenu.activity(e, projectKey: e.projectKey, canTriage: false) }
+        commands.attach(r) { _ in RowMenu.activity(e, projectKey: e.projectKey, canTriage: false,
+                                                     tracker: self.data.projectStore.trackerName(of: e.itemKey ?? e.projectKey)) }
         return r
     }
 }

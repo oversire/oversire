@@ -191,7 +191,7 @@ final class ProgressRing: NSView {
     }
 }
 
-// "3 more sub-items in Plane", under the loaded sub-items.
+// "3 more sub-items in the tracker", under the loaded sub-items.
 final class SubItemNote: NSView {
     init(_ text: String, url: String, w: CGFloat) {
         super.init(frame: NSRect(x: 0, y: 0, width: w, height: 22))
@@ -377,7 +377,7 @@ final class ProjectHeader: NSView {
             reload.contentTintColor = .secondaryLabelColor
             reload.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
             reload.frame = NSRect(x: w - 150, y: rowY, width: 20, height: 20)
-            reload.toolTip = "Get the latest items from Plane · updated \(updated)"
+            reload.toolTip = "Get the latest items from \(ENV.trackerName(snap.summary.ref.account)) · updated \(updated)"
             addSubview(reload)
         }
         let link = NSTextField(labelWithString: "Open Project")
@@ -573,9 +573,9 @@ final class ProjectItemRow: NSView {
             title.toolTip = (title.toolTip ?? item.title) + "\n" + last
         }
         let lk = NSButton(frame: NSRect(x: w - 64, y: (ROW_H - 22) / 2, width: 28, height: 22))
-        lk.image = NSImage(systemSymbolName: "arrow.up.right.square", accessibilityDescription: "Open in Plane")
+        lk.image = NSImage(systemSymbolName: "arrow.up.right.square", accessibilityDescription: "Open in \(ENV.trackerName(snap.summary.ref.account))")
         lk.isBordered = false; lk.target = self; lk.action = #selector(openLink)
-        lk.toolTip = "Open in Plane"
+        lk.toolTip = "Open in \(ENV.trackerName(snap.summary.ref.account))"
         addSubview(lk)
         let cp = NSButton(frame: NSRect(x: w - 36, y: (ROW_H - 22) / 2, width: 28, height: 22))
         cp.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy link")
@@ -792,8 +792,8 @@ extension TabVC {
         let tracked = (NSApp.delegate as? GHActionsBar)?.projectCatalog.resolve(PROJECTS_CFG) ?? []
         let agents = (NSApp.delegate as? GHActionsBar)?.agentIndex.ready
         let job = (NSApp.delegate as? GHActionsBar)?.statusJob
-        if PROJECTS_CFG.workspaces.isEmpty {
-            return [EmptyRow("Add a Plane workspace in Settings → Providers.", w: w, icon: "square.grid.2x2")]
+        if ENV.accounts(.tracker).isEmpty {
+            return [EmptyRow("Add a tracker in Settings → Providers.", w: w, icon: "square.grid.2x2")]
         }
         if tracked.isEmpty {
             return [EmptyRow("No projects tracked. Pick projects in Settings → Projects.", w: w, icon: "square.grid.2x2")]

@@ -32,8 +32,10 @@ struct ItemActions {
                 }
             },
             ActionSpec(id: "item.setPriority", title: "Set priority", help: "Sets the priority of an item. Give the priority name or id.", kind: .change,
-                       input: ActionSpec.args(["key": Self.key, "priority": ("string", "The priority name, for example high.")], required: ["key", "priority"])) { a in
+                       input: ActionSpec.args(["key": Self.key, "priority": ("string", "The priority name, for example high.")], required: ["key", "priority"]),
+                       capability: .priority) { a in
                 await link.item(a) { d, f, done in
+                    guard f.snap.hasPriority else { done(.notAllowed("\(ENV.trackerName(f.snap.summary.ref.account)) has no priority.")); return }
                     let options = f.snap.fields.first { $0.id == ProjectSnapshot.priorityFieldId }?.options ?? []
                     guard let o = options.find(a.string("priority") ?? "") else {
                         done(.notAllowed("\(f.snap.summary.identifier) has no priority \(a.string("priority") ?? ""). It has: \(options.names)."))
@@ -136,6 +138,7 @@ struct ItemActions {
                         options[ProjectSnapshot.statusFieldId] = o.id
                     }
                     if let p = a.string("priority") {
+                        guard snap.hasPriority else { done(.notAllowed("\(ENV.trackerName(snap.summary.ref.account)) has no priority.")); return }
                         let list = snap.fields.first { $0.id == ProjectSnapshot.priorityFieldId }?.options ?? []
                         guard let o = list.find(p) else { done(.notAllowed("No priority \(p). Use: \(list.names).")); return }
                         options[ProjectSnapshot.priorityFieldId] = o.id
@@ -207,5 +210,14 @@ extension ProjectStore {
     /// A snapshot by store key or by identifier.
     func snapshot(_ key: String) -> ProjectSnapshot? {
         snapshots[key] ?? snapshots.values.first { $0.summary.identifier.caseInsensitiveCompare(key) == .orderedSame }
+    }
+}
+
+extension ProjectStore {
+    /// The tracker name of an item key or a project key. No match gives the names of all trackers.
+    func trackerName(of key: String?) -> String {
+        guard let key else { return ENV.trackerNames() }
+        let snap = item(key: key)?.1 ?? snapshot(key)
+        return snap.map { ENV.trackerName($0.summary.ref.account) } ?? ENV.trackerNames()
     }
 }

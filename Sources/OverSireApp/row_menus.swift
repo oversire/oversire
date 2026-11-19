@@ -95,7 +95,7 @@ extension Array where Element == MenuEntry {
 // The menus of each row type. Capabilities hide the provider actions.
 enum RowMenu {
     static func item(_ item: Item, snap: ProjectSnapshot, stream: Workstream?, local: ProjectLocalSettings,
-                     caps: Set<Capability>, tracker: String = "Plane") -> [MenuEntry] {
+                     caps: Set<Capability>, tracker: String) -> [MenuEntry] {
         var out: [MenuEntry] = [.action("Open", .open(.item(item.key, .overview))), .action("Open in \(tracker)", .openURL(item.url)), .separator,
                                 .action("Copy ID", .copy(item.key)), .action("Copy link", .copy(item.url)),
                                 .action("Copy ID and title", .copy("\(item.key) \(item.title)")), .action("Copy branch name", .copy(local.branch(for: item))),
@@ -106,9 +106,11 @@ enum RowMenu {
             }))
         }
         if !item.isMine(snap.me) { out.append(.action("Assign to me", .assignMe(itemId: item.id))) }
-        out.append(.submenu("Priority", StatusOption.priorities.map {
-            .action($0.name, .priority(itemId: item.id, priorityId: $0.id), checked: $0.name == (item.fields["Priority"] ?? "None"))
-        }))
+        if snap.hasPriority {
+            out.append(.submenu("Priority", StatusOption.priorities.map {
+                .action($0.name, .priority(itemId: item.id, priorityId: $0.id), checked: $0.name == (item.fields["Priority"] ?? "None"))
+            }))
+        }
         out.append(.separator)
         if stream?.agent != nil {
             out.append(.action("Open session", .open(.item(item.key, .session))))
@@ -186,7 +188,7 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func activity(_ e: FeedEntry, projectKey: String?, canTriage: Bool, canRefine: Bool = false, tracker: String = "Plane") -> [MenuEntry] {
+    static func activity(_ e: FeedEntry, projectKey: String?, canTriage: Bool, canRefine: Bool = false, tracker: String) -> [MenuEntry] {
         var out: [MenuEntry] = []
         if e.route != nil || e.intake != nil { out.append(.action("Open", e.route.map { .open($0) } ?? .openURL(e.url ?? ""))) }
         if let u = e.itemURL ?? e.url { out.append(.action(e.source == .run ? "Open on GitHub" : "Open in \(tracker)", .openURL(u))) }
@@ -199,7 +201,7 @@ enum RowMenu {
         return out.tidy
     }
 
-    static func sidebarProject(_ p: ProjectSummary, hasTrackerIcon: Bool, tracker: String = "Plane") -> [MenuEntry] {
+    static func sidebarProject(_ p: ProjectSummary, hasTrackerIcon: Bool, tracker: String) -> [MenuEntry] {
         let k = p.identifier.uppercased()
         var out: [MenuEntry] = [.action("Open \(p.title)", .open(.project(k))), .action("Project settings…", .open(.projectSettings(k, .appearance))),
                                 .action("Links and Orca workspace…", .open(.projectSettings(k, .links))), .separator,

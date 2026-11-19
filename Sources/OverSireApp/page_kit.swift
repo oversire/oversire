@@ -444,7 +444,7 @@ class Row: Box {
         return m
     }
     // Copy link, Copy ID and Open on hover, and the copy keys.
-    func itemActions(url: String, key: String, tracker: String = "Plane") {
+    func itemActions(url: String, key: String, tracker: String) {
         copyID = key
         copyLink = url
         hoverViews = RowActions.item(url: url, key: key, tracker: tracker)
@@ -2189,7 +2189,7 @@ final class ResizeHandle: NSView {
 // Small icon buttons that show on a row while the pointer is on it.
 enum RowActions {
     // Copy link, Copy ID, Open in the tracker.
-    static func item(url: String, key: String, tracker: String = "Plane") -> [NSView] {
+    static func item(url: String, key: String, tracker: String) -> [NSView] {
         [IconButton("link", label: "Copy link of \(key)", tip: "Copy link (⇧⌘C)", copy: url),
          IconButton("number", label: "Copy ID \(key)", tip: "Copy ID (⌘C)", copy: key),
          IconButton("arrow.up.right.square", label: "Open \(key) in \(tracker)", tip: "Open in \(tracker)") {

@@ -70,7 +70,7 @@ enum ToolSource {
     static func name(_ tool: String, args: JSONValue) -> String {
         if let m = args["machine"]?.string, !m.isEmpty { return m }
         switch tool.split(separator: "_").first.map(String.init) ?? tool {
-        case "item", "intake", "project", "plan", "work": return "Plane"
+        case "item", "intake", "project", "plan", "work": return ENV.trackerNames()
         case "pr", "repo": return "GitHub"
         case "run": return "Actions"
         case "session", "worktree": return "Orca"
@@ -83,7 +83,7 @@ enum ToolSource {
 
     static func symbol(_ source: String) -> String {
         switch source {
-        case "Plane": return "checklist"
+        case ENV.trackerNames(): return "checklist"
         case "GitHub": return "arrow.triangle.pull"
         case "Actions": return "play.circle"
         case "Orca": return "terminal"
