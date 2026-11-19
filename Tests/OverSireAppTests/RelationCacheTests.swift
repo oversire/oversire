@@ -182,4 +182,141 @@ final class RelationCacheTests: XCTestCase {
         XCTAssertTrue(buttons(c).contains { $0.title == "Try again" })
         XCTAssertTrue(texts(c).contains(other.key), "the rows still show")
     }
+
+    // MARK: The plan of a project
+
+    private final class Plan {
+        let fake = FakeTracker()
+        let clock = ManualSchedule()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("relation-cache-\(UUID().uuidString)")
+        let project = "plane/ocral/p1"
+        var refs: [String: ItemRef] = [:]
+        var keys: [String] = []
+        var updated: [String: Date] = [:]
+        var now = Date(timeIntervalSince1970: 1_800_000_000)
+        lazy var disk = RelationDisk(folder: folder)
+        lazy var cache = RelationCache(tracker: { [fake] _ in fake }, ref: { [unowned self] in refs[$0] },
+                                       now: { [unowned self] in now }, schedule: clock.schedule,
+                                       disk: disk, project: { [unowned self] in refs[$0] == nil ? nil : project },
+                                       updatedAt: { [unowned self] in updated[$0] })
+
+        func make(_ n: Int) async throws {
+            for i in 0..<n {
+                let r = try await fake.create(ItemDraft(title: "Plan item \(i)"), in: fake.project)
+                refs[r.key] = r
+                keys.append(r.key)
+            }
+        }
+
+        deinit { try? FileManager.default.removeItem(at: folder) }
+    }
+
+    @MainActor
+    private func until(_ ok: () -> Bool) async {
+        for _ in 0..<500 where !ok() { try? await Task.sleep(nanoseconds: 10_000_000) }
+        XCTAssertTrue(ok())
+    }
+
+    @MainActor
+    func testPrimeShowsThenLoadReplaces() async throws {
+        let p = Plan()
+        try await p.make(2)
+        let (a, b) = (p.keys[0], p.keys[1])
+        try await p.fake.apply(RelationPatch(add: [ItemRelation(kind: .blockedBy, item: p.refs[b]!)]), to: p.refs[a]!)
+        let old = p.now.addingTimeInterval(-3600)
+        p.cache.prime(a, [], at: old)
+        XCTAssertEqual(p.cache.relations(a)?.isEmpty, true, "the cached relations show at once")
+        XCTAssertEqual(p.cache.read(a)?.state, .fresh(old))
+        p.cache.load([a])
+        await p.cache.read(a)?.settled()
+        XCTAssertEqual(p.cache.relations(a)?.map(\.item.key), [b], "a load replaces a primed key, so it is not seeded")
+        XCTAssertEqual(p.fake.relationReads, 1)
+        p.cache.load([a])
+        await p.cache.read(a)?.settled()
+        XCTAssertEqual(p.fake.relationReads, 1, "after the first read the key is loaded")
+    }
+
+    @MainActor
+    func testLoadPlanSkipsFresh() async throws {
+        let p = Plan()
+        try await p.make(1)
+        let a = p.keys[0]
+        let edit = p.now.addingTimeInterval(-7200)
+        try p.disk.save(project: p.project, [a.uppercased(): RelationDisk.Entry(relations: [], at: p.now.addingTimeInterval(-3600), itemUpdatedAt: edit)])
+        p.cache.loadPlan([a], updatedAt: { _ in edit })
+        await p.cache.read(a)?.settled()
+        XCTAssertEqual(p.fake.relationReads, 0)
+        XCTAssertEqual(p.cache.relations(a)?.isEmpty, true, "the disk entry shows")
+        XCTAssertEqual(p.cache.progress([a]).loaded, 1)
+
+        p.now = p.now.addingTimeInterval(86_400)
+        p.cache.loadPlan([a], updatedAt: { _ in edit })
+        await p.cache.read(a)?.settled()
+        XCTAssertEqual(p.fake.relationReads, 1, "an entry older than maxAge loads again")
+    }
+
+    @MainActor
+    func testLoadPlanStaleByUpdatedAt() async throws {
+        let p = Plan()
+        try await p.make(2)
+        let (a, b) = (p.keys[0], p.keys[1])
+        try await p.fake.apply(RelationPatch(add: [ItemRelation(kind: .blockedBy, item: p.refs[b]!)]), to: p.refs[a]!)
+        let edit = p.now.addingTimeInterval(-7200)
+        try p.disk.save(project: p.project, [a.uppercased(): RelationDisk.Entry(relations: [], at: p.now.addingTimeInterval(-3600), itemUpdatedAt: edit)])
+        let later = edit.addingTimeInterval(60)
+        p.updated[a] = later
+        p.cache.loadPlan([a], updatedAt: { _ in later })
+        await p.cache.read(a)?.settled()
+        XCTAssertEqual(p.fake.relationReads, 1)
+        XCTAssertEqual(p.cache.relations(a)?.map(\.item.key), [b])
+
+        XCTAssertEqual(p.disk.load(project: p.project)[a.uppercased()]?.relations.isEmpty, true, "the write waits 1 s")
+        p.clock.advance(1)
+        let e = p.disk.load(project: p.project)[a.uppercased()]
+        XCTAssertEqual(e?.relations.map(\.item.key), [b])
+        XCTAssertEqual(e?.at, p.now)
+        XCTAssertEqual(e?.itemUpdatedAt, later)
+
+        p.cache.loadPlan([a], updatedAt: { _ in later })
+        await p.cache.read(a)?.settled()
+        XCTAssertEqual(p.fake.relationReads, 1, "the new entry is fresh")
+    }
+
+    @MainActor
+    func testLoadPlanPriority() async throws {
+        let p = Plan()
+        try await p.make(25)
+        p.cache.loadPlan(p.keys, updatedAt: { _ in nil })
+        await until { p.fake.relationReads == 25 && p.cache.loading.isEmpty }
+        let prios = p.fake.relationReadPriorities
+        XCTAssertEqual(prios.filter { $0 == .user }.count, 20)
+        XCTAssertEqual(prios.filter { $0 == .background }.count, 5)
+        XCTAssertEqual(p.cache.progress(p.keys).loaded, 25)
+    }
+
+    @MainActor
+    func testLoadPlanRunsOneBackgroundReadAtATime() async throws {
+        let p = Plan()
+        try await p.make(4)
+        p.cache.loadPlan(p.keys, updatedAt: { _ in nil }, first: 1)
+        XCTAssertEqual(p.cache.loading.count, 2, "one user read and one background read")
+        await until { p.fake.relationReads == 4 && p.cache.loading.isEmpty }
+    }
+
+    @MainActor
+    func testProgressCounts() async throws {
+        let p = Plan()
+        try await p.make(6)
+        for k in p.keys.prefix(3) {
+            p.cache.load([k])
+            await p.cache.read(k)?.settled()
+        }
+        p.fake.failRelationReads(times: 99)
+        p.cache.load([p.keys[3]])
+        await p.cache.read(p.keys[3])?.settled()
+        let got = p.cache.progress(p.keys)
+        XCTAssertEqual(got.loaded, 3)
+        XCTAssertEqual(got.total, 6)
+        XCTAssertEqual(got.failed, 1)
+    }
 }

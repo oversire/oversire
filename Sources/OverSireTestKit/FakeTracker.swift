@@ -30,6 +30,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var writeFailures: [String: Int] = [:]               // item id → failed writes left
     private var relationReadFailures = 0
     private var relationReadCount = 0
+    private var relationReadPriorityList: [CallPriority] = []
     private var intakeDetailFailure: ProviderError?
     private var intakeDetailCount = 0
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
@@ -136,8 +137,10 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     /// Keeps each relation on both items: A blocks B ⇔ B blockedBy A.
     public func relations(of item: ItemRef) async throws -> [ItemRelation] {
         guard capabilities.contains(.relations) else { throw ProviderError.unsupported(.relations) }
+        let priority = CallPriority.current
         return try base.locked {
             relationReadCount += 1
+            relationReadPriorityList.append(priority)
             if relationReadFailures > 0 {
                 relationReadFailures -= 1
                 throw ProviderError.transport("Plane did not answer.")
@@ -271,6 +274,9 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
 
     /// The calls of `relations(of:)`.
     public var relationReads: Int { base.lockedValue { relationReadCount } }
+
+    /// The `CallPriority.current` of each call of `relations(of:)`.
+    public var relationReadPriorities: [CallPriority] { base.lockedValue { relationReadPriorityList } }
 
     /// The next `times` writes to the item fail: update, comment, relations and triage.
     public func failWrites(to itemId: String, times: Int = 1) { base.lockedValue { writeFailures[itemId] = times } }

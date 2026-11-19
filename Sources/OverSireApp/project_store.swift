@@ -87,7 +87,10 @@ final class ProjectStore {
     private var assetCache: [String: (url: String, at: Date)] = [:]
     private(set) lazy var relations = RelationCache(
         tracker: { [weak self] in self?.trackers.tracker($0.project.workspace) as? any RelationManaging },
-        ref: { [weak self] key in self?.item(key: key).flatMap { $0.item.ref(in: $0.snap.summary.ref) } })
+        ref: { [weak self] key in self?.item(key: key).flatMap { $0.item.ref(in: $0.snap.summary.ref) } },
+        disk: RelationDisk(folder: URL(fileURLWithPath: (statePath as NSString).deletingLastPathComponent).appendingPathComponent("relations")),
+        project: { [weak self] in self?.item(key: $0)?.key },
+        updatedAt: { [weak self] in self?.item(key: $0)?.item.updatedAt })
     var relayIsLive: () -> Bool = { false }
     /// True on the Mac that leads the automations. The other Mac refreshes later on cloud events.
     var leads: () -> Bool = { true }
@@ -1077,6 +1080,21 @@ final class ProjectStore {
     func isDone(key: String) -> Bool {
         guard let (_, snap, item) = item(key: key) else { return false }
         return snap.isFinished(item)
+    }
+
+    /// The keys whose relations the plan needs: open members of open epics of the project, in epic order.
+    /// Only loaded items count: an item that is only in the index has no ref.
+    func planKeys(_ project: String) -> [String] {
+        guard let snap = snapshots[project] else { return [] }
+        let open = snap.sorted(snap.items.filter { $0.epicId != nil && !snap.isClosed($0.statusOptionId) })
+        return snap.epicGroups(open).filter { $0.epic.map { !$0.state.isClosed } ?? false }.flatMap { $0.items.map(\.key) }
+    }
+
+    /// Shows the disk relations of the plan keys, then loads the missing and stale keys.
+    func loadPlan(_ project: String) {
+        guard let snap = snapshots[project] else { return }
+        let at = Dictionary(snap.items.map { ($0.key.uppercased(), $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
+        relations.loadPlan(planKeys(project), updatedAt: { at[$0.uppercased()] })
     }
 
     /// The open blocker keys of an item, from the relation cache.
