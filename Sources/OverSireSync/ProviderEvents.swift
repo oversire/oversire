@@ -246,9 +246,9 @@ public enum TrackerEvents {
 /// The rows of epic changes: epic.created, epic.item_added, epic.item_removed and epic.closed.
 public enum EpicEvents {
     /// The rows of one poll. Without an old snapshot with epics, it writes the whole history (backfill).
-    /// `mine`: the item ids that this app moved. Their rows name `me` as the human actor.
+    /// `actors`: the item ids and epic ids that this app changed, and who changed them. A human with no name is `me`.
     public static func drafts(old: ProjectSnapshot?, new snap: ProjectSnapshot, provider: String, machine: String,
-                              mine: Set<String> = [], me: String? = nil) -> [EventDraft] {
+                              actors: [String: EventActor] = [:], me: String? = nil) -> [EventDraft] {
         guard let epics = snap.epics else { return [] }
         let project = snap.summary.identifier.lowercased()
         let backfill = old?.epics == nil
@@ -258,12 +258,16 @@ public enum EpicEvents {
             for i in s?.index ?? [] { if let k = i.key { keys[i.id] = k } }
         }
         var out: [EventDraft] = []
-        func row(_ kind: Event.Kind, _ id: String, at: Date, item: String?, parent: String?, itemId: String? = nil, _ summary: String,
+        func row(_ kind: Event.Kind, _ id: String, at: Date, item: String?, parent: String?, by: String, _ summary: String,
                  _ payload: [String: JSONValue]) {
-            let human = itemId.map(mine.contains) == true && me != nil
+            var who: (ActorType, String) = (.provider, provider)
+            if let a = actors[by], a.type != .human {
+                who = (a.type, a.name ?? a.type.rawValue)
+            } else if let a = actors[by], let name = a.name ?? me {
+                who = (.human, name)
+            }
             out.append(EventDraft(id: "\(provider):\(id)", at: at, kind: kind, item: item, parentItem: parent, project: project, machine: machine,
-                                  provider: provider, actorType: human ? .human : .provider, actor: human ? me! : provider, via: "poll",
-                                  summary: summary, payload: payload))
+                                  provider: provider, actorType: who.0, actor: who.1, via: "poll", summary: summary, payload: payload))
         }
         func ms(_ d: Date) -> Int64 { Int64(d.timeIntervalSince1970 * 1000) }
         func title(_ id: EpicID) -> String { (epics.first { $0.id == id } ?? old?.epic(id))?.title ?? id.rawValue }
@@ -273,7 +277,7 @@ public enum EpicEvents {
             let at = known ?? (backfill ? e.createdAt ?? snap.fetchedAt : snap.fetchedAt)
             var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title)]
             if let from { p["from"] = .string(from.rawValue) }
-            row(.epicItemAdded, "epic-\(e.id):add:\(itemId):\(ms(at))", at: at, item: key, parent: e.eventKey, itemId: itemId,
+            row(.epicItemAdded, "epic-\(e.id):add:\(itemId):\(ms(at))", at: at, item: key, parent: e.eventKey, by: itemId,
                 "Added to \(e.title)", p)
         }
         func remove(_ id: EpicID, _ itemId: String, to: EpicID?) {
@@ -282,19 +286,19 @@ public enum EpicEvents {
             var p: [String: JSONValue] = ["epic": .string(id.rawValue), "title": .string(title(id))]
             if let to { p["to"] = .string(to.rawValue) }
             row(.epicItemRemoved, "epic-\(id):remove:\(itemId):\(ms(snap.fetchedAt))", at: snap.fetchedAt, item: key,
-                parent: e?.eventKey, itemId: itemId, "Removed from \(title(id))", p)
+                parent: e?.eventKey, by: itemId, "Removed from \(title(id))", p)
         }
         func closed(_ e: Epic) {
             let at = e.updatedAt ?? snap.fetchedAt
             let state = e.state == .done ? "done" : "canceled"
             var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title), "state": .string(state)]
             p["open"] = .int(snap.rollup(e).open)
-            row(.epicClosed, "epic-\(e.id):closed:\(ms(at))", at: at, item: e.eventKey, parent: nil, "\(e.title) \(state)", p)
+            row(.epicClosed, "epic-\(e.id):closed:\(ms(at))", at: at, item: e.eventKey, parent: nil, by: e.id.rawValue, "\(e.title) \(state)", p)
         }
         func created(_ e: Epic) {
             var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title)]
             if let t = e.targetDate { p["targetDate"] = .string(t.formatted(.iso8601)) }
-            row(.epicCreated, "epic-\(e.id):created", at: e.createdAt ?? snap.fetchedAt, item: e.eventKey, parent: nil, e.title, p)
+            row(.epicCreated, "epic-\(e.id):created", at: e.createdAt ?? snap.fetchedAt, item: e.eventKey, parent: nil, by: e.id.rawValue, e.title, p)
         }
 
         if backfill {

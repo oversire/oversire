@@ -119,7 +119,7 @@ final class ProjectStoreEpicTests: XCTestCase {
         let ok: Bool = await withCheckedContinuation { c in
             DispatchQueue.main.async {
                 rig.d.projectStore.setEpic(rig.epic.id, itemId: item.id) { c.resume(returning: $0) }
-                XCTAssertEqual(rig.d.projectStore.epicWrites, [item.id])
+                XCTAssertEqual(rig.d.projectStore.epicWrites, [item.id: .user])
             }
         }
         XCTAssertTrue(ok)
@@ -129,7 +129,7 @@ final class ProjectStoreEpicTests: XCTestCase {
         XCTAssertEqual(rows[1].item, item.key)
         XCTAssertEqual(rows[1].parentItem, rig.epic.eventKey)
         let left = await MainActor.run { rig.d.projectStore.epicWrites }
-        XCTAssertEqual(left, [])
+        XCTAssertEqual(left, [:])
         let snap = await rig.snapshot()
         XCTAssertEqual(snap?.epicId(of: item.id), rig.epic.id)
     }
@@ -141,7 +141,7 @@ final class ProjectStoreEpicTests: XCTestCase {
         }
         XCTAssertFalse(ok)
         let left = await MainActor.run { rig.d.projectStore.epicWrites }
-        XCTAssertEqual(left, [])
+        XCTAssertEqual(left, [:])
     }
 
     func testCreateAndUpdateEpic() async throws {

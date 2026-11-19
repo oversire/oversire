@@ -24,7 +24,7 @@ struct EpicActions {
                         guard let e = f.snap.findEpic(text) else { done(.notAllowed(f.snap.unknownEpic(text))); return }
                         target = e
                     }
-                    d.projectStore.setEpic(target?.id, itemId: f.item.id) {
+                    d.projectStore.setEpic(target?.id, itemId: f.item.id, by: a.caller.actor) {
                         done(ActionLink.stored(d, $0, target.map { "\(f.item.key) is in \($0.title)." } ?? "\(f.item.key) is in no epic."))
                     }
                 }
@@ -75,7 +75,7 @@ struct EpicActions {
                         guard let day = Self.parseDay(text) else { done(.notAllowed("\(name) must be a date as YYYY-MM-DD.")); return }
                         if name == "targetDate" { draft.targetDate = day } else { draft.startDate = day }
                     }
-                    d.projectStore.createEpic(draft, projectKey: snap.summary.ref.storeKey) { r in
+                    d.projectStore.createEpic(draft, projectKey: snap.summary.ref.storeKey, by: a.caller.actor) { r in
                         switch r {
                         case .success(let e): done(.ok(summary: "Epic \(e.title) is made.", data: .object(["id": .string(e.id.rawValue)])))
                         case .failure(let e): done(.failed(d.projectStore.lastError ?? e.message))
@@ -105,7 +105,20 @@ struct EpicActions {
                         if field == .targetDate { patch.targetDate = day } else { patch.startDate = day }
                     }
                     guard !patch.isEmpty else { done(.notAllowed("Give a field to change.")); return }
-                    d.projectStore.updateEpic(f.epic, patch) { done(ActionLink.stored(d, $0, "Epic \(patch.title ?? f.epic.title) is updated.")) }
+                    d.projectStore.updateEpic(f.epic, patch, by: a.caller.actor) { ok in
+                        let title = patch.title ?? f.epic.title
+                        if ok {
+                            let fields = ["title", "goal", "state", "targetDate", "startDate", "lead"].filter { a.string($0) != nil }
+                            var p: [String: JSONValue] = ["epic": .string(f.epic.id.rawValue), "title": .string(title),
+                                                          "fields": .array(fields.map(JSONValue.string))]
+                            if let s = patch.state { p["state"] = .string(s.rawValue) }
+                            let actor = a.caller.actor
+                            d.projectStore.events.action(.epicUpdated, item: f.epic.eventKey, project: f.snap.summary.identifier, verb: "epic-update",
+                                                         "\(title) updated: \(fields.joined(separator: ", "))", payload: p,
+                                                         actorType: actor.type, actor: actor.name)
+                        }
+                        done(ActionLink.stored(d, ok, "Epic \(title) is updated."))
+                    }
                 }
             },
             ActionSpec(id: "epic.close", title: "Close epic", help: "Sets an epic to done. An epic with open items does not close.", kind: .change,
@@ -114,7 +127,7 @@ struct EpicActions {
                     guard !f.epic.state.isClosed else { done(.notAllowed("\(f.epic.title) is \(f.epic.state.rawValue) already.")); return }
                     let open = f.snap.rollup(f.epic).open
                     guard open == 0 else { done(.notAllowed("\(open) item\(open == 1 ? " is" : "s are") open.")); return }
-                    d.projectStore.updateEpic(f.epic, EpicPatch(state: .done)) { done(ActionLink.stored(d, $0, "Epic \(f.epic.title) is done.")) }
+                    d.projectStore.updateEpic(f.epic, EpicPatch(state: .done), by: a.caller.actor) { done(ActionLink.stored(d, $0, "Epic \(f.epic.title) is done.")) }
                 }
             },
             ActionSpec(id: "epic.addItems", title: "Add items to epic", help: "Puts items in an epic of their project. An item sits in one epic only.", kind: .change,
@@ -132,11 +145,67 @@ struct EpicActions {
                     }
                     func next(_ n: Int) {
                         guard n < ids.count else { done(.ok(summary: "\(n) item\(n == 1 ? " is" : "s are") in \(f.epic.title).")); return }
-                        d.projectStore.setEpic(f.epic.id, itemId: ids[n]) { ok in
+                        d.projectStore.setEpic(f.epic.id, itemId: ids[n], by: a.caller.actor) { ok in
                             if ok { next(n + 1) } else { done(.failed("\(keys[n]) did not move. \(d.projectStore.lastError ?? "")" + (n > 0 ? " \(n) before it moved." : ""))) }
                         }
                     }
                     next(0)
+                }
+            },
+            ActionSpec(id: "epic.removeItems", title: "Remove items from epic", help: "Takes items out of their epic. The items stay in their project.",
+                       kind: .change, input: ActionSpec.args(["project": Self.project, "keys": ("array", "The item keys.")], required: ["project", "keys"]),
+                       capability: .epics) { a in
+                await link.run { d, done in
+                    guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    let keys = a.list("keys").map { $0.uppercased() }
+                    guard !keys.isEmpty else { done(.notAllowed("Give the item keys.")); return }
+                    var items: [Item] = []
+                    for k in keys {
+                        guard let i = snap.items.first(where: { $0.key.uppercased() == k }) else {
+                            done(.notAllowed("\(snap.summary.identifier) has no loaded item \(k).")); return
+                        }
+                        items.append(i)
+                    }
+                    let moving = items.filter { $0.epicId != nil }
+                    func next(_ n: Int) {
+                        guard n < moving.count else {
+                            done(.ok(summary: "\(n) item\(n == 1 ? " is" : "s are") in no epic." + (moving.count < items.count ? " \(items.count - moving.count) had no epic." : "")))
+                            return
+                        }
+                        d.projectStore.setEpic(nil, itemId: moving[n].id, by: a.caller.actor) { ok in
+                            if ok { next(n + 1) } else { done(.failed("\(moving[n].key) did not move. \(d.projectStore.lastError ?? "")" + (n > 0 ? " \(n) before it moved." : ""))) }
+                        }
+                    }
+                    next(0)
+                }
+            },
+            ActionSpec(id: "epic.show", title: "Show epic", help: "Gives an epic: the progress, the members, the numbered next steps and the forecast.",
+                       kind: .read, input: ActionSpec.args(["project": Self.project, "epic": Self.epic], required: ["project", "epic"]),
+                       capability: .epics) { a in
+                await link.epic(a) { d, f, done in
+                    d.projectStore.loadPlan(f.snap.summary.ref.storeKey)
+                    let m = PlanModel.build(data: d, snap: f.snap, controls: PlanControls())
+                    done(.ok(summary: m.epicText(f.epic), data: m.epicJSON(f.epic)))
+                }
+            },
+            ActionSpec(id: "epic.plan", title: "Project plan", help: "Gives the plan of a project, or of one epic: the ordered steps, the critical path, "
+                           + "the slack and the forecast of each epic. Relations that did not load yet can change the order.",
+                       kind: .read, input: ActionSpec.args(["project": Self.project, "epic": ("string", "The epic id or title. Empty: all open epics.")],
+                                                            required: ["project"]), capability: .epics) { a in
+                await link.run { d, done in
+                    guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    var only: Epic?
+                    if let text = a.string("epic"), !text.isEmpty {
+                        guard let e = snap.findEpic(text) else { done(.notAllowed(snap.unknownEpic(text))); return }
+                        only = e
+                    }
+                    d.projectStore.loadPlan(snap.summary.ref.storeKey)
+                    let m = PlanModel.build(data: d, snap: snap, controls: PlanControls())
+                    done(.ok(summary: m.planText(only: only), data: m.planJSON(only: only)))
                 }
             },
         ]

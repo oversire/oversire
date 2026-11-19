@@ -113,10 +113,10 @@ final class EventDesk: @unchecked Sendable {
         Task { [outlet] in await outlet.link(links) }
     }
 
-    /// The epic rows of one tracker poll. mine: the items whose epic this app set.
-    func epics(old: ProjectSnapshot?, new snap: ProjectSnapshot, mine: Set<String>) {
+    /// The epic rows of one tracker poll. actors: the items and epics that this app changed.
+    func epics(old: ProjectSnapshot?, new snap: ProjectSnapshot, actors: [String: EventActor]) {
         let p = snap.summary.ref.account.provider.rawValue
-        send(EpicEvents.drafts(old: old, new: snap, provider: p, machine: machine(), mine: mine, me: snap.me))
+        send(EpicEvents.drafts(old: old, new: snap, provider: p, machine: machine(), actors: actors, me: snap.me))
     }
 
     // MARK: Your actions

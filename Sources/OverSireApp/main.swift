@@ -169,6 +169,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         c.sink = self
         c.machines = machineHub
         c.unhooked = { [weak self] in self?.cloudSetup.unhookedRepos(REPOS) ?? [] }
+        c.appCalls = { [weak self] link in
+            let client = link.client(http: DaemonTransport.shared)
+            return self.map { AppCalls(catalog: $0.actions) { try await client.send($0) } }
+        }
         return c
     }()
     // Targeted refreshes that arrive while another refresh runs.

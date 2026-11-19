@@ -108,6 +108,8 @@ final class LiveSync {
     private(set) var lastPoll: Date?
     /// Repos without a webhook. They poll at the normal interval while the cloud is live.
     var unhooked: () -> [String] = { [] }
+    /// Runs the CLI calls of the local daemon. Nil: the calls time out.
+    var appCalls: ((MachineLink) -> AppCalls?)?
 
     private var merger: EventMerger?
     private var polling: PollingSource?
@@ -254,6 +256,13 @@ final class LiveSync {
                 default: break
                 }
                 guard l.local else { return }
+                if case .appCall(let c)? = DaemonFrame.parse(text) {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let calls = self?.appCalls?(l) ?? nil else { return }
+                        Task { await calls.handle(c) }
+                    }
+                    return
+                }
                 DispatchQueue.main.async { hub.frame(text) }
             })
             healthTasks.append(Task { [weak self] in

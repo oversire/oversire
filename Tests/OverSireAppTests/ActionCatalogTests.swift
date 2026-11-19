@@ -184,7 +184,7 @@ final class ActionCatalogTests: XCTestCase {
 
     func testEpicActionsNeedTheCapability() {
         let d = TestAppData()
-        let ids = ["item.setEpic", "epic.list", "epic.create", "epic.update", "epic.close", "epic.addItems"]
+        let ids = ["item.setEpic", "epic.list", "epic.create", "epic.update", "epic.close", "epic.addItems", "epic.removeItems", "epic.show", "epic.plan"]
         XCTAssertEqual(d.actions.all.filter { $0.id.hasPrefix("epic.") || $0.id == "item.setEpic" }.map(\.id).sorted(), ids.sorted())
         XCTAssertTrue(d.actions.supported(d).filter { ids.contains($0.id) }.isEmpty)
         d.caps = [.epics]
@@ -257,6 +257,76 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(billing["progress"]?.string, "0 of 2 done")
         let missing = await rig.d.actions.run("epic.addItems", args(["project": .string("FAKE"), "epic": .string(id), "keys": .array([.string("FAKE-99")])]))
         XCTAssertEqual(missing, .notAllowed("FAKE has no loaded item FAKE-99."))
+    }
+
+    private func inEpic(_ rig: EpicRig, _ n: Int) async throws {
+        for i in rig.items.prefix(n) { try await rig.fake.setEpic(rig.epic.id, for: i) }
+        await rig.reload()
+    }
+
+    func testShowGivesSteps() async throws {
+        let rig = try await EpicRig()
+        try await inEpic(rig, 2)
+        let r = await rig.d.actions.run("epic.show", args(["project": .string("FAKE"), "epic": .string("Review desk")]))
+        guard case .ok(let summary, let data?, _) = r else { return XCTFail("\(r)") }
+        XCTAssertTrue(summary.hasPrefix("Review desk: 0 of 2 done."), summary)
+        let steps = try XCTUnwrap(data["steps"]?.array)
+        XCTAssertEqual(steps.compactMap { $0["key"]?.string }.sorted(), rig.items.prefix(2).map(\.key).sorted())
+        XCTAssertEqual(steps.first?["number"], .int(1))
+        XCTAssertNotNil(steps.first?["start"]?.string)
+        XCTAssertEqual(data["members"]?.array?.count, 2)
+        XCTAssertEqual(data["progress"]?["total"], .int(2))
+        XCTAssertNotNil(data["next"]?.string)
+        XCTAssertNotNil(data["forecast"]?["end"]?.string)
+        let bad = await rig.d.actions.run("epic.show", args(["project": .string("FAKE"), "epic": .string("Nope")]))
+        XCTAssertEqual(bad, .notAllowed("FAKE has no epic Nope. It has: Review desk."))
+    }
+
+    func testPlanReportsPartialRelations() async throws {
+        let rig = try await EpicRig(items: 5)
+        try await inEpic(rig, 5)
+        await MainActor.run { for i in rig.items.prefix(2) { rig.d.projectStore.relations.prime(i.key, [], at: Date()) } }
+        let r = await rig.d.actions.run("epic.plan", args(["project": .string("FAKE")]))
+        guard case .ok(let summary, let data?, _) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(data["relations"]?["loaded"], .int(2))
+        XCTAssertEqual(data["relations"]?["total"], .int(5))
+        XCTAssertTrue(summary.contains("Relations 2 of 5 loaded"), summary)
+        let epics = try XCTUnwrap(data["epics"]?.array)
+        XCTAssertEqual(epics.count, 1)
+        XCTAssertEqual(epics.first?["steps"]?.array?.count, 5)
+        XCTAssertFalse(data["critical"]?.array?.isEmpty ?? true)
+        let unknown = await rig.d.actions.run("epic.plan", args(["project": .string("NOPE")]))
+        XCTAssertEqual(unknown, .notAllowed("OverSire has no loaded project NOPE."))
+    }
+
+    func testRemoveItemsSetsNoEpic() async throws {
+        let rig = try await EpicRig()
+        try await inEpic(rig, 2)
+        let keys = rig.items.prefix(2).map { JSONValue.string($0.key) }
+        let cli = ActionArgs(.object(["project": .string("FAKE"), "keys": .array(keys)]), caller: .cli(agent: "codex"))
+        let r = await rig.d.actions.run("epic.removeItems", cli)
+        XCTAssertEqual(r, .ok(summary: "2 items are in no epic."))
+        let snap = await rig.snapshot()
+        for i in rig.items.prefix(2) { XCTAssertNil(snap?.epicId(of: i.id)) }
+        let rows = await rig.rows(count: 5).filter { $0.kind == .epicItemRemoved }
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(Set(rows.map(\.actorType)), [.agent])
+        XCTAssertEqual(Set(rows.map(\.actor)), ["codex"])
+        let missing = await rig.d.actions.run("epic.removeItems", args(["project": .string("FAKE"), "keys": .array([.string("FAKE-99")])]))
+        XCTAssertEqual(missing, .notAllowed("FAKE has no loaded item FAKE-99."))
+    }
+
+    func testUpdateEpicWritesTheAgent() async throws {
+        let rig = try await EpicRig()
+        let cli = ActionArgs(.object(["project": .string("FAKE"), "epic": .string("Review desk"), "state": .string("active")]), caller: .cli(agent: "codex"))
+        let r = await rig.d.actions.run("epic.update", cli)
+        XCTAssertEqual(r, .ok(summary: "Epic Review desk is updated."))
+        let rows = await rig.rows(count: 2).filter { $0.kind == .epicUpdated }
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.actorType, .agent)
+        XCTAssertEqual(rows.first?.actor, "codex")
+        XCTAssertEqual(rows.first?.payload?["fields"], .array([.string("state")]))
+        XCTAssertEqual(rows.first?.item, rig.epic.eventKey)
     }
 
     /// All alerts go through AlertConfirm.

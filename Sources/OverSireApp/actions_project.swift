@@ -38,11 +38,10 @@ struct ProjectActions {
                     guard !text.isEmpty else { done(.notAllowed("Give a text.")); return }
                     do { try d.memory.saveVision(text, of: snap.summary.ref) } catch { done(.failed("\(error)")); return }
                     let ident = snap.summary.identifier
-                    let agent: String? = if case .assistant = a.caller { "assistant" } else { nil }
                     d.projectStore.events.action(.projectNorthStarSet, item: nil, project: ident, verb: "north-star",
                                                  "North star of \(ident) set (\(text.count) characters)",
                                                  payload: ["project": .string(ident), "length": .int(text.count)],
-                                                 actorType: agent == nil ? .human : .agent, actor: agent)
+                                                 actorType: a.caller.actor.type, actor: a.caller.actor.name)
                     done(.ok(summary: "The north star of \(ident) is set."))
                 }
             },

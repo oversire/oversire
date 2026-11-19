@@ -1,0 +1,55 @@
+import OverSireAssistant
+import OverSireCore
+import XCTest
+@testable import OverSireApp
+
+final class AppCallsTests: XCTestCase {
+    actor Posted {
+        var results: [AppCallResult] = []
+        var callers: [ActionCaller] = []
+        func add(_ r: AppCallResult) { results.append(r) }
+        func saw(_ c: ActionCaller) { callers.append(c) }
+    }
+
+    func testRunsAllowedAction() async throws {
+        let rig = try await EpicRig()
+        let posted = Posted()
+        let calls = AppCalls(catalog: rig.d.actions) { await posted.add($0) }
+        await calls.handle(AppCall(id: "c1", action: "epic.list", args: .object(["project": .string("FAKE")])))
+        let r = await posted.results
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r.first?.id, "c1")
+        XCTAssertEqual(r.first?.status, .ok)
+        XCTAssertEqual(r.first?.data?.array?.first?["title"]?.string, "Review desk")
+    }
+
+    func testRefusesOtherAction() async {
+        let posted = Posted()
+        let spec = ActionSpec(id: "pr.merge", title: "Merge", help: "", kind: .outward) { a in
+            await posted.saw(a.caller)
+            return .ok(summary: "merged")
+        }
+        let calls = AppCalls(catalog: ActionList([spec])) { await posted.add($0) }
+        await calls.handle(AppCall(id: "c2", action: "pr.merge", agent: "codex"))
+        let r = await posted.results
+        XCTAssertEqual(r, [AppCallResult(id: "c2", status: .notAllowed, summary: "The app does not run pr.merge from the CLI.")])
+        let ran = await posted.callers
+        XCTAssertEqual(ran, [])
+    }
+
+    func testCallerIsCli() async {
+        let posted = Posted()
+        let spec = ActionSpec(id: "epic.close", title: "Close", help: "", kind: .change) { a in
+            await posted.saw(a.caller)
+            return .failed("no")
+        }
+        let calls = AppCalls(catalog: ActionList([spec])) { await posted.add($0) }
+        await calls.handle(AppCall(id: "c3", action: "epic.close", agent: "codex"))
+        let seen = await posted.callers
+        XCTAssertEqual(seen, [.cli(agent: "codex")])
+        XCTAssertEqual(seen.first?.actor, EventActor(type: .agent, name: "codex"))
+        XCTAssertEqual(ActionCaller.cli(agent: nil).actor, .user)
+        let r = await posted.results
+        XCTAssertEqual(r.first?.status, .failed)
+    }
+}

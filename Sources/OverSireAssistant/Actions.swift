@@ -10,6 +10,17 @@ import OverSireAI
 public enum ActionCaller: Hashable, Sendable {
     case user
     case assistant(thread: String)
+    /// An `oversire` command. Nil agent: a human ran it.
+    case cli(agent: String?)
+
+    /// The actor of the event rows of a change.
+    public var actor: EventActor {
+        switch self {
+        case .user, .cli(agent: nil): return .user
+        case .assistant: return EventActor(type: .agent, name: "assistant")
+        case .cli(let agent?): return EventActor(type: .agent, name: agent)
+        }
+    }
 }
 
 public struct ActionArgs: Sendable {

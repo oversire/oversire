@@ -35,7 +35,7 @@ The table is SQLite, in `<data>/events.db` of each daemon. The home daemon holds
 
 The table `item_links` keeps the parent of each item. The app sends the links from the tracker (`POST /v1/events/links`). A row with no `parent_item` gets the parent from this table.
 
-An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.eventKey`: the tracker key of the epic, else `EPIC-` and 12 hex characters of a SHA-256 of the project and the epic id. A links update does not change the `parent_item` of an `epic.*` row. `tree=1` on the key of an epic gives the epic rows of all its items.
+An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.eventKey`: the tracker key of the epic, else `EPIC-` and 12 hex characters of a SHA-256 of the project and the epic id. A links update does not change the `parent_item` of an `epic.*` row. The app writes `epic.updated` when it changes an epic. The poll writes the other `epic.*` rows. A change from an `oversire` command (an app call) names the agent as the actor. `tree=1` on the key of an epic gives the epic rows of all its items.
 
 ## The kinds
 
@@ -48,7 +48,7 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |
-| tracker | `item.created`, `item.updated`, `comment.created`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed` |
+| tracker | `item.created`, `item.updated`, `comment.created`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed`, `epic.updated` |
 | system | `queue.picked`, `queue.held`, `runbook.step_started`, `runbook.step_ended`, `job.ran`, `automation.ran`, `item.state_changed` (actor `parent-guard`, payload `reason: open-sub-items`) |
 
 A reader keeps a row of a kind that it does not know.

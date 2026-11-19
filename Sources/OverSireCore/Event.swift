@@ -5,6 +5,19 @@ public enum ActorType: String, Codable, Sendable, CaseIterable {
     case human, agent, system, provider
 }
 
+/// The actor of a change that this app made. A human with no name is the user of the tracker account.
+public struct EventActor: Hashable, Sendable {
+    public var type: ActorType
+    public var name: String?
+
+    public init(type: ActorType, name: String? = nil) {
+        self.type = type
+        self.name = name
+    }
+
+    public static let user = EventActor(type: .human)
+}
+
 /// One row of the events table before the home daemon gets it (event.json EventDraft).
 public struct EventDraft: Hashable, Sendable, Codable {
     public static let maxSummary = 200
@@ -216,6 +229,7 @@ extension Event {
         public static let epicItemAdded: Kind = "epic.item_added"
         public static let epicItemRemoved: Kind = "epic.item_removed"
         public static let epicClosed: Kind = "epic.closed"
+        public static let epicUpdated: Kind = "epic.updated"
         public static let projectNorthStarSet: Kind = "project.north_star_set"
         public static let queuePicked: Kind = "queue.picked"
         public static let queueHeld: Kind = "queue.held"

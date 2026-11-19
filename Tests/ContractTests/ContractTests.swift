@@ -11,6 +11,8 @@ final class ContractTests: XCTestCase {
     // Fixture folder → Swift type. A new folder needs an entry here.
     static let types: [String: @Sendable (Data) throws -> Data] = [
         "provider-event": roundTrip(ProviderEvent.self),
+        "app-call": roundTrip(AppCall.self),
+        "app-call-result": roundTrip(AppCallResult.self),
         "subject-ref": roundTrip(SubjectRef.self),
         "item-patch": roundTrip(ItemPatch.self),
         "change-action": roundTrip(ChangeAction.self),
@@ -132,7 +134,7 @@ final class ContractTests: XCTestCase {
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
         "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1, "review.json": 1,
-        "event.json": 1, "event-kinds.json": 1,
+        "event.json": 1, "event-kinds.json": 1, "app-call.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {

@@ -54,6 +54,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case review(ReviewEvent)
     /// A new row of the events table of the daemon.
     case event(Event)
+    /// A CLI command for the app. Only the frame of the local daemon counts.
+    case appCall(AppCall)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -71,6 +73,9 @@ public enum DaemonFrame: Hashable, Sendable {
             return (try? DaemonClient.decode(data) as Frame).map { .runbookRun($0.run) }
         case "review": return (try? DaemonClient.decode(data) as ReviewEvent).map(DaemonFrame.review)
         case "event": return (try? DaemonClient.decode(data) as Event.Frame).map { .event($0.event) }
+        case "appCall":
+            struct Frame: Decodable { let call: AppCall }
+            return (try? DaemonClient.decode(data) as Frame).map { .appCall($0.call) }
         default: return nil
         }
     }

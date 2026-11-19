@@ -80,8 +80,8 @@ final class ProjectStore {
     private var optionCache: [String: (options: ItemOptions, at: Date)] = [:]
     private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
     private var suppressNotify = Set<String>()
-    /// The ids of the items whose epic this app set. The next poll names the user as the actor of their epic rows.
-    private(set) var epicWrites: Set<String> = []
+    /// The item ids and epic ids that this app changed, and who changed them. The next poll names that actor in their epic rows.
+    private(set) var epicWrites: [String: EventActor] = [:]
     /// Takes the epic rows. Tests set their own desk.
     var events: EventDesk = EVENTS
     private var assetCache: [String: (url: String, at: Date)] = [:]
@@ -754,10 +754,10 @@ final class ProjectStore {
     }
 
     /// A nil epic removes the item from its epic.
-    func setEpic(_ epic: EpicID?, itemId: String, done: @escaping (Bool) -> Void) {
-        epicWrites.insert(itemId)
+    func setEpic(_ epic: EpicID?, itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        epicWrites[itemId] = actor
         write(itemId, failure: nil, done: { [weak self] ok in
-            self?.epicWrites.remove(itemId)
+            self?.epicWrites[itemId] = nil
             done(ok)
         }) { c, ref in
             guard let t = c as? any EpicTracking else { throw ProviderError.unsupported(.epics) }
@@ -765,17 +765,17 @@ final class ProjectStore {
         }
     }
 
-    func createEpic(_ d: EpicDraft, projectKey: String, done: @escaping (Result<Epic, ProviderError>) -> Void) {
-        epicCall(projectKey, done: done) { t, snap in try await t.createEpic(d, in: snap.summary.ref) }
+    func createEpic(_ d: EpicDraft, projectKey: String, by actor: EventActor = .user, done: @escaping (Result<Epic, ProviderError>) -> Void) {
+        epicCall(projectKey, actor: actor, done: done) { t, snap in try await t.createEpic(d, in: snap.summary.ref) }
     }
 
-    func updateEpic(_ e: Epic, _ patch: EpicPatch, done: @escaping (Bool) -> Void) {
-        epicCall(e.project.storeKey, done: { done($0.isOk) }) { t, _ in try await t.updateEpic(e, patch) }
+    func updateEpic(_ e: Epic, _ patch: EpicPatch, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        epicCall(e.project.storeKey, actor: actor, done: { done($0.isOk) }) { t, _ in try await t.updateEpic(e, patch) }
     }
 
-    /// One epic write, then a user refresh of the project. A failure sets `lastError`.
-    private func epicCall<T: Sendable>(_ key: String, done: @escaping (Result<T, ProviderError>) -> Void,
-                                       _ op: @escaping @Sendable (any EpicTracking, ProjectSnapshot) async throws -> T) {
+    /// One epic write, then a user refresh of the project. A failure sets `lastError`. The refresh names `actor` in the epic rows.
+    private func epicCall(_ key: String, actor: EventActor, done: @escaping (Result<Epic, ProviderError>) -> Void,
+                          _ op: @escaping @Sendable (any EpicTracking, ProjectSnapshot) async throws -> Epic) {
         guard let snap = snapshots[key], let client = trackers.tracker(snap.summary.ref.workspace) else {
             lastError = "OverSire has no loaded project \(key)."
             done(.failure(.unauthorized))
@@ -788,8 +788,13 @@ final class ProjectStore {
             })
             DispatchQueue.main.async {
                 guard let self else { return }
+                let mark = (try? result.get())?.id.rawValue
+                if let mark { self.epicWrites[mark] = actor }
                 if case .failure(let e) = result { self.lastError = e.message }
-                self.refresh([key], force: true, priority: .user) { _ in done(result) }
+                self.refresh([key], force: true, priority: .user) { _ in
+                    if let mark { self.epicWrites[mark] = nil }
+                    done(result)
+                }
             }
         }
     }
@@ -1203,8 +1208,8 @@ final class ProjectStore {
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
         EVENTS.tracker(changes, old: old, new: snap, skipState: suppressNotify)
-        events.epics(old: old, new: snap, mine: epicWrites)
-        epicWrites.subtract(snap.items.map(\.id).filter { old?.epicId(of: $0) != snap.epicId(of: $0) })
+        events.epics(old: old, new: snap, actors: epicWrites)
+        for id in snap.items.map(\.id) where old?.epicId(of: id) != snap.epicId(of: id) { epicWrites[id] = nil }
         if let away, old != nil {
             let n = away.subtracting(back).count
             if n > 0 {

@@ -182,11 +182,12 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
     public var update: DaemonUpdate?
-    public var features: [String]?          // launch-env, agent-secrets
+    public var features: [String]?          // launch-env, agent-secrets, app-calls
     public var listen: Listen
 
     public static let launchEnv = "launch-env"
     public static let agentSecrets = "agent-secrets"
+    public static let appCalls = "app-calls"
 
     public func has(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 
@@ -205,6 +206,46 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
         self.update = update
         self.features = features
         self.listen = listen
+    }
+}
+
+/// One action that a CLI command asks the app to run (app-call.json AppCall). The local daemon sends it.
+public struct AppCall: Codable, Hashable, Sendable {
+    public var id: String
+    public var action: String
+    public var args: JSONValue
+    /// The agent that ran the command. Nil: a human.
+    public var agent: String?
+
+    public init(id: String, action: String, args: JSONValue = .object([:]), agent: String? = nil) {
+        self.id = id
+        self.action = action
+        self.args = args
+        self.agent = agent
+    }
+}
+
+/// The answer of the app to one AppCall (app-call.json AppCallResult).
+public struct AppCallResult: Codable, Hashable, Sendable {
+    public enum Status: String, Codable, Sendable { case ok, failed, notAllowed }
+
+    public var id: String
+    public var status: Status
+    public var summary: String
+    public var data: JSONValue?
+
+    public init(id: String, status: Status, summary: String, data: JSONValue? = nil) {
+        self.id = id
+        self.status = status
+        self.summary = summary
+        self.data = data
+    }
+}
+
+extension DaemonClient {
+    /// POST /v1/app-calls/{id}/result on the local daemon.
+    public func send(_ result: AppCallResult) async throws {
+        _ = try await send(json("POST", "/v1/app-calls/\(Self.escape(result.id))/result", result))
     }
 }
 

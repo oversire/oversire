@@ -22,6 +22,17 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertEqual(r.current, "implement")
     }
 
+    func testDecodeAppCall() throws {
+        let call = String(decoding: try contractFixture("app-call", "call"), as: UTF8.self)
+        guard case .appCall(let c)? = DaemonFrame.parse(#"{"type":"appCall","call":"# + call + "}") else {
+            return XCTFail("no appCall frame")
+        }
+        XCTAssertEqual(c.action, "epic.addItems")
+        XCTAssertEqual(c.agent, "codex")
+        XCTAssertEqual(c.args["keys"], .array([.string("OVERSIRE-484"), .string("OVERSIRE-485")]))
+        XCTAssertNil(DaemonFrame.parse(#"{"type":"appCall","call":{"id":"x"}}"#))
+    }
+
     func testReasonUsesTheErrorOfTheBody() {
         XCTAssertEqual(DaemonClient.reason(DaemonClient.refusal(409, Data(#"{"error":"group: this machine is in a group"}"#.utf8))),
                        "This machine is in a group.")

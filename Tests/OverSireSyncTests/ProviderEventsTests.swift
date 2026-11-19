@@ -139,8 +139,8 @@ final class ProviderEventsTests: XCTestCase {
         return ProjectSnapshot(summary: base.summary, statusOptions: base.statusOptions, items: list, fetchedAt: at ?? now, index: index, epics: epics)
     }
 
-    func epicRows(old: ProjectSnapshot?, new: ProjectSnapshot, mine: Set<String> = [], me: String? = nil) -> [EventDraft] {
-        EpicEvents.drafts(old: old, new: new, provider: "plane", machine: "mba", mine: mine, me: me)
+    func epicRows(old: ProjectSnapshot?, new: ProjectSnapshot, actors: [String: EventActor] = [:], me: String? = nil) -> [EventDraft] {
+        EpicEvents.drafts(old: old, new: new, provider: "plane", machine: "mba", actors: actors, me: me)
     }
 
     func testEpicBackfillOnFirstSync() {
@@ -211,10 +211,21 @@ final class ProviderEventsTests: XCTestCase {
     func testEpicRowsByMeAreHuman() {
         let old = epicSnap([("i1", "OVERSIRE-1", nil), ("i2", "OVERSIRE-2", nil)], epics: [epic("ma", "Alpha")])
         let new = epicSnap([("i1", "OVERSIRE-1", "ma"), ("i2", "OVERSIRE-2", "ma")], epics: [epic("ma", "Alpha")])
-        let rows = epicRows(old: old, new: new, mine: ["i1"], me: "fritz")
+        let rows = epicRows(old: old, new: new, actors: ["i1": .user], me: "fritz")
         XCTAssertEqual(rows.map(\.actorType), [.human, .provider])
         XCTAssertEqual(rows.map(\.actor), ["fritz", "plane"])
-        XCTAssertEqual(epicRows(old: old, new: new, mine: ["i1"]).map(\.actorType), [.provider, .provider], "no name: the provider")
+        XCTAssertEqual(epicRows(old: old, new: new, actors: ["i1": .user]).map(\.actorType), [.provider, .provider], "no name: the provider")
+    }
+
+    func testAgentActorFromCli() {
+        let old = epicSnap([("i1", "OVERSIRE-1", nil), ("i2", "OVERSIRE-2", nil)], epics: [epic("ma", "Alpha")])
+        let new = epicSnap([("i1", "OVERSIRE-1", "ma"), ("i2", "OVERSIRE-2", nil)], epics: [epic("ma", "Alpha"), epic("mb", "Beta")])
+        let rows = epicRows(old: old, new: new, actors: ["i1": EventActor(type: .agent, name: "codex"), "mb": EventActor(type: .agent, name: "codex")],
+                            me: "fritz")
+        XCTAssertEqual(rows.map(\.kind), [.epicCreated, .epicItemAdded])
+        XCTAssertEqual(rows.map(\.actorType), [.agent, .agent])
+        XCTAssertEqual(rows.map(\.actor), ["codex", "codex"])
+        for r in rows { XCTAssertEqual(EventCatalog.repo.problems(r), [], r.id) }
     }
 
     func testNoEpicRowsWithoutEpics() {
