@@ -285,10 +285,13 @@ struct KeychainSecrets: SecretReader {
 struct URLSessionWebSockets: WebSocketConnecting {
     var session = URLSession.shared
     var log = IOLog()
+    /// The largest message in bytes. Nil keeps the URLSession default.
+    var maxMessage: Int? = nil
 
     func connect(_ request: URLRequest) async throws -> any WebSocketConnection {
         let t0 = Date()
         let socket = URLSessionWebSocket(task: session.webSocketTask(with: request))
+        if let maxMessage { socket.task.maximumMessageSize = maxMessage }
         socket.task.resume()
         // A ping waits for the handshake, so a bad token fails here.
         do {
@@ -353,5 +356,6 @@ final class URLSessionWebSocket: WebSocketConnection, @unchecked Sendable {
 
 extension URLSessionWebSockets {
     /// The sockets of the daemons: the event log and the live view of a session.
-    static let daemon = URLSessionWebSockets(session: DaemonTransport.shared.longSession)
+    /// The limit is 16 MiB for the `item.attach` frame of an app call.
+    static let daemon = URLSessionWebSockets(session: DaemonTransport.shared.longSession, maxMessage: 16 << 20)
 }

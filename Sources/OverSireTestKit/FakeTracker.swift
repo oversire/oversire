@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory tracker with one project "FAKE" and four statuses.
-public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, EpicTracking, @unchecked Sendable {
+public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, EpicTracking, LinkManaging, LabelManaging, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -36,10 +36,11 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var uploadList: [(item: ItemRef, file: AttachmentUpload)] = []
     private var uploadTimes: [Date] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
+    private var linkList: [(item: ItemRef, url: URL, title: String)] = []
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
     public init(account: String = "fake",
-                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics, .priority]) {
+                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics, .priority, .links, .labels, .subItems]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]
@@ -126,8 +127,12 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
             let c = Comment(id: "c\((commentList[i.id]?.count ?? 0) + 1)-\(i.id)", author: "me", createdAt: base.now(),
                             url: i.url.absoluteString, body: markdown)
             commentList[i.id, default: []].append(c)
-            itemList[i.project.id]![at].commentCount += 1
-            itemList[i.project.id]![at].lastComment = c
+            let o = itemList[i.project.id]![at]
+            itemList[i.project.id]![at] = Item(
+                id: o.id, key: o.key, title: o.title, url: o.url, statusOptionId: o.statusOptionId, fields: o.fields, assignees: o.assignees,
+                labels: o.labels, author: o.author, updatedBy: o.updatedBy, updatedAt: o.updatedAt, activityAt: c.createdAt,
+                commentCount: o.commentCount + 1, lastComment: c, mentionsMe: o.mentionsMe, body: o.body, parentId: o.parentId,
+                epicId: o.epicId, otherEpicIds: o.otherEpicIds)
             base.emit(.comment, "created", .item(i))
         }
     }
@@ -333,6 +338,44 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
 
     /// The next `times` uploads of a file with this name fail.
     public func failUploads(of name: String, times: Int) { base.lockedValue { uploadFailures[name] = times } }
+
+    // MARK: Links and labels
+
+    public func links(_ i: ItemRef) async throws -> [URL] {
+        guard capabilities.contains(.links) else { throw ProviderError.unsupported(.links) }
+        return base.lockedValue { linkList.filter { $0.item.id == i.id }.map(\.url) }
+    }
+
+    public func addLink(_ i: ItemRef, url: URL, title: String) async throws {
+        guard capabilities.contains(.links) else { throw ProviderError.unsupported(.links) }
+        try base.locked {
+            guard itemList[i.project.id]?.contains(where: { $0.id == i.id }) == true else { throw ProviderError.notFound }
+            try failWrite(i.id)
+            linkList.append((i, url, title))
+        }
+    }
+
+    /// The links that `addLink` got, oldest first.
+    public var addedLinks: [(item: ItemRef, url: URL, title: String)] { base.lockedValue { linkList } }
+
+    public func labels(_ p: ProjectRef) async throws -> [StatusOption] {
+        guard capabilities.contains(.labels) else { throw ProviderError.unsupported(.labels) }
+        return try base.locked {
+            guard let s = settingsList[p.id] else { throw ProviderError.notFound }
+            return s.labels
+        }
+    }
+
+    public func createLabel(_ name: String, color: String, in p: ProjectRef) async throws -> String {
+        guard capabilities.contains(.labels) else { throw ProviderError.unsupported(.labels) }
+        return try base.locked {
+            guard var s = settingsList[p.id] else { throw ProviderError.notFound }
+            let id = "l-\(s.labels.count + 1)"
+            s.labels.append(StatusOption(id: id, name: name, color: color))
+            settingsList[p.id] = s
+            return id
+        }
+    }
 
     // MARK: Project settings
 

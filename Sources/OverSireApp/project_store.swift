@@ -6,6 +6,8 @@ struct NewItem {
     var title: String
     var body: String                        // Markdown
     var fieldOptions: [String: String]      // field id ("state", "priority") → option id
+    var labels: [String] = []               // label ids
+    var parent: String?                     // item id
 }
 
 /// A comment event: the project, and the item when the event names it.
@@ -80,8 +82,12 @@ final class ProjectStore {
     private var optionCache: [String: (options: ItemOptions, at: Date)] = [:]
     private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
     private var suppressNotify = Set<String>()
-    /// The item ids and epic ids that this app changed, and who changed them. The next poll names that actor in their epic rows.
-    private(set) var epicWrites: [String: EventActor] = [:]
+    /// The item ids and epic ids that this app changed, and who changed them. The next poll names that actor in the rows of the change.
+    private(set) var writeActors: [String: EventActor] = [:]
+    /// Item id → the agent that posted a comment, until the comment read names it in the comment row.
+    private var commentActors: [String: (actor: EventActor, until: Date)] = [:]
+    /// How long an agent comment waits for its comment read.
+    var commentMarkTTL: TimeInterval = 300
     /// Takes the epic rows. Tests set their own desk.
     var events: EventDesk = EVENTS
     private var assetCache: [String: (url: String, at: Date)] = [:]
@@ -552,6 +558,7 @@ final class ProjectStore {
               let merged = ProjectStore.merged(cur, read) else { return }
         let before = ProjectStore.digest(cur)
         absorb(merged)
+        read.keys.forEach { commentActors[$0] = nil }
         save()
         if before != snapshots[key].map(ProjectStore.digest) { publish(DataChange(.projects, projects: [key], origin: .poll)) }
     }
@@ -698,23 +705,23 @@ final class ProjectStore {
     }
 
     /// Refuses to close a parent with open sub-items, unless `force` (OVERSIRE-396).
-    func setStatus(itemId: String, optionId: String, force: Bool = false, done: @escaping (Bool) -> Void) {
+    func setStatus(itemId: String, optionId: String, force: Bool = false, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         if !force, refusesClose(itemId, to: optionId) { done(false); return }
         let before = item(itemId)
-        let done = { (ok: Bool) in
-            if ok, let b = before { EVENTS.stateSet(b.item, in: b.snap, to: optionId) }
+        let done = { [events] (ok: Bool) in
+            if ok, let b = before { events.stateSet(b.item, in: b.snap, to: optionId, actor: actor) }
             done(ok)
         }
-        write(itemId, failure: "Could not change the status", done: done) { c, ref in
+        write(itemId, by: actor, failure: "Could not change the status", done: done) { c, ref in
             try await c.update(ref, ItemPatch(status: optionId))
         }
     }
 
     func tracker(of p: ProjectRef) -> (any Tracker)? { trackers.tracker(p.workspace) }
 
-    func update(itemId: String, _ patch: ItemPatch, failure: String, done: @escaping (Bool) -> Void) {
+    func update(itemId: String, _ patch: ItemPatch, failure: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         if refusesClose(itemId, to: patch.status) { done(false); return }
-        write(itemId, failure: failure, done: done) { c, ref in
+        write(itemId, by: actor, failure: failure, done: done) { c, ref in
             try await c.update(ref, patch)
         }
     }
@@ -722,7 +729,10 @@ final class ProjectStore {
     // The labels of the project and the members of the workspace, for the item window menus.
     func options(projectKey: String, done: @escaping (ItemOptions) -> Void) {
         if let hit = optionCache[projectKey], -hit.at.timeIntervalSinceNow < 600 { done(hit.options); return }
-        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { return }
+        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
+            done(ItemOptions(labels: [], members: []))
+            return
+        }
         let project = snap.summary.ref
         CallPriority.task(.user) { [weak self] in
             let labels = (try? await (client as? any LabelManaging)?.labels(project)) ?? []
@@ -737,30 +747,83 @@ final class ProjectStore {
         }
     }
 
-    func comment(itemId: String, body: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: "Could not post the comment", done: done) { c, ref in
+    func comment(itemId: String, body: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        // The comment row comes later, from the comment read. The mark waits for it.
+        if actor.type != .human { commentActors[itemId] = (actor, now().addingTimeInterval(commentMarkTTL)) }
+        let done = { [weak self] (ok: Bool) in
+            if !ok { self?.commentActors[itemId] = nil }
+            done(ok)
+        }
+        write(itemId, by: actor, failure: "Could not post the comment", done: done) { c, ref in
             try await c.comment(ref, markdown: body)
         }
     }
 
-    func edit(itemId: String, title: String, body: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: nil, done: done) { c, ref in
+    func edit(itemId: String, title: String, body: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        write(itemId, by: actor, failure: nil, done: done) { c, ref in
             try await c.update(ref, ItemPatch(title: title, bodyMarkdown: body))
         }
     }
 
-    func relate(itemId: String, _ patch: RelationPatch, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: "Could not change the relations", done: done) { c, ref in
+    func relate(itemId: String, _ patch: RelationPatch, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        write(itemId, by: actor, failure: nil, done: done) { c, ref in
             guard let r = c as? any RelationManaging else { throw ProviderError.unsupported(.relations) }
             try await r.apply(patch, to: ref)
         }
     }
 
+    /// Adds a link to the item. A failure sets `lastError` to the message of the tracker.
+    func addLink(itemId: String, url: URL, title: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        write(itemId, by: actor, failure: nil, done: done) { c, ref in
+            guard let l = c as? any LinkManaging else { throw ProviderError.unsupported(.links) }
+            try await l.addLink(ref, url: url, title: title)
+        }
+    }
+
+    /// Uploads a file to the item and gives the attachment id. It does not refresh the project.
+    func attach(itemId: String, _ file: AttachmentUpload, done: @escaping (Result<String, ProviderError>) -> Void) {
+        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
+              let ref = found.item.ref(in: found.snap.summary.ref) else { done(.failure(.notFound)); return }
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: {
+                guard let a = client as? any AttachmentUploading else { throw ProviderError.unsupported(.attachments) }
+                return try await a.attach(file, to: ref)
+            })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    /// The labels of a project.
+    func labels(projectKey: String, done: @escaping (Result<[StatusOption], ProviderError>) -> Void) {
+        guard let snap = snapshot(projectKey), let client = trackers.tracker(snap.summary.ref.workspace) else { done(.failure(.notFound)); return }
+        let project = snap.summary.ref
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: {
+                guard let l = client as? any LabelManaging else { throw ProviderError.unsupported(.labels) }
+                return try await l.labels(project)
+            })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    /// The links of an item. A tracker with no links, or a failed read, gives none.
+    func links(itemId: String, done: @escaping ([URL]) -> Void) {
+        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace) as? any LinkManaging,
+              let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
+        CallPriority.task(.user) {
+            let urls = (try? await client.links(ref)) ?? []
+            DispatchQueue.main.async { done(urls) }
+        }
+    }
+
+    /// True when the tracker of the project has the capability.
+    func has(_ c: Capability, in snap: ProjectSnapshot) -> Bool { tracker(of: snap.summary.ref)?.capabilities.contains(c) ?? false }
+
     /// A nil epic removes the item from its epic.
     func setEpic(_ epic: EpicID?, itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
-        epicWrites[itemId] = actor
-        write(itemId, failure: nil, done: { [weak self] ok in
-            self?.epicWrites[itemId] = nil
+        writeActors[itemId] = actor
+        write(itemId, by: actor, failure: nil, done: { [weak self] ok in
+            self?.writeActors[itemId] = nil
             done(ok)
         }) { c, ref in
             guard let t = c as? any EpicTracking else { throw ProviderError.unsupported(.epics) }
@@ -792,10 +855,10 @@ final class ProjectStore {
             DispatchQueue.main.async {
                 guard let self else { return }
                 let mark = (try? result.get())?.id.rawValue
-                if let mark { self.epicWrites[mark] = actor }
+                if let mark { self.writeActors[mark] = actor }
                 if case .failure(let e) = result { self.lastError = e.message }
                 self.refresh([key], force: true, priority: .user) { _ in
-                    if let mark { self.epicWrites[mark] = nil }
+                    if let mark { self.writeActors[mark] = nil }
                     done(result)
                 }
             }
@@ -813,16 +876,20 @@ final class ProjectStore {
         snapshots.values.sorted { $0.summary.identifier < $1.summary.identifier }.flatMap { s in (s.epics ?? []).map { (s, $0) } }
     }
 
-    func assignMe(itemId: String, done: @escaping (Bool) -> Void) {
-        write(itemId, failure: "Could not assign the item", done: done) { c, ref in try await ProjectStore.assignMe(c, ref) }
+    func assignMe(itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        write(itemId, by: actor, failure: "Could not assign the item", done: done) { c, ref in try await ProjectStore.assignMe(c, ref) }
     }
 
     // The first "in progress" state, plus assign me. A project without such a state only assigns.
-    func start(itemId: String, done: @escaping (Bool) -> Void) {
+    func start(itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         guard let found = item(itemId) else { done(false); return }
         let progress = found.snap.statusOptions.first { $0.category == .progress }
         let current = found.item.statusOptionId
-        write(itemId, failure: nil, done: done) { c, ref in
+        let done = { [events] (ok: Bool) in
+            if ok, let progress, current != progress.id { events.stateSet(found.item, in: found.snap, to: progress.id, actor: actor) }
+            done(ok)
+        }
+        write(itemId, by: actor, failure: nil, done: done) { c, ref in
             if let progress, current != progress.id { try await c.update(ref, ItemPatch(status: progress.id)) }
             try await ProjectStore.assignMe(c, ref)
         }
@@ -883,9 +950,13 @@ final class ProjectStore {
     }
 
     // Moves a Done parent back to the first started state.
-    func reopen(itemId: String, done: @escaping (Bool) -> Void) {
+    func reopen(itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         guard let found = item(itemId), let state = found.snap.firstState(group: "started", else: .progress) else { done(false); return }
-        update(itemId: itemId, ItemPatch(status: state.id), failure: "Could not reopen the item", done: done)
+        let done = { [events] (ok: Bool) in
+            if ok { events.stateSet(found.item, in: found.snap, to: state.id, actor: actor) }
+            done(ok)
+        }
+        update(itemId: itemId, ItemPatch(status: state.id), failure: "Could not reopen the item", by: actor, done: done)
     }
 
     /// For `--uishots`: a changed copy of a snapshot. The next refresh replaces it.
@@ -903,13 +974,14 @@ final class ProjectStore {
     }
 
     // `done(created, message)`.
-    func create(_ new: NewItem, done: @escaping (Bool, String?) -> Void) {
+    func create(_ new: NewItem, by actor: EventActor = .user, done: @escaping (Bool, String?) -> Void) {
         guard let snap = snapshots[new.projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(false, "The project is not loaded yet"); return
         }
         let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
-                              priority: snap.hasPriority ? new.fieldOptions[ProjectSnapshot.priorityFieldId] : nil)
+                              priority: snap.hasPriority ? new.fieldOptions[ProjectSnapshot.priorityFieldId] : nil,
+                              labels: new.labels, parent: new.parent)
         let project = snap.summary.ref
         CallPriority.task(.user) { [weak self] in
             let added = await Result(awaiting: { try await client.create(draft, in: project).id })
@@ -922,7 +994,11 @@ final class ProjectStore {
                 case .success(let itemId):
                     self.lastCreated = itemId
                     self.suppressNotify.insert(itemId)
-                    self.refresh([new.projectKey], force: true, priority: .user) { _ in done(true, nil) }
+                    if actor.type != .human { self.writeActors[itemId] = actor }
+                    self.refresh([new.projectKey], force: true, priority: .user) { _ in
+                        if actor.type != .human { self.writeActors[itemId] = nil }
+                        done(true, nil)
+                    }
                 }
             }
         }
@@ -942,11 +1018,14 @@ final class ProjectStore {
         "\(key) has \(n) open sub-item\(n == 1 ? "" : "s"). Close \(n == 1 ? "it" : "them") first."
     }
 
-    private func write(_ itemId: String, failure: String?, done: @escaping (Bool) -> Void,
+    /// `actor`: an agent or the system is named in the poll rows of the write. The mark ends after the refresh.
+    private func write(_ itemId: String, by actor: EventActor = .user, failure: String?, done: @escaping (Bool) -> Void,
                        _ op: @escaping @Sendable (any Tracker, ItemRef) async throws -> Void) {
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
               let ref = found.item.ref(in: found.snap.summary.ref) else { done(false); return }
         suppressNotify.insert(itemId)
+        let marked = actor.type != .human
+        if marked { writeActors[itemId] = actor }
         CallPriority.task(.user) { [weak self] in
             let result = await Result(awaiting: { try await op(client, ref) })
             DispatchQueue.main.async {
@@ -956,7 +1035,10 @@ final class ProjectStore {
                     self.lastError = failure ?? e.message
                 }
                 self.timelineCache = self.timelineCache.filter { !$0.key.hasPrefix(itemId) }
-                self.refresh([found.key], force: true, priority: .user) { done($0 && result.isOk) }
+                self.refresh([found.key], force: true, priority: .user) {
+                    if marked { self.writeActors[itemId] = nil }
+                    done($0 && result.isOk)
+                }
             }
         }
     }
@@ -1210,9 +1292,10 @@ final class ProjectStore {
         let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
         notifyIntake(old: old, new: snap)
-        EVENTS.tracker(changes, old: old, new: snap, skipState: suppressNotify)
-        events.epics(old: old, new: snap, actors: epicWrites)
-        for id in snap.items.map(\.id) where old?.epicId(of: id) != snap.epicId(of: id) { epicWrites[id] = nil }
+        commentActors = commentActors.filter { $0.value.until > now() }
+        events.tracker(changes, old: old, new: snap, skipState: suppressNotify, actors: writeActors.merging(commentActors.mapValues(\.actor)) { a, _ in a })
+        events.epics(old: old, new: snap, actors: writeActors)
+        for id in snap.items.map(\.id) where old?.epicId(of: id) != snap.epicId(of: id) { writeActors[id] = nil }
         if let away, old != nil {
             let n = away.subtracting(back).count
             if n > 0 {

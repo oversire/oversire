@@ -21,6 +21,52 @@ struct ProjectActions {
                     done(.ok(summary: v.text, data: .object(["text": .string(v.text)])))
                 }
             },
+            ActionSpec(id: "project.statuses", title: "Statuses", help: "Lists the statuses of a project with their group and category. Returns [{id, name, group, category, color}].",
+                       kind: .read, input: ActionSpec.args(["project": EpicActions.project], required: ["project"])) { a in
+                await link.run { d, done in
+                    guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    let rows = snap.statusOptions.map { o -> JSONValue in
+                        var r: [String: JSONValue] = ["id": .string(o.id), "name": .string(o.name), "category": .string(o.category.rawValue), "color": .string(o.color)]
+                        if let g = o.group { r["group"] = .string(g) }
+                        return .object(r)
+                    }
+                    done(.ok(summary: "\(rows.count) statuses in \(snap.summary.identifier).", data: .array(rows)))
+                }
+            },
+            ActionSpec(id: "project.labels", title: "Labels", help: "Lists the labels of a project. Returns [{id, name, color}].",
+                       kind: .read, input: ActionSpec.args(["project": EpicActions.project], required: ["project"]), capability: .labels) { a in
+                await link.run { d, done in
+                    guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    guard d.projectStore.has(.labels, in: snap) else { done(ActionLink.unsupported(snap, "labels")); return }
+                    d.projectStore.labels(projectKey: snap.summary.ref.storeKey) { r in
+                        switch r {
+                        case .failure(let e): done(.failed(e.message))
+                        case .success(let list):
+                            let rows = list.map { JSONValue.object(["id": .string($0.id), "name": .string($0.name), "color": .string($0.color)]) }
+                            done(.ok(summary: "\(rows.count) labels in \(snap.summary.identifier).", data: .array(rows)))
+                        }
+                    }
+                }
+            },
+            ActionSpec(id: "project.people", title: "Project people", help: "Lists the tracker members of a project. Use the ids or names with item.assign. Returns [{id, name, me}].",
+                       kind: .read, input: ActionSpec.args(["project": EpicActions.project], required: ["project"])) { a in
+                await link.run { d, done in
+                    guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    guard d.projectStore.tracker(of: snap.summary.ref) is any MemberListing else {
+                        done(.notAllowed("\(ENV.trackerName(snap.summary.ref.account)) has no member list.")); return
+                    }
+                    d.projectStore.options(projectKey: snap.summary.ref.storeKey) { options in
+                        let rows = options.members.map { JSONValue.object(["id": .string($0.id), "name": .string($0.name), "me": .bool($0.id == snap.meId)]) }
+                        done(.ok(summary: "\(rows.count) people in \(snap.summary.identifier).", data: .array(rows)))
+                    }
+                }
+            },
             ActionSpec(id: "project.setNorthStar", title: "Set north star", help: "Sets the north star of a project: 1 to \(MemoryDraft.maxText) characters.",
                        kind: .change, input: ActionSpec.args(["project": EpicActions.project, "text": ("string", "The north star text.")],
                                                               required: ["project", "text"])) { a in

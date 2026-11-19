@@ -29,10 +29,16 @@ struct PeopleActions {
                 return .ok(summary: p.name, data: JSONValue(encoding: p))
             },
             ActionSpec(id: "search.all", title: "Search", help: "Searches items, pull requests, CI runs and agent sessions for the text. The results come grouped by source.",
-                       kind: .read, input: ActionSpec.args(["query": ("string", "The text."), "limit": ("integer", "Results for each source, at most 25. Default 10.")],
+                       kind: .read, input: ActionSpec.args(["query": ("string", "The text."), "project": ItemActions.project,
+                                                                   "limit": ("integer", "Results for each source, at most 25. Default 10.")],
                                                            required: ["query"])) { a in
                 guard let q = a.string("query")?.trimmingCharacters(in: .whitespaces), !q.isEmpty else { return .notAllowed("The query is empty.") }
-                return await Search(link: link, query: q, limit: min(25, max(1, a.int("limit") ?? 10))).run()
+                var project: String?
+                if let p = a.string("project"), !p.isEmpty {
+                    project = await MainActor.run { link.data?.projectStore.snapshot(p)?.summary.identifier }
+                    guard project != nil else { return .notAllowed("OverSire has no loaded project \(p).") }
+                }
+                return await Search(link: link, query: q, limit: min(25, max(1, a.int("limit") ?? 10)), project: project).run()
             },
         ]
     }
@@ -43,6 +49,8 @@ struct Search {
     let link: ActionLink
     let query: String
     let limit: Int
+    /// The identifier of the one project to search for items. Nil: all projects.
+    let project: String?
 
     func run() async -> ActionResult {
         let local = await link.main(Local()) { d, done in done(self.local(d)) }
@@ -79,7 +87,8 @@ struct Search {
     private func local(_ d: AppData) -> Local {
         func hit(_ s: String?) -> Bool { s?.localizedCaseInsensitiveContains(query) == true }
         var l = Local()
-        let snaps = d.projectStore.snapshots.values.sorted { $0.summary.identifier < $1.summary.identifier }
+        let snaps = d.projectStore.snapshots.values.filter { project == nil || $0.summary.identifier == project }
+            .sorted { $0.summary.identifier < $1.summary.identifier }
         for s in snaps {
             for i in s.items where l.items.count < limit && (hit(i.key) || hit(i.title)) {
                 l.items.append(["key": .string(i.key), "title": .string(i.title), "status": .string(s.statusName(i.statusOptionId) ?? "")])

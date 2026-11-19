@@ -8,6 +8,8 @@ final class AppCalls: @unchecked Sendable {
     static let allowed: Set<String> = [
         "item.get", "item.list", "item.markdown", "item.setEpic", "epic.list", "epic.show", "epic.plan", "epic.create", "epic.update", "epic.close", "epic.addItems", "epic.removeItems",
         "project.northStar", "project.setNorthStar",
+        "item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start", "item.reopen",
+        "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
     ]
 
     private let catalog: any ActionCatalog

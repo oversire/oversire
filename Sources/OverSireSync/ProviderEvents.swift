@@ -177,16 +177,21 @@ public struct ChangeEvents: Sendable {
 /// The rows of tracker changes: item.created, item.updated, item.state_changed, comment.created and intake.created.
 public enum TrackerEvents {
     /// The rows of the changes of one poll of a project. skipState: the items whose state change this app wrote already.
+    /// actors: the items that this app changed. An agent or system actor replaces the tracker user in the rows of that item.
     public static func drafts(_ changes: [(itemId: String, ItemChange)], old: ProjectSnapshot?, new snap: ProjectSnapshot, provider: String,
-                              machine: String, skipState: Set<String> = []) -> [EventDraft] {
+                              machine: String, skipState: Set<String> = [], actors: [String: EventActor] = [:]) -> [EventDraft] {
         let project = snap.summary.identifier.lowercased()
         let byId = Dictionary(snap.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var out: [EventDraft] = []
         var fields: [String: [String]] = [:]
+        func who(_ i: Item, _ actor: String?) -> (type: ActorType, name: String) {
+            if let a = actors[i.id], a.type != .human { return (a.type, a.name ?? a.type.rawValue) }
+            return (actor == nil ? .provider : .human, actor ?? provider)
+        }
         func row(_ kind: Event.Kind, _ id: String, _ i: Item, at: Date, actor: String?, _ summary: String, _ payload: [String: JSONValue]) {
+            let w = who(i, actor)
             out.append(EventDraft(id: "\(provider):\(id)", at: at, kind: kind, item: i.key, project: project, machine: machine, provider: provider,
-                                  actorType: actor == nil ? .provider : .human, actor: actor ?? provider, via: "poll", summary: summary,
-                                  payload: payload))
+                                  actorType: w.type, actor: w.name, via: "poll", summary: summary, payload: payload))
         }
         for (id, change) in changes {
             guard let i = byId[id] else { continue }
@@ -207,9 +212,10 @@ public enum TrackerEvents {
             case .assigned, .unassigned: fields[id, default: []].append("Assignees")
             case .comments(_, let last):
                 let text = (last.body ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? "New comment"
+                let w = who(i, last.author)
                 out.append(EventDraft(id: "\(provider)-comment:\(last.id)", at: last.createdAt, kind: .commentCreated, item: i.key, project: project,
-                                      machine: machine, provider: provider, actorType: last.author == nil ? .provider : .human,
-                                      actor: last.author ?? provider, via: "poll", summary: text,
+                                      machine: machine, provider: provider, actorType: w.type,
+                                      actor: w.name, via: "poll", summary: text,
                                       payload: ["comment": .string(last.id), "url": .string(last.url)]))
             case .removed, .closed, .reopened, .mention, .away: continue
             }

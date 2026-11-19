@@ -148,6 +148,11 @@ final class ActionLink: @unchecked Sendable {
         }
     }
 
+    /// The refusal for a feature that the tracker of the project does not have, for example "Big Timer has no links."
+    static func unsupported(_ snap: ProjectSnapshot, _ what: String) -> ActionResult {
+        .notAllowed("\(ENV.trackerName(snap.summary.ref.account)) has no \(what).")
+    }
+
     /// The result of a ProjectStore write.
     static func stored(_ d: AppData, _ ok: Bool, _ summary: String) -> ActionResult {
         ok ? .ok(summary: summary) : .failed(d.projectStore.lastError ?? "The tracker did not take the change.")
@@ -169,4 +174,19 @@ extension Array where Element == StatusOption {
     }
 
     var names: String { map(\.name).joined(separator: ", ") }
+}
+
+extension ProjectSnapshot {
+    /// A status by id, by name, or by category word: todo, progress, review, blocked or done.
+    func status(named s: String) -> StatusOption? {
+        if let o = statusOptions.find(s) { return o }
+        switch s.lowercased() {
+        case "todo": return firstState(group: "unstarted", else: .todo)
+        case "progress": return firstState(group: "started", else: .progress)
+        case "review": return statusOptions.first { $0.category == .review }
+        case "blocked": return statusOptions.first { $0.category == .blocked }
+        case "done": return firstState(group: "completed", else: .done)
+        default: return nil
+        }
+    }
 }

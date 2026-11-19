@@ -105,9 +105,11 @@ final class EventDesk: @unchecked Sendable {
     }
 
     /// The changes of one tracker poll, and the parent of each item. skipState: the items whose state you set in OverSire.
-    func tracker(_ changes: [(itemId: String, ItemChange)], old: ProjectSnapshot?, new snap: ProjectSnapshot, skipState: Set<String>) {
+    /// actors: the items that this app changed, and who changed them. An agent in `actors` is the actor of the rows of its item.
+    func tracker(_ changes: [(itemId: String, ItemChange)], old: ProjectSnapshot?, new snap: ProjectSnapshot, skipState: Set<String>,
+                 actors: [String: EventActor] = [:]) {
         let p = snap.summary.ref.account.provider.rawValue
-        send(TrackerEvents.drafts(changes, old: old, new: snap, provider: p, machine: machine(), skipState: skipState))
+        send(TrackerEvents.drafts(changes, old: old, new: snap, provider: p, machine: machine(), skipState: skipState, actors: actors))
         let links = TrackerEvents.links(snap)
         guard !links.isEmpty else { return }
         Task { [outlet] in await outlet.link(links) }
@@ -166,14 +168,15 @@ final class EventDesk: @unchecked Sendable {
                payload: ["lane": .string(lane), "reason": .string(reason)])
     }
 
-    /// You set the state of an item in OverSire. The next tracker poll skips this change.
-    func stateSet(_ i: Item, in snap: ProjectSnapshot, to optionId: String) {
+    /// You, or an agent through a CLI call, set the state of an item in OverSire. The next tracker poll skips this change.
+    func stateSet(_ i: Item, in snap: ProjectSnapshot, to optionId: String, actor: EventActor = .user) {
         guard let to = snap.option(optionId) else { return }
         var p: [String: JSONValue] = ["to": .string(to.name)]
         let from = snap.statusName(i.statusOptionId)
         if let from { p["from"] = .string(from) }
         if let g = to.group { p["group"] = .string(g) }
-        action(.itemStateChanged, item: i.key, project: snap.summary.identifier, verb: "state", "\(from ?? "None") → \(to.name)", payload: p)
+        action(.itemStateChanged, item: i.key, project: snap.summary.identifier, verb: "state", "\(from ?? "None") → \(to.name)", payload: p,
+               actorType: actor.type, actor: actor.name)
     }
 
     /// The queue no longer holds the item.

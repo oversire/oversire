@@ -73,8 +73,11 @@ struct ReadActions {
                         text = f.item.agentMarkdown(snap: f.snap, comments: [])
                         o["commentsNote"] = .string("\(ENV.trackerName(f.snap.summary.ref.account)) did not answer. The comments are missing.")
                     }
-                    o["markdown"] = .string(Self.cut(text, to: limit))
-                    done(.ok(summary: "\(f.item.key): \(f.item.title)", data: .object(o)))
+                    d.projectStore.links(itemId: f.item.id) { urls in
+                        let links = urls.isEmpty ? "" : "\n## Links\n" + urls.map { "- \($0.absoluteString)\n" }.joined()
+                        o["markdown"] = .string(Self.cut(text, to: limit - links.utf8.count) + links)
+                        done(.ok(summary: "\(f.item.key): \(f.item.title)", data: .object(o)))
+                    }
                 }
             }
         }
@@ -91,9 +94,9 @@ struct ReadActions {
 
     private var itemList: ActionSpec {
         let link = link
-        return ActionSpec(id: "item.list", title: "Items", help: "Lists the loaded items, active first. Filters: `project`, `group` (todo, progress, review, blocked, done), "
+        return ActionSpec(id: "item.list", title: "Items", help: "Lists the loaded items, active first. Filters: `project`, `group` (a list of todo, progress, review, blocked, done), "
                    + "`assignee` (a name, or me), `label`, `text`. Returns {items, total}.", kind: .read,
-                   input: ActionSpec.args(["project": ItemActions.project, "group": ("string", "todo, progress, review, blocked or done."),
+                   input: ActionSpec.args(["project": ItemActions.project, "group": ("string", "One or more of todo, progress, review, blocked, done. Separate with commas."),
                                            "assignee": ("string", "An assignee name or id, or me."), "label": ("string", "A label name."),
                                            "text": ("string", "Words in the key, title or body."), "limit": ("integer", "At most this many items. Default 50, at most 200.")])) { a in
             await link.run { d, done in
@@ -102,10 +105,11 @@ struct ReadActions {
                     guard let s = d.projectStore.snapshot(p) else { done(.notAllowed("OverSire has no loaded project \(p).")); return }
                     snaps = [s]
                 }
-                let group = a.string("group")?.lowercased(), who = a.string("assignee")?.lowercased(), label = a.string("label")?.lowercased()
+                let groups = Set(a.list("group").map { $0.lowercased() })
+                let who = a.string("assignee")?.lowercased(), label = a.string("label")?.lowercased()
                 let all = snaps.flatMap { snap in
                     snap.sorted(snap.items).filter { i in
-                        if let group, !group.isEmpty, (snap.option(i.statusOptionId)?.category ?? .todo).rawValue != group { return false }
+                        if !groups.isEmpty, !groups.contains((snap.option(i.statusOptionId)?.category ?? .todo).rawValue) { return false }
                         if let who, !who.isEmpty {
                             let me = [snap.me, snap.meId].compactMap { $0?.lowercased() }
                             guard i.assignees.contains(where: { who == "me" ? me.contains($0.lowercased()) : $0.lowercased() == who }) else { return false }
@@ -115,7 +119,8 @@ struct ReadActions {
                     }.map { WorkContext.itemFacts($0, snap: snap, maxBody: 0) }
                 }
                 let shown = Array(all.prefix(Self.limit(a, 50)))
-                done(Self.ok("\(all.count) item\(all.count == 1 ? "" : "s").", .object(["items": JSONValue(encoding: shown) ?? .array([]), "total": .int(all.count)])))
+                done(Self.ok("\(all.count) item\(all.count == 1 ? "" : "s").", .object(["items": JSONValue(encoding: shown) ?? .array([]), "total": .int(all.count)]),
+                             limit: Self.markdownLimit(a.caller)))
             }
         }
     }
@@ -401,7 +406,9 @@ struct ReadActions {
 
     // MARK: Rows
 
-    static func ok(_ summary: String, _ data: JSONValue?) -> ActionResult { .ok(summary: summary, data: data.map { $0.clipped() }) }
+    static func ok(_ summary: String, _ data: JSONValue?, limit: Int = JSONValue.readLimit) -> ActionResult {
+        .ok(summary: summary, data: data.map { $0.clipped(to: limit) })
+    }
 
     static func limit(_ a: ActionArgs, _ fallback: Int) -> Int { min(200, max(1, a.int("limit") ?? fallback)) }
 
