@@ -65,7 +65,7 @@ final class PlanView: NSStackView {
         switch segment {
         case .summary: return PlanSummaryView(model, controls: controls, host: host)
         case .map: return EmptyNote("Map comes next.", symbol: "point.3.connected.trianglepath.dotted")
-        case .timeline: return EmptyNote("Timeline comes next.", symbol: "calendar")
+        case .timeline: return PlanGanttSegment(model, controls: controls, host: host)
         }
     }
 
@@ -89,6 +89,12 @@ final class PlanView: NSStackView {
                 self?.host?.planChanged()
             }
             views.append(fold)
+        }
+        if c.segment == .timeline {
+            views.append(Segmented(["Days", "Weeks"], selected: c.zoom == .days ? 0 : 1, label: "Zoom") { [weak self] i in
+                c.zoom = i == 0 ? .days : .weeks
+                self?.host?.planChanged()
+            })
         }
         views.append(Spacer())
         let p = model.progress

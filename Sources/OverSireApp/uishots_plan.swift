@@ -117,5 +117,15 @@ extension UIShots {
         try? memory.saveVision("One quiet place that shows where all my work stands: CI, pull requests, tickets and agents.", of: ref)
         PlanVisits.shared.seed("OVERSIRE", since: scene.hasSuffix("-away") ? date(-7) : nil)
         w.router.go(.project("OVERSIRE"))
+        // project-plan-timeline-days: 426 selected, with its tip. project-plan-timeline-weeks: 432 selected, no tip.
+        if scene.hasPrefix("project-plan-timeline") {
+            DispatchQueue.main.async {
+                guard let page = w.page as? ProjectPage else { print("UISHOTS no project page"); return }
+                let weeks = scene.hasSuffix("-weeks")
+                page.plan.zoom = weeks ? .weeks : .days
+                PlanSelection.keys["OVERSIRE"] = "OVERSIRE-432"
+                page.show(plan: .timeline, focus: weeks ? nil : "OVERSIRE-426")
+            }
+        }
     }
 }

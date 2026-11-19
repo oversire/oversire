@@ -20,12 +20,14 @@ final class PlanControls {
     var folded: Set<EpicID> = []
     var mode: PlanMapMode = .all
     var critical = true
+    var zoom: PlanGanttModel.Zoom = .days
+    var timelinePlace: PlanGanttPlace?
     var focus: PlanFocus?
     /// The north star editor: open, and the text that is not saved.
     var editingNorthStar = false
     var northStarDraft: String?
 
-    var hash: Int { PageRow.hash([segment.rawValue, folded.map(\.rawValue).sorted(), mode.rawValue, critical, focus?.key, focus?.epic?.rawValue, editingNorthStar]) }
+    var hash: Int { PageRow.hash([segment.rawValue, folded.map(\.rawValue).sorted(), mode.rawValue, critical, zoom.rawValue, focus?.key, focus?.epic?.rawValue, editingNorthStar]) }
 }
 
 /// The plan of one project, built from the store on each page build.
