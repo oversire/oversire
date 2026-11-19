@@ -152,7 +152,7 @@ struct MachinesModel: Equatable {
         enum State: Equatable { case here, other(String), paused(home: String) }
         var state: State
 
-        static let note = "Auto start, Enhance, cleanup, Plane write-back and AI digests run on one Mac only. The other Macs show the results."
+        static let note = "Auto start, Enhance, cleanup, tracker write-back and AI digests run on one Mac only. The other Macs show the results."
 
         /// home: the home of the group, for a pause before the first read.
         init(_ r: AutomationRole, home: String) {

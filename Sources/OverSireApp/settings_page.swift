@@ -244,7 +244,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     private func writeBack(_ b: NSStackView) {
         let on = AGENTS.writeBack.enabled
         b.addFull(section(.writeback, [
-            SwitchRow("Write back", note: "Off keeps Plane read only. OverSire never edits text that people wrote.", on: on) { AGENTS.writeBack.enabled = $0 },
+            SwitchRow("Write back", note: "Off keeps your trackers read only. OverSire never edits text that people wrote.", on: on) { AGENTS.writeBack.enabled = $0 },
             Padded(ChipGroup([
                 .init("Links", on: AGENTS.writeBack.links) { AGENTS.writeBack.links = $0 },
                 .init("Session labels", on: AGENTS.writeBack.labels) { AGENTS.writeBack.labels = $0 },

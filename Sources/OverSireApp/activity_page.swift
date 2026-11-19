@@ -111,7 +111,7 @@ enum ActivityFeed {
                                      itemKey: key, itemURL: store.item(key: key)?.2.url))
         }
         for r in data.cleaner.records {
-            out.append(FeedEntry(id: "cleanup|\(r.at.timeIntervalSince1970)|\(r.text)", source: .agent, title: r.text, body: "Cleanup · Plane does not change",
+            out.append(FeedEntry(id: "cleanup|\(r.at.timeIntervalSince1970)|\(r.text)", source: .agent, title: r.text, body: "Cleanup · the tracker does not change",
                                  at: r.at, route: .item(r.key, .overview), itemKey: r.key, itemURL: store.item(key: r.key)?.2.url))
         }
         for c in data.statusJob.statuses.prefix(30) where c.byAI && c.state != .working {

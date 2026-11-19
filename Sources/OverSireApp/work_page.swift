@@ -150,7 +150,7 @@ final class WorkPage: Page {
         if rows.isEmpty {
             let loading = data.projectsLoading
             if !loading, case .failed = plane.state {
-                rows = [PageRow("failed", plane.state) { ReadNote("Plane did not give your items.", part: plane) }]
+                rows = [PageRow("failed", plane.state) { ReadNote("\(ENV.trackerNames()) did not give your items.", part: plane) }]
             } else {
                 rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.") }]
             }

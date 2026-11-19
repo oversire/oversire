@@ -25,7 +25,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .refresh: return "Refresh"
         case .repos: return "Repos"
         case .linking: return "Link an item to code when"
-        case .writeback: return "Write back to Plane"
+        case .writeback: return "Write back to the tracker"
         case .sessions: return "New sessions"
         case .queue: return "Queue"
         case .worktrees: return "Worktrees"

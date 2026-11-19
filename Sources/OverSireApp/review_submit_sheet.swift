@@ -25,7 +25,7 @@ final class ReviewSubmitSheet {
         sheet = DialogSheet(title: "Submit \(what) review · round \(desk.nextRound)", width: 560)
         _ = sheet.note("\(desk.key) · \(n) pending comment\(n == 1 ? "" : "s") · machine \(desk.machine)")
         summary = CommentField("", placeholder: "Summary for the agent (optional)", label: "Summary for the agent")
-        post = CheckBox("Also post the round on the Plane item", on: false, label: "Also post the round on the Plane item")
+        post = CheckBox("Also post the round on the tracker item", on: false, label: "Also post the round on the tracker item")
         target = .text("", size: 12.5, color: Palette.mut, lines: 3)
         preview = .text("", size: 11, color: Palette.mut, lines: 14, mono: true)
         error = .text("", size: 12, color: Palette.bad, lines: 3)
@@ -49,7 +49,7 @@ final class ReviewSubmitSheet {
         preview.setAccessibilityLabel("Prompt preview")
         sheet.stack.addFull(box)
         sheet.stack.addFull(post)
-        _ = sheet.note("The daemon on \(desk.machine) sends it, so this works from any Mac. Plane writes go through the app.")
+        _ = sheet.note("The daemon on \(desk.machine) sends it, so this works from any Mac. Tracker writes go through the app.")
         sheet.stack.addFull(error)
         sheet.buttons(cancel: "Cancel", primary: "Submit review", onCancel: { [weak self] in self?.sheet.dismiss() }, onPrimary: { [weak self] in self?.send() })
         update()
@@ -63,7 +63,7 @@ final class ReviewSubmitSheet {
         if verdict == .approve {
             preview.stringValue = "Approve sends no prompt to the agent."
             if desk.kind == .plan {
-                target.stringValue = "Approve sets \(desk.key) and its sub-items to Todo. Then the queue can take them. Approve writes to Plane through the app."
+                target.stringValue = "Approve sets \(desk.key) and its sub-items to Todo. Then the queue can take them. Approve writes to the tracker through the app."
                 button = "Approve plan"
             } else {
                 target.stringValue = "Approve opens the merge next. Nothing merges before you confirm."

@@ -154,7 +154,9 @@ final class IntakeListPage: Page {
     private func pickGroomProject(from b: NSView) {
         let groom = data.groomAgent
         let menu = NSMenu()
-        for snap in data.projectStore.snapshots.values.sorted(by: { $0.summary.identifier < $1.summary.identifier }) {
+        // Groom works on the intake and the Plane writes: only projects of a tracker with intake.
+        let groomable = data.projectStore.snapshots.values.filter { data.projectStore.tracker(of: $0.summary.ref)?.capabilities.contains(.intake) == true }
+        for snap in groomable.sorted(by: { $0.summary.identifier < $1.summary.identifier }) {
             let pk = snap.summary.ref.storeKey
             let busy = groom.state(pk).map { !$0.isApplied } ?? false
             let item = NSMenuItem(title: "\(snap.summary.identifier) · \(snap.summary.title)", action: nil, keyEquivalent: "")

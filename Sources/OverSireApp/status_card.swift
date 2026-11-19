@@ -229,7 +229,7 @@ struct StatusCard {
         if wb.links { plane.append("links") }
         if wb.labels { plane.append("label") }
         if wb.block { plane.append("block") }
-        let text = !wb.enabled || plane.isEmpty ? "On Plane: off" : "On Plane: " + plane.joined(separator: ", ")
+        let text = !wb.enabled || plane.isEmpty ? "On the tracker: off" : "On the tracker: " + plane.joined(separator: ", ")
         chips.append(Chiplet(text, symbol: "square.and.arrow.up") { go(.settings(.projects, tab: .linking, anchor: "writeback")) })
         return Wrap(chips)
     }

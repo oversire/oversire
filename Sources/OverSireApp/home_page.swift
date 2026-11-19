@@ -253,7 +253,7 @@ final class HomePage: Page {
             let loading = data.loadingFirst
             let plane = data.projectStore.plane
             if !loading, case .failed = plane.state {
-                rows.append(PageRow("failed", plane.state) { ReadNote("Plane did not give your items.", part: plane) })
+                rows.append(PageRow("failed", plane.state) { ReadNote("\(ENV.trackerNames()) did not give your items.", part: plane) })
             } else {
                 rows.append(PageRow(loading ? "loading" : "empty", filter.rawValue) {
                     loading ? LoadingNote("Loading") : EmptyNote(filter == .all ? "Nothing waits for you." : "No row of this kind.", symbol: "checkmark.circle")

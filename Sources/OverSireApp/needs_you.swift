@@ -335,9 +335,9 @@ final class NeedsYouCard: NSObject {
         if session { actions.append(ActionButton("Open session") { [weak self] in self?.page?.go(.item(e.key, .session)) }) }
         if let found = d.projectStore.item(key: e.key), let blockedOpt = found.snap.statusOptions.first(where: { $0.category == .blocked }),
            found.item.statusOptionId != blockedOpt.id {
-            actions.append(ActionButton("Set Plane to Blocked") { [weak self] in
+            actions.append(ActionButton("Set \(ENV.trackerName(found.snap.summary.ref.account)) to Blocked") { [weak self] in
                 d.actions.run("item.setStatus", ["key": .string(found.item.key), "status": .string(blockedOpt.id)]) { r in
-                    if case .ok = r { self?.notes[e.id] = (.ok, "Plane status set to Blocked.") } else { self?.notes[e.id] = (.bad, "Could not set the Plane status: \(r.summary)") }
+                    if case .ok = r { self?.notes[e.id] = (.ok, "\(ENV.trackerName(found.snap.summary.ref.account)) status set to Blocked.") } else { self?.notes[e.id] = (.bad, "Could not set the \(ENV.trackerName(found.snap.summary.ref.account)) status: \(r.summary)") }
                     self?.page?.reload()
                 }
             })

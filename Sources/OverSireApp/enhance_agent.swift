@@ -411,6 +411,11 @@ final class EnhanceAgent {
     /// False when the tracker of the project has no priority. An unloaded project keeps the priority.
     func hasPriority(_ projectKey: String) -> Bool { store.snapshots[projectKey]?.hasPriority ?? true }
 
+    /// The display name of the tracker of the project, for UI text.
+    func trackerName(_ projectKey: String) -> String {
+        store.snapshots[projectKey].map { ENV.trackerName($0.summary.ref.account) } ?? ENV.trackerNames()
+    }
+
     // MARK: Review
 
     func isChecked(_ t: EnhanceTarget, _ p: Pick) -> Bool { !(picks[t.id] ?? []).contains(p) }
@@ -486,7 +491,7 @@ final class EnhanceAgent {
                     edit = Self.queued(edit, label: id, keep: keep)
                 }
                 await MainActor.run {
-                    let failed = { (what: String) in done(self.store.lastError ?? "Plane did not take \(what).") }
+                    let failed = { (what: String) in done(self.store.lastError ?? "\(ENV.trackerName(snap.summary.ref.account)) did not take \(what).") }
                     let after: (Bool) -> Void = { ok in
                         guard ok else { failed("the changes"); return }
                         if let run = ready?.1 { self.stop(run) }
@@ -518,6 +523,7 @@ final class EnhanceAgent {
     }
 
     private func write(_ edit: IntakeEdit, to id: String, target: EnhanceTarget, run: Run, done: @escaping (String?) -> Void) {
+        let name = store.item(id).map { ENV.trackerName($0.snap.summary.ref.account) } ?? ENV.trackerNames()
         let ended = {
             self.stop(run)
             self.written(target.id, accepted: false)
@@ -526,12 +532,12 @@ final class EnhanceAgent {
         let relate = {
             guard !edit.relations.isEmpty else { ended(); return }
             self.store.relate(itemId: id, RelationPatch(add: edit.relations)) { ok in
-                ok ? ended() : done(self.store.lastError ?? "Plane did not take the relations.")
+                ok ? ended() : done(self.store.lastError ?? "\(name) did not take the relations.")
             }
         }
         guard edit.patch != ItemPatch() else { relate(); return }
         store.update(itemId: id, edit.patch, failure: "Could not write the changes") { ok in
-            ok ? relate() : done(self.store.lastError ?? "Plane did not take the changes.")
+            ok ? relate() : done(self.store.lastError ?? "\(name) did not take the changes.")
         }
     }
 
@@ -666,7 +672,7 @@ final class EnhancePanel: Card {
                 acts = [ActionButton("Apply to \(ref.key)", style: .primary) { agent.apply(ticket: ref, done: after) }]
             }
             add(NSStackView(h: acts + open + [ActionButton("Discard") { agent.discard(item) }], spacing: 6))
-            if item.isTicket { add(NSTextField.text("Writes the checked lines to Plane. No accept step: the item is already a ticket.", size: 12, color: Palette.dim, lines: 2)) }
+            if item.isTicket { add(NSTextField.text("Writes the checked lines to \(agent.trackerName(projectKey)). No accept step: the item is already a ticket.", size: 12, color: Palette.dim, lines: 2)) }
         case .applied:
             add(NSTextField.text("OverSire wrote the checked changes. The original text is in the section \"Original note\".", size: 12, color: Palette.mut, lines: 2))
             add(NSStackView(h: [ActionButton("Dismiss") { agent.discard(item) }], spacing: 6))

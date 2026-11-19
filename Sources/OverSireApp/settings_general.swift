@@ -15,7 +15,7 @@ extension SettingsPage {
         b.addFull(section(.menubar, [
             SwitchRow("Small popover", note: "Now, Runs and Work only.", on: GENERAL.smallPopover) { GENERAL.smallPopover = $0 },
             FieldRow("Tabs", note: "At least one tab stays on.", popoverTabs()),
-            SwitchRow("Blue dot on the menu bar icon", note: "Unread Plane activity, or a session that waits for you.", on: PROJECTS_CFG.menuDot) { [weak self] in
+            SwitchRow("Blue dot on the menu bar icon", note: "Unread tracker activity, or a session that waits for you.", on: PROJECTS_CFG.menuDot) { [weak self] in
                 PROJECTS_CFG.menuDot = $0
                 self?.app?.applyProjectSelection()
             },

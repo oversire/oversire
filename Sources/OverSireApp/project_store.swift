@@ -176,10 +176,11 @@ final class ProjectStore {
         refresh(keys, force: false) { _ in }
     }
 
-    /// The Plane read of the keys, for the toolbar menu and the page notes. Plane polls on its own timer: no retry plan.
+    /// The tracker read of the keys, for the toolbar menu and the page notes. A tracker polls on its own timer: no retry plan.
     func part(_ keys: [String]) -> PagePart {
         let named = keys.count == 1 ? tracked.first { $0.ref.storeKey == keys[0] }?.identifier ?? keys[0] : nil
-        let title = named.map { "Plane project \($0)" } ?? "Plane projects"
+        let name = keys.count == 1 ? tracked.first { $0.ref.storeKey == keys[0] }.map { ENV.trackerName($0.ref.account) } ?? ENV.trackerNames() : ENV.trackerNames()
+        let title = named.map { "\(name) project \($0)" } ?? "\(name) projects"
         let at = keys.compactMap { snapshots[$0]?.fetchedAt }.min()
         let state: ReadState
         let why = keys.compactMap { errors[$0] }.first
@@ -315,7 +316,7 @@ final class ProjectStore {
         let started = Date()
         let line = { (level: LogLevel, msg: String) in
             guard !Task.isCancelled else { return }
-            var e = LogEntry(level: level, area: .sync, job: "Plane poll", subject: p.identifier, host: p.ref.workspace,
+            var e = LogEntry(level: level, area: .sync, job: "\(ENV.trackerName(p.ref.account)) poll", subject: p.identifier, host: p.ref.workspace,
                              message: msg, ms: Int(Date().timeIntervalSince(started) * 1000))
             e.verbose = level == .ok ? true : nil
             APP_LOG.write(e)
@@ -373,10 +374,11 @@ final class ProjectStore {
             abandon(key, .timedOut)
             owner[key] = nil
             let p = tracked.first { $0.ref.storeKey == key }
-            let message = "No answer from Plane after \(seconds) s. OverSire stopped the read and reads the project again later."
-            APP_LOG.write(LogEntry(level: .warn, area: .sync, job: "Plane poll", subject: p?.identifier ?? key, host: p?.ref.workspace,
+            let name = p.map { ENV.trackerName($0.ref.account) } ?? "the tracker"
+            let message = "No answer from \(name) after \(seconds) s. OverSire stopped the read and reads the project again later."
+            APP_LOG.write(LogEntry(level: .warn, area: .sync, job: p == nil ? "Tracker poll" : "\(name) poll", subject: p?.identifier ?? key, host: p?.ref.workspace,
                                    message: message, ms: seconds * 1000))
-            errors[key] = "No answer from Plane after \(seconds) s."
+            errors[key] = "No answer from \(name) after \(seconds) s."
             publish(DataChange(.projects, projects: [key]))
             runAgain([key])
         }

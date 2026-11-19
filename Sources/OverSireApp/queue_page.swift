@@ -441,7 +441,7 @@ final class QueuePage: Page {
         var how: [String] = []
         if !AGENTS.startLabel.isEmpty { how.append("add the label \"\(AGENTS.startLabel)\"") }
         if !AGENTS.botUser.isEmpty { how.append("assign the item to \(AGENTS.botUser)") }
-        let text = how.isEmpty ? "Plane triggers are off." : "To start from Plane, " + how.joined(separator: " or ") + "."
+        let text = how.isEmpty ? "\(ENV.trackerNames()) triggers are off." : "To start from \(ENV.trackerNames()), " + how.joined(separator: " or ") + "."
         return NSStackView(h: [Glyph("arrow.down.circle", color: Palette.dim, size: 11), NSTextField.text(text, size: 12, color: Palette.dim, lines: 2), Spacer(),
                                ActionButton("Queue settings", style: .link) { [weak self] in self?.go(.settings(.agents, anchor: "queue")) }], spacing: 6)
     }

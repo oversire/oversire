@@ -171,7 +171,7 @@ final class AgentsPage: Page {
         }
         guard ask || !l.safe else { run(); return }
         AlertConfirm.ask("Remove \(c.name)?",
-                         info: l.safe ? "OverSire runs orca worktree rm. The Plane item does not change."
+                         info: l.safe ? "OverSire runs orca worktree rm. The tracker item does not change."
                              : "\(l.detail) OverSire forces the removal. Changes that are not in the base branch are lost.",
                          button: "Remove", critical: !l.safe, in: view.window, run)
     }
@@ -183,7 +183,7 @@ final class AgentsPage: Page {
             • OverSire runs orca worktree rm for each worktree.
             • A local branch is deleted only when it is merged.
             • A remote branch is deleted only when its PR is merged.
-            • The Plane items do not change.
+            • The tracker items do not change.
             """
         AlertConfirm.ask("Remove \(cards.count) worktree\(cards.count == 1 ? "" : "s")?", info: info, button: "Remove", in: view.window) { [weak self] in
             guard let self else { return }

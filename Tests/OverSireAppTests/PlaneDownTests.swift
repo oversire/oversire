@@ -64,7 +64,7 @@ final class PlaneDownTests: XCTestCase {
         XCTAssertEqual(page.parts.map(\.id), ["plane"])
         let views = built(page)
         let all = views.flatMap(texts)
-        XCTAssertTrue(all.contains("Plane did not give your items."))
+        XCTAssertTrue(all.contains("\(ENV.trackerNames()) did not give your items."))
         XCTAssertFalse(all.contains("No open items are yours."))
         XCTAssertTrue(views.flatMap(buttons).contains { $0.title == "Try again" })
     }
@@ -74,7 +74,7 @@ final class PlaneDownTests: XCTestCase {
         let intake = built(IntakeListPage(.intake(nil), data: data, router: Router())).flatMap(texts)
         XCTAssertTrue(intake.contains("Plane did not give your items."))
         let home = built(HomePage(.home, data: data, router: Router())).flatMap(texts)
-        XCTAssertTrue(home.contains("Plane did not give your items."))
+        XCTAssertTrue(home.contains("\(ENV.trackerNames()) did not give your items."))
     }
 
     func testOldDataWithPlaneDownShowsTheStaleAccessoryNotTheNote() async throws {
@@ -83,7 +83,7 @@ final class PlaneDownTests: XCTestCase {
         XCTAssertEqual(data.projectStore.plane.staleAccessory.count, 1)
         let all = built(WorkPage(.work(.items), data: data, router: Router())).flatMap(texts)
         XCTAssertTrue(all.contains { $0.hasPrefix("Read failed") })
-        XCTAssertFalse(all.contains("Plane did not give your items."))
+        XCTAssertFalse(all.contains("\(ENV.trackerNames()) did not give your items."))
         let fresh = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
                                  statePath: data.tmp + "/f.json", activityPath: data.tmp + "/f.jsonl")
         XCTAssertTrue(fresh.plane.staleAccessory.isEmpty)

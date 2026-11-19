@@ -137,7 +137,7 @@ final class ProjectRefreshTests: XCTestCase {
     }
 
     private func pollLines(_ l: IOLogTests.Lines, _ level: LogLevel) -> [LogEntry] {
-        l.all.filter { $0.job == "Plane poll" && $0.level == level }
+        l.all.filter { $0.job.hasSuffix(" poll") && $0.level == level }
     }
 
     private func snap(_ p: ProjectSummary, at: Date) -> ProjectSnapshot {
@@ -282,7 +282,7 @@ final class ProjectRefreshTests: XCTestCase {
         await until("the loop reads b") { t.blocked("b") == 1 }
         let warns = pollLines(lines, .warn)
         XCTAssertEqual(warns.count, 1)
-        XCTAssertEqual([warns[0].area.rawValue, warns[0].job, warns[0].subject, warns[0].host], ["sync", "Plane poll", "A", "ws"])
+        XCTAssertEqual([warns[0].area.rawValue, warns[0].job, warns[0].subject, warns[0].host], ["sync", "slow poll", "A", "ws"])
         await MainActor.run { store.poll() }
         await until("the poll reads a again") { t.blocked("a") == 2 }
         t.release("a")
