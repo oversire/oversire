@@ -240,6 +240,9 @@ public struct ProjectSnapshot: Codable, Sendable {
     public static let statusFieldId = "state"
     public static let priorityFieldId = "priority"
 
+    /// The tracker of the project has a priority field.
+    public var hasPriority: Bool { fields.contains { $0.id == Self.priorityFieldId } }
+
     public let summary: ProjectSummary
     public var statusOptions: [StatusOption] { didSet { openBelow = countOpenBelow() } }
     public let items: [Item]
@@ -546,10 +549,11 @@ public struct ActivityEntry: Codable, Hashable, Sendable {
                              actor: actor, text: change.text, url: url, at: at, unread: true, itemKey: itemKey, title: title)
     }
 
-    /// The item key from a tracker link such as `…/browse/SLING-7/`, for entries saved without a key.
+    /// The item key from a tracker link such as `…/browse/SLING-7/` or `bigtimer://issue/ACME-7`, for entries saved without a key.
     public static func key(inURL url: String) -> String? {
-        guard let r = url.range(of: "/browse/[A-Za-z][A-Za-z0-9]*-[0-9]+", options: .regularExpression) else { return nil }
-        return String(url[r].dropFirst("/browse/".count)).uppercased()
+        guard let r = url.range(of: "(?:/browse/|bigtimer://issue/)[A-Za-z][A-Za-z0-9]*-[0-9]+", options: .regularExpression) else { return nil }
+        let hit = url[r]
+        return String(hit[hit.index(after: hit.lastIndex { $0 == "/" }!)...]).uppercased()
     }
 }
 

@@ -29,6 +29,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let attachmentsRead: Capability = "attachmentsRead"
     public static let timeline: Capability = "timeline"
     public static let labels: Capability = "labels"
+    /// The tracker has a priority field. The UI hides the priority menu, chip and column without it.
+    public static let priority: Capability = "priority"
     public static let links: Capability = "links"
     public static let relations: Capability = "relations"
     public static let subItems: Capability = "subItems"

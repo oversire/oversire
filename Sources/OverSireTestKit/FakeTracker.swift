@@ -39,7 +39,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
     public init(account: String = "fake",
-                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics]) {
+                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics, .priority]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]

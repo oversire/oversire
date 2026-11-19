@@ -7,7 +7,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch, .epics] }
+    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch, .epics, .priority] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }

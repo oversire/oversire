@@ -278,4 +278,19 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertTrue(ItemPatch().isEmpty)
         XCTAssertFalse(ItemPatch(status: "s1").isEmpty)
     }
+
+    func testKeyInURLFindsBigTimerLinks() {
+        XCTAssertEqual(ActivityEntry.key(inURL: "bigtimer://issue/acme-142"), "ACME-142")
+        XCTAssertEqual(ActivityEntry.key(inURL: "https://app.plane.so/ws/browse/SLING-7/"), "SLING-7")
+        XCTAssertNil(ActivityEntry.key(inURL: "bigtimer://issues?project=ACME"))
+    }
+
+    func testHasPriority() {
+        let summary = ProjectSummary(ref: ProjectRef(account: AccountID(provider: "t", id: "a"), id: "p", key: "K"), identifier: "K", title: "K", url: "", closed: false)
+        func snap(_ fields: [ProjectField]) -> ProjectSnapshot {
+            ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date(), fields: fields)
+        }
+        XCTAssertFalse(snap([]).hasPriority)
+        XCTAssertTrue(snap([ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority", options: [])]).hasPriority)
+    }
 }

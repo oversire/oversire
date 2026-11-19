@@ -1,0 +1,69 @@
+{
+  "changes": [
+    {
+      "seq": 9811,
+      "entity": "issue",
+      "op": "upsert",
+      "record": {
+        "uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6071",
+        "version": 4,
+        "created_at": "2026-10-20T09:12:00Z",
+        "updated_at": "2026-10-23T14:02:11Z",
+        "deleted_at": null,
+        "created_by": "019a0000-0000-7000-8000-000000000001",
+        "updated_by": "019a0000-0000-7000-8000-000000000002",
+        "project_uuid": "019a0000-0000-7000-8000-0000000000a1",
+        "number": 142,
+        "task_uuid": null,
+        "title": "Fix the invoice export",
+        "details": "The PDF has no footer.",
+        "status": "in_progress",
+        "size": "M",
+        "due_date": "2026-10-30",
+        "completed_at": null,
+        "assignee_uuid": "019a0000-0000-7000-8000-000000000002",
+        "origin": "manual",
+        "recurring_issue_uuid": null
+      }
+    },
+    {
+      "seq": 9812,
+      "entity": "entry",
+      "op": "upsert",
+      "record": {
+        "uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6072",
+        "version": 1,
+        "created_at": "2026-10-23T14:00:00Z",
+        "updated_at": "2026-10-23T14:00:00Z",
+        "deleted_at": null,
+        "created_by": "019a0000-0000-7000-8000-000000000001",
+        "updated_by": "019a0000-0000-7000-8000-000000000001",
+        "member_uuid": "019a0000-0000-7000-8000-000000000001",
+        "workspace_uuid": null,
+        "project_uuid": "019a0000-0000-7000-8000-0000000000a1",
+        "task_uuid": null,
+        "issue_uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6071",
+        "description": "Invoice export",
+        "started_at": "2026-10-23T14:00:00Z",
+        "ended_at": null,
+        "duration_secs": -1792850400,
+        "billable": true,
+        "tags": [],
+        "source": "app",
+        "status": "running",
+        "toggl_id": null
+      }
+    },
+    {
+      "seq": 9813,
+      "entity": "issue_comment",
+      "op": "delete",
+      "uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6073",
+      "version": 3
+    }
+  ],
+  "next": 9813,
+  "more": false,
+  "head": 9813,
+  "server_time": "2026-10-23T14:02:12Z"
+}

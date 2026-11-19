@@ -1,0 +1,289 @@
+import Foundation
+import OverSireCore
+
+/// The Big Timer adapter. One instance for each server and token.
+public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable {
+    public let id: ProviderID = .bigtimer
+    public let account: AccountID
+    public let capabilities: Set<Capability> = [.itemSearch]
+    // The server has no general rate limit. The real load is the ProjectStore refresh.
+    public let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 600)
+    public let keyFormat = KeyFormat.projectDash
+
+    let api: BigTimerAPI
+    private let lock = NSLock()
+    private var meCache: (me: BTMe, at: Duration)?
+    private var memberCache: (members: [BTMember], at: Duration)?
+    private var prefixes: [String: String] = [:]                    // project uuid → prefix
+    private var issueKeys: [String: (key: String, project: String)] = [:]   // issue uuid → key, project uuid
+    private var commentIssues: [String: String] = [:]               // comment uuid → issue uuid
+    static let cacheAge: Duration = .seconds(3600)
+    static let pageMax = 500
+
+    public init(server: URL, account: AccountID, token: String, http: any HTTPTransport,
+                clock: any Clock<Duration> = ContinuousClock()) {
+        api = BigTimerAPI(base: server, token: token, http: http, clock: clock)
+        self.account = account
+    }
+
+    // MARK: Provider
+
+    public func probe() async throws -> Identity {
+        let me = try await me()
+        guard me.token.scopes.contains(where: { $0 == "write" || $0 == "admin" }) else { throw ProviderError.forbidden }
+        return Identity(person: PersonRef(id: me.member.uuid, name: me.member.name), scopes: me.token.scopes)
+    }
+
+    private func me() async throws -> BTMe {
+        if let c = lock.withLock({ meCache }), api.now - c.at < Self.cacheAge { return c.me }
+        let me: BTMe = try await api.get("/v1/me")
+        lock.withLock { meCache = (me, api.now) }
+        return me
+    }
+
+    // MARK: Members
+
+    private func members() async -> [BTMember] {
+        if let c = lock.withLock({ memberCache }), api.now - c.at < Self.cacheAge { return c.members }
+        guard let list: BTMemberList = try? await api.get("/v1/members") else { return lock.withLock { memberCache?.members ?? [] } }
+        lock.withLock { memberCache = (list.items, api.now) }
+        return list.items
+    }
+
+    /// Member id → name, for the active members. Kept for one hour.
+    public func memberNames() async -> [String: String] {
+        Dictionary(await members().filter { $0.status == "active" }.map { ($0.uuid, $0.name) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The names of all members that joined, also the deactivated ones, for authors and assignees.
+    private func names() async -> [String: String] {
+        Dictionary(await members().filter { $0.status != "invited" }.map { ($0.uuid, $0.name) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    public func ownerEmail() async -> String? { try? await me().member.email }
+
+    // MARK: Projects and items
+
+    public func projects() async throws -> [ProjectSummary] {
+        let rows = try await pages(BTProjectPage.self, "/v1/projects")
+        lock.withLock { for r in rows { prefixes[r.uuid] = r.issue_prefix } }
+        return rows.map {
+            ProjectSummary(ref: ProjectRef(account: account, id: $0.uuid, key: $0.issue_prefix), identifier: $0.issue_prefix, title: $0.name,
+                           url: "bigtimer://issues?project=\($0.issue_prefix)", closed: false, logo: nil)
+        }
+    }
+
+    public func statuses(_ p: ProjectRef) async throws -> [StatusOption] { BigTimerStatus.options }
+
+    /// Each open item, then the newest `limit` items of any status. Newest activity first.
+    public func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
+        var base = [URLQueryItem(name: "project", value: p.id), URLQueryItem(name: "order", value: "activity")]
+        if let since { base.append(URLQueryItem(name: "updated_since", value: Self.time(since))) }
+        let open = try await pages(BTIssuePage.self, "/v1/issues", query: base + [
+            URLQueryItem(name: "status", value: BigTimerStatus.options.map(\.id).filter(BigTimerStatus.openIDs.contains).joined(separator: ",")),
+            URLQueryItem(name: "limit", value: String(Self.pageMax)),
+        ])
+        let latest: BTIssuePage = try await api.get("/v1/issues", query: base + [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), Self.pageMax))),
+        ])
+        var seen = Set<String>()
+        let rows = (open + latest.items).filter { seen.insert($0.uuid).inserted }
+        let names = await names()
+        return rows.map { item(from: $0, names: names) }.sorted { $0.activityAt > $1.activityAt }
+    }
+
+    /// One item with no comments.
+    public func item(_ i: ItemRef) async throws -> Item {
+        let row: BTIssue = try await api.get("/v1/issues/\(i.id)")
+        return item(from: row, names: await names())
+    }
+
+    public func detail(_ i: ItemRef) async throws -> ItemDetail {
+        async let item = item(i)
+        async let comments = comments(i)
+        return ItemDetail(item: try await item, comments: try await comments, links: [])
+    }
+
+    /// Oldest first.
+    public func comments(_ i: ItemRef) async throws -> [Comment] {
+        let list: BTCommentList = try await api.get("/v1/issues/\(i.id)/comments")
+        let names = await names()
+        lock.withLock { for c in list.items { commentIssues[c.uuid] = c.issue_uuid } }
+        return list.items.map {
+            Comment(id: $0.uuid, author: $0.author_uuid.flatMap { names[$0] } ?? "Unknown", createdAt: $0.created_at,
+                    url: i.url.absoluteString, body: $0.body)
+        }.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    public func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef {
+        if d.priority != nil { throw ProviderError.unsupported(.priority) }
+        if !d.labels.isEmpty { throw ProviderError.unsupported(.labels) }
+        if d.parent != nil { throw ProviderError.unsupported(.subItems) }
+        let data = try await api.send("POST", "/v1/issues", json: BTIssueCreate(project_uuid: p.id, title: d.title, details: d.bodyMarkdown, status: d.status))
+        let row = try BigTimerAPI.decode(BTIssue.self, from: data)
+        remember(row)
+        return ref(of: row, project: p)
+    }
+
+    /// The PATCH goes first, then the assignee. The two writes are not atomic.
+    public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
+        if patch.priority != nil { throw ProviderError.unsupported(.priority) }
+        if patch.labels != nil { throw ProviderError.unsupported(.labels) }
+        if patch.parent != nil { throw ProviderError.unsupported(.subItems) }
+        let body = BTIssuePatch(title: patch.title, details: patch.bodyMarkdown, status: patch.status)
+        if !body.isEmpty { _ = try await api.send("PATCH", "/v1/issues/\(i.id)", json: body) }
+        if let who = patch.assignees { _ = try await api.send("POST", "/v1/issues/\(i.id)/assign", json: BTAssign(member: who.first)) }
+    }
+
+    public func comment(_ i: ItemRef, markdown: String) async throws {
+        _ = try await api.send("POST", "/v1/issues/\(i.id)/comments", json: BTCommentCreate(body: markdown))
+    }
+
+    /// The server takes "me" as a member.
+    public func assignMe(_ i: ItemRef) async throws {
+        _ = try await api.send("POST", "/v1/issues/\(i.id)/assign", json: BTAssign(member: "me"))
+    }
+
+    // MARK: Search
+
+    public func search(_ query: String, in projects: [ProjectRef]?, limit: Int) async throws -> [Item] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, limit > 0, projects?.isEmpty != true else { return [] }
+        let wanted = projects.map { Set($0.map(\.id)) }
+        var rows: [BTIssue] = []
+        if keyFormat.keys(in: q) == [q.uppercased()] {
+            do { rows.append(try await api.get("/v1/issues/\(q.uppercased())")) }
+            catch ProviderError.notFound {}
+        }
+        var query = [URLQueryItem(name: "q", value: q), URLQueryItem(name: "order", value: "activity"),
+                     URLQueryItem(name: "limit", value: String(min(limit, Self.pageMax)))]
+        if let only = wanted, only.count == 1, let id = only.first { query.append(URLQueryItem(name: "project", value: id)) }
+        let found: BTIssuePage = try await api.get("/v1/issues", query: query)
+        var seen = Set<String>()
+        rows = (rows + found.items).filter { seen.insert($0.uuid).inserted && (wanted?.contains($0.project_uuid) ?? true) }
+        let names = await names()
+        return rows.prefix(limit).map { item(from: $0, names: names) }
+    }
+
+    // MARK: Poll
+
+    /// The cursor is the seq of the change feed. A new or expired cursor sets a baseline and gives no events.
+    public func poll(since: Cursor?) async throws -> EventPage {
+        guard let seq = since.flatMap({ Int($0.rawValue) }) else { return try await baseline() }
+        let page: BTChangesPage
+        do { page = try await api.get("/v1/changes", query: Self.feed(since: seq, limit: Self.pageMax)) }
+        catch ProviderError.vendor(let code, _) where code == "cursor_expired" { return try await baseline() }
+        var refreshed = false
+        var events: [ProviderEvent] = []
+        for c in page.changes {
+            if let e = try await event(for: c, at: page.server_time, refreshed: &refreshed) { events.append(e) }
+        }
+        return EventPage(events: events, cursor: Cursor(rawValue: String(page.next)))
+    }
+
+    private func baseline() async throws -> EventPage {
+        let page: BTChangesPage = try await api.get("/v1/changes", query: Self.feed(since: 0, limit: 1))
+        return EventPage(events: [], cursor: Cursor(rawValue: String(page.head)))
+    }
+
+    private static func feed(since: Int, limit: Int) -> [URLQueryItem] {
+        [URLQueryItem(name: "since", value: String(since)), URLQueryItem(name: "limit", value: String(limit)),
+         URLQueryItem(name: "entity", value: "issue,issue_comment")]
+    }
+
+    /// The ids are the same on a repeated page. `refreshed` allows one read of the projects for each poll.
+    private func event(for change: BTChange, at serverTime: Date?, refreshed: inout Bool) async throws -> ProviderEvent? {
+        guard let version = change.version, let uuid = change.uuid else { return nil }
+        let action = change.op == "delete" ? "deleted" : version == 1 ? "created" : "updated"
+        let eid = "bigtimer-\(change.entity)-\(uuid)-v\(version)"
+        switch change.record {
+        case .issue(let r):
+            guard let prefix = try await prefix(of: r.project_uuid, refreshed: &refreshed) else { return nil }
+            let key = "\(prefix)-\(r.number)"
+            lock.withLock { issueKeys[r.uuid] = (key, r.project_uuid); prefixes[r.project_uuid] = prefix }
+            return ProviderEvent(id: eid, provider: .bigtimer, account: account, kind: .item, action: action,
+                                 subject: .item(ref(project: r.project_uuid, prefix: prefix, issue: r.uuid, key: key)), at: r.updated_at,
+                                 summary: EventSummary(title: r.title))
+        case .comment(let r):
+            lock.withLock { commentIssues[r.uuid] = r.issue_uuid }
+            guard let (key, project) = try await issueKey(r.issue_uuid) else { return nil }
+            return ProviderEvent(id: eid, provider: .bigtimer, account: account, kind: .comment, action: action,
+                                 subject: .item(ref(project: project, prefix: lock.withLock { prefixes[project] }, issue: r.issue_uuid, key: key)),
+                                 at: r.updated_at)
+        case nil:
+            // A delete has only a uuid and a version. The caches name the issue.
+            let issue: String? = change.entity == "issue_comment" ? lock.withLock({ commentIssues[uuid] }) : uuid
+            guard let issue, let (key, project) = lock.withLock({ issueKeys[issue] }) else { return nil }
+            return ProviderEvent(id: eid, provider: .bigtimer, account: account,
+                                 kind: change.entity == "issue" ? .item : .comment, action: action,
+                                 subject: .item(ref(project: project, prefix: lock.withLock { prefixes[project] }, issue: issue, key: key)),
+                                 at: serverTime ?? Date())
+        }
+    }
+
+    // MARK: Helpers
+
+    private func pages<P: BTPage>(_ type: P.Type, _ path: String, query: [URLQueryItem] = []) async throws -> [P.Row] {
+        var out: [P.Row] = []
+        var cursor: String?
+        for _ in 0..<20 {
+            let page: P = try await api.get(path, query: query + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? []))
+            out += page.items
+            guard let next = page.next_cursor, !next.isEmpty else { break }
+            cursor = next
+        }
+        return out
+    }
+
+    /// The prefix of a project. A miss reads the projects once for each poll.
+    private func prefix(of project: String, refreshed: inout Bool) async throws -> String? {
+        if let p = lock.withLock({ prefixes[project] }) { return p }
+        guard !refreshed else { return nil }
+        refreshed = true
+        _ = try await projects()
+        return lock.withLock { prefixes[project] }
+    }
+
+    /// The key and project of an issue. A miss reads the issue. A 404 gives nil.
+    private func issueKey(_ issue: String) async throws -> (String, String)? {
+        if let k = lock.withLock({ issueKeys[issue] }) { return k }
+        do {
+            let row: BTIssue = try await api.get("/v1/issues/\(issue)")
+            remember(row)
+            return (row.key, row.project_uuid)
+        } catch ProviderError.notFound { return nil }
+    }
+
+    private func remember(_ row: BTIssue) {
+        lock.withLock {
+            issueKeys[row.uuid] = (row.key, row.project_uuid)
+            if prefixes[row.project_uuid] == nil { prefixes[row.project_uuid] = String(row.key.dropLast("-\(row.number)".count)) }
+        }
+    }
+
+    private static func url(_ key: String) -> URL { URL(string: "bigtimer://issue/\(key)")! }
+
+    private func ref(project: String, prefix: String?, issue: String, key: String) -> ItemRef {
+        ItemRef(project: ProjectRef(account: account, id: project, key: prefix), id: issue, key: key, url: Self.url(key))
+    }
+
+    private func ref(of row: BTIssue, project p: ProjectRef) -> ItemRef { ItemRef(project: p, id: row.uuid, key: row.key, url: Self.url(row.key)) }
+
+    private static func time(_ d: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f.string(from: d)
+    }
+
+    private func item(from row: BTIssue, names: [String: String]) -> Item {
+        remember(row)
+        var fields: [String: String] = [:]
+        if let size = row.size { fields["Size"] = size }
+        if let due = row.due_date { fields["Due"] = due }
+        return Item(id: row.uuid, key: row.key, title: row.title, url: Self.url(row.key).absoluteString, statusOptionId: row.status,
+                    fields: fields, assignees: row.assignee_uuid.map { [names[$0] ?? "Unknown"] } ?? [], labels: [],
+                    author: row.created_by.flatMap { names[$0] }, updatedBy: row.updated_by.flatMap { names[$0] },
+                    updatedAt: row.updated_at, activityAt: row.activity_at ?? row.updated_at, commentCount: row.comment_count ?? 0,
+                    lastComment: nil, mentionsMe: false, body: row.details)
+    }
+}
