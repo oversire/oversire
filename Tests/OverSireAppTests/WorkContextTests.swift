@@ -156,9 +156,64 @@ final class WorkContextTests: XCTestCase {
         XCTAssertEqual(cached["commentsNote"] as? String, "Plane did not answer. The count is from the last read.")
     }
 
+    private func markdown(_ d: TestAppData, _ caller: ActionCaller = .user) async -> (data: [String: JSONValue], summary: String) {
+        let r = await d.actions.run("item.markdown", ActionArgs(.object(["key": .string("SLING-1")]), caller: caller))
+        guard case .ok(let summary, let data, _) = r, let o = data?.object else { XCTFail("\(r)"); return ([:], "") }
+        return (o, summary)
+    }
+
+    func testItemMarkdownHasComments() async {
+        let t = ProjectCommentTests.CommentTracker(workspace: "ocral")
+        defer { t.releaseAll() }
+        t.setComments("i1", [Comment(id: "c2", author: "bob", createdAt: t0 + 2, url: "https://plane/c2", body: "Second"),
+                             Comment(id: "c1", author: "ada", createdAt: t0 + 1, url: "https://plane/c1", body: "First")])
+        let d = seeded(trackers: ProjectCommentTests.Directory(t))
+        let (o, summary) = await markdown(d)
+        XCTAssertEqual(summary, "SLING-1: Fix the sync")
+        XCTAssertEqual(o["key"]?.string, "SLING-1")
+        XCTAssertNil(o["commentsNote"])
+        let text = o["markdown"]?.string ?? ""
+        XCTAssertTrue(text.hasPrefix("# Fix the sync"), text)
+        XCTAssertTrue(text.contains("## Comments"), text)
+        let first = text.range(of: "@ada"), second = text.range(of: "@bob")
+        XCTAssertNotNil(first)
+        XCTAssertTrue(first != nil && second != nil && first!.lowerBound < second!.lowerBound, "oldest first")
+    }
+
+    func testItemMarkdownCommentFailure() async {
+        let t = ProjectCommentTests.CommentTracker(workspace: "ocral")
+        defer { t.releaseAll() }
+        t.limited = true
+        let d = seeded(trackers: ProjectCommentTests.Directory(t))
+        let (o, _) = await markdown(d)
+        XCTAssertTrue(o["markdown"]?.string?.hasSuffix("## Comments\n_None_\n") == true, o["markdown"]?.string ?? "")
+        XCTAssertEqual(o["commentsNote"]?.string, "Plane did not answer. The comments are missing.")
+    }
+
+    func testItemMarkdownClipsForCaller() async {
+        let t = ProjectCommentTests.CommentTracker(workspace: "ocral")
+        defer { t.releaseAll() }
+        let d = seeded(trackers: ProjectCommentTests.Directory(t))
+        var big = item(1, title: "Fix the sync")
+        big.body = (0..<1_100).map { "Line \($0) of a long body text." }.joined(separator: "\n")
+        XCTAssertGreaterThan(big.body!.utf8.count, 30_000)
+        d.projectStore.seed(ProjectSnapshot(summary: ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "", closed: false),
+                                            statusOptions: [StatusOption(id: "s1", name: "Todo", color: "#000", group: "unstarted")],
+                                            items: [big], fetchedAt: t0))
+        let whole = await markdown(d, .cli(agent: nil)).data["markdown"]?.string ?? ""
+        XCTAssertFalse(whole.contains("_The text is cut"))
+        XCTAssertTrue(whole.contains("Line 1099 of"))
+        let cut = await markdown(d, .user).data["markdown"]?.string ?? ""
+        XCTAssertTrue(cut.hasSuffix("\n_The text is cut at \(JSONValue.readLimit) bytes._\n"), String(cut.suffix(80)))
+        XCTAssertLessThanOrEqual(cut.utf8.count, JSONValue.readLimit + 64)
+        XCTAssertFalse(cut.contains("Line 1099 of"))
+        XCTAssertEqual(ReadActions.markdownLimit(.cli(agent: "codex")), 256_000)
+        XCTAssertEqual(ReadActions.markdownLimit(.assistant(thread: "t")), JSONValue.readLimit)
+    }
+
     func testReadToolsAreReadKind() {
         let kind = Dictionary(uniqueKeysWithValues: TestAppData().actions.all.map { ($0.id, $0.kind) })
-        for id in ["work.context", "item.get", "item.list", "pr.list", "pr.get", "run.list", "run.get", "session.list", "question.list",
+        for id in ["work.context", "item.get", "item.markdown", "item.list", "pr.list", "pr.get", "run.list", "run.get", "session.list", "question.list",
                    "queue.list", "activity.list", "insights.summary", "cloud.status"] {
             XCTAssertEqual(kind[id], .read, id)
         }

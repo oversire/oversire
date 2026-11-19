@@ -852,13 +852,27 @@ struct RuntimeConfig: Codable, Equatable {
         return c
     }
 
-    // {url}, {key} (lowercase), {KEY} and {title}.
+    /// The read hint for an item whose URL is not http(s). Nil for a web URL.
+    static func readHint(for item: Item) -> String? {
+        let scheme = URL(string: item.url)?.scheme?.lowercased()
+        if scheme == "http" || scheme == "https" { return nil }
+        var hint = "Read the item with `oversire item show \(item.key)`."
+        if scheme == "bigtimer" {
+            hint += " `big-timer-cli issue get \(item.key)` and `big-timer-cli comment list \(item.key)` work too."
+        }
+        return hint
+    }
+
+    // {url}, {key} (lowercase), {KEY} and {title}. A URL that is not a web page gives the key, and a read hint follows.
     func prompt(for item: Item) -> String {
-        (prompt.isEmpty ? RuntimeConfig.defaultPrompt : prompt)
-            .replacingOccurrences(of: "{url}", with: item.url)
+        let hint = RuntimeConfig.readHint(for: item)
+        let text = (prompt.isEmpty ? RuntimeConfig.defaultPrompt : prompt)
+            .replacingOccurrences(of: "{url}", with: hint == nil ? item.url : item.key)
             .replacingOccurrences(of: "{KEY}", with: item.key)
             .replacingOccurrences(of: "{key}", with: item.key.lowercased())
             .replacingOccurrences(of: "{title}", with: item.title)
+        guard let hint, !text.contains("oversire item show") else { return text }
+        return text + "\n\n" + hint
     }
 }
 

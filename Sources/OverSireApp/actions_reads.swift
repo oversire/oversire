@@ -9,7 +9,7 @@ struct ReadActions {
     let link: ActionLink
 
     var specs: [ActionSpec] {
-        [workContext, itemGet, itemList, prList, prGet, runList, runGet, sessionList, questionList, queueList, activityList, insightsSummary, cloudStatus]
+        [workContext, itemGet, itemMarkdown, itemList, prList, prGet, runList, runGet, sessionList, questionList, queueList, activityList, insightsSummary, cloudStatus]
     }
 
     private var workContext: ActionSpec {
@@ -42,7 +42,7 @@ struct ReadActions {
                         count = list.count
                         last = list.last
                     case .failure:
-                        o["commentsNote"] = .string("Plane did not answer. The count is from the last read.")
+                        o["commentsNote"] = .string("\(ENV.trackerName(f.snap.summary.ref.account)) did not answer. The count is from the last read.")
                     }
                     o["commentCount"] = .int(count)
                     if let last { o["lastComment"] = JSONValue(encoding: last) }
@@ -50,6 +50,43 @@ struct ReadActions {
                 }
             }
         }
+    }
+
+    /// The byte limit of the Markdown for a caller. A CLI caller gets a larger limit.
+    static func markdownLimit(_ caller: ActionCaller) -> Int {
+        if case .cli = caller { return 256_000 }
+        return JSONValue.readLimit
+    }
+
+    private var itemMarkdown: ActionSpec {
+        let link = link
+        return ActionSpec(id: "item.markdown", title: "Item as Markdown", help: "Reads one item as Markdown for an agent: title, facts, link, description and all comments, oldest first.",
+                   kind: .read, input: ActionSpec.args(["key": ItemActions.key], required: ["key"])) { a in
+            let limit = Self.markdownLimit(a.caller)
+            return await link.item(a) { d, f, done in
+                d.projectStore.comments(key: f.item.key) { r in
+                    var o: [String: JSONValue] = ["key": .string(f.item.key)]
+                    var text: String
+                    switch r {
+                    case .success(let list): text = f.item.agentMarkdown(snap: f.snap, comments: list)
+                    case .failure:
+                        text = f.item.agentMarkdown(snap: f.snap, comments: [])
+                        o["commentsNote"] = .string("\(ENV.trackerName(f.snap.summary.ref.account)) did not answer. The comments are missing.")
+                    }
+                    o["markdown"] = .string(Self.cut(text, to: limit))
+                    done(.ok(summary: "\(f.item.key): \(f.item.title)", data: .object(o)))
+                }
+            }
+        }
+    }
+
+    /// Cuts the text at the last line end before `limit` bytes and adds a note line.
+    private static func cut(_ text: String, to limit: Int) -> String {
+        guard text.utf8.count > limit else { return text }
+        var bytes = Array(text.utf8.prefix(limit))
+        if let nl = bytes.lastIndex(of: 10) { bytes.removeSubrange(nl...) }
+        let head = String(decoding: bytes, as: UTF8.self)
+        return head + "\n\n_The text is cut at \(limit) bytes._\n"
     }
 
     private var itemList: ActionSpec {

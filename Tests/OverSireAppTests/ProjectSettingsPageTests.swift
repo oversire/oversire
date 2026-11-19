@@ -6,8 +6,8 @@ import XCTest
 final class ProjectSettingsPageTests: XCTestCase {
     private let ref = ProjectRef(account: AccountID(provider: ProviderID(rawValue: "plane"), id: "ocral"), id: "p1", key: "SLING")
 
-    private func item(_ key: String) -> Item {
-        Item(id: "i1", key: key, title: "Fix the sync", url: "https://plane/\(key)", statusOptionId: nil, fields: [:],
+    private func item(_ key: String, url: String? = nil) -> Item {
+        Item(id: "i1", key: key, title: "Fix the sync", url: url ?? "https://plane/\(key)", statusOptionId: nil, fields: [:],
              assignees: [], labels: [], author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(),
              commentCount: 0, lastComment: nil, mentionsMe: false)
     }
@@ -97,5 +97,31 @@ final class ProjectSettingsPageTests: XCTestCase {
         var cfg = ProjectsConfig()
         cfg.runtime.prompt = "{KEY}\n\n" + SessionPrompt.subItemsRule
         XCTAssertEqual(cfg.launch(for: item("OTHER-1")).prompt, "OTHER-1\n\n" + SessionPrompt.subItemsRule, "no second copy")
+    }
+
+    func testPromptForBigTimerItem() {
+        let it = item("ACME-12", url: "bigtimer://issue/ACME-12")
+        XCTAssertEqual(ProjectsConfig().launch(for: it).prompt, """
+            work on ACME-12 in worktree group .wt/acme-12
+
+            Read the item with `oversire item show ACME-12`. \
+            `big-timer-cli issue get ACME-12` and `big-timer-cli comment list ACME-12` work too.
+
+            When you set the parent to Done, set each finished sub-item to Done too. \
+            Leave a sub-item open only when it is not done, and say why in a comment.
+            """)
+    }
+
+    func testPromptForOtherScheme() {
+        let it = item("ABC-1", url: "linear://x/ABC-1")
+        XCTAssertEqual(RuntimeConfig().prompt(for: it), "work on ABC-1 in worktree group .wt/abc-1\n\nRead the item with `oversire item show ABC-1`.")
+        XCTAssertNil(RuntimeConfig.readHint(for: item("ABC-1")))
+    }
+
+    func testPromptHintNotTwice() {
+        let it = item("ACME-12", url: "bigtimer://issue/ACME-12")
+        var rc = RuntimeConfig()
+        rc.prompt = "Run `oversire item show {KEY}` and fix it"
+        XCTAssertEqual(rc.prompt(for: it), "Run `oversire item show ACME-12` and fix it")
     }
 }

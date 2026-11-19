@@ -432,6 +432,10 @@ func runSelfTest() {
                          updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
     var rc = RuntimeConfig()
     check(rc.prompt(for: draftItem) == "work on https://app.plane.so/ocral/browse/FRITZ-7/ in worktree group .wt/fritz-7", "runtime prompt template")
+    let btItem = Item(id: "u-2", key: "FRITZ-7", title: "Add quick capture", url: "bigtimer://issue/FRITZ-7",
+                      statusOptionId: "s1", fields: [:], assignees: [], labels: [], author: nil, updatedBy: nil,
+                      updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
+    check(rc.prompt(for: btItem).contains("oversire item show FRITZ-7"), "runtime prompt reads a non-web item")
     rc.prompt = "{KEY}: {title}"
     check(rc.prompt(for: draftItem) == "FRITZ-7: Add quick capture", "runtime prompt fields")
     if let d = try? JSONDecoder().decode(ProjectsConfig.self, from: Data(#"{"orca":{"environment":"mbp","roots":{"a/b":"/w"}}}"#.utf8)) {

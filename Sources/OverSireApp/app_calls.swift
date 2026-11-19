@@ -6,7 +6,7 @@ import OverSireAssistant
 // The app runs only the actions of `allowed`, with no confirm. The event rows name the agent as the actor.
 final class AppCalls: @unchecked Sendable {
     static let allowed: Set<String> = [
-        "item.setEpic", "epic.list", "epic.show", "epic.plan", "epic.create", "epic.update", "epic.close", "epic.addItems", "epic.removeItems",
+        "item.get", "item.list", "item.markdown", "item.setEpic", "epic.list", "epic.show", "epic.plan", "epic.create", "epic.update", "epic.close", "epic.addItems", "epic.removeItems",
         "project.northStar", "project.setNorthStar",
     ]
 

@@ -23,6 +23,23 @@ final class AppCallsTests: XCTestCase {
         XCTAssertEqual(r.first?.data?.array?.first?["title"]?.string, "Review desk")
     }
 
+    func testAllowsItemReads() {
+        for id in ["item.get", "item.list", "item.markdown"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        XCTAssertFalse(AppCalls.allowed.contains("item.setStatus"))
+    }
+
+    func testRunsItemMarkdown() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        let posted = Posted()
+        let calls = AppCalls(catalog: rig.d.actions) { await posted.add($0) }
+        await calls.handle(AppCall(id: "c4", action: "item.markdown", args: .object(["key": .string(key)])))
+        let r = await posted.results
+        XCTAssertEqual(r.first?.status, .ok, r.first?.summary ?? "")
+        XCTAssertEqual(r.first?.data?["key"]?.string, key)
+        XCTAssertEqual(r.first?.data?["markdown"]?.string?.hasPrefix("# "), true)
+    }
+
     func testRefusesOtherAction() async {
         let posted = Posted()
         let spec = ActionSpec(id: "pr.merge", title: "Merge", help: "", kind: .outward) { a in
