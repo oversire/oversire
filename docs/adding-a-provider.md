@@ -180,6 +180,7 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.changeSearch` | `ChangeSearching` |
 | `.collaborators` | `CollaboratorListing` |
 | `.epics` | `EpicTracking` |
+| `.liveFeed` | `LiveFeeding` |
 
 Add the capability to `capabilities` and conform to the protocol. The suite fails when one is there without the other. The UI hides a feature that no account supports.
 
@@ -268,3 +269,11 @@ grep -rl "import Cocoa\|import AppKit" Sources/OverSireCore Sources/OverSireSync
 ## Webhooks
 
 Polling is enough for a new adapter. For faster updates, the cloud can take the vendor webhooks and send them to the app. That part is in the private `oversire/cloud` repo. Its guide tells how to add a webhook adapter. On the app side, conform to `WebhookManaging` and add the `.webhooks` capability.
+
+## Live feeds
+
+A vendor can push its changes over a stream, with no cloud. Conform to `LiveFeeding` and add the `.liveFeed` capability. The protocol gives `liveFeed(lastEventID:)`, a stream of `LiveSignal` values (`alive`, `changed`, `resync`), and `liveFeedTimeout`.
+
+The signals are hints. `LiveFeedSource` in `OverSireSync` keeps the stream open, connects again with a backoff, and pulls `poll(since:)` after each `changed`. A `resync` signal or an expired cursor makes `poll` give a page with `baseline: true`. The app then refreshes all projects of the account.
+
+Give the adapter an `HTTPStreaming` transport through `ProviderEnvironment.streaming`. A 401 stops the feed until the next token edit or "Connect again". Add the vendor to `AppEnvironment.liveFeedProviders`. Test the adapter with `FakeLiveFeed` and the conformance suite.

@@ -54,7 +54,7 @@ OverSire is built on three principles:
 - **Intake** — each project header shows two number chips: the items that are not done, and a purple chip such as `⇣ 38` for the intake items that wait for triage. A project with no items or no intake shows 0. Click the intake chip to open the intake window. Each row shows the key, for example `TREBI-264`. Type in the filter field (⌘F) to find titles or keys. Click an item to see its description and images. **‹ Intake** or Esc goes back to the list. ↑ and ↓ go to the previous and next item. **Accept** makes the item a work item. **Decline** asks first, then closes the item. The **…** menu has **Snooze** (1 day to 1 month), **Mark as duplicate**, **Copy work item link** and **Delete**
 - **Progress bar** — each project header shows a bar of its items by status. A project without items shows an empty bar
 - **macOS notifications** — mentions, comments, status, assignment, closed items, and intake items that are new, changed or closed. "My items" means you are an assignee or the author. Your own comments are skipped
-- **Two update sources** — a workspace with a Plane webhook and live updates on is **Live**. A workspace without a webhook, or the cloud off, is **Polled**
+- **Two update sources** — a workspace with a Plane webhook and live updates on is **Live**. A Big Timer account with a live stream is **Live** too. A workspace without a webhook or a stream, or the cloud off, is **Polled**
 - **Poll interval** — Settings › Projects and repos › Projects › "Check trackers every" is 2, 5, 10, 15, or 30 minutes. The default is 5. Live projects use the same interval only while the cloud is disconnected
 
 To add a workspace:
@@ -317,6 +317,8 @@ With two or more Macs in the group, only one app runs the automatic actions: aut
 ## Cloud (beta, optional)
 
 By default, OverSire polls GitHub and Plane. OverSire cloud adds a push path: GitHub and Plane send webhooks to the cloud, and the cloud tells each Mac about changes in about one second. Polling stays on as a slow fallback (every 10 minutes by default).
+
+Big Timer needs no cloud for live updates. OverSire reads the `/v1/stream` event stream of the Big Timer server directly. Each change makes OverSire pull the new events, and the project shows **Live**. When the stream is down, OverSire polls and connects again. Settings › Accounts and sync › Live updates shows the state of each stream.
 
 The cloud runs from the private `oversire/cloud` repo. Its README tells how to deploy it. Each user has an OverSire Cloud account. You log in to the console with a code that comes by mail.
 
