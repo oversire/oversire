@@ -139,8 +139,8 @@ final class LiveSyncTests: XCTestCase {
     // OVERSIRE-524: a client reads only the daemons.
     func testClientHasOnlyDaemons() {
         XCTAssertEqual(LiveSync.sourceKinds(mode: .client, cloud: true, fallback: true), [.daemons])
-        XCTAssertEqual(LiveSync.sourceKinds(mode: .full, cloud: false, fallback: false), [.polling, .daemons])
-        XCTAssertEqual(LiveSync.sourceKinds(mode: .full, cloud: true, fallback: true), [.polling, .daemons, .cloud, .fallback])
+        XCTAssertEqual(LiveSync.sourceKinds(mode: .full, cloud: false, fallback: false), [.polling, .daemons, .feeds])
+        XCTAssertEqual(LiveSync.sourceKinds(mode: .full, cloud: true, fallback: true), [.polling, .daemons, .feeds, .cloud, .fallback])
     }
 
     func testTheOldCloudCursorMoves() throws {

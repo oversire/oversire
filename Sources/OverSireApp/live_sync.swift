@@ -169,12 +169,12 @@ final class LiveSync {
 
     // MARK: Lifecycle
 
-    enum SourceKind { case polling, fallback, cloud, daemons }
+    enum SourceKind { case polling, fallback, cloud, daemons, feeds }
 
     /// The sources that run. A client polls no provider and uses no cloud. It reads only the daemons.
     static func sourceKinds(mode: AppMode, cloud: Bool, fallback: Bool) -> Set<SourceKind> {
         if mode == .client { return [.daemons] }
-        var k: Set<SourceKind> = [.polling, .daemons]
+        var k: Set<SourceKind> = [.polling, .daemons, .feeds]
         if cloud { k.insert(.cloud) }
         if fallback { k.insert(.fallback) }
         return k
@@ -204,7 +204,7 @@ final class LiveSync {
         var cloud: CloudSource?
         if kinds.contains(.cloud) { cloud = makeCloud(generation: gen) } else { useCloud(nil) }
         let daemons = makeDaemons(p.links, generation: gen)
-        let feeds = makeFeeds(p.accounts, generation: gen)
+        let feeds = kinds.contains(.feeds) ? makeFeeds(p.accounts, generation: gen) : []
         let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons + feeds, onCloudHealth: { h in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.cloudHealth(h) } }
         })
