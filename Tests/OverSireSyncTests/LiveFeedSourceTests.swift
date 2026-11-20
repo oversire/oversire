@@ -276,9 +276,12 @@ final class LiveFeedSourceTests: XCTestCase {
     func testStateUpdatesStartWithTheCurrentState() async {
         let r = Rig()
         let updates = await r.source.stateUpdates()
+        var it = updates.makeAsyncIterator()
+        let first = await it.next()
+        XCTAssertEqual(first, .off)
         _ = r.source.events()
-        let got = await take(2, from: updates)
-        XCTAssertEqual(got, [.off, .connecting])
+        let next = await it.next()   // the buffer keeps only the newest state
+        XCTAssertEqual(next, .connecting)
         await r.source.stop()
     }
 
