@@ -16,6 +16,12 @@ private struct Secrets: SecretReader {
     func secret(_ key: String) -> String? { values[key] }
 }
 
+private struct NoStreams: HTTPStreaming {
+    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+        throw ProviderError.transport("offline")
+    }
+}
+
 private struct StubProvider: Provider {
     let id: ProviderID
     let account: AccountID
@@ -34,6 +40,12 @@ final class RegistryTests: XCTestCase {
                            fields: [ConfigField(key: "token", label: "Token", kind: .secret)], auth: [.token]) { c, env in
             StubProvider(id: id, account: c.account, token: c.secretKeys.first.flatMap(env.secrets.secret))
         }
+    }
+
+    func testEnvironmentKeepsTheStreaming() {
+        XCTAssertNil(env.streaming)
+        let with = ProviderEnvironment(http: NoHTTP(), streaming: NoStreams(), commands: NoCommands(), secrets: Secrets(values: [:]))
+        XCTAssertTrue(with.streaming is NoStreams)
     }
 
     func testRegisterListAndMake() throws {

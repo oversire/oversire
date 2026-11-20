@@ -36,6 +36,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let subItems: Capability = "subItems"
     public static let assets: Capability = "assets"
     public static let webhooks: Capability = "webhooks"
+    /// The adapter pushes change hints over a long-lived connection (`LiveFeeding`).
+    public static let liveFeed: Capability = "liveFeed"
     public static let changeActions: Capability = "changeActions"
     public static let deleteBranch: Capability = "deleteBranch"
     public static let rerun: Capability = "rerun"
@@ -96,13 +98,18 @@ public struct EventPage: Sendable {
     public let budget: RateBudget?
     /// A subject is in progress (a running build). The account polls at the active interval.
     public let busy: Bool
+    /// The adapter had no usable cursor and set a new start. The page has no events of the gap.
+    /// A caller that had a cursor must read all data again.
+    public let baseline: Bool
 
-    public init(events: [ProviderEvent], cursor: Cursor, retryAfter: Duration? = nil, budget: RateBudget? = nil, busy: Bool = false) {
+    public init(events: [ProviderEvent], cursor: Cursor, retryAfter: Duration? = nil, budget: RateBudget? = nil,
+                busy: Bool = false, baseline: Bool = false) {
         self.events = events
         self.cursor = cursor
         self.retryAfter = retryAfter
         self.budget = budget
         self.busy = busy
+        self.baseline = baseline
     }
 }
 

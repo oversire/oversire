@@ -31,6 +31,18 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertTrue(rt.passed, rt.description)
     }
 
+    func testFakeLiveFeedConformance() {
+        let ok = ProviderConformance.capabilities(FakeLiveFeed())
+        XCTAssertTrue(ok.passed, ok.description)
+        // A fake that claims the capability, but has no LiveFeeding.
+        let liar = ProviderConformance.capabilities(SilentFeed())
+        XCTAssertEqual(liar.problems, ["capability liveFeed needs LiveFeeding"])
+        // A fake that conforms, but does not claim it.
+        let shy = FakeLiveFeed()
+        shy.base.capabilities = []
+        XCTAssertEqual(ProviderConformance.capabilities(shy).problems, ["LiveFeeding needs the capability liveFeed"])
+    }
+
     func testFakeTrackerListsItsUploads() async throws {
         let t = FakeTracker()
         let ref = try await t.create(ItemDraft(title: "Shots"), in: t.project)
@@ -239,4 +251,15 @@ final class SearchingHost: CodeHost, ChangeSearching, CollaboratorListing, @unch
         return Array(try await inner.changes(inner.repo, ChangeFilter(limit: 100)).filter { $0.title.contains(query) }.prefix(limit))
     }
     func collaborators(_ repo: RepoRef) async throws -> [PersonRef] { blind ? [] : [PersonRef(id: "1", name: "me", login: "me")] }
+}
+
+/// Claims `.liveFeed` and has no `LiveFeeding`.
+final class SilentFeed: Provider, @unchecked Sendable {
+    let base = FakeProvider(id: "silent", account: "s", capabilities: [.liveFeed])
+    var id: ProviderID { base.id }
+    var account: AccountID { base.account }
+    var capabilities: Set<Capability> { base.capabilities }
+    var pollPolicy: PollPolicy { base.pollPolicy }
+    func probe() async throws -> Identity { try await base.probe() }
+    func poll(since: Cursor?) async throws -> EventPage { try await base.poll(since: since) }
 }

@@ -2,10 +2,10 @@ import Foundation
 import OverSireCore
 
 /// The Big Timer adapter. One instance for each server and token.
-public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable {
+public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchecked Sendable {
     public let id: ProviderID = .bigtimer
     public let account: AccountID
-    public let capabilities: Set<Capability> = [.itemSearch, .subItems]
+    public let capabilities: Set<Capability> = [.itemSearch, .subItems, .liveFeed]
     // The server has no general rate limit. The real load is the ProjectStore refresh.
     public let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 600)
     public let keyFormat = KeyFormat.projectDash
@@ -21,8 +21,8 @@ public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable 
     static let pageMax = 500
 
     public init(server: URL, account: AccountID, token: String, http: any HTTPTransport,
-                clock: any Clock<Duration> = ContinuousClock()) {
-        api = BigTimerAPI(base: server, token: token, http: http, clock: clock)
+                streaming: (any HTTPStreaming)? = nil, clock: any Clock<Duration> = ContinuousClock()) {
+        api = BigTimerAPI(base: server, token: token, http: http, streaming: streaming ?? (http as? any HTTPStreaming), clock: clock)
         self.account = account
     }
 
@@ -182,7 +182,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable 
 
     private func baseline() async throws -> EventPage {
         let page: BTChangesPage = try await api.get("/v1/changes", query: Self.feed(since: 0, limit: 1))
-        return EventPage(events: [], cursor: Cursor(rawValue: String(page.head)))
+        return EventPage(events: [], cursor: Cursor(rawValue: String(page.head)), baseline: true)
     }
 
     private static func feed(since: Int, limit: Int) -> [URLQueryItem] {

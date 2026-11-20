@@ -49,6 +49,8 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
     private var comments: [Comment] = []
     private var changes: [Change] = []
     private var counter = 0
+    private var streams: [UUID: AsyncThrowingStream<Data, Error>.Continuation] = [:]
+    private var ended = 0
     private var ids = 0
 
     let token: String
@@ -133,6 +135,24 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         return (Data(text.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers)!)
     }
 
+    /// The streams that the client closed or cancelled.
+    var closedStreams: Int { lock.withLock { ended } }
+    var openStreams: Int { lock.withLock { streams.count } }
+
+    /// Writes raw text to all open streams.
+    func push(_ raw: String) {
+        let open = lock.withLock { Array(streams.values) }
+        open.forEach { $0.yield(Data(raw.utf8)) }
+    }
+
+    func endStreams() {
+        let open = lock.withLock { () -> [AsyncThrowingStream<Data, Error>.Continuation] in
+            defer { streams = [:] }
+            return Array(streams.values)
+        }
+        open.forEach { $0.finish() }
+    }
+
     // MARK: Routes (the lock is held)
 
     private func route(_ r: URLRequest) -> (Int, [String: String], String) {
@@ -145,6 +165,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         let parts = url.path.split(separator: "/").map(String.init)
         guard parts.first == "v1", parts.count >= 2 else { return problem(404, "not_found", "No route.") }
         switch (method, parts[1], parts.count) {
+        case ("GET", "stream", 2): return (200, ["Content-Type": "text/event-stream"], "")
         case ("GET", "me", 2): return ok(me())
         case ("GET", "members", 2): return ok(["items": memberRows.map(member)])
         case ("GET", "projects", 2): return ok(page(projectRows.map(project), q))
@@ -379,5 +400,31 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f.string(from: d)
+    }
+}
+
+extension BigTimerFakeServer: HTTPStreaming {
+    /// A 200 answer with an event stream stays open. Any other reply gives its body and ends.
+    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+        lock.withLock { sent.append(request) }
+        let (status, headers, text) = lock.withLock { route(request) }
+        let resp = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
+        let isStream = status == 200 && (headers["Content-Type"] ?? "").hasPrefix("text/event-stream") && text.isEmpty
+        let body = AsyncThrowingStream<Data, Error> { cont in
+            guard isStream else {
+                cont.yield(Data(text.utf8))
+                cont.finish()
+                return
+            }
+            let id = UUID()
+            lock.withLock { streams[id] = cont }
+            cont.onTermination = { [weak self] _ in
+                guard let self else { return }
+                lock.withLock {
+                    if streams.removeValue(forKey: id) != nil { ended += 1 }
+                }
+            }
+        }
+        return (resp, body)
     }
 }

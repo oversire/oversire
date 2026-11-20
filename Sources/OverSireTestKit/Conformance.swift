@@ -56,6 +56,7 @@ public enum ProviderConformance {
         (.relations, "RelationManaging", { $0 is any RelationManaging }),
         (.assets, "AssetResolving", { $0 is any AssetResolving }),
         (.webhooks, "WebhookManaging", { $0 is any WebhookManaging }),
+        (.liveFeed, "LiveFeeding", { $0 is any LiveFeeding }),
         (.logs, "LogReading", { $0 is any LogReading }),
         (.deleteBranch, "BranchDeleting", { $0 is any BranchDeleting }),
         (.rerunJob, "JobRerunning", { $0 is any JobRerunning }),

@@ -66,6 +66,19 @@ final class BigTimerTrackerTests: XCTestCase {
 
     // MARK: Descriptor
 
+    func testDescriptorPassesTheStreaming() async throws {
+        let env = ProviderEnvironment(http: OfflineHTTP(), streaming: fake, commands: NoCommands(),
+                                      secrets: Secrets(values: ["BIGTIMER_TOKEN_bt.example.com": "good"]))
+        let config = AccountConfig(account: Self.account, values: ["server": "https://bt.example.com"], secretKeys: ["BIGTIMER_TOKEN_bt.example.com"])
+        let p = try BigTimerTracker.descriptor.make(config, env)
+        XCTAssertTrue(fake.requests.isEmpty, "make does no I/O")
+        let feed = try XCTUnwrap(p as? any LiveFeeding)
+        let stream = try await feed.liveFeed(lastEventID: nil)
+        XCTAssertEqual(fake.paths(), ["/v1/stream"])
+        XCTAssertEqual(fake.openStreams, 1)
+        withExtendedLifetime(stream) {}
+    }
+
     func testDescriptorMakesNoIO() throws {
         let env = ProviderEnvironment(http: OfflineHTTP(), commands: NoCommands(), secrets: Secrets(values: ["BIGTIMER_TOKEN_bt.example.com": "btk_x"]))
         let config = AccountConfig(account: Self.account, values: ["server": "https://BT.Example.com/"], secretKeys: ["BIGTIMER_TOKEN_bt.example.com"])
@@ -433,6 +446,7 @@ final class BigTimerTrackerTests: XCTestCase {
         XCTAssertEqual(query(r)["entity"], "issue,issue_comment")
         XCTAssertEqual(query(r)["limit"], "1")
         XCTAssertFalse(page.busy)
+        XCTAssertTrue(page.baseline)
     }
 
     func testPollEvents() async throws {
@@ -451,6 +465,8 @@ final class BigTimerTrackerTests: XCTestCase {
             XCTAssertEqual(r.url.absoluteString, "bigtimer://issue/ACME-1")
         }
         XCTAssertEqual(page.cursor.rawValue, String(fake.head))
+        XCTAssertFalse(page.baseline)
+        XCTAssertTrue(first.baseline)
         let again = try await t.poll(since: first.cursor)
         XCTAssertEqual(again.events.map(\.id), page.events.map(\.id), "a repeated page gives the same ids")
         let quiet = try await t.poll(since: page.cursor)
@@ -480,6 +496,7 @@ final class BigTimerTrackerTests: XCTestCase {
         let page = try await tracker().poll(since: Cursor(rawValue: "99"))
         XCTAssertTrue(page.events.isEmpty)
         XCTAssertEqual(page.cursor.rawValue, String(fake.head))
+        XCTAssertTrue(page.baseline, "an expired cursor asks the caller to read all data again")
     }
 
     func testPollUnknownProjectRefreshesOnce() async throws {

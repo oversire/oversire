@@ -24,7 +24,7 @@ extension BigTimerTracker {
         guard let token = env.secrets.secret(config.secretKeys.first ?? "BIGTIMER_TOKEN_\(id)"), !token.isEmpty else {
             throw ProviderError.unauthorized
         }
-        return BigTimerTracker(server: base, account: AccountID(provider: .bigtimer, id: id), token: token, http: env.http, clock: env.clock)
+        return BigTimerTracker(server: base, account: AccountID(provider: .bigtimer, id: id), token: token, http: env.http, streaming: env.streaming, clock: env.clock)
     }
 
     /// The lowercased host, plus ":port" when the URL has a port. nil when the URL has no host.

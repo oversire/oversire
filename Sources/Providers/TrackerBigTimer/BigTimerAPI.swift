@@ -2,21 +2,24 @@ import Foundation
 import OverSireCore
 
 /// The HTTP client of one server and token. It holds the 401 latch.
-/// The server blocks an IP after 10 failed auths, so a refused token stops all calls for 15 minutes.
+/// The server blocks an IP for 15 minutes after more than 10 failed auths in 1 minute.
+/// Thus a refused token stops all calls for 15 minutes.
 final class BigTimerAPI: @unchecked Sendable {
     static let latchTime: Duration = .seconds(900)
 
     private let base: URL
     private let token: String
     private let http: any HTTPTransport
+    private let streaming: (any HTTPStreaming)?
     private let elapsed: @Sendable () -> Duration
     private let lock = NSLock()
     private var latchedAt: Duration?
 
-    init(base: URL, token: String, http: any HTTPTransport, clock: any Clock<Duration>) {
+    init(base: URL, token: String, http: any HTTPTransport, streaming: (any HTTPStreaming)?, clock: any Clock<Duration>) {
         self.base = base
         self.token = token
         self.http = http
+        self.streaming = streaming
         elapsed = Self.stopwatch(clock)
     }
 
@@ -29,8 +32,7 @@ final class BigTimerAPI: @unchecked Sendable {
     }
 
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [], json body: (any Encodable)? = nil) async throws -> Data {
-        let t = elapsed()
-        if let at = lock.withLock({ latchedAt }), t - at < Self.latchTime { throw ProviderError.unauthorized }
+        try checkLatch()
         var req = URLRequest(url: try url(path, query), timeoutInterval: 30)
         req.httpMethod = method
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -44,10 +46,54 @@ final class BigTimerAPI: @unchecked Sendable {
         catch let e as ProviderError { throw e }
         catch { throw ProviderError.transport(error.localizedDescription) }
         if let e = Self.error(status: resp.statusCode, body: data, response: resp) {
-            if e == .unauthorized { lock.withLock { latchedAt = elapsed() } }
+            if e == .unauthorized { setLatch() }
             throw e
         }
         return data
+    }
+
+    private func checkLatch() throws {
+        if let at = lock.withLock({ latchedAt }), elapsed() - at < Self.latchTime { throw ProviderError.unauthorized }
+    }
+
+    private func setLatch() { lock.withLock { latchedAt = elapsed() } }
+
+    /// The longest wait of a stream with no byte. It is more than the feed timeout, so the source cuts first.
+    static let streamTimeout: TimeInterval = 90
+
+    /// Opens an event stream. It uses the latch as `send` does. A status that is not 2xx gives the mapped error.
+    func stream(_ path: String, lastEventID: String?) async throws -> AsyncThrowingStream<Data, Error> {
+        guard let streaming else { throw ProviderError.unsupported(.liveFeed) }
+        try checkLatch()
+        var req = URLRequest(url: try url(path, []), timeoutInterval: Self.streamTimeout)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        if let lastEventID { req.setValue(lastEventID, forHTTPHeaderField: "Last-Event-ID") }
+        let resp: HTTPURLResponse, body: AsyncThrowingStream<Data, Error>
+        do { (resp, body) = try await streaming.stream(req) }
+        catch let e as ProviderError { throw e }
+        catch is CancellationError { throw CancellationError() }
+        catch { throw ProviderError.transport(error.localizedDescription) }
+        guard (200..<300).contains(resp.statusCode) else {
+            var head = Data()
+            do {
+                for try await chunk in body {
+                    head.append(chunk)
+                    if head.count >= 4096 { break }
+                }
+            } catch {}
+            let e = Self.error(status: resp.statusCode, body: head.prefix(4096), response: resp) ?? .transport("HTTP \(resp.statusCode)")
+            if e == .unauthorized { setLatch() }
+            if resp.statusCode == 503, let wait = Double(resp.value(forHTTPHeaderField: "Retry-After") ?? "") {
+                throw ProviderError.rateLimited(retryAfter: .seconds(wait))
+            }
+            throw e
+        }
+        if let type = resp.value(forHTTPHeaderField: "Content-Type")?.lowercased(), !type.hasPrefix("text/event-stream") {
+            throw ProviderError.vendor(code: "not_a_stream", message: "The server did not answer with an event stream.")
+        }
+        return body
     }
 
     func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {

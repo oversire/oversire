@@ -75,14 +75,16 @@ public struct AccountConfig: Hashable, Codable, Sendable {
 /// The I/O that the app gives to each adapter.
 public struct ProviderEnvironment: Sendable {
     public let http: any HTTPTransport
+    public let streaming: (any HTTPStreaming)?
     public let commands: any CommandRunner
     public let secrets: any SecretReader
     public let clock: any Clock<Duration>
     public let log: any LogSink
 
-    public init(http: any HTTPTransport, commands: any CommandRunner, secrets: any SecretReader,
+    public init(http: any HTTPTransport, streaming: (any HTTPStreaming)? = nil, commands: any CommandRunner, secrets: any SecretReader,
                 clock: any Clock<Duration> = ContinuousClock(), log: any LogSink = NoLog()) {
         self.http = http
+        self.streaming = streaming
         self.commands = commands
         self.secrets = secrets
         self.clock = clock
