@@ -19,7 +19,8 @@ private struct Rig {
 
     var key: String { LiveFeedSource.cursorKey(feed.account) }
 
-    func connected(_ n: Int = 1) async { await eventually("connect \(n)") { feed.connects.count >= n } }
+    /// The stream is open, so a push reaches it.
+    func connected(_ n: Int = 1) async { await eventually("connect \(n)") { feed.connects.count >= n && feed.isOpen } }
 
     func state(_ s: LiveFeedState) async { await eventually("state \(s)") { await source.state() == s } }
 
