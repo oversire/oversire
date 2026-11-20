@@ -170,6 +170,34 @@ final class ProjectCommentTests: XCTestCase {
 
     private var key: String { summary().ref.storeKey }
 
+    // OVERSIRE-528
+    func testRemoteCommentsOnClient() async throws {
+        final class Seen: @unchecked Sendable { var calls: [(String, JSONValue)] = [] }
+        let seen = Seen()
+        let s = try store(tracker)
+        let answer = try MirrorCodec.body(MirrorRows(rows: [comment("c1", at: t0, body: "From mbp")]))
+        await MainActor.run {
+            s.remote = { what, args in seen.calls.append((what, args)); return answer }
+        }
+        let r: Result<[Comment], ProviderError> = await withCheckedContinuation { c in
+            DispatchQueue.main.async { s.comments(key: "P1-a") { c.resume(returning: $0) } }
+        }
+        XCTAssertEqual(try r.get().map(\.body), ["From mbp"])
+        XCTAssertEqual(seen.calls.map(\.0), ["comments"])
+        XCTAssertEqual(seen.calls.first?.1["item"], .string("P1-a"))
+        XCTAssertEqual(tracker.read, [], "a client asks no tracker")
+    }
+
+    func testRemoteFailureGivesAFailure() async throws {
+        let s = try store(tracker)
+        await MainActor.run { s.remote = { _, _ in throw ProviderError.vendor(code: "503", message: "The OverSire app on mbp is not open.") } }
+        let r: Result<[Comment], ProviderError> = await withCheckedContinuation { c in
+            DispatchQueue.main.async { s.comments(key: "P1-a") { c.resume(returning: $0) } }
+        }
+        guard case .failure(let e) = r else { return XCTFail("no failure") }
+        XCTAssertEqual(e.message, "The OverSire app on mbp is not open.")
+    }
+
     // MARK: Snapshot makes no calls
 
     func testSnapshotReadsNoComments() async throws {

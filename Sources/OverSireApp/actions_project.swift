@@ -87,7 +87,7 @@ struct ProjectActions {
                     d.projectStore.events.action(.projectNorthStarSet, item: nil, project: ident, verb: "north-star",
                                                  "North star of \(ident) set (\(text.count) characters)",
                                                  payload: ["project": .string(ident), "length": .int(text.count)],
-                                                 actorType: a.caller.actor.type, actor: a.caller.actor.name)
+                                                 actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
                     done(.ok(summary: "The north star of \(ident) is set."))
                 }
             },

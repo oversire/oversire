@@ -20,11 +20,54 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs + RunbookActions(link: link).specs
             + RepoActions(link: link).specs + IntakeActions(link: link).specs + MachineActions(link: link).specs
             + EpicActions(link: link).specs + ProjectActions(link: link).specs
-            + ReadActions(link: link).specs + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
+            + MemberActions(link: link).specs + ReadActions(link: link).specs + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
         byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
     func spec(_ id: String) -> ActionSpec? { byId[id] }
+
+    /// Set on a client. It sends an action to the source app and gives its result. Nil in Full mode.
+    var forward: (@Sendable (MemberCallRequest) async throws -> AppCallResult)?
+    /// The name of the machine of the source app.
+    var sourceName: @Sendable () -> String = { "home" }
+    /// Runs after a forwarded action that worked. A client pulls the mirror then.
+    var forwarded: (@Sendable () -> Void)?
+
+    /// True when a client sends the action to the source app.
+    func forwards(_ id: String) -> Bool { forward != nil && byId[id] != nil && !MemberCalls.local.contains(id) }
+
+    /// The busy text of a button on a client, or nil when the action runs here.
+    func sentText(_ id: String) -> String? { forwards(id) ? "Sent to \(sourceName())…" : nil }
+
+    /// A live read of a client: `mirror.read` on the source app. It gives the `data` of the answer.
+    func read(_ values: [String: JSONValue]) async throws -> JSONValue {
+        switch await run("mirror.read", ActionArgs(.object(values))) {
+        case .ok(_, let data, _):
+            guard let data else { throw ProviderError.decoding("The source app sent no data.") }
+            return data
+        case .failed(let m), .notAllowed(let m): throw ProviderError.vendor(code: "read", message: m)
+        }
+    }
+
+    private func send(_ id: String, _ args: ActionArgs, via forward: @Sendable (MemberCallRequest) async throws -> AppCallResult) async -> ActionResult {
+        do {
+            let r = try await forward(MemberCallRequest(action: id, args: args.values))
+            switch r.status {
+            case .ok:
+                forwarded?()
+                return .ok(summary: r.summary, data: r.data)
+            case .failed: return .failed(r.summary)
+            case .notAllowed: return .notAllowed(r.summary)
+            }
+        } catch let e as ProviderError {
+            if case .transport = e { return .failed("\(sourceName()) is offline. Try again when it is back.") }
+            return .failed(e.message)
+        } catch let e as StoreNotHome {
+            return .failed(e.message)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
 
     /// The page does not filter: the assistant sees all actions that a provider supports.
     func specs(for page: PageContext?) async -> [ActionSpec] {
@@ -33,6 +76,7 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
 
     func run(_ id: String, _ args: ActionArgs) async -> ActionResult {
         guard let spec = byId[id] else { return .notAllowed("No action \(id).") }
+        if let forward, forwards(id) { return await send(id, args, via: forward) }
         return await spec.perform(args)
     }
 
@@ -52,10 +96,12 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         guard let spec = byId[id] else { return }
         let go = {
             started?()
+            let sent = self.forwards(id)
             self.run(id, values) { r in
                 switch r {
-                case .ok: break
-                case .failed(let m), .notAllowed(let m): AlertConfirm.tell("\(spec.title) did not work", info: m, in: window)
+                case .ok(let m, _, _): if sent { MainActor.assumeIsolated { ClickToast.show(m, bad: false) } }
+                case .failed(let m), .notAllowed(let m):
+                    if sent { MainActor.assumeIsolated { ClickToast.show(m, bad: true) } } else { AlertConfirm.tell("\(spec.title) did not work", info: m, in: window) }
                 }
                 done?(r)
             }
@@ -85,7 +131,7 @@ extension ActionButton {
         self.init(title, symbol: symbol, style: style)
         onClick = { [weak self] in
             guard let self, let catalog = (NSApp.delegate as? AppData)?.actions else { return }
-            catalog.click(id, args, in: self.window, confirm: confirm, started: { [weak self] in self?.busy(self?.title ?? "") }) { [weak self] r in
+            catalog.click(id, args, in: self.window, confirm: confirm, started: { [weak self] in self?.busy(catalog.sentText(id) ?? self?.title ?? "") }) { [weak self] r in
                 self?.done()
                 done?(r)
             }

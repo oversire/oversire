@@ -84,4 +84,30 @@ final class DaemonTransportTests: XCTestCase {
         XCTAssertEqual(short.n, 1)
         XCTAssertEqual(long.n, 2)
     }
+
+    func testMemberCallGoesOnTheLongSession() async {
+        final class Count: HTTPTransport, HTTPStreaming, @unchecked Sendable {
+            var n = 0
+            func stream(_ r: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+                (HTTPURLResponse(url: r.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, AsyncThrowingStream { $0.finish() })
+            }
+            func send(_ r: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                n += 1
+                return (Data(#"{"id":"m-1","status":"ok","summary":"done"}"#.utf8), HTTPURLResponse(url: r.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+        let short = Count(), long = Count()
+        let c = DaemonClient(base: DaemonClient.loopback, token: nil, http: DaemonTransport(short: short, long: long))
+        let r = try? await c.memberCall(MemberCallRequest(action: "item.setStatus", args: .object(["key": .string("A-1")])))
+        XCTAssertEqual(r?.status, .ok)
+        XCTAssertEqual(DaemonClient.memberCallTimeout, 65)
+        XCTAssertEqual(short.n, 0)
+        XCTAssertEqual(long.n, 1)
+    }
+
+    func testMemberCallErrorsKeepTheDaemonText() {
+        XCTAssertEqual(DaemonClient.refusal(503, Data(#"{"error":"The OverSire app on mbp is not open."}"#.utf8)),
+                       .vendor(code: "503", message: "The OverSire app on mbp is not open."))
+        XCTAssertEqual(DaemonClient.refusal(403, Data(#"{"error":"Only apps call."}"#.utf8)), .vendor(code: "forbidden", message: "Only apps call."))
+    }
 }

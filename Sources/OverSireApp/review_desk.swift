@@ -1,18 +1,15 @@
 import Foundation
+import OverSireAssistant
 import OverSireCore
 
 /// The tracker writes of a review. The daemon has no tracker token, so the app writes (OVERSIRE-372).
+/// They run as catalog actions, so a client sends them to the source app.
 protocol ReviewTracking: AnyObject {
-    func post(_ key: String, markdown: String, done: @escaping (Bool) -> Void)
-    /// Sets the item and its open sub-items to the first state of the group.
-    func move(key: String, group: String, else category: StatusCategory, done: @escaping (Bool) -> Void)
+    func act(_ id: String, _ values: [String: JSONValue]) async -> ActionResult
 }
 
-extension ProjectStore: ReviewTracking {
-    func post(_ key: String, markdown: String, done: @escaping (Bool) -> Void) {
-        guard let found = item(key: key) else { done(false); return }
-        comment(itemId: found.item.id, body: markdown, done: done)
-    }
+extension AppActionCatalog: ReviewTracking {
+    func act(_ id: String, _ values: [String: JSONValue]) async -> ActionResult { await run(id, ActionArgs(.object(values))) }
 }
 
 /// The lines of a code comment: a click picks one line, a shift-click on the same side picks the lines between.
@@ -360,8 +357,8 @@ final class ReviewDesk {
             let launch = verdict == .requestChanges && !known ? agent(key) : nil
             let round = try await source.submit(key, SubmitReview(kind: kind, verdict: verdict, summary: summary, postToTracker: post, launch: launch))
             await MainActor.run {
-                if post { self.tracker?.post(self.key, markdown: self.trackerNote(round, batch)) { _ in } }
-                if verdict == .approve, self.kind == .plan { self.tracker?.move(key: self.key, group: "unstarted", else: .todo) { _ in } }
+                let note = post ? self.trackerNote(round, batch) : nil
+                self.write(comment: note, status: verdict == .approve && self.kind == .plan ? "todo" : nil)
             }
             await load()
             return round
@@ -378,10 +375,7 @@ final class ReviewDesk {
         do {
             let r = try await source.merge(key, MergeRequest(removeGroup: removeGroup))
             await MainActor.run {
-                if r.merged, setDone {
-                    self.tracker?.post(self.key, markdown: self.mergeNote(r)) { _ in }
-                    self.tracker?.move(key: self.key, group: "completed", else: .done) { _ in }
-                }
+                if r.merged, setDone { self.write(comment: self.mergeNote(r), status: "done") }
                 self.changed()
             }
             await load()
@@ -390,6 +384,24 @@ final class ReviewDesk {
             await fail(error)
             throw error
         }
+    }
+
+    private var writes: [Task<Void, Never>] = []
+
+    /// The note and the status of the item go to the tracker one after the other. A slow source app does not hold the review.
+    private func write(comment: String?, status: String?) {
+        guard let tracker, comment != nil || status != nil else { return }
+        let key = self.key
+        writes.append(Task {
+            if let comment { _ = await tracker.act("item.comment", ["key": .string(key), "body": .string(comment)]) }
+            if let status { _ = await tracker.act("item.setStatus", ["key": .string(key), "status": .string(status), "force": .bool(true), "subItems": .bool(true)]) }
+        })
+    }
+
+    /// Waits for the tracker writes that began. For tests.
+    func settledWrites() async {
+        for t in writes { await t.value }
+        writes = []
     }
 
     /// The agent rebases the group and fixes the conflict.

@@ -58,6 +58,13 @@ final class AppCallsTests: XCTestCase {
         XCTAssertEqual(r.first?.data?["markdown"]?.string?.hasPrefix("# "), true)
     }
 
+    func testMemberActorVia() {
+        let c = ActionCaller.member(machine: "mba", name: "Fritz")
+        XCTAssertEqual(c.actor, EventActor(type: .human, name: nil, via: "app@mba"))
+        XCTAssertEqual(c.actor.via, "app@mba")
+        XCTAssertNil(ActionCaller.user.actor.via)
+    }
+
     func testRefusesOtherAction() async {
         let posted = Posted()
         let spec = ActionSpec(id: "pr.merge", title: "Merge", help: "", kind: .outward) { a in

@@ -115,7 +115,7 @@ struct EpicActions {
                             let actor = a.caller.actor
                             d.projectStore.events.action(.epicUpdated, item: f.epic.eventKey, project: f.snap.summary.identifier, verb: "epic-update",
                                                          "\(title) updated: \(fields.joined(separator: ", "))", payload: p,
-                                                         actorType: actor.type, actor: actor.name)
+                                                         actorType: actor.type, actor: actor.name, via: actor.via)
                         }
                         done(ActionLink.stored(d, ok, "Epic \(title) is updated."))
                     }

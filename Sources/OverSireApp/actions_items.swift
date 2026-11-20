@@ -18,7 +18,8 @@ struct ItemActions {
             ActionSpec(id: "item.setStatus", title: "Set status", help: "Sets the status of an item. Give the status name or id, "
                            + "or a category word: todo, progress, review, blocked or done. A parent with open sub-items does not close without `force`.", kind: .change,
                        input: ActionSpec.args(["key": Self.key, "status": ("string", "The status name, for example In Progress."),
-                                               "force": ("boolean", "True closes a parent that has open sub-items.")], required: ["key", "status"])) { a in
+                                               "force": ("boolean", "True closes a parent that has open sub-items."),
+                                               "subItems": ("boolean", "True sets the open sub-items at all levels to the same status.")], required: ["key", "status"])) { a in
                 await link.item(a) { d, f, done in
                     guard let o = f.snap.status(named: a.string("status") ?? "") else {
                         done(.notAllowed("\(f.snap.summary.identifier) has no status \(a.string("status") ?? ""). It has: \(f.snap.statusOptions.names)."))
@@ -30,7 +31,12 @@ struct ItemActions {
                         done(.notAllowed(ProjectStore.openSubItemsReason(f.item.key, n) + " Use item.closeSubItems, or set force to true."))
                         return
                     }
-                    d.projectStore.setStatus(itemId: f.item.id, optionId: o.id, force: force, by: a.caller.actor) { done(ActionLink.stored(d, $0, "\(f.item.key) is \(o.name).")) }
+                    let finish = { (ok: Bool) in done(ActionLink.stored(d, ok, "\(f.item.key) is \(o.name).")) }
+                    if a.bool("subItems") == true {
+                        d.projectStore.setStatusWithSubItems(itemId: f.item.id, optionId: o.id, by: a.caller.actor, done: finish)
+                    } else {
+                        d.projectStore.setStatus(itemId: f.item.id, optionId: o.id, force: force, by: a.caller.actor, done: finish)
+                    }
                 }
             },
             ActionSpec(id: "item.setPriority", title: "Set priority", help: "Sets the priority of an item. Give the priority name or id.", kind: .change,
@@ -45,6 +51,14 @@ struct ItemActions {
                     }
                     d.projectStore.update(itemId: f.item.id, ItemPatch(priority: o.id), failure: "Could not change the priority", by: a.caller.actor) {
                         done(ActionLink.stored(d, $0, "\(f.item.key) has priority \(o.name)."))
+                    }
+                }
+            },
+            ActionSpec(id: "item.setLabels", title: "Set labels", help: "Sets the labels of an item. Give the label ids. An empty list removes all labels.", kind: .change,
+                       input: ActionSpec.args(["key": Self.key, "labels": ("array", "The label ids.")], required: ["key", "labels"])) { a in
+                await link.item(a) { d, f, done in
+                    d.projectStore.update(itemId: f.item.id, ItemPatch(labels: a.list("labels")), failure: "Could not change the labels", by: a.caller.actor) {
+                        done(ActionLink.stored(d, $0, "\(f.item.key) has new labels."))
                     }
                 }
             },
@@ -247,7 +261,7 @@ struct ItemActions {
                         guard ok else { done(.failed(d.projectStore.lastError ?? "The tracker did not take the link.")); return }
                         d.projectStore.events.action(.itemLinkAdded, item: f.item.key, project: f.snap.summary.identifier, verb: "link", title,
                                                      payload: ["url": .string(raw), "title": .string(title)],
-                                                     actorType: a.caller.actor.type, actor: a.caller.actor.name)
+                                                     actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
                         done(.ok(summary: "Link added to \(f.item.key)."))
                     }
                 }
@@ -271,7 +285,7 @@ struct ItemActions {
                         case .success(let id):
                             d.projectStore.events.action(.itemAttachmentAdded, item: f.item.key, project: f.snap.summary.identifier, verb: "attach", name,
                                                          payload: ["attachment": .string(id), "name": .string(name), "size": .int(data.count), "mimeType": .string(mime)],
-                                                         actorType: a.caller.actor.type, actor: a.caller.actor.name)
+                                                         actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
                             done(.ok(summary: "\(name) is attached to \(f.item.key).", data: .object(["id": .string(id)])))
                         }
                     }

@@ -251,6 +251,77 @@ extension DaemonClient {
     }
 }
 
+/// The app that sent a member call (app-call.json MemberCaller). The daemon fills it from the credential.
+public struct MemberCaller: Codable, Hashable, Sendable {
+    public var machine: String
+    public var name: String
+    public var device: String?
+
+    public init(machine: String, name: String, device: String? = nil) {
+        self.machine = machine
+        self.name = name
+        self.device = device
+    }
+}
+
+/// The body of POST /v1/member-calls (app-call.json MemberCallRequest).
+public struct MemberCallRequest: Codable, Hashable, Sendable {
+    public var action: String
+    public var args: JSONValue
+
+    public init(action: String, args: JSONValue = .object([:])) {
+        self.action = action
+        self.args = args
+    }
+}
+
+/// One action for the source app, from a client app (app-call.json MemberCall). The home daemon sends it.
+public struct MemberCall: Codable, Hashable, Sendable {
+    public var id: String
+    public var action: String
+    public var args: JSONValue
+    public var from: MemberCaller
+
+    public init(id: String, action: String, args: JSONValue = .object([:]), from: MemberCaller) {
+        self.id = id
+        self.action = action
+        self.args = args
+        self.from = from
+    }
+}
+
+/// The frame of the daemon on the WebSocket of the source app (app-call.json MemberCallFrame).
+public struct MemberCallFrame: Codable, Hashable, Sendable {
+    public var type: String
+    public var call: MemberCall
+
+    public init(call: MemberCall) {
+        self.type = "memberCall"
+        self.call = call
+    }
+}
+
+extension DaemonClient {
+    /// How long a member call waits. The relay waits 60 s for the source app.
+    public static let memberCallTimeout: TimeInterval = 65
+
+    /// POST /v1/member-calls on the home daemon. The reply is the AppCallResult of the source app.
+    /// 503: the source app is not open. 504: it did not answer. 429: it is busy. 409 with `home`: StoreNotHome.
+    /// 403: forbidden, with the daemon text. The daemon text is the message of each error.
+    public func memberCall(_ r: MemberCallRequest) async throws -> AppCallResult {
+        var req = try json("POST", "/v1/member-calls", r)
+        req.timeoutInterval = Self.memberCallTimeout
+        return try await mirrorCall(req)
+    }
+
+    /// POST /v1/member-calls/{id}/result on the home daemon. Only the source app answers.
+    public func send(memberResult result: AppCallResult, id: String) async throws {
+        var req = try json("POST", "/v1/member-calls/\(Self.escape(id))/result", result)
+        req.timeoutInterval = 30
+        _ = try await send(req)
+    }
+}
+
 /// UpdateStatus of daemon.json: the last self-update check of a daemon. POST /v1/update answers it too.
 public struct DaemonUpdate: Codable, Hashable, Sendable {
     public var checkedAt: Date

@@ -1165,6 +1165,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         NewEpicSheet.present(over: w.window, snap: snap, data: self)
                     } else if p.hasPrefix("project-plan") {
                         self.planState(p, in: w)
+                    } else if p.hasPrefix("clicks:") {
+                        self.clicksScene(String(p.dropFirst(7)), in: w)
                     } else if UIShots.clientScenes.contains(p) {
                         self.clientScene(p, in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
@@ -1180,7 +1182,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; MachinesController.shared.link = { nil } }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; MachinesController.shared.link = { nil } }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1797,6 +1799,84 @@ extension MachinesSnapshot {
 }
 
 extension UIShots {
+    /// clicks:<frame>: the clicks of a client of mbp (OVERSIRE-528). Frames: busy, toast-done, toast-closed, toast-timeout,
+    /// toast-busy, toast-offline, failed, loading, event. The data stays in memory. A hung or failed call replaces the source app.
+    func clicksScene(_ frame: String, in w: AppWindow) {
+        ClientWords.source = { "mbp" }
+        actions.sourceName = { "mbp" }
+        clientLink = .live(updated: UIShots.clientTime, items: 2140, repos: 38)
+        let hang: @Sendable (MemberCallRequest) async throws -> AppCallResult = { _ in
+            try await Task.sleep(nanoseconds: 3_600_000_000_000)
+            throw ProviderError.transport("")
+        }
+        func fails(_ text: String) -> @Sendable (MemberCallRequest) async throws -> AppCallResult {
+            { _ in throw ProviderError.vendor(code: "member-call", message: text) }
+        }
+        let toasts: [String: @Sendable (MemberCallRequest) async throws -> AppCallResult] = [
+            "toast-done": { r in AppCallResult(id: "c1", status: .ok, summary: "OVERSIRE-490 is Done.") },
+            "toast-closed": fails("The OverSire app on mbp is not open."),
+            "toast-timeout": fails("mbp did not answer. Try again."),
+            "toast-busy": fails("mbp is busy. Try again."),
+            "toast-offline": { _ in throw ProviderError.transport("offline") },
+        ]
+        switch frame {
+        case "busy":
+            actions.forward = hang
+            let status = ActionButton("Approve", style: .primary, action: "status.approve", ["id": .string("s1")])
+            let hold = ActionButton("Hold", action: "status.hold", ["id": .string("s1")])
+            let row = NSStackView(h: [status, hold], spacing: 8)
+            row.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+            glance = clicksWindow(row)
+            status.onClick?()
+        case _ where toasts[frame] != nil:
+            actions.forward = toasts[frame]
+            actions.click("status.approve", ["id": .string("s1")], in: w.window)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.glance = ClickToast.current }
+        case "loading", "failed":
+            projectStore.remote = { _, _ in
+                if frame == "loading" { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
+                throw ProviderError.vendor(code: "member-call", message: "mbp did not answer. Try again.")
+            }
+            w.router.go(.item("FRITZ-17", .activity))
+        case "event":
+            let e = Event(seq: 1, seenAt: Date(), draft: EventDraft(
+                id: "app:status-1", at: Date().addingTimeInterval(-300), kind: .itemStateChanged, item: "OVERSIRE-490", project: "OVERSIRE",
+                machine: "mbp", provider: "plane", actorType: .human, actor: "fritz", via: "app@mba", summary: "Status set to Done on OVERSIRE-490"))
+            let card = EventDetailCard(e, pageKey: "OVERSIRE-490", body: nil, mode: .payload, markdown: MarkdownView(width: 600),
+                                       go: { _ in }, onMode: { _ in }, onClose: {})
+            card.widthAnchor.constraint(equalToConstant: 560).isActive = true
+            let box = NSStackView(v: [card], spacing: 0)
+            box.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+            glance = clicksWindow(box)
+        default: print("UISHOTS bad clicks frame \(frame)")
+        }
+    }
+
+    private func clicksWindow(_ content: NSView) -> NSWindow {
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.layoutSubtreeIfNeeded()
+        let size = content.fittingSize
+        let g = NSWindow(contentRect: NSRect(origin: NSPoint(x: 400, y: 300), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        let root = Box(fill: Palette.bg, border: Palette.line, radius: 0)
+        g.contentView = root
+        root.addSubview(content)
+        NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: root.leadingAnchor), content.topAnchor.constraint(equalTo: root.topAnchor),
+                                     content.trailingAnchor.constraint(equalTo: root.trailingAnchor), content.bottomAnchor.constraint(equalTo: root.bottomAnchor)])
+        g.setContentSize(size)
+        g.orderFrontRegardless()
+        return g
+    }
+
+    func endClicks() {
+        glance?.orderOut(nil)
+        glance = nil
+        ClickToast.current?.orderOut(nil)
+        ClientWords.source = nil
+        actions.forward = nil
+        projectStore.remote = nil
+        clientLink = UIShots.clientSeed
+    }
+
     /// The client scenes: the pages, the popover and Settings › Machines of a client of mbp.
     func clientScene(_ scene: String, in w: AppWindow) {
         let link: ClientLink = scene.hasSuffix("waiting") ? .waiting : scene == "client-needs-update" ? .needsUpdate(home: "mbp", version: "1.42")

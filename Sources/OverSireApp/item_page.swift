@@ -39,6 +39,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
     private var descriptionOpen = false
     private var hiddenSummaries: Set<String> = []
     private var timeline: [ActivityEntry]?
+    /// The source app of a client did not give the timeline.
+    private var timelineFailed = false
     private var tail: [String] = []
     /// The live terminal or chat of the session, when its daemon gives a stream (OVERSIRE-285, OVERSIRE-286).
     private var live: LiveSessionCard?
@@ -119,7 +121,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
     override func show(_ r: Route) {
         if case .item(let k, let t) = r, k != key || t != tab {
             if k != key {
-                timeline = nil; tail = []; descriptionOpen = false
+                timeline = nil; timelineFailed = false; tail = []; descriptionOpen = false
                 localLook = JOURNAL.lastLook(k)
                 openedAt = Date()
                 recapOpen = false
@@ -328,10 +330,10 @@ final class ItemPage: Page, NSTextFieldDelegate {
     }
 
     private func loadData(item: Item, stream: Workstream?) {
-        if timeline == nil {
-            data.projectStore.timeline(itemId: item.id) { [weak self] e in
+        if timeline == nil, !timelineFailed {
+            data.projectStore.timelineRead(itemId: item.id) { [weak self] r in
                 guard let self, self.key == item.key else { return }
-                self.timeline = e
+                if case .success(let e) = r { self.timeline = e } else { self.timelineFailed = true }
                 if self.tab == .activity { self.reload() }
             }
         }
@@ -1367,7 +1369,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             lead.append(PageRow("journal-failed", journal.state, journal.retry) { ReadNote("The activity of the daemon did not load.", part: journal) })
         }
         let all = events(item: item, stream: stream)
-        let source = activitySource, pending = pendingComment, loading = timeline == nil
+        let source = activitySource, pending = pendingComment, loading = timeline == nil && !timelineFailed, failed = timelineFailed
         let shown = all.filter { source == .all || $0.source == source }
         return lead + [
             PageRow("filters", source) { [unowned self] in
@@ -1377,7 +1379,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 } + [Spacer()], spacing: 6)
             },
             PageRow("compose", pending != nil) { [unowned self] in self.composeRow() },
-            PageRow("list", Self.sig(shown), pending, loading) { [unowned self] in self.activityList(shown, pending: pending, loading: loading) },
+            PageRow("list", Self.sig(shown), pending, loading, failed) { [unowned self] in self.activityList(shown, pending: pending, loading: loading, failed: failed) },
         ]
     }
 
@@ -1557,14 +1559,19 @@ final class ItemPage: Page, NSTextFieldDelegate {
         return NSStackView(h: [f, send], spacing: 6)
     }
 
-    private func activityList(_ shown: [Event], pending: String?, loading: Bool) -> NSView {
+    private func activityList(_ shown: [Event], pending: String?, loading: Bool, failed: Bool = false) -> NSView {
         let list = ListCard()
         let tracker = data.projectStore.trackerName(of: key)
         if let pending {
             list.add(Row([Spinner(size: .mini), NSTextField.text(pending, size: 12.5, color: Palette.dim, lines: 2), NSTextField.text("Sending…", size: 11.5, color: Palette.dim)],
                          height: 34, label: "Sending comment: \(pending)"))
         }
-        if loading { list.add(LoadingNote("Loading the activity")) }
+        if loading { list.add(LoadingNote(ClientWords.loading("Loading the activity"))) }
+        if failed {
+            let again = ActionButton("Try again") { [weak self] in self?.timelineFailed = false; self?.reload() }
+            list.add(Row([NSTextField.text(ClientWords.failed("Could not load the activity."), size: 12.5, color: Palette.dim), Spacer(), again],
+                         height: 40, label: ClientWords.failed("Could not load the activity.")))
+        }
         for e in shown {
             var col: [NSView] = [NSTextField.text(e.text, size: 12.5, lines: 2)]
             if let b = e.body?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty {
@@ -1608,7 +1615,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         data.actions.run("item.comment", ["key": .string(key), "body": .string(text)]) { [weak self] r in
             guard let self else { return }
             self.pendingComment = nil
-            if case .ok = r { self.commentField?.stringValue = ""; self.timeline = nil; self.note = nil } else { self.commentField?.stringValue = text; self.note = (.bad, r.summary) }
+            if case .ok = r { self.commentField?.stringValue = ""; self.timeline = nil; self.timelineFailed = false; self.note = nil } else { self.commentField?.stringValue = text; self.note = (.bad, r.summary) }
             self.reload()
         }
     }

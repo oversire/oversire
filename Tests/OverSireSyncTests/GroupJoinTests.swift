@@ -40,6 +40,16 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertNil(DaemonFrame.parse(#"{"type":"appCall","call":{"id":"x"}}"#))
     }
 
+    func testDecodeMemberCall() throws {
+        let call = String(decoding: try contractFixture("member-call", "status"), as: UTF8.self)
+        guard case .memberCall(let c)? = DaemonFrame.parse(#"{"type":"memberCall","call":"# + call + "}") else {
+            return XCTFail("no memberCall frame")
+        }
+        XCTAssertEqual(c.action, "item.setStatus")
+        XCTAssertEqual(c.from.machine, "mba")
+        XCTAssertNil(DaemonFrame.parse(#"{"type":"memberCall","call":{"id":"x"}}"#))
+    }
+
     func testReasonUsesTheErrorOfTheBody() {
         XCTAssertEqual(DaemonClient.reason(DaemonClient.refusal(409, Data(#"{"error":"group: this machine is in a group"}"#.utf8))),
                        "This machine is in a group.")

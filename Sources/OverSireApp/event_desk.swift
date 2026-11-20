@@ -125,11 +125,11 @@ final class EventDesk: @unchecked Sendable {
 
     /// A row of an action in this app. verb makes the id unique with the time. An agent caller gives its actor.
     func action(_ kind: Event.Kind, item: String?, project: String? = nil, verb: String, _ summary: String, payload: [String: JSONValue]? = nil,
-                actorType: ActorType = .human, actor: String? = nil) {
+                actorType: ActorType = .human, actor: String? = nil, via: String? = nil) {
         let at = now()
         let id = "app:\(machine()):\(item ?? "-"):\(verb):\(Int64(at.timeIntervalSince1970 * 1000))"
         send([EventDraft(id: id, at: at, kind: kind, item: item, project: project?.lowercased(), machine: machine(), actorType: actorType,
-                         actor: actor ?? self.actor, via: via, summary: summary, payload: payload)])
+                         actor: actor ?? self.actor, via: via ?? self.via, summary: summary, payload: payload)])
     }
 
     /// A row of the app itself, for you: the queue.
@@ -176,7 +176,7 @@ final class EventDesk: @unchecked Sendable {
         if let from { p["from"] = .string(from) }
         if let g = to.group { p["group"] = .string(g) }
         action(.itemStateChanged, item: i.key, project: snap.summary.identifier, verb: "state", "\(from ?? "None") → \(to.name)", payload: p,
-               actorType: actor.type, actor: actor.name)
+               actorType: actor.type, actor: actor.name, via: actor.via)
     }
 
     /// The queue no longer holds the item.

@@ -114,6 +114,8 @@ final class LiveSync {
     var appCalls: ((MachineLink) -> AppCalls?)?
     /// A mirror frame of the group home. A client pulls then.
     var onMirror: (() -> Void)?
+    /// A click of a client for this app. It comes only from the group home, and only the app that leads runs it.
+    var onMemberCall: ((MemberCall, MachineLink) -> Void)?
 
     private var merger: EventMerger?
     private var polling: PollingSource?
@@ -283,6 +285,14 @@ final class LiveSync {
                     // hub.frame runs only for the local link, so a frame of a remote home needs this branch.
                     DispatchQueue.main.async { [weak self] in
                         if self?.group?.isHome(machine: machine, local: l.local) == true { self?.onMirror?() }
+                    }
+                case .memberCall(let c)?:
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.group?.isHome(machine: machine, local: l.local) == true, self.group?.owner.leads == true else {
+                            log.info("member call refused id=\(c.id, privacy: .public) from=\(c.from.machine, privacy: .public)")
+                            return
+                        }
+                        self.onMemberCall?(c, l)
                     }
                 default: break
                 }

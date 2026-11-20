@@ -12,6 +12,8 @@ public enum ActionCaller: Hashable, Sendable {
     case assistant(thread: String)
     /// An `oversire` command. Nil agent: a human ran it.
     case cli(agent: String?)
+    /// A click on a client app. The source app runs it for that Mac.
+    case member(machine: String, name: String)
 
     /// The actor of the event rows of a change.
     public var actor: EventActor {
@@ -19,6 +21,7 @@ public enum ActionCaller: Hashable, Sendable {
         case .user, .cli(agent: nil): return .user
         case .assistant: return EventActor(type: .agent, name: "assistant")
         case .cli(let agent?): return EventActor(type: .agent, name: agent)
+        case .member(let machine, _): return EventActor(type: .human, name: nil, via: "app@\(machine)")
         }
     }
 }

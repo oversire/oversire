@@ -1,3 +1,4 @@
+import OverSireAssistant
 import OverSireCore
 import OverSireTestKit
 import XCTest
@@ -251,12 +252,13 @@ final class ReviewTabTests: XCTestCase {
         await d.load()
         _ = await d.add(.plan(block: "goal"), text: "Shorter.")
         _ = try await d.submit(.approve, summary: nil, post: true)
+        await d.settledWrites()
         let posts = await MainActor.run { tracker.posts }
         let moves = await MainActor.run { tracker.moves }
         XCTAssertEqual(posts.count, 1)
         XCTAssertTrue(posts[0].contains("Plan review round 1 · Approve"), posts[0])
         XCTAssertTrue(posts[0].contains("Plan section \"Goal\""), posts[0])
-        XCTAssertEqual(moves, ["P-1 unstarted"])
+        XCTAssertEqual(moves, ["P-1 todo"])
     }
 
     func testAMergeWithSetDoneMovesTheItemToDone() async throws {
@@ -265,8 +267,9 @@ final class ReviewTabTests: XCTestCase {
         let d = await desk(src, tracker: tracker)
         let r = try await d.merge(removeGroup: true, setDone: true)
         XCTAssertTrue(r.merged)
+        await d.settledWrites()
         let moves = await MainActor.run { tracker.moves }
-        XCTAssertEqual(moves, ["A-1 completed"])
+        XCTAssertEqual(moves, ["A-1 done"])
     }
 
     // MARK: Merge sheet
@@ -497,9 +500,14 @@ final class ReviewTabTests: XCTestCase {
 }
 
 /// The tracker writes of a desk, in memory.
-final class FakeTracking: ReviewTracking {
-    var posts: [String] = []
-    var moves: [String] = []
-    func post(_ key: String, markdown: String, done: @escaping (Bool) -> Void) { posts.append(markdown); done(true) }
-    func move(key: String, group: String, else category: StatusCategory, done: @escaping (Bool) -> Void) { moves.append("\(key) \(group)"); done(true) }
+final class FakeTracking: ReviewTracking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var list: [(id: String, values: [String: JSONValue])] = []
+    var acts: [(id: String, values: [String: JSONValue])] { lock.withLock { list } }
+    var posts: [String] { acts.filter { $0.id == "item.comment" }.compactMap { $0.values["body"]?.string } }
+    var moves: [String] { acts.filter { $0.id == "item.setStatus" }.map { "\($0.values["key"]?.string ?? "") \($0.values["status"]?.string ?? "")" } }
+    func act(_ id: String, _ values: [String: JSONValue]) async -> ActionResult {
+        lock.withLock { list.append((id, values)) }
+        return .ok(summary: "ok")
+    }
 }

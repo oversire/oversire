@@ -698,11 +698,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         rebuild()
         switch field {
         case "labels":
-            // The catalog has no label action: the snapshot does not hold the label options.
-            store.update(itemId: id, ItemPatch(labels: toggled(options?.labels ?? [], found.item.labels)), failure: "Could not change the labels") { [weak self] ok in
-                done(ok, self?.store.lastError)
-            }
-            return
+            run("item.setLabels", ["key": key, "labels": .array(toggled(options?.labels ?? [], found.item.labels).map(JSONValue.string))], done)
         case "assignees": run("item.assign", ["key": key, "people": .array(toggled(options?.members ?? [], found.item.assignees).map(JSONValue.string))], done)
         case "state":
             guard let actions = (NSApp.delegate as? AppData)?.actions else { done(false, "The app is closing."); return }
@@ -908,13 +904,14 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         e.saving = true
         edit = e
         rebuild()
-        store.edit(itemId: id, title: title, body: e.body) { [weak self] ok in
+        guard let key = store.item(id)?.item.key else { return }
+        run("item.edit", ["key": .string(key), "title": .string(title), "body": .string(e.body)]) { [weak self] ok, message in
             guard let self else { return }
             if ok {
                 self.error = nil
                 self.edit = nil
             } else {
-                self.error = self.store.lastError ?? "Could not save the item"
+                self.error = message ?? "Could not save the item"
                 self.edit?.saving = false
             }
             self.rebuild()

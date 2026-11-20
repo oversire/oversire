@@ -558,7 +558,7 @@ public struct ActivityEntry: Codable, Hashable, Sendable {
 }
 
 // Choices for the label and assignee menus of an item.
-public struct ItemOptions: Sendable {
+public struct ItemOptions: Codable, Sendable {
     public let labels: [StatusOption]
     public let members: [StatusOption]
 
@@ -609,7 +609,7 @@ public struct IntakeEdit: Hashable, Sendable {
     public var isEmpty: Bool { patch == ItemPatch() && relations.isEmpty }
 }
 
-public struct IntakeDetail: Sendable {
+public struct IntakeDetail: Codable, Sendable {
     public let sequence: Int?
     public let body: String        // Markdown
     public let labels: [String]

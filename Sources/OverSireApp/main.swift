@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireAssistant
 import OverSireCore
 import QuartzCore
 import UserNotifications
@@ -227,6 +228,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         c.machines = machineHub
         c.unhooked = { [weak self] in self?.cloudSetup.unhookedRepos(REPOS) ?? [] }
         c.onMirror = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
+        c.onMemberCall = { [weak self] call, link in
+            guard let self else { return }
+            let client = link.client(http: DaemonTransport.shared)
+            Task { @MainActor in
+                let r = await MemberCalls().handle(call, actions: self.actions) { try? await self.publisher.flush() }
+                do { try await client.send(memberResult: r, id: call.id) } catch {
+                    log.error("member call \(call.id, privacy: .public) \(call.action, privacy: .public): the result did not post: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
         c.appCalls = { [weak self] link in
             let client = link.client(http: DaemonTransport.shared)
             return self.map { AppCalls(catalog: $0.actions) { try await client.send($0) } }
@@ -325,7 +336,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         RUNBOOKS.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "runbook:" + key) }
         NotificationCenter.default.addObserver(forName: RunbookBook.changed, object: RUNBOOKS, queue: .main) { [weak self] _ in self?.updateIcon() }
         RUNBOOKS.start()
-        REVIEWS.tracker = projectStore
+        REVIEWS.tracker = actions
         NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: REVIEWS, queue: .main) { [weak self] _ in self?.updateIcon() }
         REVIEWS.start()
         NotificationCenter.default.addObserver(forName: Favorites.changed, object: FAVORITES, queue: .main) { [weak self] _ in
@@ -391,6 +402,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         touchMirror(.catalog, nil)
         syncPlaneWorkspaces()
         MainActor.assumeIsolated { clientMirror?.start() }
+        if MODE == .client { connectClient() }
         if MODE == .full { projectCatalog.refreshIfStale() }
         applyCaptureHotKey()
         applyWindowHotKey()
@@ -691,6 +703,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // A client fetches nothing through gh. It pulls the mirror of home.
         if MODE == .client {
             MainActor.assumeIsolated { clientMirror?.pull() }
+            if force { Task { _ = await actions.run("app.refresh", ActionArgs()) } }
             completion?()
             return
         }
@@ -1108,6 +1121,28 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.syncPublisher()
         }
         o.start()
+    }
+
+    /// A client sends each click and each live read to the source app, through the home daemon.
+    private func connectClient() {
+        let home: @Sendable () async -> DaemonClient? = { [weak self] in
+            let group = await MainActor.run { self?.relay.group }
+            return await group?.mirrorHome()
+        }
+        actions.forward = { req in
+            guard let c = await home() else { throw ProviderError.transport("No home daemon.") }
+            return try await c.memberCall(req)
+        }
+        actions.sourceName = { [weak self] in MainActor.assumeIsolated { self?.clientName ?? "home" } }
+        actions.forwarded = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
+        ClientWords.source = { [weak self] in self?.clientName }
+        projectStore.remote = { [weak self] what, args in
+            guard let self else { throw ProviderError.notFound }
+            var values = args.object ?? [:]
+            values["what"] = .string(what)
+            let r = try await self.actions.read(values)
+            return r
+        }
     }
 
     func touchMirror(_ kind: MirrorKind, _ ids: [String]?) { MainActor.assumeIsolated { madePublisher?.touched(kind, ids: ids) } }

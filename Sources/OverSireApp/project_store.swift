@@ -67,6 +67,9 @@ final class ProjectStore {
     var client = MODE == .client
     /// The catalog of the home. A client reads the capabilities of a project from it.
     var catalog: ClientCatalog?
+    /// Set on a client. It asks the source app for the reads that need a live tracker. `what` is "comments", "timeline",
+    /// "options", "intakeDetail", "labels" or "links". It gives the `data` of the answer.
+    var remote: ((_ what: String, _ args: JSONValue) async throws -> JSONValue)?
     /// Items that came before their project doc, by store key.
     private var orphans: [String: [Item]] = [:]
     private(set) var liveKeys: Set<String> = []
@@ -89,7 +92,7 @@ final class ProjectStore {
     private var seenItems = Set<String>()
     private var timelineCache: [String: (stamp: String, entries: [ActivityEntry])] = [:]
     private var optionCache: [String: (options: ItemOptions, at: Date)] = [:]
-    private var timelineWaiters: [String: [([ActivityEntry]) -> Void]] = [:]
+    private var timelineWaiters: [String: [(Result<[ActivityEntry], ProviderError>) -> Void]] = [:]
     private var suppressNotify = Set<String>()
     /// The item ids and epic ids that this app changed, and who changed them. The next poll names that actor in the rows of the change.
     private(set) var writeActors: [String: EventActor] = [:]
@@ -642,6 +645,10 @@ final class ProjectStore {
 
     /// The comments of an item from its tracker, on the main thread.
     func comments(key: String, done: @escaping (Result<[Comment], ProviderError>) -> Void) {
+        if remote != nil {
+            remoteRead("comments", ["item": .string(key)], done: done)
+            return
+        }
         guard let found = item(key: key), let client = trackers.tracker(found.snap.summary.ref.workspace),
               let ref = found.item.ref(in: found.snap.summary.ref) else {
             done(.failure(.notFound))
@@ -654,24 +661,39 @@ final class ProjectStore {
     }
 
     func timeline(itemId: String, done: @escaping ([ActivityEntry]) -> Void) {
-        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace) else { done([]); return }
+        timelineRead(itemId: itemId) { done((try? $0.get()) ?? []) }
+    }
+
+    /// The timeline of an item. A failure comes only from the source app of a client. A local failure gives no entries.
+    func timelineRead(itemId: String, done: @escaping (Result<[ActivityEntry], ProviderError>) -> Void) {
+        guard let found = item(itemId) else { done(.success([])); return }
+        let client = trackers.tracker(found.snap.summary.ref.workspace)
+        guard client != nil || remote != nil else { done(.success([])); return }
         let stamp = isoFmt.string(from: found.item.activityAt)
         let cacheKey = itemId + "|" + stamp
-        if let hit = timelineCache[cacheKey] { done(hit.entries); return }
-        guard let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
+        if let hit = timelineCache[cacheKey] { done(.success(hit.entries)); return }
+        guard let ref = found.item.ref(in: found.snap.summary.ref) else { done(.success([])); return }
         if timelineWaiters[cacheKey] != nil { timelineWaiters[cacheKey]?.append(done); return }
         timelineWaiters[cacheKey] = [done]
         let projectKey = found.key
         let states = found.snap.statusOptions
         let current = found.snap.option(found.item.statusOptionId)?.name
+        let remote = self.remote
         CallPriority.task(.user) { [weak self] in
-            let result = await Result(awaiting: { try await ProjectStore.timeline(client, ref, statuses: states, current: current) })
+            let result: Result<[ActivityEntry], ProviderError>
+            if remote != nil {
+                result = await self?.remoteRows("timeline", ["item": .string(itemId)]) ?? .failure(.notFound)
+            } else if let client {
+                result = await Result(awaiting: { try await ProjectStore.timeline(client, ref, statuses: states, current: current) })
+            } else {
+                result = .success([])
+            }
             guard let self else { return }
             DispatchQueue.main.async {
                 let waiters = self.timelineWaiters.removeValue(forKey: cacheKey) ?? []
-                let entries: [ActivityEntry]
+                let out: Result<[ActivityEntry], ProviderError>
                 if case .success(let list) = result {
-                    entries = list.suffix(200).map { e in
+                    let entries: [ActivityEntry] = list.suffix(200).map { e in
                         var c = e
                         c.projectKey = projectKey
                         c.itemId = itemId
@@ -679,12 +701,35 @@ final class ProjectStore {
                         return c
                     }
                     self.timelineCache[cacheKey] = (stamp, entries)
+                    out = .success(entries)
+                } else if remote != nil, case .failure(let e) = result {
+                    out = .failure(e)
                 } else {
-                    entries = []
+                    out = .success([])
                 }
-                waiters.forEach { $0(entries) }
-                self.publish(DataChange(.projects, projects: [projectKey]))
+                waiters.forEach { $0(out) }
+                if case .success = out { self.publish(DataChange(.projects, projects: [projectKey])) }
             }
+        }
+    }
+
+    /// Asks the source app for a read. The source gives `{"rows": …}`. `done` runs on the main thread.
+    private func remoteRead<T: Codable & Sendable>(_ what: String, _ args: [String: JSONValue], done: @escaping (Result<T, ProviderError>) -> Void) {
+        Task { [weak self] in
+            let r: Result<T, ProviderError> = await self?.remoteRows(what, args) ?? .failure(.notFound)
+            await MainActor.run { done(r) }
+        }
+    }
+
+    private func remoteRows<T: Codable & Sendable>(_ what: String, _ args: [String: JSONValue]) async -> Result<T, ProviderError> {
+        guard let remote else { return .failure(.notFound) }
+        do {
+            let data = try await remote(what, .object(args))
+            return .success(try MirrorCodec.value(MirrorRows<T>.self, from: data).rows)
+        } catch let e as ProviderError {
+            return .failure(e)
+        } catch {
+            return .failure(.vendor(code: "remote", message: error.localizedDescription))
         }
     }
 
@@ -759,6 +804,14 @@ final class ProjectStore {
     // The labels of the project and the members of the workspace, for the item window menus.
     func options(projectKey: String, done: @escaping (ItemOptions) -> Void) {
         if let hit = optionCache[projectKey], -hit.at.timeIntervalSinceNow < 600 { done(hit.options); return }
+        if remote != nil {
+            remoteRead("options", ["project": .string(projectKey)]) { [weak self] (r: Result<ItemOptions, ProviderError>) in
+                guard case .success(let o) = r else { done(ItemOptions(labels: [], members: [])); return }
+                self?.optionCache[projectKey] = (o, Date())
+                done(o)
+            }
+            return
+        }
         guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(ItemOptions(labels: [], members: []))
             return
@@ -825,6 +878,7 @@ final class ProjectStore {
 
     /// The labels of a project.
     func labels(projectKey: String, done: @escaping (Result<[StatusOption], ProviderError>) -> Void) {
+        if remote != nil { remoteRead("labels", ["project": .string(projectKey)], done: done); return }
         guard let snap = snapshot(projectKey), let client = trackers.tracker(snap.summary.ref.workspace) else { done(.failure(.notFound)); return }
         let project = snap.summary.ref
         CallPriority.task(.user) {
@@ -838,6 +892,10 @@ final class ProjectStore {
 
     /// The links of an item. A tracker with no links, or a failed read, gives none.
     func links(itemId: String, done: @escaping ([URL]) -> Void) {
+        if remote != nil {
+            remoteRead("links", ["item": .string(itemId)]) { (r: Result<[URL], ProviderError>) in done((try? r.get()) ?? []) }
+            return
+        }
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace) as? any LinkManaging,
               let ref = found.item.ref(in: found.snap.summary.ref) else { done([]); return }
         CallPriority.task(.user) {
@@ -959,12 +1017,12 @@ final class ProjectStore {
         }
     }
 
-    // Sets the item and its open sub-items at all levels to the first state of the group, then reloads once (OVERSIRE-372).
+    // Sets the item and its open sub-items at all levels to the status, then reloads once (OVERSIRE-372).
     // A sub-item that is not loaded uses the parent URL: the tracker writes by id.
-    func move(key: String, group: String, else category: StatusCategory, done: @escaping (Bool) -> Void) {
-        guard let found = item(key: key), let client = trackers.tracker(found.snap.summary.ref.workspace),
+    func setStatusWithSubItems(itemId: String, optionId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
               let parent = found.item.ref(in: found.snap.summary.ref),
-              let state = found.snap.firstState(group: group, else: category) else { done(false); return }
+              let state = found.snap.option(optionId) else { done(false); return }
         let snap = found.snap
         let ids = [found.item.id] + snap.openDescendants(of: found.item.id)
         let refs = ids.map { id in
@@ -974,11 +1032,12 @@ final class ProjectStore {
         CallPriority.task(.user) { [weak self] in
             var failed = 0
             for ref in refs {
-                do { try await client.update(ref, ItemPatch(status: state.id)) } catch { failed += 1 }
+                do { try await client.update(ref, ItemPatch(status: optionId)) } catch { failed += 1 }
             }
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if failed > 0 { self.lastError = "Could not set \(failed) of \(refs.count) items to \(state.name)" }
+                else { self.events.stateSet(found.item, in: snap, to: optionId, actor: actor) }
                 self.refresh([found.key], force: true, priority: .user) { done($0 && failed == 0) }
             }
         }
@@ -1081,6 +1140,11 @@ final class ProjectStore {
     // MARK: Intake
 
     func intakeDetail(projectKey: String, item: IntakeItem, priority: CallPriority = .user, done: @escaping (Result<IntakeDetail, ProviderError>) -> Void) {
+        if remote != nil {
+            let intake = (try? MirrorCodec.body(item)) ?? .object([:])
+            remoteRead("intakeDetail", ["project": .string(projectKey), "intake": intake], done: done)
+            return
+        }
         guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(.failure(.unauthorized)); return
         }

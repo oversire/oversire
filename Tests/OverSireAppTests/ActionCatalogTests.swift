@@ -342,11 +342,11 @@ final class ActionCatalogTests: XCTestCase {
     func testPagesDoNotCallDomainMutators() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
         let pages = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter {
-            ["_page.swift", "_window.swift", "_tab.swift"].contains(where: $0.hasSuffix) || ["needs_you.swift", "glance.swift"].contains($0)
+            ["_page.swift", "_window.swift", "_tab.swift"].contains(where: $0.hasSuffix) || ["needs_you.swift", "glance.swift", "review_desk.swift"].contains($0)
         }
         XCTAssertGreaterThan(pages.count, 10)
         let mutator = try NSRegularExpression(pattern: #"""
-            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate|setEpic|createEpic|updateEpic)\(|\
+            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate|setEpic|createEpic|updateEpic|edit)\(|tracker\??\.(move|post)\(|\
             (projectStore|store)\.update\(itemId|queue\.(add|remove|move|start)\(|agentIndex\.(send|reveal|start)\(|\
             statusJob\.(approve|hold|markBlocked|snooze)\(|job\.(approve|hold|markBlocked|snooze)\(|questions\.(answer|dismiss)\(|\
             cleaner\.run\(|REPO_CLIENT\.(perform|rerunJob)\(|suggestions\.(accept|dismiss)\(
@@ -354,11 +354,62 @@ final class ActionCatalogTests: XCTestCase {
         var hits: [String] = []
         for f in pages {
             let lines = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8).components(separatedBy: "\n")
-            for (i, l) in lines.enumerated() where !l.contains("ItemPatch(labels:") {
+            for (i, l) in lines.enumerated() {
                 if mutator.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil { hits.append("\(f):\(i + 1): \(l.trimmingCharacters(in: .whitespaces))") }
             }
         }
         XCTAssertEqual(hits, [], hits.joined(separator: "\n"))
+    }
+
+    // OVERSIRE-528
+    func testClientForwardsChange() async {
+        final class Seen: @unchecked Sendable { var calls: [MemberCallRequest] = [] }
+        let d = seeded()
+        let seen = Seen()
+        d.actions.forward = { r in
+            seen.calls.append(r)
+            return AppCallResult(id: "m-1", status: .ok, summary: "SLING-1 is Done.")
+        }
+        d.actions.sourceName = { "mbp" }
+        let r = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Done")])))
+        XCTAssertEqual(r, .ok(summary: "SLING-1 is Done."))
+        XCTAssertEqual(seen.calls.map(\.action), ["item.setStatus"])
+        XCTAssertEqual(seen.calls.first?.args["key"], .string("SLING-1"))
+        XCTAssertEqual(d.projectStore.snapshots.values.first?.items.first?.statusOptionId, "s1", "the client changes nothing")
+        XCTAssertEqual(d.actions.sentText("item.setStatus"), "Sent to mbp…")
+    }
+
+    func testClientKeepsLocalAction() async {
+        final class Seen: @unchecked Sendable { var n = 0 }
+        let d = seeded()
+        let seen = Seen()
+        d.actions.forward = { _ in seen.n += 1; return AppCallResult(id: "m", status: .ok, summary: "") }
+        for id in ["page.current", "machine.list", "item.get"] {
+            _ = await d.actions.run(id, ActionArgs(.object(["key": .string("SLING-1")])))
+            XCTAssertNil(d.actions.sentText(id), id)
+        }
+        XCTAssertEqual(seen.n, 0)
+    }
+
+    func testClientMapsErrors() async {
+        let d = seeded()
+        d.actions.sourceName = { "mbp" }
+        let args = ActionArgs(.object(["key": .string("SLING-1"), "body": .string("x")]))
+        d.actions.forward = { _ in throw ProviderError.vendor(code: "503", message: "The OverSire app on mbp is not open.") }
+        let a = await d.actions.run("item.comment", args)
+        XCTAssertEqual(a, .failed("The OverSire app on mbp is not open."))
+        d.actions.forward = { _ in throw ProviderError.transport("The Internet connection appears to be offline.") }
+        let b = await d.actions.run("item.comment", args)
+        XCTAssertEqual(b, .failed("mbp is offline. Try again when it is back."))
+        d.actions.forward = { _ in AppCallResult(id: "m", status: .notAllowed, summary: "No.") }
+        let c = await d.actions.run("item.comment", args)
+        XCTAssertEqual(c, .notAllowed("No."))
+    }
+
+    func testFullModeRunsHere() async {
+        let d = seeded()
+        XCTAssertNil(d.actions.sentText("item.setStatus"))
+        XCTAssertFalse(d.actions.forwards("item.setStatus"))
     }
 
     // OVERSIRE-524

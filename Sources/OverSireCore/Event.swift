@@ -9,10 +9,13 @@ public enum ActorType: String, Codable, Sendable, CaseIterable {
 public struct EventActor: Hashable, Sendable {
     public var type: ActorType
     public var name: String?
+    /// The channel of the change, for example app@mba. Nil: the app of this Mac.
+    public var via: String?
 
-    public init(type: ActorType, name: String? = nil) {
+    public init(type: ActorType, name: String? = nil, via: String? = nil) {
         self.type = type
         self.name = name
+        self.via = via
     }
 
     public static let user = EventActor(type: .human)

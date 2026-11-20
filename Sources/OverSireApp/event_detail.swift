@@ -454,14 +454,14 @@ final class EventDetailCard: Box {
             content = Self.markdownBox(markdown, text: t, mode: shown == .raw ? .code : .rendered, sized: onSized)
         case (_, .failed(let m)?):
             if let bodyPart {
-                content = ReadNote("The comment did not load.", part: bodyPart, framed: false)
+                content = ReadNote(ClientWords.failed("The comment did not load."), part: bodyPart, framed: false)
             } else {
-                content = NSTextField.text("The comment did not load: \(m)", size: 12, color: Palette.bad, lines: 2)
+                content = NSTextField.text(ClientWords.source == nil ? "The comment did not load: \(m)" : ClientWords.failed(""), size: 12, color: Palette.bad, lines: 2)
             }
         case (_, .missing?):
             content = NSTextField.text("The tracker has no comment with this id. Someone deleted it.", size: 12, color: Palette.dim, lines: 2)
         default:
-            content = LoadingNote("Loading the comment", height: 60, compact: true)
+            content = LoadingNote(ClientWords.loading("Loading the comment"), height: 60, compact: true)
         }
         col.addFull(NSStackView(v: [NSStackView(h: bar, spacing: 8), content].map { $0 }, spacing: 6))
         for v in col.arrangedSubviews { v.widthAnchor.constraint(equalTo: col.widthAnchor).isActive = true }

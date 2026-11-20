@@ -58,6 +58,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case appCall(AppCall)
     /// The mirror feed of the home daemon has a new head. A client then pulls.
     case mirror(MirrorFrame)
+    /// A click of a client app for the source app. Only the frame of the group home counts.
+    case memberCall(MemberCall)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -78,6 +80,9 @@ public enum DaemonFrame: Hashable, Sendable {
         case "appCall":
             struct Frame: Decodable { let call: AppCall }
             return (try? DaemonClient.decode(data) as Frame).map { .appCall($0.call) }
+        case "memberCall":
+            struct Frame: Decodable { let call: MemberCall }
+            return (try? DaemonClient.decode(data) as Frame).map { .memberCall($0.call) }
         case "mirror": return (try? DaemonClient.decode(data) as MirrorFrame).map(DaemonFrame.mirror)
         default: return nil
         }

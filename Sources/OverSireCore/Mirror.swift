@@ -301,7 +301,7 @@ extension DaemonClient {
 
     private struct NotHomeBody: Decodable { let error: String?; let home: String? }
 
-    private func mirrorCall<T: Decodable>(_ r: URLRequest) async throws -> T {
+    package func mirrorCall<T: Decodable>(_ r: URLRequest) async throws -> T {
         let (data, resp) = try await exchange(r)
         if resp.statusCode == 409 {
             if let b = try? JSONDecoder().decode(NotHomeBody.self, from: data), let home = b.home {
