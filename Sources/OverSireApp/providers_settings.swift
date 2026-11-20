@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 
 // Settings › Accounts and sync: the accounts of each layer. The form of a new account comes from the
 // ConfigField list of the provider descriptor.
@@ -134,6 +135,9 @@ extension SettingsPage {
             }
         }
         if case .cli(let name)? = d.auth.first(where: { if case .cli = $0 { return true }; return false }) { detail.append("\(name) login") }
+        let feedWord = Self.feedWord(list.filter { ENV.hasLiveFeed($0.account) }.map { data.relay.feedState($0.account) },
+                                     pollMinutes: PROJECTS_CFG.pollMinutes)
+        if let feedWord { detail.append(feedWord) }
         var errors: [String] = [], who: [String] = []
         for a in list {
             switch form.probes[a.account] {
@@ -180,6 +184,17 @@ extension SettingsPage {
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 30), icon.heightAnchor.constraint(equalToConstant: 30),
                                      g.centerXAnchor.constraint(equalTo: icon.centerXAnchor), g.centerYAnchor.constraint(equalTo: icon.centerYAnchor)])
         return ServiceCard(icon: icon, name: d.displayName, detail: detail.filter { !$0.isEmpty }.joined(separator: " · "), status: status, actions: actions)
+    }
+
+    /// The live part of the detail line of a service card. The states are those of the accounts that have a live feed.
+    /// Nil when no account has one.
+    static func feedWord(_ states: [LiveFeedState], pollMinutes: Int) -> String? {
+        guard !states.isEmpty else { return nil }
+        let live = states.filter { $0 == .live }.count
+        if states.count > 1, live > 0 { return "\(live) of \(states.count) live" }
+        if live > 0 { return "Live" }
+        if states.contains(.connecting) { return "Connecting…" }
+        return "Polls every \(pollMinutes) min"
     }
 
     private func probe(_ id: AccountID) {

@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 
 // The state of the Live updates section that a rebuild keeps.
 final class LiveForm {
@@ -61,6 +62,7 @@ extension SettingsPage {
             })
             rows.append(githubHooks())
             rows += planeHooks()
+            rows += streamRows()
         } else {
             let url = NSTextField(string: lf.url?.stringValue ?? RELAY.workerURL)
             url.placeholderString = "https://oversire-cloud.example.workers.dev"
@@ -74,6 +76,7 @@ extension SettingsPage {
             lf.code = code
             rows.append(FieldRow("Cloud URL", note: "The OverSire Cloud console shows it.", url))
             rows.append(FieldRow("Pairing code", note: "Get one in the console. OverSire keeps the device token in the Keychain.", code))
+            rows += streamRows()
         }
         if let h = s.health {
             let q = WriteQuota(rowsToday: h.rowsWrittenToday, now: Date())
@@ -100,7 +103,8 @@ extension SettingsPage {
         let card = ListCard()
         rows.forEach { card.add($0) }
         v.addFull(card)
-        v.addFull(NSTextField.text("OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds. With the cloud live, a poll only checks the state at the reconcile time.",
+        let direct = ENV.accounts.contains { ENV.hasLiveFeed($0.account) } ? " Big Timer sends its changes to this Mac directly, with no cloud." : ""
+        v.addFull(NSTextField.text("OverSire cloud sends GitHub and Plane webhooks to this Mac, so pages update in seconds. With the cloud live, a poll only checks the state at the reconcile time." + direct,
                                    size: 11.5, color: Palette.dim, lines: 0))
         v.identifier = SettingsAnchor.live.id
         b.addFull(v)
@@ -128,6 +132,66 @@ extension SettingsPage {
         let n = h.devices.count
         let last = h.lastWebhookAt.map { "last event " + relativeAgo(Date(timeIntervalSince1970: $0 / 1000)) } ?? "no event yet"
         return "\(n) device\(n == 1 ? "" : "s") · \(last) · \(h.rowsWrittenToday.formatted()) of \(FREE_ROWS_PER_DAY / 1000)k writes today"
+    }
+
+    /// One row for each tracker account with a live feed. It needs no cloud.
+    private func streamRows() -> [NSView] {
+        ENV.accounts(.tracker).map(\.account).filter(ENV.hasLiveFeed).map { a in
+            let vendor = ENV.trackerName(a)
+            let m = Self.streamRow(data.relay.feedState(a), pollMinutes: PROJECTS_CFG.pollMinutes, vendor: vendor)
+            let pill = Pill(Self.tone(m.tone), text: m.pill)
+            pill.toolTip = m.tip
+            var views: [NSView] = [TwoLine("\(vendor) stream", "Server \(a.id)", weight: .medium), Spacer(), pill]
+            if let action = m.action {
+                views.append(ActionButton(action) { [weak self] in self?.data.relay.reconnectFeed(a) })
+            }
+            return Row(views, height: 52, label: "\(vendor) stream \(a.id)")
+        }
+    }
+
+    struct StreamRowModel: Equatable {
+        let pill: String
+        let tone: String
+        let symbol: String
+        let tip: String
+        let action: String?
+    }
+
+    static func tone(_ word: String) -> Tone {
+        switch word {
+        case "ok": return .ok
+        case "running": return .running
+        case "warning": return .warning
+        case "bad": return .bad
+        case "idle": return .idle
+        default: return .queued
+        }
+    }
+
+    /// The pill, the tooltip and the button of the stream row. The tone is a word, because `Tone` is not Equatable.
+    static func streamRow(_ s: LiveFeedState, pollMinutes n: Int, vendor: String = "Big Timer") -> StreamRowModel {
+        let polls = "Projects poll every \(n) min."
+        func model(_ pill: String, _ tone: String, _ tip: String, retry: Bool) -> StreamRowModel {
+            StreamRowModel(pill: pill, tone: tone, symbol: Self.tone(tone).symbol, tip: tip, action: retry ? "Connect again" : nil)
+        }
+        switch s {
+        case .live:
+            return model("Live", "ok", "\(vendor) sends each change to this Mac. A project polls only when its data is older than 30 min.", retry: false)
+        case .connecting:
+            return model("Connecting", "running", "OverSire opens the stream. Projects poll every \(n) min meanwhile.", retry: false)
+        case .retrying(let e):
+            return model("Polls · reconnects", "warning", "The stream stopped: \(e.message). \(polls) OverSire connects again soon.", retry: true)
+        case .stopped(.unauthorized):
+            return model("Token refused", "bad", "\(vendor) refused the token. \(polls) Edit the token on the \(vendor) card.", retry: true)
+        case .stopped(.forbidden):
+            return model("No access", "bad", "The token cannot read the stream. \(polls)", retry: true)
+        case .stopped(.notFound):
+            return model("Polls · no stream", "idle", "This \(vendor) server has no live stream. Update the server to get live updates. \(polls)", retry: false)
+        case .stopped(let e):
+            return model("Failed", "bad", "The stream stopped: \(e.message). \(polls)", retry: true)
+        case .off:
+            return model("Off", "queued", "Add a token for this account to get live updates.", retry: false)
+        }
     }
 
     private func githubHooks() -> NSView {

@@ -156,7 +156,7 @@ extension SettingsPage {
             self?.app?.projectStore.restartTimer()
         }
         b.addFull(section(.refresh, [
-            FieldRow("Check trackers every", note: "For workspaces without a webhook, and when the cloud is off.", poll),
+            FieldRow("Check trackers every", note: "For workspaces without a webhook or a live stream, and when the cloud is off.", poll),
         ]))
     }
 }

@@ -136,6 +136,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let cleanup = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLEANUP"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
+    // OVERSIRE_UISHOTS_BIGTIMER=live, connecting, retrying, refused or nostream: a Big Timer account with that stream state. In memory only.
+    static let bigtimer = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_BIGTIMER"]
     // OVERSIRE_UISHOTS_STREAM=<ws url>: the chat: and stream: shots connect to this daemon stream, with no sample frames.
     static let stream = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_STREAM"].flatMap(URL.init(string:)).map { URLRequest(url: $0) }
     // OVERSIRE_UISHOTS_AI=on: Settings › AI shows a sample key that passed Test. No AI job runs.
@@ -905,10 +907,28 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             seedSharedAgents()
             SettingsPage.commandsOpen = true
         }
+        if let s = UIShots.bigtimer { seedBigTimer(s) }
         useSampleMachines()
         agentIndex.poll()
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         refresh(force: true) { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.shoot() } }
+    }
+
+    private func seedBigTimer(_ state: String) {
+        let a = AccountID(provider: .bigtimer, id: "bt.example.com")
+        ACCOUNTS.removeAll { $0.account.provider == .bigtimer }
+        ACCOUNTS.append(AccountConfig(account: a, values: ["server": "https://bt.example.com"]))
+        ENV.load(ACCOUNTS)
+        SettingsPage.providersForm.probes[a] = .success("Ada Lovelace")
+        let s: LiveFeedState
+        switch state {
+        case "connecting": s = .connecting
+        case "retrying": s = .retrying(.transport("The connection dropped."))
+        case "refused": s = .stopped(.unauthorized)
+        case "nostream": s = .stopped(.notFound)
+        default: s = .live
+        }
+        relay.seedFeed(a, s)
     }
 
     private func shoot() {
@@ -1069,7 +1089,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         case "error": state = .error("The hub did not answer.")
                         default: state = .off
                         }
-                        w.sidebar.live.set(LiveLineModel(state: state, lastBurst: state == .live ? Date() : nil, pollEvery: POLL_NORMAL))
+                        w.sidebar.live.set(LiveLineModel(state: state, lastBurst: state == .live ? Date() : nil, pollEvery: POLL_NORMAL,
+                                                         liveFeeds: UIShots.bigtimer == nil ? 0 : self.relay.liveFeedCount))
                     } else if p == "popover" || p == "popover:offline" {
                         // popover:offline: the footer of a Mac with no network path (OVERSIRE-431).
                         if p == "popover:offline" { NetworkPath.shared.update(satisfied: false) } else if NetworkPath.shared.offlineSince != nil {

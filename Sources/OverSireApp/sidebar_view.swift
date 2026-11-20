@@ -241,6 +241,8 @@ struct LiveLineModel: Equatable {
     var state: LiveSync.State
     var lastBurst: Date?
     var pollEvery: TimeInterval = POLL_NORMAL
+    /// The live feeds that are up (Big Timer).
+    var liveFeeds = 0
 
     /// How long "just now" shows after a burst.
     static let pingTime: TimeInterval = 4
@@ -276,7 +278,10 @@ struct LiveLineModel: Equatable {
 
     var tooltip: String {
         if case .error(let m) = state { return "Cloud error: \(m)" }
-        return lastBurst.map { "Last event \(relativeTime($0))" } ?? (state == .off ? "No cloud. OverSire polls GitHub and the trackers." : "No events yet")
+        let feeds = liveFeeds > 0 && state == .off ? "No cloud. OverSire polls GitHub. Big Timer sends its changes live." : nil
+        let burst = lastBurst.map { "Last event \(relativeTime($0))" }
+        if let burst { return feeds.map { burst + ". " + $0 } ?? burst }
+        return feeds ?? (state == .off ? "No cloud. OverSire polls GitHub and the trackers." : "No events yet")
     }
 }
 
@@ -316,7 +321,7 @@ final class LiveLine: Box {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ relay: LiveSync) { set(LiveLineModel(state: relay.state, lastBurst: relay.lastBurstAt)) }
+    func show(_ relay: LiveSync) { set(LiveLineModel(state: relay.state, lastBurst: relay.lastBurstAt, liveFeeds: relay.liveFeedCount)) }
 
     func set(_ m: LiveLineModel) {
         let burst = m.lastBurst != nil && m.lastBurst != model.lastBurst && m.justNow(at: now())

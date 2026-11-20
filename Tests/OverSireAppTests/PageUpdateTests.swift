@@ -222,6 +222,12 @@ final class TimeTickerTests: XCTestCase {
 }
 
 final class LiveLineTests: XCTestCase {
+    func testSidebarTooltipNamesALiveFeed() {
+        XCTAssertEqual(LiveLineModel(state: .off, liveFeeds: 1).tooltip, "No cloud. OverSire polls GitHub. Big Timer sends its changes live.")
+        XCTAssertEqual(LiveLineModel(state: .off, liveFeeds: 0).tooltip, "No cloud. OverSire polls GitHub and the trackers.")
+        XCTAssertEqual(LiveLineModel(state: .live, liveFeeds: 1).tooltip, "No events yet", "with the cloud live, the cloud text stays")
+    }
+
     func testStatesHaveTextNotOnlyColor() {
         XCTAssertEqual(LiveLineModel(state: .live).mark, .connected)
         XCTAssertEqual(LiveLineModel(state: .live).title, "Connected")
