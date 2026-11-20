@@ -115,6 +115,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         case .notifications: notifications(body)
         case .logs: logs(body)
         }
+        lockShared(body)
         let navCol = NSStackView(v: [], spacing: 8)
         navCol.addFull(search)
         navCol.addFull(nav)
@@ -149,10 +150,32 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         return PageHeader("Settings", caption: "This Mac is a client of \(name). Changes to shared settings go to \(name).")
     }
 
+    /// The link of a client that cannot change the shared settings now. nil: it can.
+    var offlineLink: ClientLink? {
+        guard MODE == .client, let l = data.clientLink, !l.canChange, !l.isWaiting else { return nil }
+        return l
+    }
+
+    private static let sharedAnchors: Set<SettingsAnchor> = [.projects, .refresh, .repos, .linking, .writeback, .sessions, .queue, .worktrees, .planner, .use]
+
+    /// Turns off the controls of the shared sections. Their rows stay in view with the data of the last read.
+    private func lockShared(_ body: NSStackView) {
+        guard let l = offlineLink, Self.sharedPages.contains(page) else { return }
+        let why = l.refusal(l.homeName ?? data.clientName) ?? ""
+        let ids = Set(Self.sharedAnchors.map(\.id))
+        func walk(_ v: NSView, _ on: Bool) {
+            let on = on || v.identifier.map { ids.contains($0) } ?? false
+            if on { v.lock(why) }
+            v.subviews.forEach { walk($0, on) }
+        }
+        walk(body, false)
+    }
+
     /// The conflict or the failure of the last change to a shared section.
     private func clientBanner() -> NSView? {
         guard MODE == .client, Self.sharedPages.contains(page) else { return nil }
         let name = data.clientName
+        if let l = offlineLink, let b = l.settingsBanner { return b }
         switch ClientSettings.shared.state {
         case .idle, .saving: return nil
         case .conflict:

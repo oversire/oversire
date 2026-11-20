@@ -245,6 +245,7 @@ final class RunsPage: Page {
                            },
                            ActionButton("Refresh", symbol: "arrow.clockwise") { data.refresh(force: true, completion: nil) }])
             },
+        ] + ClientBanner.rows() + [
             PageRow("strip", filter.rawValue, counts, full: false) { [weak self, filter] in
                 let strip = TabStrip(filters.map { $0.rawValue.capitalized }, selected: filters.firstIndex(of: filter) ?? 0, counts: counts)
                 strip.onSelect = { i in self?.go(.runs(filters[i])) }
@@ -289,7 +290,6 @@ final class RunsPage: Page {
             }
         }
         let table = shown.isEmpty ? nil : RunLine.layout
-        if let l = data.clientLink, l.banner != nil { top.append(PageRow("update", "\(l)") { l.banner ?? NSView() }) }
         let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }
         return [PageSection("top", rows: top), PageSection("runs", rows: [list])]
     }
@@ -472,11 +472,11 @@ final class RunPage: Page {
 
         var actions: [NSView] = []
         if r.isFailure {
-            let failed = ActionButton("Re-run failed jobs", symbol: "arrow.clockwise", style: .primary) { [weak self] in self?.rerun(failed: true) }
+            let failed = ActionButton("Re-run failed jobs", symbol: "arrow.clockwise", style: .primary) { [weak self] in self?.rerun(failed: true) }.follows("run.rerun")
             if busy == Self.rerunFailed { failed.busy("Re-running…") } else { failed.isEnabled = busy == nil }
             actions.append(failed)
         }
-        let all = ActionButton("Re-run all") { [weak self] in self?.rerun(failed: false) }
+        let all = ActionButton("Re-run all") { [weak self] in self?.rerun(failed: false) }.follows("run.rerun")
         all.isEnabled = !live && busy == nil
         if busy == Self.rerunAll { all.busy("Re-running…") }
         let cancel = ActionButton("Cancel", style: .danger) { [weak self] in self?.cancelRun() }

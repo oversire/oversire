@@ -104,7 +104,7 @@ final class WorkPage: Page {
         let epics = data.has(.epics) ? data.projectStore.allEpics.filter { !$0.epic.state.isClosed }.count : nil
         return [
             PageRow("header", caption, extra) { PageHeader("Work", caption: caption, actions: actions()) },
-        ] + DaemonBanner.rows() + [
+        ] + DaemonBanner.rows() + ClientBanner.rows() + [
             PageRow("tabs", tab.rawValue, mine, epics ?? -1, worktrees, reviews, turn, extra) { [weak page] in
                 var review = TabStrip.Tab(title: "Review", count: reviews > 0 ? reviews : nil,
                                           label: "Review, \(reviews) review\(reviews == 1 ? "" : "s"), \(turn) your turn")
@@ -159,7 +159,6 @@ final class WorkPage: Page {
             }
         }
         let table = table
-        if let l = data.clientLink, l.banner != nil { top.append(PageRow("update", "\(l)") { l.banner ?? NSView() }) }
         return [PageSection("top", rows: top), PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
@@ -294,7 +293,7 @@ final class WorkPage: Page {
         let down = ActionButton("", symbol: "chevron.down", action: "queue.move", ["key": k, "by": .int(1)])
         down.isEnabled = n < lane.entries.count - 1
         down.setAccessibilityLabel("Move \(key) down")
-        let start = ActionButton("Start now")
+        let start = ActionButton("Start now").follows("queue.start")
         start.onClick = { [weak self, weak start] in
             guard let self, let start, let snap = self.data.projectStore.snapshot(lane.project) else { return }
             SessionStartMenu(self.data).pickRoot(snap, at: start, key: key) { root in

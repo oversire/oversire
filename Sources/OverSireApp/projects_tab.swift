@@ -784,7 +784,25 @@ final class FeedRow: NSView {
 }
 
 extension TabVC {
+    /// The banner of a client state (offline, app closed, no source), as one row of the popover.
+    private func clientBannerRow(_ w: CGFloat) -> NSView? {
+        guard let banner = (NSApp.delegate as? GHActionsBar)?.clientLink?.banner else { return nil }
+        let holder = Flipped(frame: NSRect(x: 0, y: 0, width: w, height: 0))
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(banner)
+        let inner = banner.widthAnchor.constraint(equalToConstant: w - 20)
+        NSLayoutConstraint.activate([inner, banner.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 10),
+                                     banner.topAnchor.constraint(equalTo: holder.topAnchor, constant: 6)])
+        banner.layoutSubtreeIfNeeded()
+        holder.frame.size.height = banner.fittingSize.height + 12
+        return holder
+    }
+
     func buildProjectsContent(_ w: CGFloat) -> [NSView] {
+        (clientBannerRow(w).map { [$0] } ?? []) + buildProjectsBody(w)
+    }
+
+    private func buildProjectsBody(_ w: CGFloat) -> [NSView] {
         let store = (NSApp.delegate as? GHActionsBar)?.projectStore
         guard let store = store else {
             return [EmptyRow("Projects are not ready yet.", w: w)]

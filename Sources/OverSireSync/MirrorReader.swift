@@ -249,6 +249,9 @@ public actor MirrorReader {
     /// True when the reader read a whole feed: the cache or a pull has data.
     public var hasData: Bool { epoch != nil }
 
+    /// True while a new feed (a new epoch) is not ready. The reader still holds the old data.
+    public var isPending: Bool { staging != nil }
+
     /// The time of the last good pull, also from before a restart.
     public var updatedAt: Date? { lastPull }
 

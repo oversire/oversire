@@ -506,6 +506,35 @@ final class MachinesModelTests: XCTestCase {
         }
         XCTAssertEqual(states, [.noDaemon, .solo, .group])
     }
+
+    // OVERSIRE-530
+    func testClientChipFromReaders() {
+        var s = snapshot()
+        s.readers = [MirrorPeer(machine: "mba", name: "OverSire on mba", head: 4, seenAt: now.addingTimeInterval(-300)),
+                     MirrorPeer(machine: "devbox", name: "OverSire on devbox", head: 4, seenAt: now.addingTimeInterval(-601))]
+        let m = MachinesModel(s, config: MachinesConfig(), now: now)
+        XCTAssertEqual(m.machines.map(\.client), [false, true, false], "a reader seen in the last 10 min is a client")
+        XCTAssertEqual(MachinesModel(snapshot(), config: MachinesConfig(), now: now).machines.map(\.client), [false, false, false])
+    }
+
+    func testModeStaysOnWhenOffline() {
+        var s = MachinesSnapshot.sample("machines-client-offline", now: now)
+        s.automations = .client(holder: "mbp")
+        let link = ClientLink.homeOffline(home: "mbp", since: now.addingTimeInterval(-720), data: Date(timeIntervalSince1970: 1_000_000))
+        let k = MachinesModel(s, config: MachinesConfig(), now: now, mode: .client, link: link, counts: (2140, 38)).mode
+        XCTAssertTrue(k.enabled, "a client can always go back to Full")
+        XCTAssertNil(k.reason)
+        XCTAssertEqual(k.dataTone.word, "Offline · 12 min ago")
+        XCTAssertTrue(k.dataNote.hasSuffix("2,140 items · 38 repos"), k.dataNote)
+        let closed = MachinesModel(s, config: MachinesConfig(), now: now, mode: .client, link: .appClosed(home: "mbp", data: nil)).mode
+        XCTAssertEqual(closed.dataTone.word, "App closed")
+        let none = MachinesModel(s, config: MachinesConfig(), now: now, mode: .client, link: .noSource(home: "mbp")).mode
+        XCTAssertEqual(none.dataTone.word, "No source")
+        let moving = MachinesModel(s, config: MachinesConfig(), now: now, mode: .client, link: .moving(to: "box")).mode
+        XCTAssertEqual(moving.dataTone.word, "Moving")
+        XCTAssertEqual(moving.dataTitle, "Data from box")
+        XCTAssertEqual(moving.dataNote, "Home moved to box. Reading the data from box…")
+    }
 }
 
 // MARK: Update

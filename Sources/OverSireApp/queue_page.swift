@@ -352,7 +352,7 @@ final class QueuePage: Page {
         let down = ActionButton("", symbol: "chevron.down", action: "queue.move", ["key": k, "by": .int(1)])
         down.isEnabled = n < lane.entries.count - 1
         down.setAccessibilityLabel("Move \(key) down")
-        let start = ActionButton("Start now")
+        let start = ActionButton("Start now").follows("queue.start")
         start.onClick = { [weak self, weak start] in
             guard let self, let start, let snap = self.data.projectStore.snapshot(lane.project) else { return }
             SessionStartMenu(self.data).pickRoot(snap, at: start, key: key) { root in

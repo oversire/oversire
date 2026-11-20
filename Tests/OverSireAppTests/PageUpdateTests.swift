@@ -254,6 +254,24 @@ final class LiveLineTests: XCTestCase {
         XCTAssertEqual(LiveLineModel(state: .live).title, "Connected", "Full mode keeps the cloud texts")
     }
 
+    // OVERSIRE-530
+    func testOfflineTexts() {
+        let data = Calendar.current.date(bySettingHour: 14, minute: 2, second: 0, of: Date())!
+        let off = LiveLineModel(state: .off, client: .homeOffline(home: "mbp", since: Date(), data: data), clientName: "mbp")
+        XCTAssertEqual(off.title, "mbp is offline")
+        XCTAssertEqual(off.detail, "data from 14:02")
+        XCTAssertEqual(off.mark, .warning)
+        XCTAssertEqual(off.tooltip, "mbp is offline. Try again when it is back.")
+        XCTAssertEqual(ClientLink.homeOffline(home: "mbp", since: Date(), data: data).footer("mbp"), "mbp offline · data from 14:02")
+        let closed = LiveLineModel(state: .off, client: .appClosed(home: "mbp", data: data), clientName: "mbp")
+        XCTAssertEqual(closed.title, "OverSire is not open on mbp")
+        XCTAssertEqual(closed.tooltip, "The OverSire app on mbp is not open.")
+        XCTAssertEqual(LiveLineModel(state: .off, client: .noSource(home: "mbp"), clientName: "mbp").title, "No Mac runs the automations")
+        let moving = LiveLineModel(state: .off, client: .moving(to: "box"), clientName: "mbp")
+        XCTAssertEqual(moving.title, "Moving to box…")
+        XCTAssertEqual(moving.mark, .waiting)
+    }
+
     func testJustNowShowsFourSeconds() {
         let t = Date()
         let m = LiveLineModel(state: .live, lastBurst: t)

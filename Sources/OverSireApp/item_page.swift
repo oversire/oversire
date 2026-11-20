@@ -201,7 +201,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             ])]
         }
         let stream = data.workstreams.stream(key)
-        var top = [headRow(snap: snap, item: item)]
+        var top = [headRow(snap: snap, item: item)] + ClientBanner.rows()
         if let note { top.append(PageRow("note", "\(note.0)", note.1) { Banner(note.0, title: note.1) }) }
         if snap.isDoneWithOpenSubItems(item) { top.append(openSubItemsRow(snap: snap, item: item)) }
         top.append(tabsRow(snap: snap, item: item))
@@ -490,13 +490,14 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let open = snap.isDoneWithOpenSubItems(item) ? snap.openSubItems(of: item.id) : 0
         let name = (opt?.name ?? "No status") + (open > 0 ? " · \(open) sub-item\(open == 1 ? "" : "s") open" : "")
         let glyph = StatusGlyph.item(item, snap: snap).sized(12)
-        return MenuChip(name, icon: glyph) { [weak self] in
+        let chip = MenuChip(name, icon: glyph) { [weak self] in
             snap.statusOptions.map { o in
                 let a = MenuAction(o.name) { self?.save("status", "item.setStatus", o.id) }
                 a.item.state = o.id == item.statusOptionId ? .on : .off
                 return a
             }
         }
+        return chip.follows("item.setStatus")
     }
 
     // MARK: Done with open sub-items
@@ -593,7 +594,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
                 a.item.state = p.name == cur ? .on : .off
                 return a
             }
-        }
+        }.follows("item.setPriority")
     }
 
     // MARK: Epic
@@ -1554,7 +1555,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         f.target = self
         f.action = #selector(sendComment)
         commentField = f
-        let send = ActionButton("Comment") { [weak self] in self?.sendComment() }
+        f.follows("item.comment")
+        let send = ActionButton("Comment") { [weak self] in self?.sendComment() }.follows("item.comment")
         if pendingComment != nil { send.busy("Sending…") }
         return NSStackView(h: [f, send], spacing: 6)
     }

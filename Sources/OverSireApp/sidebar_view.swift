@@ -236,7 +236,7 @@ final class SidebarCell: NSTableCellView {
 
 /// What the live line shows: the cloud state and the last burst of events. Pure, for the tests.
 struct LiveLineModel: Equatable {
-    enum Mark: Equatable { case connected, connecting, disconnected, polling, waiting }
+    enum Mark: Equatable { case connected, connecting, disconnected, polling, waiting, warning }
 
     var state: LiveSync.State
     var lastBurst: Date?
@@ -251,7 +251,13 @@ struct LiveLineModel: Equatable {
     static let pingTime: TimeInterval = 4
 
     var mark: Mark {
-        if let client { return client.isWaiting ? .waiting : .connected }
+        if let client {
+            switch client {
+            case .waiting, .moving: return .waiting
+            case .homeOffline, .appClosed, .noSource: return .warning
+            case .live, .needsUpdate: return .connected
+            }
+        }
         switch state {
         case .live: return .connected
         case .connecting: return .connecting
@@ -280,10 +286,15 @@ struct LiveLineModel: Equatable {
         }
     }
 
+    private func isMoving(_ l: ClientLink) -> Bool { if case .moving = l { return true }; return false }
+
     func justNow(at now: Date) -> Bool { lastBurst.map { now.timeIntervalSince($0) < Self.pingTime && now >= $0 } ?? false }
 
     var tooltip: String {
-        if let client { return client.isWaiting ? "\(clientName) sends no data yet. This Mac does not poll." : "This Mac shows the data of \(clientName). It does not poll." }
+        if let client {
+            if let why = client.refusal(client.homeName ?? clientName), !client.isWaiting, !isMoving(client) { return why }
+            return client.isWaiting ? "\(clientName) sends no data yet. This Mac does not poll." : "This Mac shows the data of \(client.homeName ?? clientName). It does not poll."
+        }
         if case .error(let m) = state { return "Cloud error: \(m)" }
         let feeds = liveFeeds > 0 && state == .off ? "No cloud. OverSire polls GitHub. Big Timer sends its changes live." : nil
         let burst = lastBurst.map { "Last event \(relativeTime($0))" }
@@ -311,6 +322,8 @@ final class LiveLine: Box {
         ping.alphaValue = 0.7
         ping.isHidden = true
         detail.lineBreakMode = .byTruncatingTail
+        title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        detail.setContentCompressionResistancePriority(.init(200), for: .horizontal)
         let row = NSStackView(h: [markView, title, detail, Spacer(), ping], spacing: 6)
         addSubview(line)
         addSubview(row)
@@ -405,6 +418,23 @@ final class LiveMark: NSView {
             h.lineWidth = 1.1
             h.lineCapStyle = .round
             h.stroke()
+        case .warning:
+            let t = NSRect(x: (bounds.width - 11) / 2, y: (bounds.height - 10) / 2, width: 11, height: 10)
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: t.midX, y: t.maxY))
+            p.line(to: NSPoint(x: t.maxX, y: t.minY))
+            p.line(to: NSPoint(x: t.minX, y: t.minY))
+            p.close()
+            p.lineWidth = 1.3
+            p.lineJoinStyle = .round
+            Palette.warn.setStroke()
+            p.stroke()
+            let bang = NSBezierPath()
+            bang.move(to: NSPoint(x: t.midX, y: t.minY + 3.6))
+            bang.line(to: NSPoint(x: t.midX, y: t.minY + 5.8))
+            bang.lineWidth = 1.2
+            bang.lineCapStyle = .round
+            bang.stroke()
         case .disconnected:
             let t = NSRect(x: (bounds.width - 11) / 2, y: (bounds.height - 10) / 2, width: 11, height: 10)
             let p = NSBezierPath()

@@ -16,8 +16,23 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     var lastUpdate = Date()
     var firstLoad = true
     /// A client scene sets it. OVERSIRE_UISHOTS_CLIENT seeds it.
-    var clientLink: ClientLink? = UIShots.clientSeed
+    var clientLink: ClientLink? = UIShots.clientSeed {
+        didSet { wireClient() }
+    }
     var clientName: String { "mbp" }
+    var clientCounts: (items: Int, repos: Int) { clientLink == nil ? (0, 0) : (2140, 38) }
+    private let linkBox = ClientLinkBox(nil)
+
+    /// A client scene gives the catalog a forward and the link, so the gated controls turn off as on a client.
+    func wireClient() {
+        linkBox.value = clientLink
+        guard clientLink != nil else { return }
+        if actions.forward == nil { actions.forward = { _ in throw ProviderError.transport("uishots") } }
+        actions.sourceName = { "mbp" }
+        let box = linkBox
+        actions.linkState = { box.value }
+        NotificationCenter.default.post(name: AppActionCatalog.availabilityChanged, object: nil)
+    }
     let projectStore: ProjectStore
     let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: UIShots.tmp + "/store")))
     lazy var agentIndex = AgentIndex(writes: writes)
@@ -166,11 +181,25 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         case "waiting": return .waiting
         case "live": return .live(updated: UIShots.clientTime, items: 2140, repos: 38)
         case "update": return .needsUpdate(home: "mbp", version: "1.42")
-        default: return nil
+        default: return clientState(ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLIENT"] ?? "")
         }
     }()
     static let clientTime = Date().addingTimeInterval(-120)
-    static let clientScenes = ["client-waiting", "client-live", "client-needs-update", "client-glance-waiting", "client-glance-live", "machines-client", "machines-client-waiting"]
+    /// The time of the data in the offline shots: 14:02 today.
+    static let clientDataTime = Calendar.current.date(bySettingHour: 14, minute: 2, second: 0, of: Date()) ?? Date()
+
+    /// offline, closed, nosource or moving (OVERSIRE-530): the state of a client of mbp. Others give nil.
+    static func clientState(_ name: String) -> ClientLink? {
+        switch name {
+        case "offline": return .homeOffline(home: "mbp", since: Date().addingTimeInterval(-720), data: clientDataTime)
+        case "closed": return .appClosed(home: "mbp", data: clientDataTime)
+        case "nosource": return .noSource(home: "mbp")
+        case "moving": return .moving(to: "box")
+        default: return nil
+        }
+    }
+    static let clientScenes = ["client-waiting", "client-live", "client-needs-update", "client-glance-waiting", "client-glance-live", "machines-client", "machines-client-waiting",
+                               "client-offline", "client-app-closed", "client-no-source", "client-moving", "client-glance-offline", "machines-client-offline"]
 
     // OVERSIRE_UISHOTS_AUTO=other, paused or client: the Queue page tells that auto start runs on mba, or waits for the home.
     static let autoRole: AutomationRole? = {
@@ -1184,7 +1213,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; MachinesController.shared.link = { nil } }; if UIShots.settingsClientScenes.contains(p) { MODE = .full; KEPT_ACCOUNTS = []; ClientSettings.shared.reset() }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = []; if !UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed } }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; if self.clientLink == nil { self.actions.forward = nil; self.actions.linkState = { nil } }; MachinesController.shared.link = { nil } }; if UIShots.settingsClientScenes.contains(p) { MODE = .full; KEPT_ACCOUNTS = []; ClientSettings.shared.reset(); self.clientLink = UIShots.clientSeed }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1701,10 +1730,10 @@ extension MachinesSnapshot {
     static let scenes: Set<String> = ["machines-loading", "machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine",
                                          "machines-auto-owner", "machines-auto-other", "machines-auto-paused", "machines-app-only",
                                          "machines-mode-full", "machines-mode-disabled", "machines-mode-confirm", "machines-mode-client",
-                                         "machines-auto-client", "machines-auto-client-none"]
+                                         "machines-auto-client", "machines-auto-client-none", "machines-client-offline", "machines-two-clients"]
 
     /// The scenes where this Mac is a client of mbp, as mba.
-    static let clientScenes: Set<String> = ["machines-mode-client", "machines-auto-client", "machines-auto-client-none"]
+    static let clientScenes: Set<String> = ["machines-mode-client", "machines-auto-client", "machines-auto-client-none", "machines-client-offline"]
 
     /// mbp is this Mac. mba and devbox are members, or found on the tailnet when this Mac is alone.
     static func sample(_ scene: String, now: Date = Date()) -> MachinesSnapshot {
@@ -1751,6 +1780,20 @@ extension MachinesSnapshot {
                                   member("mba", "100.71.4.12", roles: ["serve"], seen: 20, version: "0.3.2"),
                                   member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
         s.health = ["mba": .live, "devbox": .failed("no answer")]
+        if scene == "machines-two-clients" {
+            // mbp is home. mba and mini read its mirror (OVERSIRE-530).
+            s.group?.members = [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: 0), member("mba", "100.71.4.12", roles: ["serve"], seen: 0),
+                                member("mini", "100.64.9.7", roles: ["serve"], seen: 0)]
+            s.health = ["mba": .live, "mini": .live]
+            s.features = ["mba": [DaemonInfo.mirror, DaemonInfo.memberCalls], "mini": [DaemonInfo.mirror, DaemonInfo.memberCalls]]
+            let ready = [DaemonInfo.mirror, DaemonInfo.memberCalls]
+            s.info?.features = ready
+            s.readers = [MirrorPeer(machine: "mba", name: "OverSire on mba", head: 40, seenAt: now.addingTimeInterval(-20)),
+                         MirrorPeer(machine: "mini", name: "OverSire on mini", head: 40, seenAt: now.addingTimeInterval(-180))]
+            s.sessions["mba"] = []
+            s.sessions["mini"] = []
+            return s
+        }
         s.info?.features = [DaemonInfo.launchEnv, DaemonInfo.agentSecrets]
         s.features["mba"] = []
         s.latest = "0.4.1"
@@ -1775,9 +1818,9 @@ extension MachinesSnapshot {
             s.features = ["mbp": ready]
             s.latest = "0.4.0"
             s.group = Group(id: "g-mbp", name: "My machines", home: "mbp", version: 4,
-                            members: [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: 0), member("mba", "100.71.4.12", roles: ["serve"], seen: 0),
-                                      member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
-            s.health = ["mbp": .live, "devbox": .failed("no answer")]
+                            members: [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: scene == "machines-client-offline" ? 720 : 0),
+                                      member("mba", "100.71.4.12", roles: ["serve"], seen: 0), member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
+            s.health = ["mbp": scene == "machines-client-offline" ? .failed("no answer") : .live, "devbox": .failed("no answer")]
             s.sessions["mba"] = []
             let mbp = Lease(name: AutomationOwner.leaseName, holder: "app-mbp", holderName: "mbp", epoch: 3, until: now.addingTimeInterval(60))
             switch scene {
@@ -1881,8 +1924,16 @@ extension UIShots {
 
     /// The client scenes: the pages, the popover and Settings › Machines of a client of mbp.
     func clientScene(_ scene: String, in w: AppWindow) {
-        let link: ClientLink = scene.hasSuffix("waiting") ? .waiting : scene == "client-needs-update" ? .needsUpdate(home: "mbp", version: "1.42")
-            : .live(updated: UIShots.clientTime, items: 2140, repos: 38)
+        let link: ClientLink
+        switch scene {
+        case _ where scene.hasSuffix("waiting"): link = .waiting
+        case "client-needs-update": link = .needsUpdate(home: "mbp", version: "1.42")
+        case "client-offline", "client-glance-offline", "machines-client-offline": link = UIShots.clientState("offline") ?? .waiting
+        case "client-app-closed": link = UIShots.clientState("closed") ?? .waiting
+        case "client-no-source": link = UIShots.clientState("nosource") ?? .waiting
+        case "client-moving": link = UIShots.clientState("moving") ?? .waiting
+        default: link = .live(updated: UIShots.clientTime, items: 2140, repos: 38)
+        }
         clientLink = link
         bus.post(DataChange(.connection, origin: .event))
         if scene.hasPrefix("client-glance") {
@@ -1893,7 +1944,7 @@ extension UIShots {
             glance = g
         } else if scene.hasPrefix("machines-") {
             MachinesController.shared.link = { link }
-            UIShots.machines("machines-mode-client", in: w)
+            UIShots.machines(scene == "machines-client-offline" ? scene : "machines-mode-client", in: w)
         } else {
             w.router.go(.work(.items))
         }
@@ -1901,7 +1952,7 @@ extension UIShots {
 
     /// OVERSIRE-529: the shared settings of a client of mbp. The state stays in memory: no scene saves the config.
     /// accounts-client: Accounts and sync. The others show Agents and queue with the header and the banner of that state.
-    static let settingsClientScenes = ["accounts-client", "settings-client", "settings-client-saving", "settings-client-conflict", "settings-client-failed"]
+    static let settingsClientScenes = ["accounts-client", "settings-client", "settings-client-saving", "settings-client-conflict", "settings-client-failed", "settings-client-offline"]
 
     func settingsClientScene(_ scene: String, in w: AppWindow) {
         MODE = .client
@@ -1920,6 +1971,7 @@ extension UIShots {
         case "settings-client-failed": state = .failed(ClientSettings.noAnswer("mbp"))
         default: state = .idle
         }
+        if scene == "settings-client-offline" { clientLink = UIShots.clientState("offline") }
         ClientSettings.shared.seed(home, state: state)
         w.router.go(.settings(.general))   // a fresh page
         w.router.go(scene == "accounts-client" ? .settings(.accounts) : .settings(.agents))
@@ -1929,7 +1981,7 @@ extension UIShots {
     static func machines(_ scene: String, in w: AppWindow) {
         let c = MachinesController.shared
         c.frozen = true
-        ClientMode.supported = scene.hasPrefix("machines-mode-")
+        ClientMode.supported = scene.hasPrefix("machines-mode-") || scene == "machines-two-clients"
         MODE = MachinesSnapshot.clientScenes.contains(scene) ? .client : .full
         let account = AccountConfig(account: AccountID(provider: ProviderID(rawValue: "plane"), id: "ocral"))
         KEPT_ACCOUNTS = MODE == .client ? [account, AccountConfig(account: AccountID(provider: ProviderID(rawValue: "github"), id: "ocral")),

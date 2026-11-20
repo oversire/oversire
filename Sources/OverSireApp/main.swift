@@ -157,14 +157,21 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 let group = await MainActor.run { self?.relay.group }
                 await group?.rereadAndWait()
             }
+            m.socketUp = { [weak self] in self?.relay.group?.places(sessions: nil).homeOnline ?? false }
             m.onStatus = { [weak self] _ in
-                self?.bus.post(DataChange(.connection, origin: .event))
+                // The pages watch .config. A banner and the off controls change with the link.
+                self?.bus.post(DataChange([.connection, .config], origin: .event))
+                NotificationCenter.default.post(name: AppActionCatalog.availabilityChanged, object: nil)
+            }
+            NotificationCenter.default.addObserver(forName: MachineHub.changed, object: nil, queue: .main) { [weak m] _ in
+                MainActor.assumeIsolated { m?.socketChanged() }
             }
             return m
         }
     }()
     var clientLink: ClientLink? { MainActor.assumeIsolated { clientMirror?.status } }
     var clientName: String { MainActor.assumeIsolated { clientMirror?.name ?? "home" } }
+    var clientCounts: (items: Int, repos: Int) { MainActor.assumeIsolated { clientMirror?.counts() ?? (0, 0) } }
     var pages: AppWindow? { appWindow }
     lazy var assistantRoot = AssistantRoot(app: self)
     /// Nil: the panel links to Settings › AI.
@@ -704,7 +711,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // A client fetches nothing through gh. It pulls the mirror of home.
         if MODE == .client {
             MainActor.assumeIsolated { clientMirror?.pull() }
-            if force { Task { _ = await actions.run("app.refresh", ActionArgs()) } }
+            if force, actions.available("app.refresh") { Task { _ = await actions.run("app.refresh", ActionArgs()) } }
             completion?()
             return
         }
@@ -1142,6 +1149,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             return try await c.memberCall(req)
         }
         actions.sourceName = { [weak self] in MainActor.assumeIsolated { self?.clientName ?? "home" } }
+        if let box = MainActor.assumeIsolated({ clientMirror?.box }) { actions.linkState = { box.value } }
         let settings = ClientSettings.shared
         settings.call = actions.forward
         settings.sourceName = actions.sourceName

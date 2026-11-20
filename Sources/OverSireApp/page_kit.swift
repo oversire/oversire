@@ -168,6 +168,26 @@ final class ActionButton: NSButton {
     enum Style { case plain, primary, link, ghost, danger }
     var onClick: (() -> Void)?
     var idle: (title: String, image: NSImage?, enabled: Bool)?   // set while busy
+    private var wanted = true
+    private var tipBefore: String?
+
+    /// The reason that a client cannot run the action of this button now. While it is set, the button stays off.
+    var gate: String? {
+        didSet {
+            guard gate != oldValue else { return }
+            if oldValue == nil { tipBefore = toolTip }
+            super.isEnabled = wanted && gate == nil
+            toolTip = gate ?? tipBefore
+        }
+    }
+
+    override var isEnabled: Bool {
+        get { super.isEnabled }
+        set {
+            wanted = newValue
+            super.isEnabled = newValue && gate == nil
+        }
+    }
 
     init(_ title: String, symbol: String? = nil, style: Style = .plain, key: String? = nil, _ action: (() -> Void)? = nil) {
         onClick = action
@@ -216,6 +236,18 @@ final class ActionButton: NSButton {
 // A small rounded label: "main", "FRITZ-17", "3 / 5". A click handler makes it a button.
 class Chiplet: Box {
     var onClick: (() -> Void)?
+    private var tipBefore: String?
+
+    /// The reason that a client cannot run the action of this chip now. While it is set, a click does nothing.
+    var gate: String? {
+        didSet {
+            guard gate != oldValue else { return }
+            if oldValue == nil { tipBefore = toolTip }
+            toolTip = gate ?? tipBefore
+            alphaValue = gate == nil ? 1 : 0.5
+            setAccessibilityEnabled(gate == nil)
+        }
+    }
     /// False: Tab skips the chip. A card that picks with keys sets it.
     var keyFocus = true
     private let label: NSTextField
@@ -256,15 +288,15 @@ class Chiplet: Box {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.label.stringValue = old }
     }
 
-    override func mouseUp(with event: NSEvent) { onClick?() }
-    override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
-    override func accessibilityPerformPress() -> Bool { onClick?(); return onClick != nil }
+    override func mouseUp(with event: NSEvent) { if gate == nil { onClick?() } }
+    override func resetCursorRects() { if onClick != nil, gate == nil { addCursorRect(bounds, cursor: .pointingHand) } }
+    override func accessibilityPerformPress() -> Bool { guard gate == nil else { return false }; onClick?(); return onClick != nil }
 
     // A chip with a click handler takes keyboard focus. Space or Return presses it.
-    override var acceptsFirstResponder: Bool { onClick != nil }
-    override var canBecomeKeyView: Bool { onClick != nil && keyFocus }
+    override var acceptsFirstResponder: Bool { onClick != nil && gate == nil }
+    override var canBecomeKeyView: Bool { onClick != nil && keyFocus && gate == nil }
     override func keyDown(with event: NSEvent) {
-        if onClick != nil, [36, 49, 76].contains(event.keyCode) { onClick?(); return }
+        if onClick != nil, gate == nil, [36, 49, 76].contains(event.keyCode) { onClick?(); return }
         super.keyDown(with: event)
     }
     override func drawFocusRingMask() { NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill() }

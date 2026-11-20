@@ -33,8 +33,23 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
     /// Runs after a forwarded action that worked. A client pulls the mirror then.
     var forwarded: (@Sendable () -> Void)?
 
+    /// The link state of a client, for any thread. Nil in Full mode.
+    var linkState: @Sendable () -> ClientLink? = { nil }
+
     /// True when a client sends the action to the source app.
     func forwards(_ id: String) -> Bool { forward != nil && byId[id] != nil && !MemberCalls.local.contains(id) }
+
+    /// Why a client cannot run the action now, or nil. Only a forwarded action that changes something waits for the link.
+    func refusal(_ id: String) -> String? {
+        guard forwards(id), let kind = byId[id]?.kind, kind != .read, let link = linkState(), !link.canChange else { return nil }
+        return link.refusal(sourceName())
+    }
+
+    /// False when a client cannot run the action now. A local action is always available.
+    func available(_ id: String) -> Bool { refusal(id) == nil }
+
+    /// The link of a client changed. Off controls look again.
+    static let availabilityChanged = Notification.Name("ActionAvailabilityChanged")
 
     /// The busy text of a button on a client, or nil when the action runs here.
     func sentText(_ id: String) -> String? { forwards(id) ? "Sent to \(sourceName())…" : nil }
@@ -76,6 +91,7 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
 
     func run(_ id: String, _ args: ActionArgs) async -> ActionResult {
         guard let spec = byId[id] else { return .notAllowed("No action \(id).") }
+        if let text = refusal(id) { return .notAllowed(text) }
         if let forward, forwards(id) { return await send(id, args, via: forward) }
         return await spec.perform(args)
     }
@@ -94,6 +110,11 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
     func click(_ id: String, _ values: [String: JSONValue] = [:], in window: NSWindow?, confirm: String? = nil, asked: Bool = false,
                started: (() -> Void)? = nil, done: ((ActionResult) -> Void)? = nil) {
         guard let spec = byId[id] else { return }
+        if let text = refusal(id) {
+            MainActor.assumeIsolated { ClickToast.show(text, bad: true) }
+            done?(.notAllowed(text))
+            return
+        }
         let go = {
             started?()
             let sent = self.forwards(id)
@@ -129,6 +150,7 @@ extension ActionButton {
     convenience init(_ title: String, symbol: String? = nil, style: Style = .plain, action id: String, _ args: [String: JSONValue] = [:],
                      confirm: String? = nil, done: ((ActionResult) -> Void)? = nil) {
         self.init(title, symbol: symbol, style: style)
+        follows(id)
         onClick = { [weak self] in
             guard let self, let catalog = (NSApp.delegate as? AppData)?.actions else { return }
             catalog.click(id, args, in: self.window, confirm: confirm, started: { [weak self] in self?.busy(catalog.sentText(id) ?? self?.title ?? "") }) { [weak self] r in
@@ -136,6 +158,50 @@ extension ActionButton {
                 done?(r)
             }
         }
+    }
+}
+
+/// Keeps a control off while a client cannot run an action. It looks again when the link changes.
+private final class ActionGate {
+    let id: String
+    private weak var view: NSView?
+    private var token: NSObjectProtocol?
+    private var wasEnabled = true
+    private var off = false
+
+    init(_ view: NSView, _ id: String) {
+        self.view = view
+        self.id = id
+        token = NotificationCenter.default.addObserver(forName: AppActionCatalog.availabilityChanged, object: nil, queue: .main) { [weak self] _ in self?.apply() }
+        apply()
+    }
+
+    deinit { token.map(NotificationCenter.default.removeObserver) }
+
+    func apply() {
+        guard let view else { return }
+        let text = (NSApp?.delegate as? AppData)?.actions.refusal(id)
+        switch view {
+        case let b as ActionButton: b.gate = text
+        case let c as Chiplet: c.gate = text
+        case let c as NSControl:
+            if text != nil, !off { wasEnabled = c.isEnabled; off = true }
+            c.isEnabled = text == nil ? (off ? wasEnabled : c.isEnabled) : false
+            if text == nil { off = false }
+            c.toolTip = text ?? c.toolTip
+        default: break
+        }
+    }
+}
+
+private var gateKey = 0
+
+extension NSView {
+    /// Turns the control off while a client cannot run the action `id`. The tooltip tells why.
+    @discardableResult
+    func follows(_ id: String) -> Self {
+        objc_setAssociatedObject(self, &gateKey, ActionGate(self, id), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        return self
     }
 }
 

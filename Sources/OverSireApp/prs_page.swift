@@ -37,7 +37,7 @@ final class PRsPage: Page {
             }
             return true
         }
-        let update: [PageRow] = data.clientLink.flatMap { l in l.banner == nil ? nil : [PageRow("update", "\(l)") { l.banner ?? NSView() }] } ?? []
+        let update = ClientBanner.rows()
         let waiting = data.clientLink?.isWaiting == true, name = data.clientName
         guard !all.isEmpty, !waiting else {
             let loading = data.firstLoad
@@ -103,12 +103,12 @@ final class PRsPage: Page {
         if let verb = busy[id] {
             actions.append(InlineSpinner(verb + "…"))
         } else {
-            if !p.mine { actions.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }) }
+            if !p.mine { actions.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }.follows("pr.approve")) }
             actions.append(MenuChip("Merge", symbol: "arrow.triangle.merge") { [weak self] in
                 [("Squash and merge", MergeMethod.squash), ("Rebase and merge", .rebase), ("Merge commit", .merge)].map { t, m in
                     MenuAction(t) { self?.act(repo, p, .merge(m), verb: t) }
                 }
-            })
+            }.follows("pr.merge"))
         }
         cells["actions"] = NSStackView(h: actions, spacing: 6)
         let r = TableRow(table, cells: cells, height: 50, label: "\(p.mine ? "My PR" : "Review request"): \(p.title), \(sub), \(state)") {

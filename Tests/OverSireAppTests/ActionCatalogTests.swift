@@ -406,6 +406,40 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(c, .notAllowed("No."))
     }
 
+    // OVERSIRE-530
+    func testOfflineRefusesChange() async {
+        final class Seen: @unchecked Sendable { var n = 0 }
+        let d = seeded()
+        let seen = Seen()
+        d.actions.forward = { _ in seen.n += 1; return AppCallResult(id: "m", status: .ok, summary: "") }
+        d.actions.sourceName = { "mbp" }
+        let offline = ClientLink.homeOffline(home: "mbp", since: Date(), data: Date())
+        d.actions.linkState = { offline }
+        let args = ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Done")]))
+        let r = await d.actions.run("item.setStatus", args)
+        XCTAssertEqual(r, .notAllowed("mbp is offline. Try again when it is back."))
+        XCTAssertEqual(seen.n, 0, "an offline client sends nothing")
+        XCTAssertFalse(d.actions.available("item.setStatus"))
+        for spec in d.actions.all where d.actions.forwards(spec.id) {
+            XCTAssertEqual(d.actions.available(spec.id), spec.kind == .read, spec.id)
+        }
+        d.actions.linkState = { .appClosed(home: "mbp", data: nil) }
+        XCTAssertEqual(d.actions.refusal("item.setStatus"), "The OverSire app on mbp is not open.")
+        d.actions.linkState = { .live(updated: Date(), items: 1, repos: 1) }
+        XCTAssertTrue(d.actions.available("item.setStatus"))
+    }
+
+    func testOfflineAllowsLocal() async {
+        let d = seeded()
+        d.actions.forward = { _ in AppCallResult(id: "m", status: .ok, summary: "") }
+        d.actions.linkState = { .homeOffline(home: "mbp", since: Date(), data: nil) }
+        for id in MemberCalls.local where d.actions.spec(id) != nil {
+            XCTAssertTrue(d.actions.available(id), id)
+        }
+        XCTAssertTrue(d.actions.available("item.get"), "a read stays on")
+        XCTAssertTrue(d.actions.available("machine.mode"), "a client can switch back to Full")
+    }
+
     func testFullModeRunsHere() async {
         let d = seeded()
         XCTAssertNil(d.actions.sentText("item.setStatus"))

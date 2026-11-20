@@ -54,12 +54,15 @@ protocol AppData: AnyObject {
     var clientLink: ClientLink? { get }
     /// The name of the machine that gives the data of a client.
     var clientName: String { get }
+    /// The items and repos that a client holds.
+    var clientCounts: (items: Int, repos: Int) { get }
 }
 
 extension AppData {
     var pages: AppWindow? { nil }
     var clientLink: ClientLink? { nil }
     var clientName: String { "home" }
+    var clientCounts: (items: Int, repos: Int) { (0, 0) }
 
     /// The problems for the marks. Empty when the Logs settings turn the mark off.
     var openProblems: [Problem] { LOGS_CFG.menuMark ? logs?.problems.open ?? [] : [] }

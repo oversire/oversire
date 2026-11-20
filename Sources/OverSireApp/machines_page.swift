@@ -28,6 +28,8 @@ struct MachinesSnapshot: Equatable {
     var automations: AutomationRole?
     /// machine → the features of its daemon. A machine without an entry gave no answer.
     var features: [String: [String]] = [:]
+    /// The Macs that read the mirror of the home. Empty when the home has no mirror.
+    var readers: [MirrorPeer] = []
 }
 
 /// The rows of the page. It has no AppKit types, so tests compare it.
@@ -54,6 +56,8 @@ struct MachinesModel: Equatable {
         var behind: Bool
         /// The features of its daemon. nil: not read.
         var features: [String]? = nil
+        /// The machine reads the data of the home in Client mode (seen in the last 10 min).
+        var client = false
 
         var hostText: String { "\(host) · oversire \(version ?? "before 0.2.2")" }
 
@@ -209,18 +213,27 @@ struct MachinesModel: Equatable {
         var keptAccounts: Int
         /// The link of a client to its home. nil in Full mode.
         var link: ClientLink?
+        /// The count of items and repos that the client holds.
+        var items = 0
+        var repos = 0
+        var now = Date()
 
-        var dataTitle: String { "Data from \(home ?? "home")" }
+        var dataTitle: String { "Data from \(link?.homeName ?? home ?? "home")" }
 
         var dataTone: Tone {
             switch link {
             case .live?: return Tone(symbol: "circle.fill", color: Palette.ok, word: "Live")
             case .needsUpdate?: return Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: "Update")
+            case .homeOffline(_, let since, _)?:
+                return Tone(symbol: "circle", color: Palette.dim, word: MachinesModel.offline(since, now: now))
+            case .appClosed?: return Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: "App closed")
+            case .noSource?: return Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: "No source")
+            case .moving?: return Tone(symbol: "clock", color: Palette.dim, word: "Moving")
             default: return Tone(symbol: "clock", color: Palette.dim, word: "Waiting")
             }
         }
 
-        var dataNote: String { (link ?? .waiting).note(home ?? "home") }
+        var dataNote: String { (link ?? .waiting).note(link?.homeName ?? home ?? "home", items: items, repos: repos) }
 
         static let fullNote = "Full: this Mac uses its own accounts and polls Plane, GitHub and CI."
 
@@ -296,7 +309,8 @@ struct MachinesModel: Equatable {
     var missingHooks: [String] { hooks.filter { $0.state == .missing || $0.state == .outdated }.map(\.name) }
 
     init(_ s: MachinesSnapshot, config: MachinesConfig, now: Date = Date(), mode current: AppMode = MODE,
-         keptAccounts: Int = KEPT_ACCOUNTS.count, clientReader: Bool = ClientMode.supported, link: ClientLink? = nil) {
+         keptAccounts: Int = KEPT_ACCOUNTS.count, clientReader: Bool = ClientMode.supported, link: ClientLink? = nil,
+         counts: (items: Int, repos: Int) = (0, 0)) {
         daemon = s.info
         installed = s.installed
         path = s.path
@@ -329,7 +343,8 @@ struct MachinesModel: Equatable {
                            home: s.group?.home == m.machine || (s.group == nil && isThis), runner: m.roles.contains("runner"), online: online,
                            status: online ? "Online" : Self.offline(m.lastSeen, now: now), sessions: active.count,
                            waiting: active.filter { $0.state == .waiting }.count, runsSessions: runs, muted: config.muted.contains(name),
-                           version: version, behind: false, features: isThis ? s.info.map { $0.features ?? [] } : s.features[name])
+                           version: version, behind: false, features: isThis ? s.info.map { $0.features ?? [] } : s.features[name],
+                           client: s.readers.contains { $0.machine == name && now.timeIntervalSince($0.seenAt) < Self.clientWindow })
         }
         let newest = ([s.latest] + machines.map(\.version)).compactMap { $0 }.max { Updater.isNewer($1, than: $0) }
         if let newest {
@@ -377,8 +392,12 @@ struct MachinesModel: Equatable {
         case .client(let h)?: holder = h
         case .paused?, nil: break
         }
-        mode = Mode(mode: current, home: home, enabled: reason == nil, reason: reason, holderIsSelf: isSelf, holder: holder, keptAccounts: keptAccounts, link: link)
+        mode = Mode(mode: current, home: home, enabled: reason == nil, reason: reason, holderIsSelf: isSelf, holder: holder, keptAccounts: keptAccounts, link: link,
+                    items: counts.items, repos: counts.repos, now: now)
     }
+
+    /// A reader that the home saw in this time shows as CLIENT.
+    static let clientWindow: TimeInterval = 600
 
     static func offline(_ seen: Date?, now: Date) -> String {
         guard let seen else { return "Offline" }
@@ -476,7 +495,8 @@ final class MachinesController {
     var model: MachinesModel {
         var s = snapshot
         if let o = owner() { s.automations = o.role }
-        return MachinesModel(s, config: config(), link: link())
+        let c = (NSApp?.delegate as? AppData)?.clientCounts ?? (0, 0)
+        return MachinesModel(s, config: config(), link: link(), counts: c)
     }
     var busy: Bool { DaemonSetup.shared.busy }
 
@@ -518,9 +538,18 @@ final class MachinesController {
                 if let i = try? await client.whoami() { s.features[l.machine] = i.features ?? [] }
             }
         }
+        await loadReaders(&s)
         snapshot = s
         loadedAt = Date()
         changed()
+    }
+
+    /// The readers of the mirror, from the home daemon. A peek records no reader.
+    @MainActor private func loadReaders(_ s: inout MachinesSnapshot) async {
+        guard let home = s.group?.home.rawValue else { return }
+        let features = home == s.info?.machine.rawValue ? s.info?.features : s.features[home]
+        guard features?.contains(DaemonInfo.mirror) == true, let client = daemon(home) else { return }
+        s.readers = (try? await client.mirrorPeek())?.readers ?? []
     }
 
     /// For tests and `--uishots`. loaded false: the first read did not end.
@@ -840,6 +869,7 @@ extension SettingsPage {
             if x.isThis { badges.append(NSTextField.text("this Mac", size: 11.5, color: Palette.dim)) }
             if x.home { badges.append(Chiplet("HOME")) }
             if x.runner { badges.append(Chiplet("RUNNER")) }
+            if x.client { badges.append(Chiplet("CLIENT", symbol: "eye")) }
             if x.muted { badges.append(Chiplet("MUTED", symbol: "speaker.slash")) }
             if x.runsSessions { badges.append(Chiplet("SESSIONS", symbol: "terminal")) }
             let name = NSStackView(v: [NSStackView(h: badges, spacing: 6),
@@ -883,6 +913,7 @@ extension SettingsPage {
             let pop = PopUp(titles + (picked == nil ? ["None"] : []), selected: picked ?? titles.count, label: "Run sessions on") { i in
                 if i < m.sessionChoices.count { c.setSessions(m.sessionChoices[i]) }
             }
+            if let l = offlineLink { pop.lock(l.refusal(l.homeName ?? data.clientName) ?? "") }
             card.add(Row([TwoLine("Run sessions on", Self.runSessionsNote, lines: 2), Spacer(), pop], height: 62, label: "Run sessions on"))
         }
         if let a = m.automations { card.add(automationsRow(a)) }

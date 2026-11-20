@@ -278,6 +278,11 @@ extension DaemonClient {
         try await mirrorCall(request("/v1/mirror"))
     }
 
+    /// The head with no reader record. Needs a daemon that knows `peek` (older ones record the caller).
+    public func mirrorPeek() async throws -> MirrorHead {
+        try await mirrorCall(request("/v1/mirror?peek=1"))
+    }
+
     /// Member route. The docs with seq above `after`. A page can be large, so the call waits 30 s.
     public func mirrorPage(after: Int64, limit: Int, epoch: String?) async throws -> MirrorPage {
         var r = request("/v1/mirror/docs" + Self.query(["after": String(after), "limit": String(limit), "epoch": epoch]))
