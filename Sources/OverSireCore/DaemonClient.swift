@@ -338,7 +338,7 @@ public final class DaemonClient: Sendable {
         return try await get("/v1/items/\(Self.escape(q.item))/events?" + (c.percentEncodedQuery ?? ""))
     }
 
-    private static func query(_ items: KeyValuePairs<String, String?>) -> String {
+    package static func query(_ items: KeyValuePairs<String, String?>) -> String {
         var c = URLComponents()
         c.queryItems = items.compactMap { k, v in v.map { URLQueryItem(name: k, value: $0) } }
         // Go reads "+" in a query as a space.

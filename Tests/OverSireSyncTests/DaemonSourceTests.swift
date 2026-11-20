@@ -141,6 +141,91 @@ final class DaemonSourceTests: XCTestCase {
         do { _ = try await good.whoami(); XCTFail("no error") } catch ProviderError.transport {}
     }
 
+    /// Answers each request with one status and body, and keeps the requests.
+    private final class Canned: HTTPTransport, @unchecked Sendable {
+        let status: Int
+        let body: Data
+        let requests = Locked<[URLRequest]>([])
+        init(_ status: Int, _ body: Data) {
+            self.status = status
+            self.body = body
+        }
+        func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+            requests.with { $0.append(request) }
+            return (body, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
+    private func canonicalJSON(_ data: Data) throws -> String {
+        let obj = try JSONSerialization.jsonObject(with: data)
+        return String(decoding: try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
+    }
+
+    func testMirrorPutSendsJSON() async throws {
+        let batch = try contractFixture("mirror-put", "batch")
+        let head = try String(decoding: contractFixture("mirror-head", "live"), as: UTF8.self)
+        let canned = Canned(200, Data(#"{"head":\#(head),"applied":2,"same":1}"#.utf8))
+        let client = DaemonClient(base: URL(string: "http://mbp:7690")!, token: "osd1.x", http: canned)
+        let put: MirrorPut = try contract(MirrorPut.self, "mirror-put", "batch")
+        let res = try await client.mirrorPut(put)
+        XCTAssertEqual(res.applied, 2)
+        XCTAssertEqual(res.same, 1)
+        XCTAssertEqual(res.head.head, 14)
+        let r = try XCTUnwrap(canned.requests.get().last)
+        XCTAssertEqual(r.httpMethod, "PUT")
+        XCTAssertEqual(r.url?.path, "/v1/mirror/docs")
+        XCTAssertEqual(r.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(r.value(forHTTPHeaderField: "Authorization"), "Bearer osd1.x")
+        XCTAssertEqual(try canonicalJSON(try XCTUnwrap(r.httpBody)), try canonicalJSON(batch))
+    }
+
+    func testMirrorReadsSendTheCursorAndDecode() async throws {
+        let canned = Canned(200, try contractFixture("mirror-page", "page"))
+        let client = DaemonClient(base: URL(string: "http://mbp:7690")!, token: nil, http: canned)
+        let page = try await client.mirrorPage(after: 5, limit: 200, epoch: "e7c1a9f04b2d4c58")
+        XCTAssertEqual(page.docs.map(\.seq), [12, 14])
+        XCTAssertEqual(page.docs[1].deleted, true)
+        let r = try XCTUnwrap(canned.requests.get().last)
+        XCTAssertEqual(r.httpMethod ?? "GET", "GET")
+        XCTAssertEqual(r.url?.path, "/v1/mirror/docs")
+        XCTAssertEqual(r.url?.query, "after=5&limit=200&epoch=e7c1a9f04b2d4c58")
+        let noEpoch = try await DaemonClient(base: URL(string: "http://mbp:7690")!, token: nil, http: canned)
+            .mirrorPage(after: 0, limit: 10, epoch: nil)
+        XCTAssertEqual(noEpoch.next, 14)
+        XCTAssertEqual(canned.requests.get().last?.url?.query, "after=0&limit=10")
+
+        let head = try await DaemonClient(base: URL(string: "http://mbp:7690")!, token: nil, http: Canned(200, try contractFixture("mirror-head", "no-source"))).mirrorHead()
+        XCTAssertEqual(head.head, 0)
+        XCTAssertNil(head.source)
+        let index = try await DaemonClient(base: URL(string: "http://mbp:7690")!, token: nil, http: Canned(200, try contractFixture("mirror-index", "index"))).mirrorIndex()
+        XCTAssertEqual(index.docs.map(\.kind), [.catalog, .item])
+    }
+
+    func testMirrorNotHomeGivesStoreNotHome() async throws {
+        let client = DaemonClient(base: URL(string: "http://mba:7690")!, token: nil,
+                                  http: Canned(409, Data(#"{"error":"mba is home","home":"mbp"}"#.utf8)))
+        do { _ = try await client.mirrorHead(); XCTFail("no error") } catch let e as StoreNotHome {
+            XCTAssertEqual(e, StoreNotHome(home: "mbp", message: "mba is home"))
+        }
+    }
+
+    func testMirrorMapsTheOtherErrors() async throws {
+        func call(_ status: Int, _ body: String) async -> Error? {
+            let client = DaemonClient(base: URL(string: "http://mbp:7690")!, token: nil, http: Canned(status, Data(body.utf8)))
+            do { _ = try await client.mirrorPut(MirrorPut(epoch: "e", source: "app-1", sourceName: "mbp", appVersion: "1", docs: [])); return nil } catch { return error }
+        }
+        let epoch = await call(409, #"{"error":"The mirror changed. Send all again.","epoch":"e2"}"#)
+        XCTAssertEqual(epoch as? ProviderError, .vendor(code: "409", message: "The mirror changed. Send all again."))
+        let big = await call(413, #"{"error":"The batch is too large."}"#)
+        XCTAssertEqual(big as? ProviderError, .vendor(code: "413", message: "The batch is too large."))
+        let lease = await call(403, #"{"error":"mba does not hold the automations lease."}"#)
+        XCTAssertEqual(lease as? ProviderError, .vendor(code: "forbidden", message: "mba does not hold the automations lease."))
+        let bare = await call(403, "")
+        XCTAssertEqual(bare as? ProviderError, .forbidden)
+        let gone = await call(404, "")
+        XCTAssertEqual(gone as? ProviderError, .notFound)
+    }
+
     func testDaemonClientIssuesAnAppCredential() async throws {
         let daemon = FakeDaemon()
         let c = try await DaemonClient(base: loopback, token: nil, http: daemon).issueApp(name: "OverSire on mba")

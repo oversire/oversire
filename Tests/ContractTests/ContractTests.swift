@@ -124,6 +124,12 @@ final class ContractTests: XCTestCase {
         "event-append-result": roundTrip(Event.AppendResult.self),
         "item-links": roundTrip(ItemLinks.self),
         "event-frame": roundTrip(Event.Frame.self),
+        "mirror-doc": roundTrip(MirrorDoc.self),
+        "mirror-put": roundTrip(MirrorPut.self),
+        "mirror-head": roundTrip(MirrorHead.self),
+        "mirror-page": roundTrip(MirrorPage.self),
+        "mirror-index": roundTrip(MirrorIndex.self),
+        "mirror-frame": roundTrip(MirrorFrame.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
@@ -134,7 +140,7 @@ final class ContractTests: XCTestCase {
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
         "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1, "review.json": 1,
-        "event.json": 1, "event-kinds.json": 1, "app-call.json": 1,
+        "event.json": 1, "event-kinds.json": 1, "app-call.json": 1, "mirror.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
