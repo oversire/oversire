@@ -165,6 +165,17 @@ final class LiveSync {
 
     // MARK: Lifecycle
 
+    enum SourceKind { case polling, fallback, cloud, daemons }
+
+    /// The sources that run. A client polls no provider and uses no cloud. It reads only the daemons.
+    static func sourceKinds(mode: AppMode, cloud: Bool, fallback: Bool) -> Set<SourceKind> {
+        if mode == .client { return [.daemons] }
+        var k: Set<SourceKind> = [.polling, .daemons]
+        if cloud { k.insert(.cloud) }
+        if fallback { k.insert(.fallback) }
+        return k
+    }
+
     /// Makes the sources again from the accounts, the repos and the cloud settings.
     func start() {
         stopSources()
@@ -178,13 +189,16 @@ final class LiveSync {
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.lastPoll = Date() } }
         }
         let online: @Sendable () -> Bool = { NetworkPath.shared.isOnline }
-        let polling = PollingSource(providers: ENV.pollers(repos: polled), cursors: cursors, intervals: intervals, isOnline: online, onPolled: onPolled)
+        let kinds = Self.sourceKinds(mode: MODE, cloud: p.cloud, fallback: !p.fallback.isEmpty)
+        let polling = kinds.contains(.polling)
+            ? PollingSource(providers: ENV.pollers(repos: polled), cursors: cursors, intervals: intervals, isOnline: online, onPolled: onPolled) : nil
         // Their own cursor file: two pollers of one account must not write the same cursor.
-        let fallback = p.fallback.isEmpty ? nil
+        let fallback = !kinds.contains(.fallback) ? nil
             : PollingSource(providers: ENV.pollers(repos: p.fallback),
                             cursors: CursorStore(url: URL(fileURLWithPath: FALLBACK_CURSORS_PATH)),
                             intervals: PollIntervals(normal: .seconds(POLL_NORMAL), active: .seconds(POLL_NORMAL)), isOnline: online, onPolled: onPolled)
-        let cloud = makeCloud(generation: gen)
+        var cloud: CloudSource?
+        if kinds.contains(.cloud) { cloud = makeCloud(generation: gen) } else { useCloud(nil) }
         let daemons = makeDaemons(p.links, generation: gen)
         let feeds = makeFeeds(p.accounts, generation: gen)
         let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons + feeds, onCloudHealth: { h in

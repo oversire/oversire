@@ -360,4 +360,57 @@ final class ActionCatalogTests: XCTestCase {
         }
         XCTAssertEqual(hits, [], hits.joined(separator: "\n"))
     }
+
+    // OVERSIRE-524
+    func testMachineModeIsASettingsAction() {
+        let spec = TestAppData().actions.all.first { $0.id == "machine.mode" }
+        XCTAssertEqual(spec?.kind, .settings)
+    }
+
+    func testMachineModeWritesEvent() async {
+        actor Outlet: EventOutlet {
+            var rows: [EventDraft] = []
+            func append(_ drafts: [EventDraft]) async { rows += drafts }
+            func link(_ l: [ItemLink]) async {}
+        }
+        final class Calls: @unchecked Sendable {
+            var written: [AppMode] = []
+            var relaunches = 0
+        }
+        let outlet = Outlet(), calls = Calls()
+        let desk = EventDesk(outlet: outlet)
+        desk.machine = { "mba" }
+        let mode = MachinesModel.Mode(mode: .full, home: "mbp", enabled: true, reason: nil, holderIsSelf: false, holder: "mbp", keptAccounts: 2)
+        var sw = ModeSwitch(state: { mode }, write: { calls.written.append($0) }, desk: { desk }, relaunch: { calls.relaunches += 1 }, settle: {})
+        let client = ActionArgs(.object(["mode": .string("client")]))
+
+        let agent = await sw.run(ActionArgs(.object(["mode": .string("client")]), caller: .assistant(thread: "t")))
+        guard case .notAllowed = agent else { return XCTFail("\(agent)") }
+        let same = await sw.run(ActionArgs(.object(["mode": .string("full")])))
+        XCTAssertEqual(same.summary, "This Mac is in full mode already.")
+        XCTAssertTrue(calls.written.isEmpty)
+
+        let done = await sw.run(client)
+        guard case .ok = done else { return XCTFail("\(done)") }
+        XCTAssertEqual(calls.written, [.client])
+        XCTAssertEqual(calls.relaunches, 1)
+        for _ in 0..<200 where await outlet.rows.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        let rows = await outlet.rows
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.kind, .appModeChanged)
+        XCTAssertEqual(rows.first?.payload?["mode"], .string("client"))
+        XCTAssertEqual(rows.first?.payload?["home"], .string("mbp"))
+
+        let off = MachinesModel.Mode(mode: .full, home: nil, enabled: false, reason: "Join a group to use client mode.", holderIsSelf: false, holder: nil, keptAccounts: 0)
+        sw.state = { off }
+        let blocked = await sw.run(client)
+        XCTAssertEqual(blocked, .notAllowed("Join a group to use client mode."))
+        XCTAssertEqual(calls.written, [.client], "a disabled switch writes nothing")
+
+        let back = MachinesModel.Mode(mode: .client, home: "mbp", enabled: false, reason: "x", holderIsSelf: false, holder: nil, keptAccounts: 2)
+        sw.state = { back }
+        let full = await sw.run(ActionArgs(.object(["mode": .string("full")])))
+        guard case .ok = full else { return XCTFail("\(full)") }
+        XCTAssertEqual(calls.written, [.client, .full], "a client can always go back to Full")
+    }
 }

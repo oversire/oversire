@@ -86,4 +86,34 @@ final class AutomationGatesTests: XCTestCase {
         cia.mayAct = { true }
         XCTAssertTrue(cia.digestDue())
     }
+
+    // OVERSIRE-524: a client turns off each gate, also with no owner.
+    func testClientTurnsOffEachGate() {
+        XCTAssertTrue(ClientMode.mayAct(.full, owner: nil), "Full with no group acts")
+        XCTAssertTrue(ClientMode.mayAct(.full, owner: true))
+        XCTAssertFalse(ClientMode.mayAct(.full, owner: false))
+        XCTAssertFalse(ClientMode.mayAct(.client, owner: nil))
+        XCTAssertFalse(ClientMode.mayAct(.client, owner: true))
+
+        let gate = { ClientMode.mayAct(.client, owner: nil) }
+        AGENTS.autoStart = true
+        let q = WorkQueue(writes: writes, store: projects, agents: agents)
+        q.mayAct = { [unowned self] in self.asked += 1; return gate() }
+        q.tick(workstreams: WorkstreamIndex())
+        AGENTS.cleanup.auto = true
+        let c = Cleaner(defaults: UserDefaults(suiteName: "oversire-tests")!)
+        c.mayAct = { [unowned self] in self.asked += 1; return gate() }
+        c.sweep(TestAppData())
+        AGENTS.writeBack.enabled = true
+        let w = PlaneWriteBack(path: dir.path + "/writeback.json", store: projects, trackers: ENV)
+        w.mayAct = { [unowned self] in self.asked += 1; return gate() }
+        w.sync([])
+        AI_CFG.digest = true
+        AI_CFG.digestHour = 0
+        let cia = CIAssist(path: dir.path + "/ci-assist.json", ai: { nil })
+        cia.mayAct = gate
+        XCTAssertFalse(cia.digestDue())
+        XCTAssertEqual(asked, 3)
+        XCTAssertTrue(c.running.isEmpty)
+    }
 }

@@ -42,7 +42,7 @@ final class GroupSync {
         self.http = http
         let leases = LeaseDirectory(http: http)
         self.leases = leases
-        owner = AutomationOwner(home: { leases.home($0) }, device: AppEnvironment.appDevice, name: { leases.selfName })
+        owner = AutomationOwner(home: { leases.home($0) }, device: AppEnvironment.appDevice, name: { leases.selfName }, client: MODE == .client)
         writes.group = { [weak self] in self?.group?.id }
         writes.rehome = { [weak self] e in await MainActor.run { self?.rehome(e) } }
         observer = NotificationCenter.default.addObserver(forName: MachineHub.changed, object: hub, queue: .main) { [weak self] _ in

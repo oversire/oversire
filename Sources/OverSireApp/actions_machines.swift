@@ -4,9 +4,21 @@ import OverSireSync
 import OverSireAI
 import OverSireAssistant
 
+/// What the mode switch does outside the config: the event, the restart and the wait between them.
+struct ModeSwitch {
+    /// The Mode row of the Machines page.
+    var state: @MainActor () -> MachinesModel.Mode = { MachinesController.shared.model.mode }
+    var write: (AppMode) -> Void = { MODE = $0; saveConfig() }
+    var desk: () -> EventDesk = { EVENTS }
+    var relaunch: () -> Void = { try? Relauncher(appURL: Bundle.main.bundleURL).relaunch() }
+    /// The event leaves the app before the restart.
+    var settle: () async -> Void = { try? await Task.sleep(nanoseconds: 800_000_000) }
+}
+
 // The "My machines" actions. They go to the local daemon through MachinesController.
 struct MachineActions {
     let link: ActionLink
+    var modeSwitch = ModeSwitch()
 
     static let machine = ("string", "The machine name.")
     static let session = ("string", "The session id from machine.sessions.")
@@ -91,6 +103,10 @@ struct MachineActions {
                 let r = try await c.answer(a.string("id") ?? "", RunnerAnswer(id: a.string("id") ?? "", items: items, note: a.string("note")))
                 return .ok(summary: "The answer is sent.", data: JSONValue(encoding: r))
             },
+            ActionSpec(id: "machine.mode", title: "Mode", help: "Sets the mode of this Mac, Full or Client, and restarts OverSire. A client shows the data of the home Mac.",
+                       kind: .settings, input: ActionSpec.args(["mode": ("string", "full or client.")], required: ["mode"])) { a in
+                await modeSwitch.run(a)
+            },
             call("machine.installHooks", "Install hooks", "Installs the session hooks of agent CLIs on this Mac.",
                  ["harnesses": ("array", "Agent CLI names, for example claude and codex.")], required: ["harnesses"]) { a, c in
                 _ = try await c.hooks(install: a.list("harnesses")); return nil
@@ -135,6 +151,27 @@ struct MachineActions {
             let failed = await MachinesController.shared.call(title) { try await op(a, $0) }
             return failed.map { .failed($0) } ?? .ok(summary: "\(title): done.")
         }
+    }
+}
+
+extension ModeSwitch {
+    /// Writes the mode and the event, then restarts. Only a user runs it. A client can always go back to Full.
+    func run(_ a: ActionArgs) async -> ActionResult {
+        guard a.caller == .user else { return .notAllowed("Only you can change the mode of this Mac.") }
+        guard let to = a.string("mode").flatMap(AppMode.init(rawValue:)) else { return .notAllowed("The mode is full or client.") }
+        let k = await MainActor.run { state() }
+        guard to != k.mode else { return .ok(summary: "This Mac is in \(to.rawValue) mode already.") }
+        if to == .client, let why = k.reason { return .notAllowed(why) }
+        let home = to == .client ? k.home : nil
+        let payload: [String: JSONValue] = home.map { ["mode": .string(to.rawValue), "home": .string($0)] } ?? ["mode": .string(to.rawValue)]
+        let text = home.map { "Mode set to Client of \($0)" } ?? "Mode set to Full"
+        await MainActor.run {
+            write(to)
+            desk().action(.appModeChanged, item: nil, verb: "mode", text, payload: payload)
+        }
+        await settle()
+        await MainActor.run { relaunch() }
+        return .ok(summary: "\(text). OverSire restarts.")
     }
 }
 

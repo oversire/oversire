@@ -182,12 +182,14 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
     public var update: DaemonUpdate?
-    public var features: [String]?          // launch-env, agent-secrets, app-calls
+    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls
     public var listen: Listen
 
     public static let launchEnv = "launch-env"
     public static let agentSecrets = "agent-secrets"
     public static let appCalls = "app-calls"
+    public static let mirror = "mirror"
+    public static let memberCalls = "member-calls"
 
     public func has(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 

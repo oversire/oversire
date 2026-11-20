@@ -405,6 +405,89 @@ final class MachinesModelTests: XCTestCase {
                        "two apps on one member: the row shows")
     }
 
+    // OVERSIRE-524
+    private func modeModel(_ s: MachinesSnapshot, mode: AppMode = .full, reader: Bool = true) -> MachinesModel.Mode {
+        MachinesModel(s, config: MachinesConfig(), now: now, mode: mode, keptAccounts: 3, clientReader: reader).mode
+    }
+
+    private func readySnapshot() -> MachinesSnapshot {
+        var s = snapshot()
+        s.features["mbp"] = [DaemonInfo.mirror, DaemonInfo.memberCalls]
+        s.info = info("mba")
+        return s
+    }
+
+    func testModeDisabledWithoutGroup() {
+        let solo = MachinesSnapshot()
+        let k = modeModel(solo)
+        XCTAssertFalse(k.enabled)
+        XCTAssertEqual(k.reason, "Join a group to use client mode.")
+        XCTAssertEqual(k.note, "Join a group to use client mode.")
+    }
+
+    func testModeDisabledWhenHomeLacksMirror() {
+        var s = readySnapshot()
+        s.automations = .other(Lease(name: "automations", holder: "app-mbp", holderName: "mbp", epoch: 1, until: now))
+        s.features["mbp"] = [DaemonInfo.memberCalls]
+        let old = modeModel(s)
+        XCTAssertFalse(old.enabled)
+        XCTAssertEqual(old.reason, "Update oversire on mbp to use client mode.")
+
+        s.features["mbp"] = [DaemonInfo.mirror, DaemonInfo.memberCalls]
+        XCTAssertFalse(modeModel(s, reader: false).enabled, "this build has no reader yet")
+        XCTAssertEqual(modeModel(s, reader: false).reason, "Update oversire on this Mac to use client mode.")
+        let ready = modeModel(s)
+        XCTAssertTrue(ready.enabled)
+        XCTAssertNil(ready.reason)
+        XCTAssertEqual(ready.note, MachinesModel.Mode.fullNote)
+        XCTAssertEqual(ready.confirmTitle(to: .client), "Use this Mac as a client of mbp?")
+        XCTAssertEqual(ready.confirmButton(to: .client), "Use as client")
+        XCTAssertFalse(ready.confirmInfo(to: .client).contains("runs the automations now"))
+
+        s.group?.members.removeAll { $0.machine == "mbp" }
+        s.group?.home = "mbp"
+        s.features["mbp"] = nil
+        XCTAssertFalse(modeModel(s).enabled, "home with no features is offline")
+    }
+
+    func testClientCanAlwaysGoBackToFull() {
+        let k = modeModel(MachinesSnapshot(), mode: .client, reader: false)
+        XCTAssertTrue(k.enabled)
+        XCTAssertNil(k.reason)
+        XCTAssertEqual(k.mode, .client)
+        XCTAssertEqual(k.accountsNote, "3 accounts and their tokens stay in the Keychain. Client mode does not use them.")
+        XCTAssertEqual(k.confirmTitle(to: .full), "Use this Mac in Full mode?")
+    }
+
+    func testConfirmNamesTheLeaseHolder() {
+        var s = readySnapshot()
+        s.automations = .owner(Lease(name: "automations", holder: "app-mba", holderName: "mba", epoch: 1, until: now))
+        XCTAssertTrue(modeModel(s).confirmInfo(to: .client).contains("This Mac runs the automations now."))
+        s.automations = .paused("")
+        XCTAssertTrue(modeModel(s).confirmInfo(to: .client).contains("No Mac runs the automations now."))
+    }
+
+    func testAutomationsOnClientHasNoButton() {
+        var s = snapshot()
+        s.automations = .client(holder: "mbp")
+        var a = MachinesModel(s, config: MachinesConfig(), now: now, mode: .client).automations
+        XCTAssertEqual(a?.state, .client(holder: "mbp"))
+        XCTAssertEqual(a?.status, "Run on mbp")
+        XCTAssertNil(a?.action)
+        s.automations = .client(holder: nil)
+        a = MachinesModel(s, config: MachinesConfig(), now: now, mode: .client).automations
+        XCTAssertEqual(a?.status, "No Mac runs them")
+        XCTAssertNil(a?.action)
+    }
+
+    func testModeIsFoundInTheSearch() {
+        for q in ["mode", "client", "mirror"] {
+            let hit = SettingsIndex.search(q).first
+            XCTAssertEqual(hit?.anchor, .mode, q)
+            XCTAssertEqual(hit?.anchor.page, .machines, q)
+        }
+    }
+
     func testAutomationsIsFoundInTheSearch() {
         XCTAssertEqual(SettingsIndex.search("automations").first?.anchor, .machines)
     }

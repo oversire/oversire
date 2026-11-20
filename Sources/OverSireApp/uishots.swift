@@ -157,11 +157,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let groom = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_GROOM"]
     // OVERSIRE_UISHOTS_FILES=folded or open: FRITZ-17 has four images and one PDF.
     static let files = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FILES"]
-    // OVERSIRE_UISHOTS_AUTO=other or paused: the Queue page tells that auto start runs on mba, or waits for the home.
+    // OVERSIRE_UISHOTS_AUTO=other, paused or client: the Queue page tells that auto start runs on mba, or waits for the home.
     static let autoRole: AutomationRole? = {
         switch ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AUTO"] {
         case "other": return .other(Lease(name: AutomationOwner.leaseName, holder: "app-mba", holderName: "mba", epoch: 3, until: Date().addingTimeInterval(60)))
         case "paused": return .paused("devbox")
+        case "client": return .client(holder: "mba")
         default: return nil
         }
     }()
@@ -1162,7 +1163,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:"), let s = w.window?.attachedSheet { w.window?.endSheet(s) }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1677,7 +1678,12 @@ extension UIShots {
 
 extension MachinesSnapshot {
     static let scenes: Set<String> = ["machines-loading", "machines-empty", "machines-found", "machines-group", "join-waiting", "approve-dialog", "add-machine",
-                                         "machines-auto-owner", "machines-auto-other", "machines-auto-paused", "machines-app-only"]
+                                         "machines-auto-owner", "machines-auto-other", "machines-auto-paused", "machines-app-only",
+                                         "machines-mode-full", "machines-mode-disabled", "machines-mode-confirm", "machines-mode-client",
+                                         "machines-auto-client", "machines-auto-client-none"]
+
+    /// The scenes where this Mac is a client of mbp, as mba.
+    static let clientScenes: Set<String> = ["machines-mode-client", "machines-auto-client", "machines-auto-client-none"]
 
     /// mbp is this Mac. mba and devbox are members, or found on the tailnet when this Mac is alone.
     static func sample(_ scene: String, now: Date = Date()) -> MachinesSnapshot {
@@ -1739,6 +1745,28 @@ extension MachinesSnapshot {
         ]
         s.runtimes["mba"] = [DaemonRuntime(id: "orca", name: "Orca", installed: true, reachable: false, error: "Orca is not running.")]
         let lease = Lease(name: AutomationOwner.leaseName, holder: "app-mba", holderName: "mba", epoch: 3, until: now.addingTimeInterval(60))
+        if scene.hasPrefix("machines-mode-") || Self.clientScenes.contains(scene) {
+            // This Mac is mba. mbp is home and holds the lease.
+            let old = [DaemonInfo.launchEnv, DaemonInfo.agentSecrets]
+            let ready = scene != "machines-mode-disabled" ? old + [DaemonInfo.appCalls, DaemonInfo.mirror, DaemonInfo.memberCalls] : old
+            s.info = info("mba", "100.71.4.12", roles: ["serve"])
+            s.info?.features = ready
+            s.features = ["mbp": ready]
+            s.latest = "0.4.0"
+            s.group = Group(id: "g-mbp", name: "My machines", home: "mbp", version: 4,
+                            members: [member("mbp", "100.97.81.23", roles: ["serve", "runner"], seen: 0), member("mba", "100.71.4.12", roles: ["serve"], seen: 0),
+                                      member("devbox", "100.88.20.3", roles: ["serve", "runner"], seen: 7300)], devices: [])
+            s.health = ["mbp": .live, "devbox": .failed("no answer")]
+            s.sessions["mba"] = []
+            let mbp = Lease(name: AutomationOwner.leaseName, holder: "app-mbp", holderName: "mbp", epoch: 3, until: now.addingTimeInterval(60))
+            switch scene {
+            case "machines-mode-confirm": s.automations = .owner(lease)
+            case "machines-auto-client-none": s.automations = .client(holder: nil)
+            case _ where Self.clientScenes.contains(scene): s.automations = .client(holder: "mbp")
+            default: s.automations = .other(mbp)
+            }
+            return s
+        }
         switch scene {
         case "machines-auto-owner": s.automations = .owner(lease)
         case "machines-auto-other": s.automations = .other(lease)
@@ -1756,6 +1784,11 @@ extension UIShots {
     static func machines(_ scene: String, in w: AppWindow) {
         let c = MachinesController.shared
         c.frozen = true
+        ClientMode.supported = scene.hasPrefix("machines-mode-")
+        MODE = MachinesSnapshot.clientScenes.contains(scene) ? .client : .full
+        let account = AccountConfig(account: AccountID(provider: ProviderID(rawValue: "plane"), id: "ocral"))
+        KEPT_ACCOUNTS = MODE == .client ? [account, AccountConfig(account: AccountID(provider: ProviderID(rawValue: "github"), id: "ocral")),
+                                           AccountConfig(account: AccountID(provider: ProviderID(rawValue: "github"), id: "flarco"))] : []
         c.config = { MachinesConfig(sessions: "mbp", hooksConsent: true) }
         c.owner = { nil }
         c.installed = { scene != "machines-empty" && scene != "machines-app-only" }
@@ -1771,6 +1804,10 @@ extension UIShots {
                     MachineSheets.waiting(over: w.window, phase: .waiting(confirm: "4821", host: "mbp"), expires: now.addingTimeInterval(292)) {}
                 case "approve-dialog":
                     MachineSheets.approve(r, group: "My machines", over: w.window) { _ in }
+                case "machines-mode-confirm":
+                    let k = c.model.mode
+                    AlertConfirm.show(AlertConfirm.Spec(title: k.confirmTitle(to: .client), info: k.confirmInfo(to: .client),
+                                                        buttons: [k.confirmButton(to: .client), "Cancel"]), in: w.window)
                 case "add-machine":
                     MachineSheets.add(over: w.window, invite: GroupInvite(code: "K7Q2-M9XD", via: "mbp", expiresAt: now.addingTimeInterval(581)))
                 default: break

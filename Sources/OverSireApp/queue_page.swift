@@ -39,7 +39,7 @@ final class QueuePage: Page {
     override var watches: DataDomains { [.queue, .agents, .projects, .relations, .planner, .summaries, .questions, .config, .runbooks, .connection] }
 
     /// Why auto start does not run on this Mac (OVERSIRE-412). nil: it runs here. device: the id of this app.
-    static func autoStartNote(_ r: AutomationRole?, device: String) -> (title: String, body: String, action: String)? {
+    static func autoStartNote(_ r: AutomationRole?, device: String) -> (title: String, body: String, action: String?)? {
         switch r {
         case .other(let l)? where l.holder != device:
             let m = l.holderName.isEmpty ? l.holder : l.holderName
@@ -48,6 +48,9 @@ final class QueuePage: Page {
         case .paused(let h)?:
             return ("Auto start waits for \(h.isEmpty ? "the home Mac" : h).",
                     "The home Mac gives the automations to one Mac. It is offline now.", "Retry")
+        case .client(let h)?:
+            return (h.map { "Auto start runs on \($0), not on this Mac." } ?? "Auto start runs on no Mac now.",
+                    "This Mac is a client. A client does not run the automations.", nil)
         default:
             return nil
         }
@@ -94,9 +97,10 @@ final class QueuePage: Page {
         let owner = MachinesController.shared.owner()
         if auto, let note = Self.autoStartNote(UIShots.autoRole ?? owner?.role, device: owner?.device ?? AppEnvironment.appDevice) {
             rows.append(PageRow("auto", note.title, note.action) {
+                guard let verb = note.action else { return Banner(.info, title: note.title, body: note.body, actions: []) }
                 let c = MachinesController.shared
-                let b = ActionButton(note.action) { if note.action == "Retry" { c.retryAutomations() } else { c.takeAutomations() } }
-                b.setAccessibilityLabel(note.action == "Retry" ? "Retry the automations" : "Run the automations on this Mac")
+                let b = ActionButton(verb) { if verb == "Retry" { c.retryAutomations() } else { c.takeAutomations() } }
+                b.setAccessibilityLabel(verb == "Retry" ? "Retry the automations" : "Run the automations on this Mac")
                 return Banner(.info, title: note.title, body: note.body, actions: [b])
             })
         }

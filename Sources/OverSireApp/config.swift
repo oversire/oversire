@@ -35,6 +35,27 @@ struct AppConfig: Codable {
     var accounts: [AccountConfig]?   // one entry for each connected vendor account
     var machines: MachinesConfig?
     var email: String?               // your email in the event rows (OVERSIRE-382)
+    var mode: AppMode?               // nil is Full. Local to this Mac, never sent home.
+}
+
+/// Full polls the providers itself. A client shows the data of the home Mac and loads no accounts.
+enum AppMode: String, Codable {
+    case full, client
+}
+
+enum ClientMode {
+    /// True when this build has the client reader (OVERSIRE-527). The Mode control stays off until then.
+    static var supported = false
+
+    /// The gate of each automation. A client never acts, also when it has no group (owner is nil).
+    static func mayAct(_ mode: AppMode, owner: Bool?) -> Bool { mode == .full && (owner ?? true) }
+}
+
+extension AppConfig {
+    /// A client loads no accounts. The file keeps them.
+    func accountsToLoad() -> [AccountConfig] {
+        mode == .client ? [] : AppEnvironment.accounts(from: self)
+    }
 }
 
 // How much the AI checks may do. Auto acts only on "looks done". "Looks stuck" always asks.
@@ -1091,6 +1112,7 @@ let WORK_STATS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("work-stat
 let LOGS_DIR = (CONFIG_DIR as NSString).appendingPathComponent("logs")
 let PROBLEMS_PATH = (CONFIG_DIR as NSString).appendingPathComponent("problems.json")
 let PROJECT_ACTIVITY_PATH = (CONFIG_DIR as NSString).appendingPathComponent("plane-activity.jsonl")
+let MIRROR_DIR = (CONFIG_DIR as NSString).appendingPathComponent("mirror")
 
 // REPOS is what the app tracks: PICKED_REPOS plus every repo of PICKED_ORGS.
 var REPOS: [String] = []
@@ -1117,6 +1139,9 @@ var LOGS_CFG = LogConfig()
 var MACHINES = MachinesConfig()
 var MY_EMAIL: String?
 var ACCOUNTS: [AccountConfig] = []
+var MODE: AppMode = .full
+/// On a client: the accounts of the file, unchanged. saveConfig writes them back.
+var KEPT_ACCOUNTS: [AccountConfig] = []
 let DEFAULT_BRANCHES: Set<String> = ["main", "develop"]
 
 let repoPattern = try! NSRegularExpression(pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
@@ -1162,10 +1187,15 @@ func loadConfig(save: Bool = true) {
     if let l = c.logs { LOGS_CFG = l }
     if let m = c.machines { MACHINES = m }
     MY_EMAIL = c.email
-    ACCOUNTS = AppEnvironment.accounts(from: c)
-    PROJECTS_CFG.dropStale(trackers: Set(ACCOUNTS.filter { ENV.registry.descriptor($0.account.provider)?.layer == .tracker }.map(\.account.id)))
-    let moved = LegacyMigration.moveOrca(&ACCOUNTS, machines: &MACHINES, environment: PROJECTS_CFG.orca.legacyEnvironment)
-    AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
+    MODE = c.mode ?? .full
+    ACCOUNTS = c.accountsToLoad()
+    KEPT_ACCOUNTS = MODE == .client ? c.accounts ?? [] : []
+    var moved = false
+    if MODE == .full {
+        PROJECTS_CFG.dropStale(trackers: Set(ACCOUNTS.filter { ENV.registry.descriptor($0.account.provider)?.layer == .tracker }.map(\.account.id)))
+        moved = LegacyMigration.moveOrca(&ACCOUNTS, machines: &MACHINES, environment: PROJECTS_CFG.orca.legacyEnvironment)
+        AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
+    }
     ENV.load(ACCOUNTS)
     if moved {
         log.notice("Removed the Orca runtime account. The daemon runs Orca now. Sessions run on \(MACHINES.sessions ?? "this Mac", privacy: .public).")
@@ -1176,10 +1206,12 @@ func loadConfig(save: Bool = true) {
 func saveConfig() {
     guard CONFIG_READ else { return }
     try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
-    ACCOUNTS = ACCOUNTS.filter { !AppEnvironment.repoProviders.contains($0.account.provider) }
-        + AppEnvironment.repoAccounts(repos: PICKED_REPOS.filter(isValidRepo), orgs: PICKED_ORGS)
-    AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
-    ENV.load(ACCOUNTS)
+    if MODE == .full {
+        ACCOUNTS = ACCOUNTS.filter { !AppEnvironment.repoProviders.contains($0.account.provider) }
+            + AppEnvironment.repoAccounts(repos: PICKED_REPOS.filter(isValidRepo), orgs: PICKED_ORGS)
+        AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
+        ENV.load(ACCOUNTS)
+    }
     var c = AppConfig(repos: PICKED_REPOS.filter { isValidRepo($0) },
                       orgs: PICKED_ORGS.isEmpty ? nil : PICKED_ORGS, pollInterval: POLL_NORMAL,
                       pollActiveInterval: POLL_ACTIVE, runsPerRepo: RUNS_PER_REPO,
@@ -1187,7 +1219,8 @@ func saveConfig() {
                       oneRowPerWorkflow: ONE_ROW_PER_WORKFLOW, latestAcrossBranches: LATEST_ACROSS_BRANCHES,
                       repoColors: REPO_COLORS.isEmpty ? nil : REPO_COLORS, autoUpdate: AUTO_UPDATE,
                       relay: RELAY, notifications: NOTIFICATIONS, tabs: TABS, projects: PROJECTS_CFG, ai: AI_CFG, general: GENERAL, linking: LINKING, agents: AGENTS, logs: LOGS_CFG)
-    c.accounts = ACCOUNTS
+    c.accounts = MODE == .client ? KEPT_ACCOUNTS : ACCOUNTS
+    c.mode = MODE == .client ? .client : nil
     c.machines = MACHINES == MachinesConfig() ? nil : MACHINES
     c.email = MY_EMAIL
     if let data = try? JSONEncoder().encode(c) {

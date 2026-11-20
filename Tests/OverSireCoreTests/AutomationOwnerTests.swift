@@ -43,8 +43,8 @@ final class AutomationOwnerTests: XCTestCase {
             return .member(m, DaemonClient(base: URL(string: "http://\(m):7690")!, token: nil, http: d))
         }
 
-        func owner(_ device: String, _ name: String) -> AutomationOwner {
-            AutomationOwner(home: { [self] in self.appHome($0) }, device: device, name: { name }, ttl: 90, clock: { [clock] in clock.now })
+        func owner(_ device: String, _ name: String, client: Bool = false) -> AutomationOwner {
+            AutomationOwner(home: { [self] in self.appHome($0) }, device: device, name: { name }, ttl: 90, clock: { [clock] in clock.now }, client: client)
         }
     }
 
@@ -206,6 +206,59 @@ final class AutomationOwnerTests: XCTestCase {
         w.clock.add(30)
         await a.refresh()
         XCTAssertEqual(posts.count, 1)
+    }
+
+    // OVERSIRE-524: a client reads the lease and never writes it.
+    func testClientNeverAcquires() async {
+        let w = World()
+        let c = w.owner("app-3", "mba", client: true)
+        await c.refresh()
+        await c.take()
+        await c.release()
+        w.clock.add(100)
+        await c.refresh()
+        XCTAssertFalse(w.mbp.calls.contains("POST /v1/leases/\(AutomationOwner.leaseName)"))
+        XCTAssertFalse(w.mbp.calls.contains { $0.hasPrefix("DELETE") })
+        XCTAssertNil(w.mbp.leases[AutomationOwner.leaseName])
+    }
+
+    func testClientCannotAct() async {
+        let w = World()
+        let a = w.owner("app-1", "mbp")
+        await a.refresh()
+        let c = w.owner("app-3", "mba", client: true)
+        XCTAssertFalse(c.mayAct, "no action before the first refresh")
+        await c.refresh()
+        XCTAssertEqual(c.role, .client(holder: "mbp"))
+        XCTAssertFalse(c.mayAct)
+        XCTAssertFalse(c.leads)
+        XCTAssertNil(c.role.lease)
+        await c.take()
+        XCTAssertFalse(c.mayAct)
+        guard case .owner = a.role else { return XCTFail("\(a.role)") }
+    }
+
+    func testClientWithNoHolder() async {
+        let w = World()
+        let c = w.owner("app-3", "mba", client: true)
+        await c.refresh()
+        XCTAssertEqual(c.role, .client(holder: nil))
+        let a = w.owner("app-1", "mbp")
+        await a.refresh()
+        w.clock.add(91)
+        await c.refresh()
+        XCTAssertEqual(c.role, .client(holder: nil), "an ended lease has no holder")
+    }
+
+    func testClientKeepsItsRoleWhenHomeIsDown() async {
+        let w = World()
+        let a = w.owner("app-1", "mbp")
+        await a.refresh()
+        let c = w.owner("app-3", "mba", client: true)
+        await c.refresh()
+        w.mbp.online = false
+        await c.refresh()
+        XCTAssertEqual(c.role, .client(holder: "mbp"))
     }
 
     final class Box: @unchecked Sendable {

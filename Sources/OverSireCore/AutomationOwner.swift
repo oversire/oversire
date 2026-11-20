@@ -14,9 +14,22 @@ public protocol LeaseClient: Sendable {
     /// Throws StoreNotHome when the daemon is not home.
     func acquire(_ name: String, _ r: LeaseRequest) async throws -> LeaseResult
     func release(_ name: String, holder: String) async throws
+    /// The lease now, or nil when nobody holds it. Throws StoreNotHome when the daemon is not home.
+    func current(_ name: String) async throws -> Lease?
 }
 
-extension DaemonClient: LeaseClient {}
+extension DaemonClient: LeaseClient {
+    public func current(_ name: String) async throws -> Lease? {
+        let (data, resp) = try await exchange(request("/v1/leases/\(Self.escape(name))"))
+        if resp.statusCode == 404 { return nil }
+        if resp.statusCode == 409 {
+            struct Body: Decodable { let error: String?; let home: String? }
+            let b = try? JSONDecoder().decode(Body.self, from: data)
+            throw StoreNotHome(home: b?.home, message: b?.error ?? "This machine is not home")
+        }
+        return try Self.decode(try Self.check(data, resp))
+    }
+}
 
 /// Where the lease is. The app gives it from the group and the machine links.
 public enum LeaseHome: Sendable {
@@ -30,11 +43,12 @@ public enum AutomationRole: Hashable, Sendable {
     case owner(Lease)
     case other(Lease)          // another app owns; the UI shows its name
     case paused(String)        // the home daemon cannot be reached; the machine name, "" before the first read of the group
+    case client(holder: String?)   // this Mac is a client: it never takes the lease; the name of the holder, nil when nobody holds it
 
     public var lease: Lease? {
         switch self {
         case .owner(let l), .other(let l): return l
-        case .solo, .paused: return nil
+        case .solo, .paused, .client: return nil
         }
     }
 }
@@ -54,7 +68,8 @@ public final class AutomationOwner: @unchecked Sendable {
     private let clock: @Sendable () -> Date
     private let lock = NSLock()
     // Until the first refresh, the app does not know the group.
-    private var current: AutomationRole = .paused("")
+    private var current: AutomationRole
+    private let client: Bool
     private var tail: Task<Void, Never>?
     private var loop: Task<Void, Never>?
     private var runs = true
@@ -62,8 +77,11 @@ public final class AutomationOwner: @unchecked Sendable {
     private var yielded = false
 
     /// home: the home of the lease. hint: the home that a 409 named, else nil. name: the machine name that the other apps show.
+    /// client: a client only reads the lease. It never acquires or releases it.
     public init(home: @escaping @Sendable (_ hint: String?) -> LeaseHome, device: String, name: @escaping @Sendable () -> String,
-                ttl: TimeInterval = 90, clock: @escaping @Sendable () -> Date = Date.init) {
+                ttl: TimeInterval = 90, clock: @escaping @Sendable () -> Date = Date.init, client: Bool = false) {
+        self.client = client
+        self.current = client ? .client(holder: nil) : .paused("")
         self.home = home
         self.device = device
         self.name = name
@@ -78,7 +96,7 @@ public final class AutomationOwner: @unchecked Sendable {
         switch role {
         case .solo: return true
         case .owner(let l): return l.until.timeIntervalSince(clock()) > Self.margin
-        case .other, .paused: return false
+        case .other, .paused, .client: return false
         }
     }
 
@@ -86,7 +104,7 @@ public final class AutomationOwner: @unchecked Sendable {
     public var leads: Bool {
         switch role {
         case .solo, .owner: return true
-        case .other, .paused: return false
+        case .other, .paused, .client: return false
         }
     }
 
@@ -104,16 +122,21 @@ public final class AutomationOwner: @unchecked Sendable {
     /// Gets or renews the lease. An owner with no runtime gives it up once, so that a Mac with a runtime takes it.
     public func refresh() async {
         await serial {
+            if self.client { await self.observe(); return }
             if await self.yieldWithoutRuntime() { return }
             await self.acquire(take: false)
         }
     }
 
     /// Run them here: takes the lease also when another app has it.
-    public func take() async { await serial { await self.acquire(take: true) } }
+    public func take() async {
+        if client { return }
+        await serial { await self.acquire(take: true) }
+    }
 
     /// Gives the lease back, on sleep and on quit. The next refresh asks again.
     public func release() async {
+        if client { return }
         await serial {
             guard case .owner(let l) = self.role, case .member(_, let c) = self.home(nil) else { return }
             try? await c.release(Self.leaseName, holder: self.device)
@@ -177,6 +200,24 @@ public final class AutomationOwner: @unchecked Sendable {
             }
         }
         if case .member(let m, _) = target { failed(m) }
+    }
+
+    // A client reads the holder. A failed read keeps the last role.
+    private func observe() async {
+        var target = home(nil)
+        for _ in 0..<2 {
+            guard case .member(let m, let c) = target else { return }
+            do {
+                let l = try await c.current(Self.leaseName)
+                set(.client(holder: l.flatMap { $0.until > self.clock() ? $0.holderName : nil }))
+                return
+            } catch let e as StoreNotHome {
+                guard let h = e.home, h != m else { return }
+                target = home(h)
+            } catch {
+                return
+            }
+        }
     }
 
     // The next refresh of this app takes the lease again when no other app took it. Then it keeps the lease.

@@ -57,6 +57,32 @@ final class ConfigSafetyTests: XCTestCase {
         XCTAssertFalse(CONFIG_READ)
         XCTAssertEqual(FileManager.default.contents(atPath: CONFIG_PATH), before, "a test process must not write the user config")
     }
+
+    private let plane = AccountConfig(account: AccountID(provider: .plane, id: "ocral"), values: ["workspace": "ocral"])
+
+    // OVERSIRE-524: a file with no mode is Full. An old file keeps working.
+    func testModeIsFullWhenAbsent() throws {
+        let old = try JSONDecoder().decode(AppConfig.self, from: Data(#"{"repos":[]}"#.utf8))
+        XCTAssertNil(old.mode)
+        XCTAssertEqual(old.accountsToLoad().count, AppEnvironment.accounts(from: old).count)
+        var c = AppConfig(repos: [])
+        c.accounts = [plane]
+        XCTAssertEqual(c.accountsToLoad().map(\.account.id), ["ocral"])
+        c.mode = .full
+        XCTAssertEqual(c.accountsToLoad().map(\.account.id), ["ocral"])
+        let json = try JSONEncoder().encode(AppConfig(repos: []))
+        XCTAssertFalse(String(decoding: json, as: UTF8.self).contains("\"mode\""), "Full writes no mode key")
+    }
+
+    func testClientLoadsNoAccounts() throws {
+        var c = AppConfig(repos: ["o/r"], orgs: ["o"])
+        c.accounts = [plane]
+        c.mode = .client
+        XCTAssertTrue(c.accountsToLoad().isEmpty, "no accounts, no repo accounts")
+        let back = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(c))
+        XCTAssertEqual(back.mode, .client)
+        XCTAssertEqual(back.accounts?.map(\.account.id), ["ocral"], "the file keeps the accounts")
+    }
 }
 
 final class LiveSyncTests: XCTestCase {
@@ -108,6 +134,13 @@ final class LiveSyncTests: XCTestCase {
         let plan = RefreshPlan([event("1", .item, "updated"), event("2", .comment, "created")], knownRepos: [])
         XCTAssertEqual(plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }, ["bt.example.com/\(project.id)"])
         XCTAssertEqual(plan.comments, [CommentHint(workspace: "bt.example.com", project: project.id, item: "i1")])
+    }
+
+    // OVERSIRE-524: a client reads only the daemons.
+    func testClientHasOnlyDaemons() {
+        XCTAssertEqual(LiveSync.sourceKinds(mode: .client, cloud: true, fallback: true), [.daemons])
+        XCTAssertEqual(LiveSync.sourceKinds(mode: .full, cloud: false, fallback: false), [.polling, .daemons])
+        XCTAssertEqual(LiveSync.sourceKinds(mode: .full, cloud: true, fallback: true), [.polling, .daemons, .cloud, .fallback])
     }
 
     func testTheOldCloudCursorMoves() throws {

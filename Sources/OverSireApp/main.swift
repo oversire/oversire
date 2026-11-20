@@ -243,7 +243,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         if GENERAL.openWindowAtLaunch || !GENERAL.showIn.menuBar {
             DispatchQueue.main.async { self.appWindow.show() }
         }
-        if REPOS.isEmpty {
+        if MODE == .client {
+            // A client waits for the mirror of home (OVERSIRE-524). It polls nothing.
+        } else if REPOS.isEmpty {
             // First run: open Settings in the window
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 self.closeTime = .distantPast
@@ -281,7 +283,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         rateLimit.onChange = { [weak self] in
             ((self?.popover.contentViewController as? TabVC)?.footerView as? Footer)?.showQuota(self?.rateLimit.latest)
         }
-        rateLimit.start()
+        if MODE == .full { rateLimit.start() }
         updater.onReady = { [weak self] v in
             self?.notify(title: "OverSire", subtitle: "v\(v) is ready to install", body: "Install it from Settings › General.", id: "update-ready-\(v)")
         }
@@ -295,10 +297,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             guard let self = self, !self.catalog.refreshing else { return }
             self.applyRepoSelection()
         }
-        catalog.refreshIfStale()
+        if MODE == .full { catalog.refreshIfStale() }
         catalogTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
-            self?.catalog.refreshIfStale()
-            self?.projectCatalog.refreshIfStale()
+            if MODE == .full {
+                self?.catalog.refreshIfStale()
+                self?.projectCatalog.refreshIfStale()
+            }
             self?.scanImportGraphs()
         }
         signalTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in self?.sendChangedPaths() }
@@ -328,7 +332,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         if PROJECTS_CFG.settings != before { saveConfig() }
         projectStore.track(resolved, live: liveProjectKeys())
         syncPlaneWorkspaces()
-        projectCatalog.refreshIfStale()
+        if MODE == .full { projectCatalog.refreshIfStale() }
         applyCaptureHotKey()
         applyWindowHotKey()
         applyAssistantHotKey()
@@ -624,7 +628,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func refresh(force: Bool = false, completion: (() -> Void)? = nil) {
-        guard !REPOS.isEmpty else { completion?(); return }
+        // A client fetches nothing through gh. The mirror pull comes in OVERSIRE-527.
+        guard MODE == .full, !REPOS.isEmpty else { completion?(); return }
         // Never let refreshes overlap: a slow network poll that outlives the timer
         // interval would otherwise stack concurrent gh-process storms.
         // A coalesced refresh still owes its caller a callback once fresh data lands.
@@ -965,7 +970,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var automations: AutomationOwner? { relay.group?.owner }
 
     private func startAutomations() {
-        let may: () -> Bool = { [weak self] in self?.automations?.mayAct ?? true }
+        // A client runs no automation, also with no group.
+        let mode = MODE
+        let may: () -> Bool = { [weak self] in ClientMode.mayAct(mode, owner: self?.automations?.mayAct) }
         queue.mayAct = may
         enhanceAgent.mayAct = may
         cleaner.mayAct = may
@@ -983,7 +990,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         groomAgent.outputs = aiOutputs
         ENV.automationOwner = automations
         let lead = automations
-        projectStore.leads = { lead?.leads ?? true }
+        projectStore.leads = { ClientMode.mayAct(mode, owner: lead?.leads) }
         guard let o = automations else { return }
         NotificationCenter.default.addObserver(forName: AutomationOwner.changed, object: o, queue: .main) { [weak self] _ in
             log.info("Automations: \(String(describing: o.role), privacy: .public)")

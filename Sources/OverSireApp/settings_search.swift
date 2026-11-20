@@ -6,7 +6,7 @@ enum SettingsAnchor: String, CaseIterable {
     case services, live
     case projects, refresh, repos, linking, writeback
     case sessions, queue, worktrees, planner, runbooks
-    case thisMac = "this-mac", joinOnly = "join-only", found, machines, runtimes, hooks, daemon
+    case mode, thisMac = "this-mac", joinOnly = "join-only", found, machines, runtimes, hooks, daemon
     case engine, localCLI = "local-cli", apiKey = "api-key", use, assistant, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
     case problems, log, logSettings = "log-settings"
@@ -31,6 +31,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .worktrees: return "Worktrees"
         case .planner: return "Intake and planner"
         case .runbooks: return "Runbooks"
+        case .mode: return "Mode"
         case .thisMac: return "This Mac"
         case .joinOnly: return "Use other machines only"
         case .found: return "Found on your tailnet"
@@ -61,7 +62,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .worktrees, .planner, .runbooks: return .agents
-        case .thisMac, .joinOnly, .found, .machines, .runtimes, .hooks, .daemon: return .machines
+        case .mode, .thisMac, .joinOnly, .found, .machines, .runtimes, .hooks, .daemon: return .machines
         case .engine, .localCLI, .apiKey, .use, .assistant, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
         case .problems, .log, .logSettings: return .logs
@@ -225,6 +226,7 @@ struct SettingsIndex {
         Entry("Orca account for a machine", .machines, "runtime environment"),
         Entry("Mute sessions", .machines, "silence machine"),
         Entry("Remove a machine", .machines, "group member delete"),
+        Entry("Mode", .mode, "client full mirror home accounts"),
         Entry("Automations", .machines, "owner lease auto start enhance cleanup write-back digest run them here paused"),
         Entry("Orca live terminal", .runtimes, "runtime stream text only pairing retry"),
         Entry("Install hooks", .hooks, "claude codex opencode live status"),

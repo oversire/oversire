@@ -149,23 +149,30 @@ struct MachinesModel: Equatable {
 
     /// The Automations row: which Mac runs the automatic actions (OVERSIRE-328).
     struct Automations: Equatable {
-        enum State: Equatable { case here, other(String), paused(home: String) }
+        enum State: Equatable { case here, other(String), paused(home: String), client(holder: String?) }
         var state: State
+        /// The home of the group. A client names it when no Mac holds the lease.
+        var home = ""
 
         static let note = "Auto start, Enhance, cleanup, tracker write-back and AI digests run on one Mac only. The other Macs show the results."
 
         /// home: the home of the group, for a pause before the first read.
         init(_ r: AutomationRole, home: String) {
+            self.home = home
             switch r {
             case .solo, .owner: state = .here
             case .other(let l): state = .other(l.holderName.isEmpty ? l.holder : l.holderName)
             case .paused(let m): state = .paused(home: m.isEmpty ? home : m)
+            case .client(let h): state = .client(holder: h.flatMap { $0.isEmpty ? nil : $0 })
             }
         }
 
         var detail: String {
-            guard case .paused(let h) = state else { return Self.note }
-            return "Paused, so that two Macs do not do the same work. They start again when \(h), the home, is online."
+            switch state {
+            case .paused(let h): return "Paused, so that two Macs do not do the same work. They start again when \(h), the home, is online."
+            case .client(let h): return "This Mac is a client. Auto start, Enhance, cleanup, tracker write-back and AI digests run on \(h ?? home)."
+            case .here, .other: return Self.note
+            }
         }
 
         var status: String {
@@ -173,17 +180,64 @@ struct MachinesModel: Equatable {
             case .here: return "Run on this Mac"
             case .other(let m): return "Run on \(m)"
             case .paused: return "Paused · home offline"
+            case .client(let h): return h.map { "Run on \($0)" } ?? "No Mac runs them"
             }
         }
 
         /// "Run them here" or "Retry". nil: no button.
         var action: String? {
             switch state {
-            case .here: return nil
+            case .here, .client: return nil
             case .other: return "Run them here"
             case .paused: return "Retry"
             }
         }
+    }
+
+    /// The Mode row: Full or Client (OVERSIRE-524).
+    struct Mode: Equatable {
+        var mode: AppMode
+        /// The home machine of the group. nil: no group.
+        var home: String?
+        /// The control works. A client can always go back to Full.
+        var enabled: Bool
+        /// Why the control is off. nil: it is on.
+        var reason: String?
+        var holderIsSelf: Bool
+        /// The Mac that holds the automations lease. nil: none.
+        var holder: String?
+        var keptAccounts: Int
+
+        static let fullNote = "Full: this Mac uses its own accounts and polls Plane, GitHub and CI."
+
+        var note: String {
+            if let reason { return reason }
+            guard mode == .client else { return Self.fullNote }
+            return "Client: this Mac shows the data of \(home ?? "home"). It needs no accounts. Clicks run on \(home ?? "home")."
+        }
+
+        var accountsNote: String {
+            keptAccounts == 1 ? "1 account and its token stay in the Keychain. Client mode does not use them."
+                : "\(keptAccounts) accounts and their tokens stay in the Keychain. Client mode does not use them."
+        }
+
+        /// The title of the confirm for a switch to `to`.
+        func confirmTitle(to: AppMode) -> String {
+            to == .client ? "Use this Mac as a client of \(home ?? "home")?" : "Use this Mac in Full mode?"
+        }
+
+        func confirmInfo(to: AppMode) -> String {
+            guard to == .client else { return "OverSire restarts. This Mac uses its own accounts again and polls Plane, GitHub and CI." }
+            var s = "OverSire restarts. This Mac stops polling and shows the data of \(home ?? "home"). Your accounts and tokens on this Mac stay, but OverSire does not use them. Clicks run on \(home ?? "home")."
+            if holderIsSelf {
+                s += " This Mac runs the automations now. They stop until another Mac takes them."
+            } else if holder == nil {
+                s += " No Mac runs the automations now. A client shows data only when a Mac in Full mode runs them."
+            }
+            return s
+        }
+
+        func confirmButton(to: AppMode) -> String { to == .client ? "Use as client" : "Use Full mode" }
     }
 
     var state: State
@@ -209,6 +263,7 @@ struct MachinesModel: Equatable {
     var runtimes: [Runtime]
     /// nil: one Mac uses the group (one member and one app), or the app has no automation owner.
     var automations: Automations?
+    var mode: Mode
 
     var title: String {
         switch state {
@@ -226,7 +281,8 @@ struct MachinesModel: Equatable {
     /// Hooks that the consent installs.
     var missingHooks: [String] { hooks.filter { $0.state == .missing || $0.state == .outdated }.map(\.name) }
 
-    init(_ s: MachinesSnapshot, config: MachinesConfig, now: Date = Date()) {
+    init(_ s: MachinesSnapshot, config: MachinesConfig, now: Date = Date(), mode current: AppMode = MODE,
+         keptAccounts: Int = KEPT_ACCOUNTS.count, clientReader: Bool = ClientMode.supported) {
         daemon = s.info
         installed = s.installed
         path = s.path
@@ -281,7 +337,33 @@ struct MachinesModel: Equatable {
         runtimes = machines.flatMap { m in (s.runtimes[m.name] ?? []).map { Runtime(machine: m.name, $0) } }
         // A Mac with no daemon joins as an app, so two apps can share one member.
         let apps = s.group?.devices.filter { $0.kind == .app }.count ?? 0
-        automations = members.count > 1 || apps > 1 ? s.automations.map { Automations($0, home: s.group?.home.rawValue ?? "") } : nil
+        let inGroup = s.group != nil && (members.count > 1 || apps > 1)
+        automations = inGroup ? s.automations.map { Automations($0, home: s.group?.home.rawValue ?? "") } : nil
+        let home = s.group?.home.rawValue
+        var reason: String?
+        if current == .full {
+            if !inGroup || home == nil {
+                reason = "Join a group to use client mode."
+            } else if let h = home {
+                let m = machines.first { $0.name == h }
+                if m?.online != true || m?.features == nil {
+                    reason = "\(h) is offline. Try again when it is back."
+                } else if ![DaemonInfo.mirror, DaemonInfo.memberCalls].allSatisfy({ m?.features?.contains($0) == true }) {
+                    reason = "Update oversire on \(h) to use client mode."
+                } else if !clientReader {
+                    reason = "Update oversire on this Mac to use client mode."
+                }
+            }
+        }
+        var holder: String?
+        var isSelf = false
+        switch s.automations {
+        case .solo?, .owner?: isSelf = true
+        case .other(let l)?: holder = l.holderName.isEmpty ? l.holder : l.holderName
+        case .client(let h)?: holder = h
+        case .paused?, nil: break
+        }
+        mode = Mode(mode: current, home: home, enabled: reason == nil, reason: reason, holderIsSelf: isSelf, holder: holder, keptAccounts: keptAccounts)
     }
 
     static func offline(_ seen: Date?, now: Date) -> String {
@@ -619,6 +701,7 @@ extension SettingsPage {
             b.addFull(Banner(.warning, title: n, actions: [ActionButton("Dismiss") { [weak self] in c.notice = nil; self?.reload() }]))
         }
         if c.reading { machineReading(b); return }
+        machineMode(b, m.mode)
         if m.state == .noDaemon { machineSetup(b, m) }
         if m.state == .solo && !m.found.isEmpty { machineFound(b, m) }
         if m.state != .noDaemon || !m.machines.isEmpty { machineList(b, m) }
@@ -649,6 +732,30 @@ extension SettingsPage {
         v.addFull(card)
         v.identifier = SettingsAnchor.machines.id
         b.addFull(v)
+    }
+
+    private func machineMode(_ b: NSStackView, _ k: MachinesModel.Mode) {
+        let note = NSTextField.text(k.note, size: 11.5, color: Palette.dim, lines: 2)
+        var sub: NSView = note
+        if k.reason != nil { sub = NSStackView(h: [Glyph("info.circle", color: Palette.dim, size: 12), note], spacing: 5) }
+        let seg = Segmented(["Full", "Client"], selected: k.mode == .client ? 1 : 0, label: "Mode", enabled: k.enabled) { [weak self] i in
+            self?.confirmMode(k, to: i == 1 ? .client : .full)
+        }
+        var rows: [NSView] = [Row([TwoLine("This Mac", subView: sub, lines: 1), Spacer(), seg], height: 62, label: "Mode, \(k.mode == .client ? "Client" : "Full")")]
+        if k.mode == .client {
+            rows.append(Row([TwoLine("Accounts of this Mac", k.accountsNote, lines: 2), Spacer()], height: 56, label: "Accounts of this Mac"))
+        }
+        b.addFull(section(.mode, rows))
+    }
+
+    // The switch restarts the app. Cancel puts the control back.
+    private func confirmMode(_ k: MachinesModel.Mode, to: AppMode) {
+        guard to != k.mode else { return }
+        let spec = AlertConfirm.Spec(title: k.confirmTitle(to: to), info: k.confirmInfo(to: to), buttons: [k.confirmButton(to: to), "Cancel"])
+        AlertConfirm.show(spec, in: view.window) { [weak self] a in
+            guard a.button == 0 else { self?.reload(); return }
+            self?.data.actions.click("machine.mode", ["mode": .string(to.rawValue)], in: self?.view.window, asked: true) { _ in self?.reload() }
+        }
     }
 
     private func machineSetup(_ b: NSStackView, _ m: MachinesModel) {
@@ -775,6 +882,8 @@ extension SettingsPage {
         switch a.state {
         case .here: tone = Tone(symbol: "checkmark.circle", color: Palette.ok, word: a.status)
         case .other: tone = Tone(symbol: "laptopcomputer", color: Palette.acc, word: a.status)
+        case .client(_?): tone = Tone(symbol: "laptopcomputer", color: Palette.acc, word: a.status)
+        case .client: tone = Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: a.status)
         case .paused: tone = Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: a.status)
         }
         let note = NSTextField.text(a.detail, size: 11.5, color: Palette.dim, lines: 2)

@@ -207,16 +207,15 @@ final class Updater {
         if pgrep -f "$app/Contents/MacOS/oversire" >/dev/null; then rm -rf "$backup" "$(dirname "$new")"
         else rm -rf "$app"; mv "$backup" "$app"; open "$app"; fi
         """
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", script, "sh", "\(getpid())", appURL.path, staged.path]
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { fail("cannot start the installer: \(error.localizedDescription)"); return }
-        UserDefaults.standard.set(version, forKey: "updatedTo")
-        UserDefaults.standard.removeObject(forKey: Updater.stagedKey)
-        log.info("Updater: installing v\(version) and restarting")
-        NSApp.terminate(nil)
+        do {
+            try Relauncher(appURL: appURL).relaunch(script: script, args: [staged.path]) {
+                UserDefaults.standard.set(version, forKey: "updatedTo")
+                UserDefaults.standard.removeObject(forKey: Updater.stagedKey)
+                log.info("Updater: installing v\(version) and restarting")
+            }
+        } catch {
+            fail("cannot start the installer: \(error.localizedDescription)")
+        }
     }
 
     /// The version this launch updated to, once. Nil on a normal launch.

@@ -240,6 +240,7 @@ extension Event {
         public static let jobRan: Kind = "job.ran"
         public static let automationRan: Kind = "automation.ran"
         public static let agentChanged: Kind = "agent.changed"
+        public static let appModeChanged: Kind = "app.mode_changed"
         public static let secretSet: Kind = "secret.set"
         public static let secretResolved: Kind = "secret.resolved"
     }
