@@ -112,6 +112,8 @@ final class LiveSync {
     var unhooked: () -> [String] = { [] }
     /// Runs the CLI calls of the local daemon. Nil: the calls time out.
     var appCalls: ((MachineLink) -> AppCalls?)?
+    /// A mirror frame of the group home. A client pulls then.
+    var onMirror: (() -> Void)?
 
     private var merger: EventMerger?
     private var polling: PollingSource?
@@ -277,6 +279,11 @@ final class LiveSync {
                 case .runbookRun(let r)?: DispatchQueue.main.async { RUNBOOKS.apply(r) }
                 case .review(let e)?: Task { await REVIEWS.apply(e, from: machine) }
                 case .event(let e)?: DispatchQueue.main.async { EVENTS.received(e); JOURNAL.received(e) }
+                case .mirror?:
+                    // hub.frame runs only for the local link, so a frame of a remote home needs this branch.
+                    DispatchQueue.main.async { [weak self] in
+                        if self?.group?.isHome(machine: machine, local: l.local) == true { self?.onMirror?() }
+                    }
                 default: break
                 }
                 guard l.local else { return }

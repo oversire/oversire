@@ -65,8 +65,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         })
     }()
     lazy var projectStore: ProjectStore = {
+        // A client warms from the mirror cache. The files of Full mode stay as they are.
+        let client = MODE == .client
         let s = ProjectStore(trackers: ENV, notifier: projectNotifier,
-                             statePath: PROJECT_STATE_PATH, activityPath: PROJECT_ACTIVITY_PATH)
+                             statePath: client ? MIRROR_DIR + "/plane-state.json" : PROJECT_STATE_PATH,
+                             activityPath: client ? MIRROR_DIR + "/plane-activity.jsonl" : PROJECT_ACTIVITY_PATH)
         s.relayIsLive = { [weak self] in self?.relay.state == .live }
         s.feedIsLive = { [weak self] a in self?.relay.isFeedLive(a) ?? false }
         s.busy = busy
@@ -135,6 +138,32 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             }, docs: docs, appVersion: version, source: AppEnvironment.appDevice, sourceName: name)
         }
     }
+    /// Reads the mirror of the home daemon. Nil in Full mode.
+    lazy var clientMirror: ClientMirror? = {
+        guard MODE == .client else { return nil }
+        return MainActor.assumeIsolated {
+            let fetch = HomeMirrorFetch { [weak self] in
+                let group = await MainActor.run { [weak self] in self?.relay.group }
+                return await group?.mirrorHome()
+            }
+            let m = ClientMirror(reader: MirrorReader(fetch: fetch, cache: MirrorCache(dir: MIRROR_DIR))) { [weak self] in self?.applyMirror($0) }
+            m.counts = { [weak self] in
+                guard let self else { return (0, 0) }
+                return (self.projectStore.snapshots.values.reduce(0) { $0 + $1.items.count }, Set(self.grouped.map(\.0) + self.prGrouped.map(\.0)).count)
+            }
+            m.homeName = { [weak self] in self?.relay.group?.places(sessions: nil).home }
+            m.rehome = { [weak self] in
+                let group = await MainActor.run { self?.relay.group }
+                await group?.rereadAndWait()
+            }
+            m.onStatus = { [weak self] _ in
+                self?.bus.post(DataChange(.connection, origin: .event))
+            }
+            return m
+        }
+    }()
+    var clientLink: ClientLink? { MainActor.assumeIsolated { clientMirror?.status } }
+    var clientName: String { MainActor.assumeIsolated { clientMirror?.name ?? "home" } }
     var pages: AppWindow? { appWindow }
     lazy var assistantRoot = AssistantRoot(app: self)
     /// Nil: the panel links to Settings › AI.
@@ -197,6 +226,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         c.sink = self
         c.machines = machineHub
         c.unhooked = { [weak self] in self?.cloudSetup.unhookedRepos(REPOS) ?? [] }
+        c.onMirror = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
         c.appCalls = { [weak self] link in
             let client = link.client(http: DaemonTransport.shared)
             return self.map { AppCalls(catalog: $0.actions) { try await client.send($0) } }
@@ -360,6 +390,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         projectStore.track(resolved, live: liveProjectKeys())
         touchMirror(.catalog, nil)
         syncPlaneWorkspaces()
+        MainActor.assumeIsolated { clientMirror?.start() }
         if MODE == .full { projectCatalog.refreshIfStale() }
         applyCaptureHotKey()
         applyWindowHotKey()
@@ -657,8 +688,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func refresh(force: Bool = false, completion: (() -> Void)? = nil) {
-        // A client fetches nothing through gh. The mirror pull comes in OVERSIRE-527.
-        guard MODE == .full, !REPOS.isEmpty else { completion?(); return }
+        // A client fetches nothing through gh. It pulls the mirror of home.
+        if MODE == .client {
+            MainActor.assumeIsolated { clientMirror?.pull() }
+            completion?()
+            return
+        }
+        guard !REPOS.isEmpty else { completion?(); return }
         // Never let refreshes overlap: a slow network poll that outlives the timer
         // interval would otherwise stack concurrent gh-process storms.
         // A coalesced refresh still owes its caller a callback once fresh data lands.
@@ -804,6 +840,41 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         return (zip(repos, runs).map { ($0, $1) }, prs ? zip(repos, list).map { ($0, $1) } : [])
     }
 
+    /// A client gets a delta of the mirror: the same steps as a full fetch, with no provider call and no event row.
+    func applyMirror(_ d: MirrorDelta) {
+        projectStore.mirrored(d)
+        if let c = d.catalog {
+            projectStore.catalog = c
+            projectCatalog.mirrored = c
+            ENV.mirrored = c
+            projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: [])
+        }
+        if let r = d.runs {
+            let runs = Self.mirrorOrder(r)
+            detectTransitions(runs)
+            ciAssist.observe(runs)
+            DeployLog.shared.record(runs)
+            grouped = runs
+        }
+        if let p = d.prs { prGrouped = Self.mirrorOrder(p) }
+        if d.runs != nil || d.prs != nil {
+            REPOS = grouped.map(\.0) + prGrouped.map(\.0).filter { r in !grouped.contains { $0.0 == r } }
+            assignRepoColors(REPOS)
+        }
+        let first = firstLoad
+        firstLoad = false
+        lastFetch = Date()
+        updateIcon()
+        reloadList(first ? DataChange(.all) : nil, origin: .poll)
+    }
+
+    /// The repos that this Mac knows come first, in their order. The others follow, by name.
+    static func mirrorOrder<T>(_ m: [String: [T]]) -> [(String, [T])] {
+        let known = REPOS.filter { m[$0] != nil }
+        let rest = m.keys.filter { !known.contains($0) }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        return (known + rest).map { ($0, m[$0] ?? []) }
+    }
+
     func runPendingPartial() {
         guard let p = pendingPartial else { return }
         pendingPartial = nil
@@ -813,6 +884,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     // Resolves REPOS from the picks. `reopen` is for an explicit save from the settings.
     func applyRepoSelection() {
+        // A client takes its repos from the mirror.
+        guard MODE == .full else { return }
         let previous = REPOS
         REPOS = catalog.resolve(picked: PICKED_REPOS, orgs: PICKED_ORGS)
         assignRepoColors(REPOS)
@@ -849,7 +922,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func liveProjectKeys() -> Set<String> {
-        Set(projectCatalog.resolve(PROJECTS_CFG).filter { p in
+        guard MODE == .full else { return [] }
+        return Set(projectCatalog.resolve(PROJECTS_CFG).filter { p in
             switch cloudSetup.hooks.statuses[HookManager.planeKey(p.ref.workspace)] {
             case .live, .waiting: return true
             default: return false
@@ -1117,7 +1191,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     log.info("Transition: \(wf) on \(run.headBranch) → \(run.conclusion ?? "unknown") (was \(old ?? "new"))")
                     let link = workstreams.link(runId: run.id)
                     let watched = link.flatMap { workstreams.stream($0.key)?.agent }.map { $0.phase == .working || $0.phase == .waiting } ?? false
-                    if ciAssist.shouldRetry(repo: repo, run, watched: watched) {
+                    if MODE == .full, ciAssist.shouldRetry(repo: repo, run, watched: watched) {
                         log.info("Flaky: re-running \(wf) on \(run.headBranch) once before the alert")
                         rerun(repo: repo, runs: [run], failedOnly: true)
                         continue

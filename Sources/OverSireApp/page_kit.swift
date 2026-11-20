@@ -961,6 +961,32 @@ final class EmptyNote: NSStackView {
     required init(coder: NSCoder) { fatalError() }
 }
 
+// The empty page of a client before its home sends the data (OVERSIRE-527).
+final class WaitingNote: NSStackView {
+    init(_ name: String) {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .centerX
+        spacing = 6
+        translatesAutoresizingMaskIntoConstraints = false
+        edgeInsets = NSEdgeInsets(top: 56, left: 24, bottom: 56, right: 24)
+        let title = NSTextField.text("Waiting for \(name) to send its data.", size: 15, weight: .semibold, lines: 2)
+        let note = NSTextField.text("Open OverSire on \(name). It sends its projects, PRs and CI to this Mac.", size: 12, color: Palette.mut, lines: 2)
+        [title, note].forEach { $0.alignment = .center }
+        setCustomSpacing(10, after: addGlyph())
+        addArrangedSubview(title)
+        addArrangedSubview(note)
+        setAccessibilityLabel("Waiting for \(name) to send its data")
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    private func addGlyph() -> NSView {
+        let g = Glyph("clock", color: Palette.dim, size: 28)
+        addArrangedSubview(g)
+        return g
+    }
+}
+
 // A list of rows with a line between them.
 protocol RowList: AnyObject {
     var list: NSStackView { get }

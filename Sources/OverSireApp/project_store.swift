@@ -1,5 +1,6 @@
 import Cocoa
 import OverSireCore
+import OverSireSync
 
 struct NewItem {
     var projectKey: String
@@ -62,6 +63,12 @@ final class ProjectStore {
     /// The last fetch error of each project, by store key. A good fetch clears it.
     private(set) var errors: [String: String] = [:]
     private(set) var tracked: [ProjectSummary] = []
+    /// True on a client: the mirror gives the data, and the store reads no tracker.
+    var client = MODE == .client
+    /// The catalog of the home. A client reads the capabilities of a project from it.
+    var catalog: ClientCatalog?
+    /// Items that came before their project doc, by store key.
+    private var orphans: [String: [Item]] = [:]
     private(set) var liveKeys: Set<String> = []
     private(set) var intakeKeys: [String: Int] = [:]   // work item id → number, for keys such as TREBI-264
     private var loadingKeys: Set<String> = []
@@ -156,9 +163,11 @@ final class ProjectStore {
         tracked = projects
         liveKeys = live
         PROJECT_ICONS.track(projects)
-        restartTimer()
-        let keys = projects.map { $0.ref.storeKey }
-        refresh(keys, force: limitUsed != nil && limitUsed != snapshotLimit) { _ in }
+        if !client {
+            restartTimer()
+            let keys = projects.map { $0.ref.storeKey }
+            refresh(keys, force: limitUsed != nil && limitUsed != snapshotLimit) { _ in }
+        }
         if changed { publish(DataChange(.projects, origin: .event)) }
     }
 
@@ -173,6 +182,7 @@ final class ProjectStore {
     }
 
     func poll() {
+        guard !client else { return }
         releaseStuckReads()
         let keys = tracked.map(\.ref.storeKey).filter { key in
             // A live project waits for its events, unless its last refresh failed or is old.
@@ -215,6 +225,8 @@ final class ProjectStore {
     /// A workspace in its rate limit pause refreshes after the pause.
     /// A refresh that joins a running refresh keeps the lane of the running one. Its rerun uses the lane of the last caller.
     func refresh(_ keys: [String], force: Bool, priority: CallPriority = .background, done: @escaping (Bool) -> Void) {
+        // A client has no tracker. The mirror pull gives the data.
+        guard !client else { done(true); return }
         let takes = force && priority == .user
         let running = keys.filter { owner[$0] != nil && (!takes || reads[$0]?.lane == .user) }
         var todo = keys.filter { !running.contains($0) }
@@ -835,7 +847,12 @@ final class ProjectStore {
     }
 
     /// True when the tracker of the project has the capability.
-    func has(_ c: Capability, in snap: ProjectSnapshot) -> Bool { tracker(of: snap.summary.ref)?.capabilities.contains(c) ?? false }
+    func has(_ c: Capability, in snap: ProjectSnapshot) -> Bool {
+        if let catalog {
+            return catalog.projects.first { $0.summary.ref.storeKey == snap.summary.ref.storeKey }?.capabilities.contains(c) ?? false
+        }
+        return tracker(of: snap.summary.ref)?.capabilities.contains(c) ?? false
+    }
 
     /// A nil epic removes the item from its epic.
     func setEpic(_ epic: EpicID?, itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
@@ -1366,7 +1383,7 @@ final class ProjectStore {
             guard let d = try? enc.encode(e) else { return nil }
             return String(data: d, encoding: .utf8)
         }.joined(separator: "\n") + "\n"
-        try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: (activityPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try? text.write(toFile: activityPath, atomically: true, encoding: .utf8)
     }
 
@@ -1418,7 +1435,7 @@ final class ProjectStore {
         let disk = Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems),
                         seenItems: Array(seenItems))
         guard let data = try? JSONEncoder().encode(disk) else { return }
-        try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: (statePath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)
     }
 
@@ -1575,5 +1592,61 @@ extension Result where Failure == ProviderError {
         do { self = .success(try await op()) }
         catch let e as ProviderError { self = .failure(e) }
         catch { self = .failure(.transport(error.localizedDescription)) }
+    }
+}
+
+// MARK: Mirror
+
+extension ProjectStore {
+    /// Applies the delta of a pull of the mirror feed (OVERSIRE-527). It writes no event row and no feed line:
+    /// the source writes them. It tells the user of new items and changes, as a poll does.
+    func mirrored(_ d: MirrorDelta) {
+        var touched = Set<String>()
+        if d.reset {
+            for key in snapshots.keys where d.projects[key] == nil { snapshots[key] = nil; touched.insert(key) }
+            orphans = [:]
+        }
+        for key in d.removedProjects where snapshots.removeValue(forKey: key) != nil { touched.insert(key) }
+        let keys = Set(d.projects.keys).union(d.items.keys).union(d.removedItems.keys).subtracting(d.removedProjects)
+        for key in keys.sorted() {
+            let prior = snapshots[key]
+            let upserts = (orphans.removeValue(forKey: key) ?? []) + (d.items[key] ?? [])
+            guard let base = d.projects[key] ?? prior else { orphans[key] = upserts; continue }
+            var items = d.reset ? [] : (prior?.items ?? [])
+            var at = Dictionary(items.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+            for i in upserts {
+                if let n = at[i.id] { items[n] = i } else { at[i.id] = items.count; items.append(i) }
+            }
+            if let gone = d.removedItems[key].map(Set.init), !gone.isEmpty { items.removeAll { gone.contains($0.id) } }
+            let snap = ProjectStore.localized(ProjectStore.withItems(base, items))
+            snapshots[key] = snap
+            touched.insert(key)
+            if let prior, now().timeIntervalSince(prior.fetchedAt) <= awayAfter { notifyMirrored(old: prior, new: snap) }
+            seenItems.formUnion(items.map(\.id))
+        }
+        if !d.activity.isEmpty {
+            // The first read is quiet, as the first snapshot of a poll is.
+            if d.reset, activityCache.isEmpty { readActivity.formUnion(d.activity.map(\.id)) }
+            append(d.activity)
+        }
+        guard !touched.isEmpty || !d.activity.isEmpty || d.reset else { return }
+        save()
+        publish(DataChange([.projects, .intake], projects: touched, origin: .poll))
+    }
+
+    private func notifyMirrored(old: ProjectSnapshot, new snap: ProjectSnapshot) {
+        let all = ProjectStore.diff(old, snap)
+        let known = Set(old.index?.map(\.id) ?? [])
+        let back = Set(all.compactMap { c -> String? in
+            if case .added = c.1, seenItems.contains(c.itemId) || known.contains(c.itemId) { return c.itemId }
+            return nil
+        })
+        let changes = all.filter { c in
+            if case .removed = c.1 { return false }
+            return !back.contains(c.itemId)
+        }
+        notifyIntake(old: old, new: snap)
+        guard !changes.isEmpty, let n = PROJECTS_CFG.notifications(for: snap.summary.identifier) else { return }
+        notifier.handle(changes, in: snap, settings: n)
     }
 }

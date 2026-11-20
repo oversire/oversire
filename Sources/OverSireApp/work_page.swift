@@ -130,7 +130,7 @@ final class WorkPage: Page {
         if slots > 0 { caption += " · \(used) of \(slots) session slots used" }
         let on = AGENTS.autoStart
         let plane = data.projectStore.plane
-        let top = WorkPage.header(self, tab: .items, caption: caption, extra: [AnyHashable(on), AnyHashable(plane.state)], actions: { [weak self] in
+        var top = WorkPage.header(self, tab: .items, caption: caption, extra: [AnyHashable(on), AnyHashable(plane.state)], actions: { [weak self] in
             plane.staleAccessory + [ToggleChip("Auto start", on: on) { AGENTS.autoStart.toggle(); saveConfig(); self?.reload() }]
         })
 
@@ -147,15 +147,19 @@ final class WorkPage: Page {
             }
         }
         pageBusy = data.projectsLoading
-        if rows.isEmpty {
+        if rows.isEmpty || data.clientLink?.isWaiting == true {
             let loading = data.projectsLoading
             if !loading, case .failed = plane.state {
                 rows = [PageRow("failed", plane.state) { ReadNote("\(ENV.trackerNames()) did not give your items.", part: plane) }]
             } else {
-                rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.") }]
+                let waiting = data.clientLink?.isWaiting == true, name = data.clientName
+                rows = [PageRow(waiting ? "waiting" : loading ? "loading" : "empty", 0) {
+                    waiting ? WaitingNote(name) : loading ? LoadingNote("Loading your items") : EmptyNote("No open items are yours.")
+                }]
             }
         }
         let table = table
+        if let l = data.clientLink, l.banner != nil { top.append(PageRow("update", "\(l)") { l.banner ?? NSView() }) }
         return [PageSection("top", rows: top), PageSection("items", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 

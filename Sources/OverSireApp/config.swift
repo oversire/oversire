@@ -44,8 +44,8 @@ enum AppMode: String, Codable {
 }
 
 enum ClientMode {
-    /// True when this build has the client reader (OVERSIRE-527). The Mode control stays off until then.
-    static var supported = false
+    /// True when this build has the client reader (OVERSIRE-527). Tests and shots turn it off.
+    static var supported = true
 
     /// The gate of each automation. A client never acts, also when it has no group (owner is nil).
     static func mayAct(_ mode: AppMode, owner: Bool?) -> Bool { mode == .full && (owner ?? true) }

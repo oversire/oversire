@@ -792,8 +792,13 @@ extension TabVC {
         let tracked = (NSApp.delegate as? GHActionsBar)?.projectCatalog.resolve(PROJECTS_CFG) ?? []
         let agents = (NSApp.delegate as? GHActionsBar)?.agentIndex.ready
         let job = (NSApp.delegate as? GHActionsBar)?.statusJob
-        if ENV.accounts(.tracker).isEmpty {
-            return [EmptyRow("Add a tracker in Settings → Providers.", w: w, icon: "square.grid.2x2")]
+        let app = NSApp.delegate as? GHActionsBar
+        if app?.clientLink == .waiting {
+            return [EmptyRow("Waiting for \(app?.clientName ?? "home") to send its data.", w: w, icon: "clock")]
+        }
+        if store.client ? (store.catalog?.trackers.isEmpty ?? false) : ENV.accounts(.tracker).isEmpty {
+            let text = store.client ? "\(app?.clientName ?? "Home") has no tracker. Add one in OverSire on \(app?.clientName ?? "home")." : "Add a tracker in Settings → Providers."
+            return [EmptyRow(text, w: w, icon: "square.grid.2x2")]
         }
         if tracked.isEmpty {
             return [EmptyRow("No projects tracked. Pick projects in Settings → Projects.", w: w, icon: "square.grid.2x2")]

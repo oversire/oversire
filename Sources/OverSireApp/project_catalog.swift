@@ -25,6 +25,8 @@ final class ProjectCatalog {
     private var lookedUp = Set<String>()
     private let trackers: TrackerDirectory
     private let path: String
+    /// The projects of the home, on a client. A client has no tracker account.
+    var mirrored: ClientCatalog?
 
     init(trackers: TrackerDirectory, path: String) {
         self.trackers = trackers
@@ -48,6 +50,7 @@ final class ProjectCatalog {
 
     // Explicit picks plus every open project of the workspaces picked as a whole.
     func resolve(_ cfg: ProjectsConfig) -> [ProjectSummary] {
+        if let mirrored { return mirrored.projects.map(\.summary) }
         var out: [ProjectSummary] = []
         for w in workspaces {
             let all = cfg.allOf.contains(w)
@@ -56,7 +59,7 @@ final class ProjectCatalog {
         return cfg.sorted(out)
     }
 
-    func refreshIfStale() { if isStale { refreshAll() } }
+    func refreshIfStale() { if mirrored == nil, isStale { refreshAll() } }
 
     /// The open project with this key ("MCPQ") in any workspace.
     func project(key: String) -> ProjectSummary? {
@@ -66,12 +69,13 @@ final class ProjectCatalog {
     /// Refreshes all workspaces once for a key that OverSire does not track. A new Plane project then shows with no wait for the cache.
     /// False when the key was looked up before.
     func lookUp(_ key: String) -> Bool {
-        guard lookedUp.insert(key.uppercased()).inserted else { return false }
+        guard mirrored == nil, lookedUp.insert(key.uppercased()).inserted else { return false }
         refreshAll(force: true)
         return true
     }
 
     func refreshAll(force: Bool = false) {
+        guard mirrored == nil else { return }
         for w in workspaces { refresh(w, force: force) }
         let known = Set(workspaces)
         if bySlug.keys.contains(where: { !known.contains($0) }) {

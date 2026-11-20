@@ -236,18 +236,22 @@ final class SidebarCell: NSTableCellView {
 
 /// What the live line shows: the cloud state and the last burst of events. Pure, for the tests.
 struct LiveLineModel: Equatable {
-    enum Mark: Equatable { case connected, connecting, disconnected, polling }
+    enum Mark: Equatable { case connected, connecting, disconnected, polling, waiting }
 
     var state: LiveSync.State
     var lastBurst: Date?
     var pollEvery: TimeInterval = POLL_NORMAL
     /// The live feeds that are up (Big Timer).
     var liveFeeds = 0
+    /// A client shows the link to its home, not the cloud.
+    var client: ClientLink?
+    var clientName = "home"
 
     /// How long "just now" shows after a burst.
     static let pingTime: TimeInterval = 4
 
     var mark: Mark {
+        if let client { return client.isWaiting ? .waiting : .connected }
         switch state {
         case .live: return .connected
         case .connecting: return .connecting
@@ -257,6 +261,7 @@ struct LiveLineModel: Equatable {
     }
 
     var title: String {
+        if let client { return client.title(clientName) }
         switch state {
         case .live: return "Connected"
         case .connecting: return "Connecting…"
@@ -267,6 +272,7 @@ struct LiveLineModel: Equatable {
 
     /// The dim text after the title.
     var detail: String? {
+        if let client { return client.detail }
         switch state {
         case .connecting: return "polling meanwhile"
         case .error: return "polling every \(Int(pollEvery)) s"
@@ -277,6 +283,7 @@ struct LiveLineModel: Equatable {
     func justNow(at now: Date) -> Bool { lastBurst.map { now.timeIntervalSince($0) < Self.pingTime && now >= $0 } ?? false }
 
     var tooltip: String {
+        if let client { return client.isWaiting ? "\(clientName) sends no data yet. This Mac does not poll." : "This Mac shows the data of \(clientName). It does not poll." }
         if case .error(let m) = state { return "Cloud error: \(m)" }
         let feeds = liveFeeds > 0 && state == .off ? "No cloud. OverSire polls GitHub. Big Timer sends its changes live." : nil
         let burst = lastBurst.map { "Last event \(relativeTime($0))" }
@@ -321,7 +328,9 @@ final class LiveLine: Box {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ relay: LiveSync) { set(LiveLineModel(state: relay.state, lastBurst: relay.lastBurstAt, liveFeeds: relay.liveFeedCount)) }
+    func show(_ relay: LiveSync, client: ClientLink? = nil, name: String = "home") {
+        set(LiveLineModel(state: relay.state, lastBurst: relay.lastBurstAt, liveFeeds: relay.liveFeedCount, client: client, clientName: name))
+    }
 
     func set(_ m: LiveLineModel) {
         let burst = m.lastBurst != nil && m.lastBurst != model.lastBurst && m.justNow(at: now())
@@ -384,6 +393,18 @@ final class LiveMark: NSView {
         case .polling:
             Palette.dim.setFill()
             NSBezierPath(ovalIn: r).fill()
+        case .waiting:
+            Palette.dim.setStroke()
+            let c = NSBezierPath(ovalIn: r.insetBy(dx: 0.6, dy: 0.6))
+            c.lineWidth = 1.2
+            c.stroke()
+            let h = NSBezierPath()
+            h.move(to: NSPoint(x: r.midX, y: r.maxY - 2.2))
+            h.line(to: NSPoint(x: r.midX, y: r.midY))
+            h.line(to: NSPoint(x: r.midX + 2, y: r.midY - 1.2))
+            h.lineWidth = 1.1
+            h.lineCapStyle = .round
+            h.stroke()
         case .disconnected:
             let t = NSRect(x: (bounds.width - 11) / 2, y: (bounds.height - 10) / 2, width: 11, height: 10)
             let p = NSBezierPath()

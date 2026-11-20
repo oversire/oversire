@@ -22,6 +22,13 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertEqual(r.current, "implement")
     }
 
+    func testMirrorFrameParses() throws {
+        let frame = String(decoding: try contractFixture("mirror-frame", "frame"), as: UTF8.self)
+        guard case .mirror(let m)? = DaemonFrame.parse(frame) else { return XCTFail("no mirror frame") }
+        XCTAssertEqual(m.head, 14)
+        XCTAssertEqual(m.epoch, "e7c1a9f04b2d4c58")
+    }
+
     func testDecodeAppCall() throws {
         let call = String(decoding: try contractFixture("app-call", "call"), as: UTF8.self)
         guard case .appCall(let c)? = DaemonFrame.parse(#"{"type":"appCall","call":"# + call + "}") else {

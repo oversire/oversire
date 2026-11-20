@@ -51,7 +51,7 @@ public struct MirrorPut: Codable, Hashable, Sendable {
     }
 }
 
-public struct MirrorReader: Codable, Hashable, Sendable {
+public struct MirrorPeer: Codable, Hashable, Sendable {
     public var machine: String
     public var name: String
     public var device: String?
@@ -79,11 +79,11 @@ public struct MirrorHead: Codable, Hashable, Sendable {
     public var publishedAt: Date?
     /// A WebSocket client of the source is connected. Absent means false.
     public var sourceOnline: Bool?
-    public var readers: [MirrorReader]?
+    public var readers: [MirrorPeer]?
 
     public init(epoch: String, head: Int64, floor: Int64, ready: Bool, source: String? = nil, sourceName: String? = nil,
                 sourceMachine: String? = nil, appVersion: String? = nil, publishedAt: Date? = nil,
-                sourceOnline: Bool? = nil, readers: [MirrorReader]? = nil) {
+                sourceOnline: Bool? = nil, readers: [MirrorPeer]? = nil) {
         self.epoch = epoch
         self.head = head
         self.floor = floor

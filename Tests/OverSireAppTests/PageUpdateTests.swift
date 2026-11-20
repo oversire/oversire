@@ -239,6 +239,21 @@ final class LiveLineTests: XCTestCase {
         XCTAssertNil(LiveLineModel(state: .off).detail)
     }
 
+    func testClientTexts() {
+        let waiting = LiveLineModel(state: .off, client: .waiting, clientName: "mbp")
+        XCTAssertEqual(waiting.title, "Waiting for mbp")
+        XCTAssertEqual(waiting.mark, .waiting)
+        XCTAssertNil(waiting.detail)
+        let at = Date()
+        let live = LiveLineModel(state: .off, client: .live(updated: at, items: 3, repos: 2), clientName: "mbp")
+        XCTAssertEqual(live.title, "From mbp")
+        XCTAssertEqual(live.mark, .connected)
+        XCTAssertEqual(live.detail, "updated " + ClientLink.clock(at))
+        XCTAssertEqual(ClientLink.live(updated: at, items: 2140, repos: 38).note("mbp"), "Updated \(ClientLink.clock(at)) · 2,140 items · 38 repos")
+        XCTAssertEqual(ClientLink.waiting.note("mbp"), "Waiting for mbp to send its data.")
+        XCTAssertEqual(LiveLineModel(state: .live).title, "Connected", "Full mode keeps the cloud texts")
+    }
+
     func testJustNowShowsFourSeconds() {
         let t = Date()
         let m = LiveLineModel(state: .live, lastBurst: t)

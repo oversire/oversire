@@ -24,6 +24,7 @@ final class AppEnvironment: @unchecked Sendable {
     private var failed: [AccountID: String] = [:]
     private var gates: [AccountID: RateGate] = [:]
     private weak var owner: AutomationOwner?
+    private var catalog: ClientCatalog?
 
     init(secrets: KeychainSecrets = KeychainSecrets()) {
         self.secrets = secrets
@@ -169,10 +170,22 @@ final class AppEnvironment: @unchecked Sendable {
         return provider(AccountConfig(account: AccountID(provider: d.id, id: owner), values: ["owner": owner])) as? P
     }
 
+    /// The catalog of the home, on a client. It has no accounts, so the layers answer from the catalog.
+    var mirrored: ClientCatalog? {
+        get { lock.withLock { catalog } }
+        set { lock.withLock { catalog = newValue } }
+    }
+
     /// The union of the capabilities of the accounts of a layer, or of all accounts.
     /// The runtime layer is the sessions machine.
     func capabilities(_ layer: Layer? = nil) -> Set<Capability> {
-        var caps = (layer.map(accounts) ?? accounts).compactMap(provider).reduce(into: Set<Capability>()) { $0.formUnion($1.capabilities) }
+        var caps: Set<Capability>
+        if let m = mirrored {
+            let layers = layer.map { [$0] } ?? [.tracker, .codeHost, .ci]
+            caps = layers.reduce(into: Set<Capability>()) { $0.formUnion(m.capabilities[$1.rawValue] ?? []) }
+        } else {
+            caps = (layer.map(accounts) ?? accounts).compactMap(provider).reduce(into: Set<Capability>()) { $0.formUnion($1.capabilities) }
+        }
         if layer == nil || layer == .runtime, let rt = runtime { caps.formUnion(rt.capabilities) }
         return caps
     }

@@ -207,6 +207,20 @@ struct MachinesModel: Equatable {
         /// The Mac that holds the automations lease. nil: none.
         var holder: String?
         var keptAccounts: Int
+        /// The link of a client to its home. nil in Full mode.
+        var link: ClientLink?
+
+        var dataTitle: String { "Data from \(home ?? "home")" }
+
+        var dataTone: Tone {
+            switch link {
+            case .live?: return Tone(symbol: "circle.fill", color: Palette.ok, word: "Live")
+            case .needsUpdate?: return Tone(symbol: "exclamationmark.triangle", color: Palette.warn, word: "Update")
+            default: return Tone(symbol: "clock", color: Palette.dim, word: "Waiting")
+            }
+        }
+
+        var dataNote: String { (link ?? .waiting).note(home ?? "home") }
 
         static let fullNote = "Full: this Mac uses its own accounts and polls Plane, GitHub and CI."
 
@@ -282,7 +296,7 @@ struct MachinesModel: Equatable {
     var missingHooks: [String] { hooks.filter { $0.state == .missing || $0.state == .outdated }.map(\.name) }
 
     init(_ s: MachinesSnapshot, config: MachinesConfig, now: Date = Date(), mode current: AppMode = MODE,
-         keptAccounts: Int = KEPT_ACCOUNTS.count, clientReader: Bool = ClientMode.supported) {
+         keptAccounts: Int = KEPT_ACCOUNTS.count, clientReader: Bool = ClientMode.supported, link: ClientLink? = nil) {
         daemon = s.info
         installed = s.installed
         path = s.path
@@ -363,7 +377,7 @@ struct MachinesModel: Equatable {
         case .client(let h)?: holder = h
         case .paused?, nil: break
         }
-        mode = Mode(mode: current, home: home, enabled: reason == nil, reason: reason, holderIsSelf: isSelf, holder: holder, keptAccounts: keptAccounts)
+        mode = Mode(mode: current, home: home, enabled: reason == nil, reason: reason, holderIsSelf: isSelf, holder: holder, keptAccounts: keptAccounts, link: link)
     }
 
     static func offline(_ seen: Date?, now: Date) -> String {
@@ -427,6 +441,8 @@ final class MachinesController {
     var config: () -> MachinesConfig = { MACHINES }
     /// The automation owner of the app. nil: no group sync.
     var owner: () -> AutomationOwner? = { (NSApp?.delegate as? GHActionsBar)?.automations }
+    /// The link of a client to its home. nil in Full mode.
+    var link: () -> ClientLink? = { (NSApp?.delegate as? GHActionsBar)?.clientLink }
     var changed: () -> Void = { ChangeBus.shared.post(DataChange(.connection, origin: .user)) }
 
     static let loadingChanged = Notification.Name("MachinesLoading")
@@ -460,7 +476,7 @@ final class MachinesController {
     var model: MachinesModel {
         var s = snapshot
         if let o = owner() { s.automations = o.role }
-        return MachinesModel(s, config: config())
+        return MachinesModel(s, config: config(), link: link())
     }
     var busy: Bool { DaemonSetup.shared.busy }
 
@@ -743,6 +759,7 @@ extension SettingsPage {
         }
         var rows: [NSView] = [Row([TwoLine("This Mac", subView: sub, lines: 1), Spacer(), seg], height: 62, label: "Mode, \(k.mode == .client ? "Client" : "Full")")]
         if k.mode == .client {
+            rows.append(Row([TwoLine(k.dataTitle, k.dataNote, lines: 2), Spacer(), Pill(k.dataTone)], height: 56, label: k.dataTitle))
             rows.append(Row([TwoLine("Accounts of this Mac", k.accountsNote, lines: 2), Spacer()], height: 56, label: "Accounts of this Mac"))
         }
         b.addFull(section(.mode, rows))

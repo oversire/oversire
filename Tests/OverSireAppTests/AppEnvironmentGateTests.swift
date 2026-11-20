@@ -101,4 +101,17 @@ final class AppEnvironmentGateTests: XCTestCase {
         d.set(["Plane", "GitHub"], forKey: "activity.filter.sources")
         XCTAssertEqual(FeedFilter.load(d).sources, ["Tracker", "GitHub"])
     }
+
+    func testMirroredCapabilities() {
+        let env = AppEnvironment()
+        XCTAssertFalse(env.has(.rerun))
+        let summary = ProjectSummary(ref: ProjectRef(account: AccountID(provider: .plane, id: "ws"), id: "p"), identifier: "P", title: "P", url: "", closed: false)
+        env.mirrored = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.links])],
+                                     capabilities: ["ci": [.rerun], "tracker": [.links]], trackers: ["ws"])
+        XCTAssertTrue(env.has(.rerun))
+        XCTAssertTrue(env.capabilities(.tracker).contains(.links))
+        XCTAssertFalse(env.capabilities(.ci).contains(.links))
+        env.mirrored = ClientCatalog(projects: [], capabilities: [:], trackers: [])
+        XCTAssertFalse(env.has(.rerun))
+    }
 }

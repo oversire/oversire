@@ -72,6 +72,9 @@ final class GroupSync {
     /// The daemon of the group home for the mirror, with the app credential. nil: no group, or the home is offline.
     func mirrorHome() async -> DaemonClient? { leases.homeClient() }
 
+    /// True when `machine` is the home of the group. With no group, the local daemon is the home.
+    func isHome(machine: String, local: Bool) -> Bool { leases.isHome(machine: machine, local: local) }
+
     /// The members of the group, with the home and the Run sessions on machine. No group: this Mac and its daemon.
     func places(sessions: String?) -> AgentPlaces {
         let me = selfName
@@ -195,6 +198,10 @@ final class LeaseDirectory: @unchecked Sendable {
     /// The machine name of this Mac: its daemon, else the host name, as a join of the app sends it.
     var selfName: String {
         lock.withLock { links.first(where: \.local)?.machine } ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
+    }
+
+    func isHome(machine: String, local: Bool) -> Bool {
+        lock.withLock { group.map { $0.home.rawValue == machine } ?? local }
     }
 
     /// The client of the home daemon: loopback on the home Mac, else its link with the app credential.

@@ -275,17 +275,21 @@ final class RunsPage: Page {
         var rows = PageRow.limited(shown, more: more, reload: { [weak self] in self?.reload() }) { [weak self, commands] r in
             RunLine.row(repo: r.repo, run: r.run, data: data, commands: commands) { self?.go($0) }
         }
-        if rows.isEmpty {
+        if rows.isEmpty || data.clientLink?.isWaiting == true {
             let loading = data.firstLoad
             if !loading, shown.isEmpty, all.isEmpty, let err = lastFetchError {
                 rows = [PageRow("failed", err) {
                     ReadNote("GitHub did not give the runs.", part: .github(error: err) { data.refresh(force: true, completion: nil) })
                 }]
             } else {
-                rows = [PageRow(loading ? "loading" : "empty", 0) { loading ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed") }]
+                let waiting = data.clientLink?.isWaiting == true, name = data.clientName
+                rows = [PageRow(waiting ? "waiting" : loading ? "loading" : "empty", 0) {
+                    waiting ? WaitingNote(name) : loading ? LoadingNote("Loading runs") : EmptyNote("No runs match.", symbol: "circle.dashed")
+                }]
             }
         }
         let table = shown.isEmpty ? nil : RunLine.layout
+        if let l = data.clientLink, l.banner != nil { top.append(PageRow("update", "\(l)") { l.banner ?? NSView() }) }
         let list = PageRow.list(table == nil ? "list.plain" : "list", rows: rows) { StickyListCard.table(table) }
         return [PageSection("top", rows: top), PageSection("runs", rows: [list])]
     }

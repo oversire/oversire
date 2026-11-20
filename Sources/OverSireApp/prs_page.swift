@@ -37,16 +37,19 @@ final class PRsPage: Page {
             }
             return true
         }
-        guard !all.isEmpty else {
+        let update: [PageRow] = data.clientLink.flatMap { l in l.banner == nil ? nil : [PageRow("update", "\(l)") { l.banner ?? NSView() }] } ?? []
+        let waiting = data.clientLink?.isWaiting == true, name = data.clientName
+        guard !all.isEmpty, !waiting else {
             let loading = data.firstLoad
             let err = loading ? nil : lastFetchError
-            let note = PageRow(loading ? "loading" : err == nil ? "empty" : "failed", err ?? "") {
+            let note = PageRow(waiting ? "waiting" : loading ? "loading" : err == nil ? "empty" : "failed", err ?? "") {
+                if waiting { return WaitingNote(name) }
                 if let err { return ReadNote("GitHub did not give the pull requests.", part: .github(error: err) { data.refresh(force: true, completion: nil) }) }
                 return loading ? LoadingNote("Loading pull requests")
                     : EmptyNote("No review waits for you, and you have no open pull request. OverSire reads the repos of Settings › Projects and repos with the gh CLI.",
                                 symbol: "arrow.triangle.pull")
             }
-            return [PageSection("top", rows: [header]), PageSection("prs", rows: [PageRow.list("plain", rows: [note]) { ListCard() }])]
+            return [PageSection("top", rows: [header] + update), PageSection("prs", rows: [PageRow.list("plain", rows: [note]) { ListCard() }])]
         }
         let reviews = all.filter { !$0.pr.mine }, mine = all.filter { $0.pr.mine }
         var rows: [PageRow] = []
@@ -55,7 +58,7 @@ final class PRsPage: Page {
             rows += list.map { row($0.repo, $0.pr) }
         }
         let table = table
-        return [PageSection("top", rows: [header]), PageSection("prs", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
+        return [PageSection("top", rows: [header] + update), PageSection("prs", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }])]
     }
 
     private func linkedKey(_ repo: String, _ p: ChangeRequest) -> String? {

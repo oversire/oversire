@@ -74,6 +74,7 @@ final class GlanceVC: NSViewController {
 
         foot.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let when = NetworkPath.shared.offlineSince.map(NetworkPath.offlineText)
+            ?? data.clientLink?.footer(data.clientName)
             ?? (data.firstLoad ? "Loading…" : "Updated \(relativeTime(data.lastUpdate))")
         foot.addArrangedSubview(NSTextField.text(when, size: 11.5, color: Palette.dim))
         foot.addArrangedSubview(Spacer())

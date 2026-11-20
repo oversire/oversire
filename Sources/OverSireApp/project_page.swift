@@ -159,6 +159,7 @@ enum ProjectLookup: Hashable {
             let name = data?.projectStore.tracked.first { $0.identifier.uppercased() == key }.map { ENV.trackerName($0.ref.account) } ?? ENV.trackerNames()
             return Banner(.bad, title: "\(name) did not give the items of \(key)", body: error, actions: [retry])
         case .untracked(let canTrack):
+            if let l = data?.clientLink, l.isWaiting { return WaitingNote(data?.clientName ?? "home") }
             guard canTrack, let p = data?.projectCatalog.project(key: key) else {
                 return EmptyNote("OverSire does not track \(key). \(ENV.trackerNames()) has no open project with this key.", symbol: "questionmark.folder")
             }

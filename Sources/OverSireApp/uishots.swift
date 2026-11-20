@@ -15,6 +15,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     var prGrouped: [(String, [ChangeRequest])] = []
     var lastUpdate = Date()
     var firstLoad = true
+    /// A client scene sets it. OVERSIRE_UISHOTS_CLIENT seeds it.
+    var clientLink: ClientLink? = UIShots.clientSeed
+    var clientName: String { "mbp" }
     let projectStore: ProjectStore
     let writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: UIShots.tmp + "/store")))
     lazy var agentIndex = AgentIndex(writes: writes)
@@ -157,6 +160,18 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let groom = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_GROOM"]
     // OVERSIRE_UISHOTS_FILES=folded or open: FRITZ-17 has four images and one PDF.
     static let files = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FILES"]
+    // OVERSIRE_UISHOTS_CLIENT=waiting, live or update: the pages show a client of mbp in that state. The data stays in memory.
+    static let clientSeed: ClientLink? = {
+        switch ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLIENT"] {
+        case "waiting": return .waiting
+        case "live": return .live(updated: UIShots.clientTime, items: 2140, repos: 38)
+        case "update": return .needsUpdate(home: "mbp", version: "1.42")
+        default: return nil
+        }
+    }()
+    static let clientTime = Date().addingTimeInterval(-120)
+    static let clientScenes = ["client-waiting", "client-live", "client-needs-update", "client-glance-waiting", "client-glance-live", "machines-client", "machines-client-waiting"]
+
     // OVERSIRE_UISHOTS_AUTO=other, paused or client: the Queue page tells that auto start runs on mba, or waits for the home.
     static let autoRole: AutomationRole? = {
         switch ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_AUTO"] {
@@ -1150,6 +1165,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         NewEpicSheet.present(over: w.window, snap: snap, data: self)
                     } else if p.hasPrefix("project-plan") {
                         self.planState(p, in: w)
+                    } else if UIShots.clientScenes.contains(p) {
+                        self.clientScene(p, in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
                         UIShots.machines(p, in: w)
                     } else if let r = Route(path: p) {
@@ -1163,7 +1180,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; MachinesController.shared.link = { nil } }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1780,6 +1797,26 @@ extension MachinesSnapshot {
 }
 
 extension UIShots {
+    /// The client scenes: the pages, the popover and Settings › Machines of a client of mbp.
+    func clientScene(_ scene: String, in w: AppWindow) {
+        let link: ClientLink = scene.hasSuffix("waiting") ? .waiting : scene == "client-needs-update" ? .needsUpdate(home: "mbp", version: "1.42")
+            : .live(updated: UIShots.clientTime, items: 2140, repos: 38)
+        clientLink = link
+        bus.post(DataChange(.connection, origin: .event))
+        if scene.hasPrefix("client-glance") {
+            GlanceVC.tab = .now
+            let g = NSWindow(contentRect: NSRect(origin: NSPoint(x: 1360, y: 200), size: GlanceVC.size), styleMask: [.borderless], backing: .buffered, defer: false)
+            g.contentViewController = GlanceVC(data: self) { w.router.go($0) }
+            g.orderFrontRegardless()
+            glance = g
+        } else if scene.hasPrefix("machines-") {
+            MachinesController.shared.link = { link }
+            UIShots.machines("machines-mode-client", in: w)
+        } else {
+            w.router.go(.work(.items))
+        }
+    }
+
     /// Settings › Machines with sample data, and its dialogs.
     static func machines(_ scene: String, in w: AppWindow) {
         let c = MachinesController.shared

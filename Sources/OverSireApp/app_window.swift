@@ -50,10 +50,16 @@ protocol AppData: AnyObject {
     func refresh(force: Bool, completion: (() -> Void)?)
     /// True when an account has the feature. Pages hide what no account has.
     func has(_ c: Capability) -> Bool
+    /// What a client knows about its data. Nil in Full mode.
+    var clientLink: ClientLink? { get }
+    /// The name of the machine that gives the data of a client.
+    var clientName: String { get }
 }
 
 extension AppData {
     var pages: AppWindow? { nil }
+    var clientLink: ClientLink? { nil }
+    var clientName: String { "home" }
 
     /// The problems for the marks. Empty when the Logs settings turn the mark off.
     var openProblems: [Problem] { LOGS_CFG.menuMark ? logs?.problems.open ?? [] : [] }
@@ -419,7 +425,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         installSignals()
         display(router.current)
         syncUpdateItem()
-        sidebar.live.show(data.relay)
+        sidebar.live.show(data.relay, client: data.clientLink, name: data.clientName)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -543,7 +549,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     // The shown page updates through the gate, so it does not change under the cursor.
     private func dataChanged(_ c: DataChange) {
         defer { syncRefresh() }
-        if c.domains.contains(.connection) { sidebar.live.show(data.relay) }
+        if c.domains.contains(.connection) { sidebar.live.show(data.relay, client: data.clientLink, name: data.clientName) }
         for p in cache where p !== page { p.receive(c) }
         if page?.wants(c) == true { if held == nil { held = c } else { held?.merge(c) } }
         // A window behind other windows builds when it shows again. A build blocks the main thread and the menu bar panel.

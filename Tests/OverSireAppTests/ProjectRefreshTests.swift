@@ -1,5 +1,6 @@
 import XCTest
 import OverSireCore
+import OverSireSync
 import OverSireTestKit
 @testable import TrackerPlane
 @testable import OverSireApp
@@ -671,5 +672,96 @@ final class ProjectRefreshTests: XCTestCase {
             if case .added = $0.change { return true } else { return false }
         }.map(\.itemId)
         XCTAssertEqual(added, ["i4"], "only the new item is news")
+    }
+
+    // MARK: Client mode (OVERSIRE-527)
+
+    private actor DraftCount: EventOutlet {
+        var drafts = 0
+        func append(_ d: [EventDraft]) { drafts += d.count }
+        func link(_ links: [ItemLink]) {}
+    }
+
+    private let mirrorRef = ProjectRef(account: AccountID(provider: "plane", id: "ws"), id: "p1", key: "ONE")
+
+    private func mirrorItem(_ n: Int) -> Item {
+        let at = Date()
+        return Item(id: "i\(n)", key: "ONE-\(n)", title: "T\(n)", url: "u", statusOptionId: "t", fields: [:], assignees: [], labels: [],
+                    author: nil, updatedBy: nil, updatedAt: at, activityAt: at, commentCount: 0, lastComment: nil, mentionsMe: false, parentId: nil)
+    }
+
+    private func mirrorSnap(_ items: [Item] = []) -> ProjectSnapshot {
+        ProjectSnapshot(summary: ProjectSummary(ref: mirrorRef, identifier: "ONE", title: "One", url: "", closed: false),
+                        statusOptions: [StatusOption(id: "t", name: "Todo", color: "", group: "unstarted")], items: items, fetchedAt: Date())
+    }
+
+    private func clientStore(notify: @escaping (String) -> Void = { _ in }) throws -> (ProjectStore, String) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("client-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = ProjectStore(trackers: Trackers(SlowTracker()), notifier: ProjectNotifier(post: { _, _, _, id in notify(id) }),
+                                 statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+        store.client = true
+        return (store, dir.path)
+    }
+
+    @MainActor
+    func testMirroredWritesNoEvents() async throws {
+        let (store, _) = try clientStore()
+        let outlet = DraftCount()
+        store.events = EventDesk(outlet: outlet)
+        var d = MirrorDelta()
+        d.projects[mirrorRef.storeKey] = mirrorSnap()
+        d.items[mirrorRef.storeKey] = [mirrorItem(1), mirrorItem(2)]
+        d.activity = [ActivityEntry(id: "a1", projectKey: mirrorRef.storeKey, itemId: "i1", change: .added, actor: nil, text: "New", url: "", at: Date(), unread: true)]
+        d.reset = true
+        store.mirrored(d)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let drafts = await outlet.drafts
+        XCTAssertEqual(drafts, 0)
+        XCTAssertEqual(store.snapshots[mirrorRef.storeKey]?.items.count, 2)
+        XCTAssertEqual(store.activityEntries.map(\.id), ["a1"])
+    }
+
+    @MainActor
+    func testMirroredRunsNotifier() throws {
+        var posted: [String] = []
+        let (store, _) = try clientStore { posted.append($0) }
+        var first = MirrorDelta()
+        first.projects[mirrorRef.storeKey] = mirrorSnap()
+        first.items[mirrorRef.storeKey] = [mirrorItem(1)]
+        first.reset = true
+        store.mirrored(first)
+        XCTAssertTrue(posted.isEmpty, "the first read is quiet")
+
+        var next = MirrorDelta()
+        next.projects[mirrorRef.storeKey] = mirrorSnap()
+        next.items[mirrorRef.storeKey] = [mirrorItem(2)]
+        store.mirrored(next)
+        XCTAssertEqual(posted, ["project:i2"])
+    }
+
+    @MainActor
+    func testClientHasReadsTheCatalog() throws {
+        let (store, _) = try clientStore()
+        let snap = mirrorSnap()
+        XCTAssertFalse(store.has(.links, in: snap))
+        store.catalog = ClientCatalog(projects: [CatalogProject(summary: snap.summary, capabilities: [.links])], capabilities: [:], trackers: ["ws"])
+        XCTAssertTrue(store.has(.links, in: snap))
+        XCTAssertFalse(store.has(.relations, in: snap))
+    }
+
+    @MainActor
+    func testTrackDoesNotPollOnClient() throws {
+        let t = SlowTracker()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("client-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                 statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+        store.client = true
+        let summary = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "", closed: false)
+        store.track([summary], live: [])
+        XCTAssertEqual(store.tracked.map(\.identifier), ["SLOW"])
+        XCTAssertEqual(t.calls, 0)
+        XCTAssertEqual(t.blocked, 0)
     }
 }
