@@ -25,6 +25,40 @@ final class AppEnvironmentGateTests: XCTestCase {
         XCTAssertEqual(d.displayName, "Big Timer")
     }
 
+    func testBigTimerGetsAStreamingTransport() {
+        let env = AppEnvironment()
+        XCTAssertNotNil(env.io(.bigtimer, account: timer.account).streaming)
+        XCTAssertNil(env.io(.plane, account: plane.account).streaming)
+        XCTAssertTrue(env.hasLiveFeed(timer.account))
+        XCTAssertFalse(env.hasLiveFeed(plane.account))
+    }
+
+    func testTokenEditDropsTheCachedAdapter() {
+        let accounts = ACCOUNTS
+        let service = "com.oversire.test.\(UUID().uuidString)"
+        let secrets = KeychainSecrets(accountsService: service)
+        defer {
+            ACCOUNTS = accounts
+            secrets.delete(AppEnvironment.secretKey(timer.account, field: "token"))
+        }
+        let env = AppEnvironment(secrets: secrets)
+        var saved: [AccountID] = []
+        env.onSecretSaved = { saved.append($0) }
+        env.save(timer, secrets: ["token": "btk_one"])
+        XCTAssertEqual(saved, [timer.account])
+        env.load(ACCOUNTS)
+        let first = env.provider(timer.account) as? BigTimerTracker
+        XCTAssertNotNil(first)
+        XCTAssertTrue(first === (env.provider(timer.account) as? BigTimerTracker), "the adapter is cached")
+        env.save(timer, secrets: ["token": "btk_two"])
+        XCTAssertEqual(saved.count, 2)
+        let second = env.provider(timer.account) as? BigTimerTracker
+        XCTAssertNotNil(second)
+        XCTAssertFalse(first === second, "a new token makes a new adapter")
+        env.save(timer, secrets: [:])
+        XCTAssertEqual(saved.count, 2, "an edit with no new token keeps the adapter")
+    }
+
     func testTrackerNames() {
         let env = AppEnvironment()
         XCTAssertEqual(env.trackerNames(), "your tracker")

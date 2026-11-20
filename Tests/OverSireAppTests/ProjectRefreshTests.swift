@@ -574,6 +574,51 @@ final class ProjectRefreshTests: XCTestCase {
         await until("a stale live project polls") { loads() == 2 }
     }
 
+    func testPollSkipsAFreshProjectOfALiveFeed() async throws {
+        let t = OrderTracker()
+        let store = try store(t)
+        let key = order.ref.storeKey
+        let account = order.ref.account
+        store.relayIsLive = { false }
+        store.feedIsLive = { $0 == account }
+        await MainActor.run { store.track([order], live: []) }
+        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await MainActor.run { store.poll() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.calls.filter { $0 == "items" }.count, 1, "a fresh feed project waits for its events")
+        XCTAssertTrue(store.isLive(key))
+        XCTAssertTrue(store.showsLive(key))
+    }
+
+    func testPollReadsAFeedProjectWhenTheFeedIsDown() async throws {
+        let t = OrderTracker()
+        let store = try store(t)
+        let key = order.ref.storeKey
+        store.relayIsLive = { false }
+        store.feedIsLive = { _ in false }
+        await MainActor.run { store.track([order], live: []) }
+        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        let loads = { t.calls.filter { $0 == "items" }.count }
+        await MainActor.run { store.poll() }
+        await until("the poll loads the project") { loads() == 2 }
+        XCTAssertFalse(store.isLive(key))
+        XCTAssertFalse(store.showsLive(key))
+    }
+
+    func testPollRefreshesAStaleFeedProject() async throws {
+        let t = OrderTracker()
+        let store = try store(t)
+        let key = order.ref.storeKey
+        let account = order.ref.account
+        store.relayIsLive = { false }
+        store.feedIsLive = { $0 == account }
+        await MainActor.run { store.track([order], live: []) }
+        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        store.now = { Date().addingTimeInterval(3600) }
+        await MainActor.run { store.poll() }
+        await until("a stale feed project polls") { t.calls.filter { $0 == "items" }.count == 2 }
+    }
+
     func testLimitChangeDuringARefreshRunsAgain() async throws {
         let saved = PROJECTS_CFG.itemsPerProject
         defer { PROJECTS_CFG.itemsPerProject = saved }

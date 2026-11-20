@@ -347,6 +347,22 @@ final class ProjectCommentTests: XCTestCase {
         XCTAssertEqual(tracker.read, ["i2"])
     }
 
+    func testFeedLiveReadsOnlyNamedComments() async throws {
+        let store = try store(tracker)
+        let account = summary().ref.account
+        store.relayIsLive = { false }
+        store.feedIsLive = { $0 == account }
+        let a0 = Date() - 1000
+        tracker.setList("p1", [item("i1", at: a0, mine: false), item("i2", at: a0, mine: false), item("i3", at: a0, mine: false)])
+        await start(store)
+        let a1 = Date() - 10
+        tracker.setList("p1", [item("i1", at: a1, mine: false), item("i2", at: a1 + 1, mine: false), item("i3", at: a0, mine: false)])
+        await MainActor.run { store.refreshForEvents([(workspace: "ws", project: "p1")], comments: [hint("i2")]) { _ in } }
+        await until("one read") { self.tracker.read.count == 1 }
+        await settle(store)
+        XCTAssertEqual(tracker.read, ["i2"])
+    }
+
     func testLiveCommentEventWithoutItemReadsTheChangedItems() async throws {
         let store = try await liveStore()
         await MainActor.run { store.refreshForEvents([(workspace: "ws", project: "p1")], comments: [hint(nil)]) { _ in } }

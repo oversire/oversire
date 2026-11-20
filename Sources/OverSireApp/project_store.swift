@@ -98,6 +98,8 @@ final class ProjectStore {
         project: { [weak self] in self?.item(key: $0)?.key },
         updatedAt: { [weak self] in self?.item(key: $0)?.item.updatedAt })
     var relayIsLive: () -> Bool = { false }
+    /// True while the live feed of the account is up (Big Timer).
+    var feedIsLive: (AccountID) -> Bool = { _ in false }
     /// True on the Mac that leads the automations. The other Mac refreshes later on cloud events.
     var leads: () -> Bool = { true }
     var now: () -> Date = Date.init
@@ -170,10 +172,9 @@ final class ProjectStore {
 
     func poll() {
         releaseStuckReads()
-        let liveRelay = relayIsLive()
         let keys = tracked.map(\.ref.storeKey).filter { key in
             // A live project waits for its events, unless its last refresh failed or is old.
-            if liveKeys.contains(key), liveRelay {
+            if isLive(key) {
                 guard errors[key] == nil, let at = snapshots[key]?.fetchedAt else { return true }
                 return now().timeIntervalSince(at) > liveMaxAge
             }
@@ -483,7 +484,7 @@ final class ProjectStore {
             commentQueue[key] = nil
             return
         }
-        let live = liveKeys.contains(key) && relayIsLive()
+        let live = isLive(key)
         let named = commentWant.removeValue(forKey: key) ?? []
         var anyComment = false
         if let at = commentAny[key], let started, at <= started {
@@ -506,7 +507,7 @@ final class ProjectStore {
             guard let ids = commentQueue.removeValue(forKey: key), let snap = snapshots[key],
                   tracked.contains(where: { $0.ref.storeKey == key }),
                   let client = trackers.tracker(snap.summary.ref.workspace) else { continue }
-            let live = liveKeys.contains(key) && relayIsLive()
+            let live = isLive(key)
             let targets = snap.items.filter { ids.contains($0.id) && (live || $0.commentsDue) }
                 .sorted { $0.activityAt > $1.activityAt }.prefix(commentCap)
                 .compactMap { i in i.ref(in: snap.summary.ref).map { (id: i.id, at: i.activityAt, ref: $0) } }
@@ -574,6 +575,21 @@ final class ProjectStore {
     }
 
     private func workspace(of key: String) -> String? { tracked.first { $0.ref.storeKey == key }?.ref.workspace }
+
+    private func account(of key: String) -> AccountID? { tracked.first { $0.ref.storeKey == key }?.ref.account }
+
+    /// Events reach the project: the cloud pushes its webhooks, or its account has a live feed. Then it does not poll.
+    func isLive(_ key: String) -> Bool {
+        (liveKeys.contains(key) && relayIsLive()) || account(of: key).map(feedIsLive) == true
+    }
+
+    /// For the header chip. It keeps the Plane chip as it is.
+    func showsLive(_ key: String) -> Bool {
+        liveKeys.contains(key) || account(of: key).map(feedIsLive) == true
+    }
+
+    /// A feed went up or down: the headers draw again.
+    func feedLiveChanged() { publish(DataChange(.projects, origin: .event)) }
 
     /// Refreshes the key at `at`. Keys with the same time share one refresh.
     private func later(_ key: String, at: Date) {

@@ -98,6 +98,18 @@ final class LiveSyncTests: XCTestCase {
         XCTAssertTrue(none.comments.isEmpty)
     }
 
+    func testBigTimerEventsRefreshTheirProject() {
+        let account = AccountID(provider: "bigtimer", id: "bt.example.com")
+        let project = ProjectRef(account: account, id: "9f3c2c1e-0000-4000-8000-000000000001", key: "ACME")
+        let item = ItemRef(project: project, id: "i1", key: "ACME-1", url: URL(string: "https://bt.example.com/issues/ACME-1")!)
+        func event(_ id: String, _ kind: EventKind, _ action: String) -> ProviderEvent {
+            ProviderEvent(id: id, provider: "bigtimer", account: account, kind: kind, action: action, subject: .item(item), at: Date())
+        }
+        let plan = RefreshPlan([event("1", .item, "updated"), event("2", .comment, "created")], knownRepos: [])
+        XCTAssertEqual(plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }, ["bt.example.com/\(project.id)"])
+        XCTAssertEqual(plan.comments, [CommentHint(workspace: "bt.example.com", project: project.id, item: "i1")])
+    }
+
     func testTheOldCloudCursorMoves() throws {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: "oversire-tests-\(UUID())"))
         defaults.set(42, forKey: "relayCursor")

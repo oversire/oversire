@@ -15,6 +15,8 @@ protocol RelaySink: AnyObject {
     func relayProjectRefresh(_ events: [(workspace: String, project: String?)], comments: [CommentHint], done: @escaping (Bool) -> Void)
     func relayFullRefresh(done: @escaping (Bool) -> Void)
     func relayStateChanged()
+    /// A live feed of a tracker account went up or down. It does no refresh.
+    func relayFeedChanged(_ account: AccountID, live: Bool)
 }
 
 // Splits a batch of events into a repo refresh and a project refresh.
@@ -116,6 +118,9 @@ final class LiveSync {
     private var fallback: PollingSource?
     private var cloud: CloudSource?
     private var daemons: [CloudSource] = []
+    private var feeds: [LiveFeedSource] = []
+    /// The state of the live feed of each tracker account that has one.
+    private(set) var feedStates: [AccountID: LiveFeedState] = [:]
     private var healthTasks: [Task<Void, Never>] = []
     private var consumer: Task<Void, Never>?
     private var watching = false
@@ -163,6 +168,7 @@ final class LiveSync {
     /// Makes the sources again from the accounts, the repos and the cloud settings.
     func start() {
         stopSources()
+        clearFeedStates()
         generation += 1
         let gen = generation
         let p = currentPlan()
@@ -180,13 +186,15 @@ final class LiveSync {
                             intervals: PollIntervals(normal: .seconds(POLL_NORMAL), active: .seconds(POLL_NORMAL)), isOnline: online, onPolled: onPolled)
         let cloud = makeCloud(generation: gen)
         let daemons = makeDaemons(p.links, generation: gen)
-        let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons, onCloudHealth: { h in
+        let feeds = makeFeeds(p.accounts, generation: gen)
+        let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons + feeds, onCloudHealth: { h in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.cloudHealth(h) } }
         })
         self.polling = polling
         self.fallback = fallback
         self.cloud = cloud
         self.daemons = daemons
+        self.feeds = feeds
         self.merger = merger
         if cloud == nil { state = .off }
         watchNetwork()
@@ -213,6 +221,7 @@ final class LiveSync {
         plan = nil
         generation += 1
         stopSources()
+        clearFeedStates()
         pathWatch.map(NetworkPath.shared.remove)
         pathWatch = nil
         state = .off
@@ -230,6 +239,7 @@ final class LiveSync {
         fallback = nil
         cloud = nil
         daemons = []
+        feeds = []
         healthTasks.forEach { $0.cancel() }
         healthTasks = []
     }
@@ -299,10 +309,68 @@ final class LiveSync {
         pathWatch = NetworkPath.shared.watch { [weak self] in
             STORE_WRITES.syncNow()
             guard let self else { return }
-            Task { [polling = self.polling, fallback = self.fallback] in await polling?.wake(); await fallback?.wake() }
+            Task { [polling = self.polling, fallback = self.fallback, feeds = self.feeds] in
+                await polling?.wake()
+                await fallback?.wake()
+                for f in feeds { await f.wake() }
+            }
             let daemonDown = self.machines.map { hub in self.daemons.contains { !hub.isLive($0.name) } } ?? false
             if (self.cloud != nil && self.state != .live) || daemonDown { self.start() }
         }
+    }
+
+    // MARK: Live feeds
+
+    func feedState(_ a: AccountID) -> LiveFeedState { feedStates[a] ?? .off }
+
+    /// For shots only.
+    func seedFeed(_ a: AccountID, _ s: LiveFeedState) { feedStates[a] = s }
+
+    func isFeedLive(_ a: AccountID) -> Bool { feedStates[a] == .live }
+
+    var liveFeedCount: Int { feedStates.values.filter { $0 == .live }.count }
+
+    /// "Connect again": ends the backoff, or starts a stopped feed.
+    func reconnectFeed(_ a: AccountID) {
+        guard let f = feeds.first(where: { $0.account == a }) else { return }
+        Task { await f.wake() }
+    }
+
+    /// A new token or a changed account needs a new adapter. This makes all sources again, also when the plan is equal.
+    func restartFeeds() {
+        guard plan != nil else { return }
+        start()
+    }
+
+    /// One source for each tracker account whose adapter pushes change hints. A hint pulls the feed.
+    private func makeFeeds(_ accounts: [AccountConfig], generation gen: Int) -> [LiveFeedSource] {
+        accounts.compactMap { a in
+            guard ENV.descriptor(a.account)?.layer == .tracker, let feed = ENV.provider(a.account) as? any LiveFeeding,
+                  feed.capabilities.contains(.liveFeed) else { return nil }
+            let s = LiveFeedSource(feed: feed, cursors: cursors, isOnline: { NetworkPath.shared.isOnline }, onResync: { account in
+                DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.resync(account) } }
+            })
+            healthTasks.append(Task { [weak self] in
+                for await state in await s.stateUpdates() {
+                    await MainActor.run { if self?.generation == gen { self?.feedChanged(s.account, state) } }
+                }
+            })
+            return s
+        }
+    }
+
+    private func feedChanged(_ a: AccountID, _ s: LiveFeedState) {
+        let was = isFeedLive(a)
+        feedStates[a] = s
+        log.info("\(ENV.trackerName(a), privacy: .public) feed \(a.id, privacy: .public): \(String(describing: s), privacy: .public)")
+        bus.post(DataChange(.connection, origin: .event))
+        if was != (s == .live) { sink?.relayFeedChanged(a, live: s == .live) }
+    }
+
+    private func clearFeedStates() {
+        let wasLive = feedStates.filter { $0.value == .live }.keys
+        feedStates = [:]
+        wasLive.forEach { sink?.relayFeedChanged($0, live: false) }
     }
 
     @objc private func didWake() { if merger != nil { start() } }

@@ -821,7 +821,7 @@ extension TabVC {
             if let fid = statusFilter[key] { items = items.filter { $0.statusOptionId == fid } }
             // A query opens the projects with matches and folds the rest. The saved fold state stays.
             let folded = query.isEmpty ? PROJECTS_CFG.isFolded(key) : items.isEmpty
-            let live = store.liveKeys.contains(key)
+            let live = store.showsLive(key)
             let header = ProjectHeader(snap: snap, live: live, refreshing: store.refreshing.contains(key),
                                        filter: statusFilter[key], updated: relativeTime(snap.fetchedAt), w: w,
                                        folded: folded, canReorder: canReorder)

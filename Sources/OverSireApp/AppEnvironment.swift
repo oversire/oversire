@@ -38,7 +38,8 @@ final class AppEnvironment: @unchecked Sendable {
         let gh = p == .github || p == .githubActions
         var http: any HTTPTransport = gh ? URLSessionTransport.noRedirects : URLSessionTransport()
         if p == .plane, let account { http = GatedTransport(http, gate: gate(account), log: AppLog(), host: account.id) }
-        return ProviderEnvironment(http: http, commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil),
+        return ProviderEnvironment(http: http, streaming: p == .bigtimer ? URLSessionTransport.streams : nil,
+                                   commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil),
                                    secrets: other ?? secrets, log: AppLog())
     }
 
@@ -69,6 +70,9 @@ final class AppEnvironment: @unchecked Sendable {
 
     /// Runs after the Providers page removes an account, for example to delete its webhook.
     var onRemove: ((AccountID) -> Void)?
+
+    /// Runs after `save` wrote a secret of the account, with the adapter dropped.
+    var onSecretSaved: ((AccountID) -> Void)?
 
     // MARK: Accounts
 
@@ -130,6 +134,14 @@ final class AppEnvironment: @unchecked Sendable {
     }
 
     func error(_ id: AccountID) -> String? { lock.withLock { failed[id] } }
+
+    /// The next `provider(_:)` call makes a new adapter. A new token then also clears the 401 latch.
+    func dropAdapter(_ a: AccountID) {
+        lock.withLock {
+            made[a] = nil
+            failed[a] = nil
+        }
+    }
 
     // MARK: Layers
 
@@ -195,6 +207,11 @@ let ENV = AppEnvironment()
 
 extension AppEnvironment: TrackerDirectory {
     var trackerIds: [String] { accounts(.tracker).map(\.account.id) }
+
+    /// The providers whose adapter pushes change hints (`LiveFeeding`). The UI shows a feed state for their accounts.
+    static let liveFeedProviders: Set<ProviderID> = [.bigtimer]
+
+    func hasLiveFeed(_ a: AccountID) -> Bool { Self.liveFeedProviders.contains(a.provider) }
     func trackerError(_ id: String) -> String? {
         accounts(.tracker).first { $0.account.id == id }.flatMap { error($0.account) }
     }
@@ -301,12 +318,18 @@ extension AppEnvironment {
         var c = c
         let d = registry.descriptor(c.account.provider)
         c.secretKeys = []
+        var wrote = false
         for f in d?.fields ?? [] where f.kind == .secret {
             let key = Self.secretKey(c.account, field: f.key)
             c.secretKeys.append(key)
             if let v = values[f.key] {
                 if v.isEmpty { secrets.delete(key) } else { secrets.set(key, v) }
+                wrote = true
             }
+        }
+        if wrote {
+            dropAdapter(c.account)
+            onSecretSaved?(c.account)
         }
         if let old, old != c.account { remove(old) }
         if Self.repoProviders.contains(c.account.provider) {

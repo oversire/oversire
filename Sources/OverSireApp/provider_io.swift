@@ -84,6 +84,9 @@ struct URLSessionTransport: HTTPTransport {
     /// The caller sees each redirect. A token then does not go to an other host.
     static let noRedirects = URLSessionTransport(session: URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil))
 
+    /// Live feeds stay open for hours. Their own session keeps them out of the 6 connections of `URLSession.shared`.
+    static let streams = URLSessionTransport(session: URLSession(configuration: .ephemeral))
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let t0 = Date()
         let (data, resp): (Data, URLResponse)
@@ -272,8 +275,11 @@ struct ProcessRunner: CommandRunner {
 
 /// Plane tokens keep their old Keychain service. The secrets of other accounts share one service.
 struct KeychainSecrets: SecretReader {
+    /// Tests use their own service.
+    var accountsService = "com.oversire.app.accounts"
+
     func store(_ key: String) -> SecretStore {
-        SecretStore(service: key.hasPrefix("PLANE_TOKEN_") ? "com.oversire.app.plane" : "com.oversire.app.accounts")
+        SecretStore(service: key.hasPrefix("PLANE_TOKEN_") ? "com.oversire.app.plane" : accountsService)
     }
 
     func secret(_ key: String) -> String? { store(key).get(key) }

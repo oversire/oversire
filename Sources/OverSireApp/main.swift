@@ -68,6 +68,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let s = ProjectStore(trackers: ENV, notifier: projectNotifier,
                              statePath: PROJECT_STATE_PATH, activityPath: PROJECT_ACTIVITY_PATH)
         s.relayIsLive = { [weak self] in self?.relay.state == .live }
+        s.feedIsLive = { [weak self] a in self?.relay.isFeedLive(a) ?? false }
         s.busy = busy
         s.onChange = { [weak self] c in
             self?.updateIcon()
@@ -304,6 +305,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         cloudSetup.planeClient = { ENV.tracker($0) as? any WebhookManaging }
         ENV.onRemove = { [weak self] id in
             if id.provider == .plane { self?.cloudSetup.removePlaneHook(id.id) }
+        }
+        // Later, so the account list is saved first. A new token needs new feeds with the new adapter.
+        ENV.onSecretSaved = { [weak self] id in
+            guard ENV.descriptor(id)?.layer == .tracker else { return }
+            DispatchQueue.main.async { self?.relay.restartFeeds() }
         }
         NotificationCenter.default.addObserver(forName: AppEnvironment.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -1332,6 +1338,8 @@ extension GHActionsBar: RelaySink {
     }
 
     // A gap in the log: refresh every repo.
+    func relayFeedChanged(_ account: AccountID, live: Bool) { projectStore.feedLiveChanged() }
+
     func relayFullRefresh(done: @escaping (Bool) -> Void) {
         refreshRepos(REPOS, includePRs: true, completedRuns: []) { ok in
             self.projectStore.refresh(self.projectStore.tracked.map(\.ref.storeKey), force: true) { projectOK in
