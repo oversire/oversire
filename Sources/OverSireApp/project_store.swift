@@ -75,6 +75,8 @@ final class ProjectStore {
     private var readActivity = Set<String>() { didSet { unread = nil } }
     private var readItems = Set<String>() { didSet { unread = nil } }
     private var activityCache: [ActivityEntry] = [] { didSet { unread = nil } }   // newest first
+    /// The kept entries, newest first. The mirror reads them.
+    var activityEntries: [ActivityEntry] { activityCache }
     private var unread: (count: Int, items: Set<String>)?
     // Each item that was in a snapshot. An item that comes back over the item limit is not new.
     private var seenItems = Set<String>()

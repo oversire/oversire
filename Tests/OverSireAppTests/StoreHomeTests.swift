@@ -37,4 +37,17 @@ final class StoreHomeTests: XCTestCase {
         XCTAssertEqual(StoreHome.cloud(cloud).identity, "D1")
         XCTAssertNil(StoreHome.local.identity)
     }
+
+    func testMirrorHomeIsLoopbackOnHome() {
+        let leases = LeaseDirectory(http: URLSessionTransport())
+        XCTAssertNil(leases.homeClient(), "before the first read of the group")
+        _ = leases.update(read: true, group: group(home: "mba"), links: [mba, mbp], live: ["mba", "mbp"])
+        XCTAssertEqual(leases.homeClient()?.base, DaemonClient.loopback)
+        _ = leases.update(read: true, group: group(home: "mbp"), links: [mba, mbp], live: ["mba", "mbp"])
+        XCTAssertEqual(leases.homeClient()?.base, mbp.base)
+        _ = leases.update(read: true, group: group(home: "mbp"), links: [mba], live: ["mba"])
+        XCTAssertNil(leases.homeClient(), "the home has no link")
+        _ = leases.update(read: true, group: nil, links: [mba], live: ["mba"])
+        XCTAssertNil(leases.homeClient(), "no group, no home")
+    }
 }

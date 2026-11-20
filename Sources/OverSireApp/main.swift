@@ -109,6 +109,32 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
     lazy var actions = AppActionCatalog(data: self)
+    private var madePublisher: MirrorPublisher?
+    /// Sends the provider data to the mirror of home. It runs only on the app that holds the automations lease.
+    /// Made at the first start, when the group and the machine name are known.
+    var publisher: MirrorPublisher {
+        if let p = madePublisher { return p }
+        let p = makePublisher()
+        madePublisher = p
+        return p
+    }
+
+    private func makePublisher() -> MirrorPublisher {
+        MainActor.assumeIsolated {
+            let docs = AppMirrorDocs(store: projectStore, runs: { [weak self] in self?.grouped ?? [] }, prs: { [weak self] in self?.prGrouped ?? [] },
+                                     projects: { [weak self] in self?.projectCatalog.resolve(PROJECTS_CFG) ?? [] },
+                                     layers: { ENV.capabilities($0) }, trackers: { ENV.trackerIds })
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+            let name = relay.group?.selfName ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
+            return MirrorPublisher(home: { [weak self] in
+                let group = await MainActor.run { self?.relay.group }
+                return await group?.mirrorHome()
+            }, rehome: { [weak self] in
+                let group = await MainActor.run { self?.relay.group }
+                await group?.rereadAndWait()
+            }, docs: docs, appVersion: version, source: AppEnvironment.appDevice, sourceName: name)
+        }
+    }
     var pages: AppWindow? { appWindow }
     lazy var assistantRoot = AssistantRoot(app: self)
     /// Nil: the panel links to Settings › AI.
@@ -323,6 +349,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self.startQuestions()
             for w in ENV.trackerIds where self.projectCatalog.projects(of: w).isEmpty { self.projectCatalog.refresh(w, force: true) }
             self.applyProjectSelection()
+            self.touchMirror(.catalog, nil)
             self.bus.post(DataChange(.all, origin: .user))
         }
         cloudSetup.trackedWorkspaces = { [weak self] in self?.trackedPlaneWorkspaces() ?? [] }
@@ -331,6 +358,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         PROJECTS_CFG.migrateRoots(resolved)
         if PROJECTS_CFG.settings != before { saveConfig() }
         projectStore.track(resolved, live: liveProjectKeys())
+        touchMirror(.catalog, nil)
         syncPlaneWorkspaces()
         if MODE == .full { projectCatalog.refreshIfStale() }
         applyCaptureHotKey()
@@ -397,6 +425,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: projectCatalog, queue: .main) { [weak self] _ in
             guard let self = self, !self.projectCatalog.refreshing else { return }
             self.projectStore.track(self.projectCatalog.resolve(PROJECTS_CFG), live: self.liveProjectKeys())
+            self.touchMirror(.catalog, nil)
             self.syncPlaneWorkspaces()
         }
     }
@@ -664,8 +693,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.ciAssist.observe(runRes)
                 DeployLog.shared.record(runRes)
                 self.grouped = runRes
+                self.touchMirror(.runs, nil)
                 if includePRs {
                     self.prGrouped = prRes
+                    self.touchMirror(.prs, nil)
                     self.lastPRRefresh = Date()
                     self.stats.refreshMerged()
                 }
@@ -727,7 +758,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 self.ciAssist.observe(fresh)
                 DeployLog.shared.record(fresh + backfill)
                 self.grouped = mergeGrouped(self.grouped, fresh, order: REPOS)
-                if includePRs { self.prGrouped = mergeGrouped(self.prGrouped, prRes, order: REPOS) }
+                self.touchMirror(.runs, repos)
+                if includePRs {
+                    self.prGrouped = mergeGrouped(self.prGrouped, prRes, order: REPOS)
+                    self.touchMirror(.prs, repos)
+                }
                 self.lastFetch = Date()
                 self.refreshInFlight = false
                 self.updateIcon()
@@ -825,6 +860,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func applyProjectSelection() {
         agentIndex.poll()
         projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: liveProjectKeys())
+        touchMirror(.catalog, nil)
         projectStore.restartTimer()
         syncPlaneWorkspaces()
         updateIcon()
@@ -995,8 +1031,25 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: AutomationOwner.changed, object: o, queue: .main) { [weak self] _ in
             log.info("Automations: \(String(describing: o.role), privacy: .public)")
             self?.reloadList(DataChange(.connection, origin: .event))
+            self?.syncPublisher()
         }
         o.start()
+    }
+
+    func touchMirror(_ kind: MirrorKind, _ ids: [String]?) { MainActor.assumeIsolated { madePublisher?.touched(kind, ids: ids) } }
+
+    /// The app that holds the lease sends its data to home. Home must have the mirror feed.
+    func syncPublisher() {
+        guard MODE == .full, case .owner? = automations?.role else { MainActor.assumeIsolated { madePublisher?.stop() }; return }
+        guard !MainActor.assumeIsolated({ madePublisher?.isRunning ?? false }) else { return }
+        Task { [weak self] in
+            let client = await self?.relay.group?.mirrorHome()
+            let info = try? await client?.whoami()
+            await MainActor.run {
+                guard let self, case .owner? = self.automations?.role else { return }
+                if info?.has(DaemonInfo.mirror) == true { self.publisher.start() }
+            }
+        }
     }
 
     func applicationWillTerminate(_ note: Notification) {

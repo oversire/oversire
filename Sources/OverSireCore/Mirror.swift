@@ -164,6 +164,112 @@ public struct MirrorFrame: Codable, Hashable, Sendable {
     }
 }
 
+/// The body of a `runs` doc. A body is always a JSON object, so the list has a key.
+public struct MirrorRuns: Codable, Hashable, Sendable {
+    public var runs: [Run]
+
+    public init(runs: [Run]) { self.runs = runs }
+}
+
+/// The body of a `prs` doc.
+public struct MirrorPRs: Codable, Hashable, Sendable {
+    public var prs: [ChangeRequest]
+
+    public init(prs: [ChangeRequest]) { self.prs = prs }
+}
+
+/// The body of the `catalog` doc (id `home`). A client has no accounts, so this tells it
+/// which projects the home tracks and which features the home has.
+public struct ClientCatalog: Codable, Hashable, Sendable {
+    /// The tracked projects, as `projectCatalog.resolve(PROJECTS_CFG)` gives them on the source.
+    public var projects: [CatalogProject]
+    /// The capabilities of each layer of the home. The key is the raw value of `Layer`.
+    public var capabilities: [String: [Capability]]
+    /// The ids of the tracker accounts of the home.
+    public var trackers: [String]
+
+    public init(projects: [CatalogProject], capabilities: [String: [Capability]], trackers: [String]) {
+        self.projects = projects
+        self.capabilities = capabilities
+        self.trackers = trackers
+    }
+}
+
+public struct CatalogProject: Codable, Hashable, Sendable {
+    public var summary: ProjectSummary
+    /// The capabilities of the tracker of the project, as `ProjectStore.has` reads them.
+    public var capabilities: [Capability]
+
+    public init(summary: ProjectSummary, capabilities: [Capability]) {
+        self.summary = summary
+        self.capabilities = capabilities
+    }
+}
+
+/// How the source writes the body of a doc and how a reader reads it. The same code runs on both sides.
+/// The daemon hashes the bytes of a body, and key order changes the hash. So an encode has sorted keys.
+public enum MirrorCodec {
+    /// The `v` of each doc body type that this build writes and reads.
+    public static let version = 1
+
+    /// The doc ids. `project` is the store key, `item` is `<store key>/<item id>`, `runs` and `prs` are `<owner>/<repo>`,
+    /// `activity` is the entry id, `catalog` is `home`.
+    public static let catalogID = "home"
+    public static func itemID(project: String, item: String) -> String { "\(project)/\(item)" }
+
+    /// The store key of an item doc id: the text before the last "/".
+    public static func projectKey(ofItemDoc id: String) -> String? {
+        id.lastIndex(of: "/").map { String(id[..<$0]) }
+    }
+
+    public static func encoder() -> JSONEncoder {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        e.dateEncodingStrategy = .custom { date, enc in
+            var c = enc.singleValueContainer()
+            try c.encode(isoText(date))
+        }
+        return e
+    }
+
+    public static func decoder() -> JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .custom { dec in
+            let s = try dec.singleValueContainer().decode(String.self)
+            guard let date = parseISO(s) else {
+                throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "not an ISO 8601 time: \(s)"))
+            }
+            return date
+        }
+        return d
+    }
+
+    /// The body of a doc. A value that is not a JSON object cannot be a body: the daemon refuses it.
+    public static func body<T: Encodable>(_ value: T) throws -> JSONValue {
+        let data = try encoder().encode(value)
+        let any = try JSONSerialization.jsonObject(with: data)
+        guard any is [String: Any] else { throw ProviderError.decoding("A mirror body must be a JSON object.") }
+        return JSONValue(any: any)
+    }
+
+    public static func value<T: Decodable>(_ type: T.Type = T.self, from body: JSONValue) throws -> T {
+        try decoder().decode(type, from: bytes(body))
+    }
+
+    /// The compact bytes with sorted keys. The daemon hashes these bytes.
+    public static func bytes(_ body: JSONValue) -> Data {
+        (try? encoder().encode(body)) ?? Data()
+    }
+
+    private static func isoText(_ d: Date) -> String { isoWriter.string(from: d) }
+
+    nonisolated(unsafe) private static let isoWriter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+}
+
 extension DaemonClient {
     /// Member route on the home daemon. Throws StoreNotHome for 409 with `home`.
     public func mirrorHead() async throws -> MirrorHead {
@@ -185,7 +291,10 @@ extension DaemonClient {
     /// Member route, apps only. Only the holder of the automations lease can put.
     /// 409 with an epoch: the feed changed, send all docs again (vendor code "409"). 413: the batch is too large.
     public func mirrorPut(_ p: MirrorPut) async throws -> MirrorPutResult {
-        var r = try json("PUT", "/v1/mirror/docs", p)
+        var r = try json("PUT", "/v1/mirror/docs", Optional<MirrorPut>.none)
+        let enc = MirrorCodec.encoder()
+        enc.dateEncodingStrategy = .iso8601
+        r.httpBody = try enc.encode(p)
         r.timeoutInterval = 30
         return try await mirrorCall(r)
     }

@@ -69,6 +69,9 @@ final class GroupSync {
         }
     }
 
+    /// The daemon of the group home for the mirror, with the app credential. nil: no group, or the home is offline.
+    func mirrorHome() async -> DaemonClient? { leases.homeClient() }
+
     /// The members of the group, with the home and the Run sessions on machine. No group: this Mac and its daemon.
     func places(sessions: String?) -> AgentPlaces {
         let me = selfName
@@ -87,18 +90,26 @@ final class GroupSync {
     /// A {"type":"group"} frame: Machines reads the group from the daemons, then it applies.
     func reread() { load(again: true) }
 
+    /// Like `reread()`. It returns when the group is applied.
+    func rereadAndWait() async {
+        let machines = await MainActor.run { hub.machines }
+        await read(machines, again: true)
+    }
+
     private func load(again: Bool) {
         let machines = hub.machines
-        Task { [weak self] in
-            if again { await machines.refresh() }
-            // refreshed first: a group read after it is the group of the daemons.
-            let read = await machines.refreshed
-            let g = await machines.group
-            await MainActor.run {
-                self?.group = g
-                self?.loaded = read
-                self?.apply()
-            }
+        Task { [weak self] in await self?.read(machines, again: again) }
+    }
+
+    private func read(_ machines: Machines, again: Bool) async {
+        if again { await machines.refresh() }
+        // refreshed first: a group read after it is the group of the daemons.
+        let read = await machines.refreshed
+        let g = await machines.group
+        await MainActor.run {
+            self.group = g
+            self.loaded = read
+            self.apply()
         }
     }
 
@@ -184,6 +195,12 @@ final class LeaseDirectory: @unchecked Sendable {
     /// The machine name of this Mac: its daemon, else the host name, as a join of the app sends it.
     var selfName: String {
         lock.withLock { links.first(where: \.local)?.machine } ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
+    }
+
+    /// The client of the home daemon: loopback on the home Mac, else its link with the app credential.
+    func homeClient() -> DaemonClient? {
+        if case .member(_, let c as DaemonClient) = home(nil) { return c }
+        return nil
     }
 
     /// Before the first read of the group, the automations wait. hint: the home that a 409 named.
