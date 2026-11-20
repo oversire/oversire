@@ -77,7 +77,7 @@ extension SettingsPage {
         cards.append(ServiceCard(icon: ServiceCard.icon("+", color: nil), name: "Add a service", detail: "Tracker, code host or CI",
                                  status: nil, actions: [], dashed: true) { [weak self] in self?.openForm(.tracker) })
         let v = NSStackView(v: [SectionTitle("Services")], spacing: 6)
-        v.addFull(CardGrid(cards, minWidth: 240))
+        v.addFull(CardGrid(cards, minWidth: 300))   // the action row of a card needs about 285 pt
         v.identifier = SettingsAnchor.services.id
         if form.layer != nil { v.addFull(formCard()) }
         v.addFull(ghLogin())
