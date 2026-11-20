@@ -77,10 +77,21 @@ final class BigTimerAPI: @unchecked Sendable {
         case 429:
             let wait = Double(response.value(forHTTPHeaderField: "Retry-After") ?? "")
             return .rateLimited(retryAfter: wait.map { .seconds($0) })
+        case 400 where problem?.code == "validation" && problem?.errors?["parent_uuid"] != nil:
+            return .vendor(code: "validation", message: parentMessage(problem?.errors?["parent_uuid"] ?? ""))
         default:
             return .vendor(code: problem?.code ?? String(status),
                            message: problem?.detail ?? HTTPURLResponse.localizedString(forStatusCode: status))
         }
+    }
+
+    /// Simple text for a broken sub-item rule. An unknown server text stays in the message.
+    static func parentMessage(_ field: String) -> String {
+        if field.contains("a sub-item cannot have sub-items") { return "Big Timer: a sub-item cannot have sub-items." }
+        if field.contains("so it cannot be a sub-item") { return "Big Timer: an item with sub-items cannot become a sub-item." }
+        if field.contains("another project") { return "Big Timer: a sub-item must be in the project of its parent." }
+        if field.contains("the issue itself") { return "Big Timer: an item cannot be its own parent." }
+        return "Big Timer: the parent is not valid (\(field))."
     }
 
     /// The path joins the path of the base URL. Query values keep "+" and "&" safe.

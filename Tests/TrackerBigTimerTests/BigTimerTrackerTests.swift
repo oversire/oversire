@@ -270,7 +270,7 @@ final class BigTimerTrackerTests: XCTestCase {
         let quiet = fake.requests.count
         try await t.update(r, ItemPatch())
         XCTAssertEqual(fake.requests.count, quiet, "an empty patch sends nothing")
-        for (patch, cap) in [(ItemPatch(priority: "high"), Capability.priority), (ItemPatch(labels: ["x"]), .labels), (ItemPatch(parent: "p"), .subItems)] {
+        for (patch, cap) in [(ItemPatch(priority: "high"), Capability.priority), (ItemPatch(labels: ["x"]), .labels)] {
             do { try await t.update(r, patch); XCTFail("no throw") } catch { XCTAssertEqual(error as? ProviderError, .unsupported(cap)) }
         }
         XCTAssertEqual(fake.requests.count, quiet, "a refused patch sends nothing")
@@ -284,14 +284,95 @@ final class BigTimerTrackerTests: XCTestCase {
         do { _ = try await t.create(ItemDraft(title: "x", labels: ["a"]), in: project); XCTFail("no throw") } catch {
             XCTAssertEqual(error as? ProviderError, .unsupported(.labels))
         }
-        do { _ = try await t.create(ItemDraft(title: "x", parent: "p"), in: project); XCTFail("no throw") } catch {
-            XCTAssertEqual(error as? ProviderError, .unsupported(.subItems))
-        }
         XCTAssertTrue(fake.requests.isEmpty)
         let made = try await t.create(ItemDraft(title: "Made", bodyMarkdown: "Body", status: "in_progress"), in: project)
         XCTAssertEqual(made.key, "ACME-1")
         XCTAssertEqual(made.url.absoluteString, "bigtimer://issue/ACME-1")
         XCTAssertEqual(fake.issue(made.id)?.status, "in_progress")
+    }
+
+    func testCreateSendsParent() async throws {
+        let parent = fake.addIssue(project: acme, title: "Parent")
+        let t = tracker()
+        XCTAssertTrue(t.capabilities.contains(.subItems))
+        let made = try await t.create(ItemDraft(title: "Child", parent: parent), in: project)
+        let post = try XCTUnwrap(fake.requests.last { $0.httpMethod == "POST" })
+        XCTAssertEqual(fake.body(post)["parent_uuid"] as? String, parent)
+        XCTAssertEqual(fake.issue(made.id)?.parent, parent)
+        let plain = try await t.create(ItemDraft(title: "Top"), in: project)
+        XCTAssertNil(fake.body(try XCTUnwrap(fake.requests.last { $0.httpMethod == "POST" }))["parent_uuid"], "no parent, no key")
+        XCTAssertNil(fake.issue(plain.id)?.parent)
+    }
+
+    func testUpdateSetsAndClearsParent() async throws {
+        let parent = fake.addIssue(project: acme, title: "Parent")
+        let id = fake.addIssue(project: acme, title: "Child")
+        let t = tracker()
+        let r = try await ref(t, id)
+
+        try await t.update(r, ItemPatch(parent: parent))
+        var patch = try XCTUnwrap(fake.requests.last { $0.httpMethod == "PATCH" })
+        XCTAssertEqual(Array(fake.body(patch).keys), ["parent_uuid"])
+        XCTAssertEqual(fake.body(patch)["parent_uuid"] as? String, parent)
+        XCTAssertEqual(fake.issue(id)?.parent, parent)
+
+        try await t.update(r, ItemPatch(parent: ""))
+        patch = try XCTUnwrap(fake.requests.last { $0.httpMethod == "PATCH" })
+        XCTAssertEqual(fake.body(patch)["parent_uuid"] as? String, "", "an empty string clears the parent")
+        XCTAssertNil(fake.issue(id)?.parent)
+
+        try await t.update(r, ItemPatch(title: "Renamed"))
+        patch = try XCTUnwrap(fake.requests.last { $0.httpMethod == "PATCH" })
+        XCTAssertNil(fake.body(patch)["parent_uuid"], "a nil parent is not sent")
+    }
+
+    func testItemsMapParentId() async throws {
+        let parent = fake.addIssue(project: acme, title: "Parent")
+        let child = fake.addIssue(project: acme, title: "Child", parent: parent)
+        let t = tracker()
+        let items = try await t.items(project, since: nil, limit: 10)
+        XCTAssertEqual(items.first { $0.id == child }?.parentId, parent)
+        XCTAssertNil(items.first { $0.id == parent }?.parentId)
+        let one = try await t.item(try await ref(t, child))
+        XCTAssertEqual(one.parentId, parent)
+        let found = try await t.search("Child", in: nil, limit: 5)
+        XCTAssertEqual(found.first?.parentId, parent)
+    }
+
+    func testOldServerHasNoParent() throws {
+        let json = #"""
+        {"uuid":"u","version":1,"project_uuid":"p","number":1,"key":"ACME-1","title":"T","status":"open",
+         "created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}
+        """#
+        let row = try BigTimerAPI.decode(BTIssue.self, from: Data(json.utf8))
+        XCTAssertNil(row.parent_uuid)
+    }
+
+    func testParentRuleErrorMessage() async throws {
+        let top = fake.addIssue(project: acme, title: "Top")
+        let kid = fake.addIssue(project: acme, title: "Kid", parent: top)
+        let other = fake.addProject(prefix: "OTH")
+        let foreign = fake.addIssue(project: other, title: "Foreign")
+        let t = tracker()
+        let kidRef = try await ref(t, kid)
+        let topRef = try await ref(t, top)
+
+        func message(_ work: () async throws -> Void) async -> String? {
+            do { try await work() } catch { return (error as? ProviderError)?.errorDescription }
+            return nil
+        }
+        let deep = await message { _ = try await t.create(ItemDraft(title: "Deep", parent: kid), in: project) }
+        XCTAssertEqual(deep, "Big Timer: a sub-item cannot have sub-items.")
+        let parentOfKids = await message { try await t.update(topRef, ItemPatch(parent: foreign)) }
+        XCTAssertEqual(parentOfKids, "Big Timer: a sub-item must be in the project of its parent.")
+        let lonely = fake.addIssue(project: acme, title: "Lonely")
+        let hasKids = await message { try await t.update(topRef, ItemPatch(parent: lonely)) }
+        XCTAssertEqual(hasKids, "Big Timer: an item with sub-items cannot become a sub-item.")
+        let itself = await message { try await t.update(kidRef, ItemPatch(parent: kid)) }
+        XCTAssertEqual(itself, "Big Timer: an item cannot be its own parent.")
+        let unknown = await message { try await t.update(kidRef, ItemPatch(parent: "nope")) }
+        XCTAssertEqual(unknown, "Big Timer: the parent is not valid (does not name a live record).")
+        XCTAssertEqual(fake.issue(kid)?.parent, top, "a refused patch keeps the parent")
     }
 
     func testAssignMeSendsMe() async throws {
@@ -431,12 +512,15 @@ final class BigTimerTrackerTests: XCTestCase {
         XCTAssertEqual(issues.items.map { $0.comment_count }, [2, 0])
         XCTAssertNotNil(issues.items[0].last_comment_at)
         XCTAssertNil(issues.items[1].last_comment_at)
+        XCTAssertNil(issues.items[0].parent_uuid)
+        XCTAssertEqual(issues.items[1].parent_uuid, issues.items[0].uuid)
         XCTAssertGreaterThan(try XCTUnwrap(issues.items[0].activity_at), issues.items[0].updated_at)
         let feed = try BigTimerAPI.decode(BTChangesPage.self, from: Data(contentsOf: dir.appendingPathComponent("changes_page.json")))
         XCTAssertEqual(feed.head, 9813)
         XCTAssertEqual(feed.changes.map(\.entity), ["issue", "entry", "issue_comment"])
         guard case .issue(let r)? = feed.changes[0].record else { return XCTFail("no issue record") }
         XCTAssertEqual(r.number, 142)
+        XCTAssertEqual(r.parent_uuid, "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6070")
         XCTAssertNil(feed.changes[1].record)
         XCTAssertEqual(feed.changes[2].uuid, "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6073")
         XCTAssertEqual(feed.changes[2].version, 3)

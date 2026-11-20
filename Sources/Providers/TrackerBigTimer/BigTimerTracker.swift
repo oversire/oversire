@@ -5,7 +5,7 @@ import OverSireCore
 public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable {
     public let id: ProviderID = .bigtimer
     public let account: AccountID
-    public let capabilities: Set<Capability> = [.itemSearch]
+    public let capabilities: Set<Capability> = [.itemSearch, .subItems]
     // The server has no general rate limit. The real load is the ProjectStore refresh.
     public let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 600)
     public let keyFormat = KeyFormat.projectDash
@@ -118,8 +118,8 @@ public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable 
     public func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef {
         if d.priority != nil { throw ProviderError.unsupported(.priority) }
         if !d.labels.isEmpty { throw ProviderError.unsupported(.labels) }
-        if d.parent != nil { throw ProviderError.unsupported(.subItems) }
-        let data = try await api.send("POST", "/v1/issues", json: BTIssueCreate(project_uuid: p.id, title: d.title, details: d.bodyMarkdown, status: d.status))
+        let data = try await api.send("POST", "/v1/issues", json: BTIssueCreate(project_uuid: p.id, title: d.title, details: d.bodyMarkdown,
+                                                                                  status: d.status, parent_uuid: d.parent))
         let row = try BigTimerAPI.decode(BTIssue.self, from: data)
         remember(row)
         return ref(of: row, project: p)
@@ -129,8 +129,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable 
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
         if patch.priority != nil { throw ProviderError.unsupported(.priority) }
         if patch.labels != nil { throw ProviderError.unsupported(.labels) }
-        if patch.parent != nil { throw ProviderError.unsupported(.subItems) }
-        let body = BTIssuePatch(title: patch.title, details: patch.bodyMarkdown, status: patch.status)
+        let body = BTIssuePatch(title: patch.title, details: patch.bodyMarkdown, status: patch.status, parent_uuid: patch.parent)
         if !body.isEmpty { _ = try await api.send("PATCH", "/v1/issues/\(i.id)", json: body) }
         if let who = patch.assignees { _ = try await api.send("POST", "/v1/issues/\(i.id)/assign", json: BTAssign(member: who.first)) }
     }
@@ -284,6 +283,6 @@ public final class BigTimerTracker: Tracker, ItemSearching, @unchecked Sendable 
                     fields: fields, assignees: row.assignee_uuid.map { [names[$0] ?? "Unknown"] } ?? [], labels: [],
                     author: row.created_by.flatMap { names[$0] }, updatedBy: row.updated_by.flatMap { names[$0] },
                     updatedAt: row.updated_at, activityAt: row.activity_at ?? row.updated_at, commentCount: row.comment_count ?? 0,
-                    lastComment: nil, mentionsMe: false, body: row.details)
+                    lastComment: nil, mentionsMe: false, body: row.details, parentId: row.parent_uuid)
     }
 }

@@ -14,6 +14,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         var size: String?
         var due: String?
         var assignee: String?
+        var parent: String?
         var createdBy: String
         var createdAt: Date
         var updatedAt: Date
@@ -93,13 +94,13 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
     }
 
     @discardableResult
-    func addIssue(project: String, title: String, status: String = "open", assignee: String? = nil, size: String? = nil, due: String? = nil) -> String {
+    func addIssue(project: String, title: String, status: String = "open", assignee: String? = nil, size: String? = nil, due: String? = nil, parent: String? = nil) -> String {
         lock.withLock {
             let id = nextID()
             let n = (issues.filter { $0.project == project }.map(\.number).max() ?? 0) + 1
             let t = tick()
             let i = Issue(uuid: id, project: project, number: n, title: title, details: nil, status: status, size: size, due: due,
-                          assignee: assignee, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
+                          assignee: assignee, parent: parent, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
             issues.append(i)
             log(issue: i, op: "upsert")
             return id
@@ -170,6 +171,11 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
     private func listIssues(_ q: [String: String]) -> (Int, [String: String], String) {
         var rows = issues
         if let p = q["project"] { rows = rows.filter { $0.project == p } }
+        if let p = q["parent"] {
+            if p == "none" { rows = rows.filter { $0.parent == nil } }
+            else if let parent = resolve(p) { rows = rows.filter { $0.parent == parent.uuid } }
+            else { return problem(404, "not_found", "No issue.") }
+        }
         if let s = q["status"] { rows = rows.filter { s.split(separator: ",").map(String.init).contains($0.status) } }
         if let text = q["q"]?.lowercased() {
             rows = rows.filter { $0.title.lowercased().contains(text) || ($0.details ?? "").lowercased().contains(text) }
@@ -185,15 +191,17 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
 
     private func createIssue(_ r: URLRequest) -> (Int, [String: String], String) {
         let b = body(r)
-        guard Set(b.keys).isSubset(of: ["project_uuid", "title", "details", "status"]) else { return problem(400, "validation", "Unknown field.") }
+        guard Set(b.keys).isSubset(of: ["project_uuid", "title", "details", "status", "parent_uuid"]) else { return problem(400, "validation", "Unknown field.") }
         guard let p = b["project_uuid"] as? String, projectRows.contains(where: { $0.uuid == p }), let title = b["title"] as? String, !title.isEmpty else {
             return problem(400, "validation", "A project and a title are required.")
         }
+        let parent = b["parent_uuid"] as? String
+        if let parent, let refusal = parentRefusal(parent, for: nil, project: p) { return refusal }
         let id = nextID()
         let t = tick()
         let n = (issues.filter { $0.project == p }.map(\.number).max() ?? 0) + 1
         let i = Issue(uuid: id, project: p, number: n, title: title, details: b["details"] as? String, status: b["status"] as? String ?? "open",
-                      size: nil, due: nil, assignee: nil, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
+                      size: nil, due: nil, assignee: nil, parent: parent, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
         issues.append(i)
         log(issue: i, op: "upsert")
         return ok(view(i), status: 201)
@@ -201,13 +209,31 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
 
     private func patchIssue(_ i: Issue, _ r: URLRequest) -> (Int, [String: String], String) {
         let b = body(r)
-        guard Set(b.keys).isSubset(of: ["title", "details", "status", "size", "due_date"]) else { return problem(400, "validation", "Unknown field.") }
+        guard Set(b.keys).isSubset(of: ["title", "details", "status", "size", "due_date", "parent_uuid"]) else { return problem(400, "validation", "Unknown field.") }
         guard let n = issues.firstIndex(where: { $0.uuid == i.uuid }) else { return problem(404, "not_found", "No issue.") }
+        if let parent = b["parent_uuid"] as? String {
+            if parent.isEmpty { issues[n].parent = nil }
+            else if let refusal = parentRefusal(parent, for: i.uuid, project: i.project) { return refusal }
+            else { issues[n].parent = parent }
+        }
         if let v = b["title"] as? String { issues[n].title = v }
         if let v = b["details"] as? String { issues[n].details = v }
         if let v = b["status"] as? String { issues[n].status = v }
         touch(n)
         return ok(view(issues[n]))
+    }
+
+    /// The sub-item rules of the server: one level, same project, not itself.
+    private func parentRefusal(_ parent: String, for issue: String?, project: String) -> (Int, [String: String], String)? {
+        let text: String?
+        if parent == issue { text = "cannot be the issue itself" }
+        else if let p = issues.first(where: { $0.uuid == parent }) {
+            if p.parent != nil { text = "is a sub-item; a sub-item cannot have sub-items" }
+            else if p.project != project { text = "belongs to another project" }
+            else if let issue, issues.contains(where: { $0.parent == issue }) { text = "the issue has sub-items, so it cannot be a sub-item" }
+            else { text = nil }
+        } else { text = "does not name a live record" }
+        return text.map { problem(400, "validation", "A field is not valid.", errors: ["parent_uuid": $0]) }
     }
 
     private func assign(_ i: Issue, _ r: URLRequest) -> (Int, [String: String], String) {
@@ -282,6 +308,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         changes.append(Change(seq: changes.count + 1, entity: "issue", op: op, record: [
             "uuid": i.uuid, "version": i.version, "project_uuid": i.project, "number": i.number, "title": i.title,
             "created_at": Self.time(i.createdAt), "updated_at": Self.time(i.updatedAt), "status": i.status,
+            "parent_uuid": i.parent as Any? ?? NSNull(),
         ], uuid: i.uuid, version: i.version))
     }
 
@@ -324,7 +351,10 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
             "status": i.status, "created_by": i.createdBy, "updated_by": i.createdBy, "created_at": Self.time(i.createdAt),
             "updated_at": Self.time(i.updatedAt), "activity_at": Self.time(activity(i)), "comment_count": live.count,
             "details": i.details as Any? ?? NSNull(), "size": i.size as Any? ?? NSNull(), "due_date": i.due as Any? ?? NSNull(),
-            "assignee_uuid": i.assignee as Any? ?? NSNull(),
+            "assignee_uuid": i.assignee as Any? ?? NSNull(), "parent_uuid": i.parent as Any? ?? NSNull(),
+            "parent_key": i.parent.flatMap { p in issues.first { $0.uuid == p }.map(key) } as Any? ?? NSNull(),
+            "sub_item_count": issues.filter { $0.parent == i.uuid }.count,
+            "sub_items_done": issues.filter { $0.parent == i.uuid && ["done", "cancelled"].contains($0.status) }.count,
         ]
         o["last_comment_at"] = live.map(\.createdAt).max().map(Self.time) ?? NSNull()
         return o
@@ -339,8 +369,9 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         (status, [:], String(decoding: (try? JSONSerialization.data(withJSONObject: o)) ?? Data(), as: UTF8.self))
     }
 
-    private func problem(_ status: Int, _ code: String, _ detail: String) -> (Int, [String: String], String) {
-        let o: [String: Any] = ["type": "about:blank", "title": "Problem", "status": status, "code": code, "detail": detail]
+    private func problem(_ status: Int, _ code: String, _ detail: String, errors: [String: String]? = nil) -> (Int, [String: String], String) {
+        var o: [String: Any] = ["type": "about:blank", "title": "Problem", "status": status, "code": code, "detail": detail]
+        if let errors { o["errors"] = errors }
         return (status, [:], String(decoding: (try? JSONSerialization.data(withJSONObject: o)) ?? Data(), as: UTF8.self))
     }
 

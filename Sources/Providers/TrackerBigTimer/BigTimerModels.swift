@@ -54,6 +54,8 @@ struct BTIssue: Decodable {
     let size: String?
     let due_date: String?
     let assignee_uuid: String?
+    // The sub-item fields come with the server change of sub-items. An older server has no value.
+    let parent_uuid: String?
     let created_by: String?
     let updated_by: String?
     let created_at: Date
@@ -88,6 +90,7 @@ struct BTIssueRecord: Decodable {
     let version: Int
     let created_at: Date
     let updated_at: Date
+    let parent_uuid: String?
 }
 
 struct BTCommentRecord: Decodable {
@@ -146,6 +149,7 @@ struct BTChangesPage: Decodable {
 struct BTProblem: Decodable {
     let code: String?
     let detail: String?
+    let errors: [String: String]?
 }
 
 // Request bodies. The server refuses unknown keys, so each body has only its own keys.
@@ -155,14 +159,17 @@ struct BTIssueCreate: Encodable {
     let title: String
     let details: String?
     let status: String?
+    let parent_uuid: String?
 }
 
+/// A nil field is not encoded. An empty parent_uuid removes the parent.
 struct BTIssuePatch: Encodable {
     let title: String?
     let details: String?
     let status: String?
+    let parent_uuid: String?
 
-    var isEmpty: Bool { title == nil && details == nil && status == nil }
+    var isEmpty: Bool { title == nil && details == nil && status == nil && parent_uuid == nil }
 }
 
 /// A nil member encodes as null, which removes the assignee.

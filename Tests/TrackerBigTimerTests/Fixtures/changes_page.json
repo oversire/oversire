@@ -22,6 +22,7 @@
         "due_date": "2026-10-30",
         "completed_at": null,
         "assignee_uuid": "019a0000-0000-7000-8000-000000000002",
+        "parent_uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6070",
         "origin": "manual",
         "recurring_issue_uuid": null
       }
