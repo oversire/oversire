@@ -65,7 +65,8 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     override var watches: DataDomains { [.config, .connection] }
 
     override func build(_ col: NSStackView) {
-        col.addFull(PageHeader("Settings", caption: "OverSire saves each change at once to \((CONFIG_PATH as NSString).abbreviatingWithTildeInPath)."))
+        col.addFull(header())
+        if let b = clientBanner() { col.addFull(b) }
         search.onChange = { [weak self] q in
             Self.query = q
             Self.hit = 0
@@ -125,6 +126,39 @@ final class SettingsPage: Page, NSTextFieldDelegate {
             let flash = Self.flash
             Self.flash = nil
             DispatchQueue.main.async { [weak self] in self?.reveal(a, flash: flash) }
+        }
+    }
+
+    // MARK: Client
+
+    /// The pages with shared sections. Their changes go to the home Mac.
+    private static let sharedPages: Set<Route.SettingsPage> = [.projects, .agents, .machines, .ai]
+
+    private func header() -> NSView {
+        guard MODE == .client else {
+            return PageHeader("Settings", caption: "OverSire saves each change at once to \((CONFIG_PATH as NSString).abbreviatingWithTildeInPath).")
+        }
+        let name = data.clientName
+        if ClientSettings.shared.state == .saving {
+            let spin = Spinner()
+            spin.setAccessibilityLabel("Saving")
+            spin.isHidden = false
+            let text = NSTextField.text("Saving on \(name)…", size: 12, color: Palette.dim, lines: 2)
+            return PageHeader("Settings", captionView: NSStackView(h: [spin, text], spacing: 6))
+        }
+        return PageHeader("Settings", caption: "This Mac is a client of \(name). Changes to shared settings go to \(name).")
+    }
+
+    /// The conflict or the failure of the last change to a shared section.
+    private func clientBanner() -> NSView? {
+        guard MODE == .client, Self.sharedPages.contains(page) else { return nil }
+        let name = data.clientName
+        switch ClientSettings.shared.state {
+        case .idle, .saving: return nil
+        case .conflict:
+            return Banner(.warning, title: "Changed on \(name)", body: "Changed on \(name). Look again.")
+        case .failed(let text):
+            return Banner(.warning, title: "Not saved", body: text, actions: [Spacer(), ActionButton("Try again") { ClientSettings.shared.retry() }])
         }
     }
 

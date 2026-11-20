@@ -64,6 +64,7 @@ private final class FakeDocs: MirrorDocSource {
     var prs: [MirrorDoc] = []
     var activity: [MirrorDoc] = []
     var catalog = MirrorDoc.make(.catalog, id: "home", Body(n: 0))!
+    var settings = MirrorDoc.make(.settings, id: "home", Body(n: 0))!
 
     func projectDocs(_ keys: [String]?) -> [MirrorDoc] {
         projects.filter { d in
@@ -75,6 +76,7 @@ private final class FakeDocs: MirrorDocSource {
     func prDocs(_ repos: [String]?) -> [MirrorDoc] { prs.filter { repos?.contains($0.id) ?? true } }
     func activityDocs(since: Date?) -> [MirrorDoc] { activity }
     func catalogDoc() -> MirrorDoc { catalog }
+    func settingsDoc() -> MirrorDoc { settings }
 }
 
 @MainActor
@@ -106,7 +108,7 @@ final class MirrorPublisherTests: XCTestCase {
         let h = FakeMirrorHome()
         _ = try await started(docs, h)
         XCTAssertEqual(h.puts.count, 1)
-        XCTAssertEqual(h.puts[0].docs.count, 5, "4 docs and the catalog")
+        XCTAssertEqual(h.puts[0].docs.count, 6, "4 docs, the catalog and the settings")
         XCTAssertEqual(h.puts[0].ready, true)
         XCTAssertEqual(h.puts[0].epoch, "E1")
         XCTAssertEqual(h.puts[0].source, "app-1")
@@ -154,7 +156,7 @@ final class MirrorPublisherTests: XCTestCase {
         let a = doc(.runs, "o/a", 1), b = doc(.runs, "o/b", 1), c = doc(.runs, "o/c", 1)
         docs.runs = [a, b, c]
         let h = FakeMirrorHome()
-        h.index = [a, b, docs.catalog].map { MirrorIndex.Entry(kind: $0.kind, id: $0.id, hash: $0.hash) }
+        h.index = [a, b, docs.catalog, docs.settings].map { MirrorIndex.Entry(kind: $0.kind, id: $0.id, hash: $0.hash) }
         h.index.append(MirrorIndex.Entry(kind: .runs, id: "o/c", hash: "old"))
         _ = try await started(docs, h)
         XCTAssertEqual(h.puts.count, 1)
@@ -173,7 +175,8 @@ final class MirrorPublisherTests: XCTestCase {
     func testFullSyncWithNothingToSendStillSetsReady() async throws {
         let docs = FakeDocs()
         let h = FakeMirrorHome()
-        h.index = [MirrorIndex.Entry(kind: .catalog, id: "home", hash: docs.catalog.hash)]
+        h.index = [MirrorIndex.Entry(kind: .catalog, id: "home", hash: docs.catalog.hash),
+                   MirrorIndex.Entry(kind: .settings, id: "home", hash: docs.settings.hash)]
         _ = try await started(docs, h)
         XCTAssertEqual(h.puts.count, 1)
         XCTAssertTrue(h.puts[0].docs.isEmpty)
@@ -185,7 +188,7 @@ final class MirrorPublisherTests: XCTestCase {
         docs.projects = (0..<1199).map { doc(.item, "ocral/p1/i\($0)", $0) }
         let h = FakeMirrorHome()
         _ = try await started(docs, h)
-        XCTAssertEqual(h.puts.map(\.docs.count), [500, 500, 200], "1,199 items and the catalog")
+        XCTAssertEqual(h.puts.map(\.docs.count), [500, 500, 201], "1,199 items, the catalog and the settings")
         XCTAssertEqual(h.puts.map(\.ready), [nil, nil, true])
     }
 
@@ -399,6 +402,41 @@ final class MirrorPublisherTests: XCTestCase {
         XCTAssertEqual(c.capabilities["ci"], [.rerun])
         XCTAssertEqual(c.capabilities["codeHost"], [])
         XCTAssertEqual(c.trackers, ["ws"])
+    }
+
+    func testTouchedSettingsSendsOnlyTheSettingsDoc() async throws {
+        let docs = FakeDocs()
+        let h = FakeMirrorHome()
+        let p = try await started(docs, h)
+        let before = h.puts.count
+        p.touched(.settings, ids: nil)
+        try await p.flush()
+        XCTAssertEqual(h.puts.count, before, "the same body sends nothing")
+        docs.settings = doc(.settings, "home", 1)
+        p.touched(.settings, ids: nil)
+        try await p.flush()
+        XCTAssertEqual(h.puts.count, before + 1)
+        XCTAssertEqual(h.puts.last?.docs.map(\.kind), [.settings])
+    }
+
+    func testTouchedCatalogChecksTheSettingsDocToo() async throws {
+        let docs = FakeDocs()
+        let h = FakeMirrorHome()
+        let p = try await started(docs, h)
+        docs.settings = doc(.settings, "home", 2)
+        p.touched(.catalog, ids: nil)
+        try await p.flush()
+        XCTAssertEqual(h.puts.last?.docs.map(\.kind), [.settings])
+    }
+
+    func testSettingsDocHasTheHomeSettings() throws {
+        let (docs, _, _) = try appDocs()
+        let d = docs.settingsDoc()
+        XCTAssertEqual(d.kind, .settings)
+        XCTAssertEqual(d.id, "home")
+        let h: HomeSettings = try MirrorCodec.value(from: try XCTUnwrap(d.body))
+        XCTAssertEqual(h.v, HomeSettings.version)
+        XCTAssertEqual(h.hashes.count, SettingsSection.allCases.count)
     }
 
     func testBodyEncodingIsStable() throws {

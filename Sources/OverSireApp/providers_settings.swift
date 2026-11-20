@@ -88,6 +88,37 @@ extension SettingsPage {
         b.addFull(v)
     }
 
+    /// A client has no accounts. It shows the services of the home Mac, with no buttons.
+    func clientProviders(_ b: NSStackView) {
+        let name = data.clientName
+        b.addFull(Banner(.info, title: "Accounts live on \(name)",
+                         body: "This Mac is a client. It uses no accounts or tokens. Add or change an account on \(name)."))
+        let cards = ClientSettings.shared.accounts.map { a -> NSView in
+            let layer = Layer(rawValue: a.kind)
+            let d = layer.flatMap { l in ENV.registry.descriptors(l).first { $0.id.rawValue == a.provider } }
+            let failed = a.status != "ok"
+            let pill = Pill(failed ? Tone(symbol: Tone.bad.symbol, color: Palette.bad, word: "Failed on \(name)")
+                                   : Tone(symbol: "laptopcomputer", color: Palette.dim, word: "On \(name)"))
+            let kind = Self.layerInfo.first { $0.0.rawValue == a.kind }?.1 ?? ""
+            let detail = failed ? a.status : [kind, a.detail].filter { !$0.isEmpty }.joined(separator: " · ")
+            let icon = Box(fill: Palette.raise, border: nil, radius: 7)
+            let g = Glyph(d?.symbol ?? "server.rack", size: 15)
+            g.translatesAutoresizingMaskIntoConstraints = false
+            icon.addSubview(g)
+            NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 30), icon.heightAnchor.constraint(equalToConstant: 30),
+                                         g.centerXAnchor.constraint(equalTo: icon.centerXAnchor), g.centerYAnchor.constraint(equalTo: icon.centerYAnchor)])
+            return ServiceCard(icon: icon, name: a.displayName, detail: detail, status: pill, actions: [])
+        }
+        let v = NSStackView(v: [SectionTitle("Services")], spacing: 6)
+        if !cards.isEmpty { v.addFull(CardGrid(cards, minWidth: 240)) }
+        v.identifier = SettingsAnchor.services.id
+        let off = Self.features.filter { !ENV.capabilities().contains($0.1) }.map(\.0)
+        if !off.isEmpty {
+            v.addFull(NSTextField.text("Features off, because no account has them: " + off.joined(separator: ", ") + ".", size: 11.5, color: Palette.dim, lines: 0))
+        }
+        b.addFull(v)
+    }
+
     private func openForm(_ layer: Layer, provider: ProviderID? = nil) {
         form.close()
         form.layer = layer

@@ -401,6 +401,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         projectStore.track(resolved, live: liveProjectKeys())
         touchMirror(.catalog, nil)
         syncPlaneWorkspaces()
+        onConfigSaved = { [weak self] in self?.touchMirror(.settings, nil) }
         MainActor.assumeIsolated { clientMirror?.start() }
         if MODE == .client { connectClient() }
         if MODE == .full { projectCatalog.refreshIfStale() }
@@ -856,6 +857,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     /// A client gets a delta of the mirror: the same steps as a full fetch, with no provider call and no event row.
     func applyMirror(_ d: MirrorDelta) {
         projectStore.mirrored(d)
+        var retrack = false
+        if let s = d.settings {
+            let before = homeSettings(from: currentConfig())
+            ClientSettings.shared.received(s)
+            retrack = homeSettings(from: currentConfig()).changed(since: before).contains(.projects)
+        }
+        if d.catalog == nil, retrack { projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: []) }
         if let c = d.catalog {
             projectStore.catalog = c
             projectCatalog.mirrored = c
@@ -1134,6 +1142,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             return try await c.memberCall(req)
         }
         actions.sourceName = { [weak self] in MainActor.assumeIsolated { self?.clientName ?? "home" } }
+        let settings = ClientSettings.shared
+        settings.call = actions.forward
+        settings.sourceName = actions.sourceName
+        settings.sent = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
         actions.forwarded = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
         ClientWords.source = { [weak self] in self?.clientName }
         projectStore.remote = { [weak self] what, args in

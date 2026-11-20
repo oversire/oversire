@@ -242,6 +242,22 @@ struct NotificationOverride: Equatable {
 
 enum ProjectView: String, Codable { case board, activity }
 
+/// The fields of ProjectsConfig that the home Mac shares with its clients (OVERSIRE-529). The view fields stay on each Mac.
+struct ProjectsShared: Codable, Equatable {
+    var workspaces: [PlaneWorkspace]
+    var picked: [String]
+    var allOf: [String]
+    var pollMinutes: Int
+    var itemsPerProject: Int
+    var hideDoneAfterDays: Int
+    var showSubItems: Bool
+    var reopenOpenParents: Bool
+    var runtime: RuntimeConfig
+    var orca: OrcaConfig
+    var settings: [String: ProjectLocalSettings]
+    var capture: CaptureConfig
+}
+
 struct ProjectsConfig: Codable {
     var workspaces: [PlaneWorkspace] = []   // tokens are in the Keychain
     var picked: [String] = []         // project keys "slug/uuid"
@@ -300,6 +316,28 @@ struct ProjectsConfig: Codable {
             runtime = old   // before Settings › Runtime, orca held agent and prompt
         }
         settings = try c.decodeIfPresent([String: ProjectLocalSettings].self, forKey: .settings) ?? [:]
+    }
+
+    var shared: ProjectsShared {
+        get {
+            ProjectsShared(workspaces: workspaces, picked: picked, allOf: allOf, pollMinutes: pollMinutes, itemsPerProject: itemsPerProject,
+                           hideDoneAfterDays: hideDoneAfterDays, showSubItems: showSubItems, reopenOpenParents: reopenOpenParents,
+                           runtime: runtime, orca: orca, settings: settings, capture: capture)
+        }
+        set {
+            workspaces = newValue.workspaces
+            picked = newValue.picked
+            allOf = newValue.allOf
+            pollMinutes = newValue.pollMinutes
+            itemsPerProject = newValue.itemsPerProject
+            hideDoneAfterDays = newValue.hideDoneAfterDays
+            showSubItems = newValue.showSubItems
+            reopenOpenParents = newValue.reopenOpenParents
+            runtime = newValue.runtime
+            orca = newValue.orca
+            settings = newValue.settings
+            capture = newValue.capture
+        }
     }
 
     func local(_ key: String) -> ProjectLocalSettings { settings[key.uppercased()] ?? ProjectLocalSettings() }
@@ -1159,11 +1197,13 @@ private(set) var CONFIG_READ = false
 /// `save: false` (`--uishots`): the migrations change only the memory, not the file.
 func loadConfig(save: Bool = true) {
     guard let data = FileManager.default.contents(atPath: CONFIG_PATH) else { CONFIG_READ = true; return }
-    guard let c = try? JSONDecoder().decode(AppConfig.self, from: data) else {
+    guard let decoded = try? JSONDecoder().decode(AppConfig.self, from: data) else {
         log.error("Cannot decode \(CONFIG_PATH, privacy: .public). OverSire does not save the config.")
         return
     }
     CONFIG_READ = true
+    var c = decoded
+    if c.mode == .client { ClientSettings.shared.overlay(&c) }
     PICKED_REPOS = c.repos.filter { isValidRepo($0) }
     PICKED_ORGS = c.orgs ?? []
     REPOS = PICKED_REPOS
@@ -1203,15 +1243,8 @@ func loadConfig(save: Bool = true) {
     }
 }
 
-func saveConfig() {
-    guard CONFIG_READ else { return }
-    try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
-    if MODE == .full {
-        ACCOUNTS = ACCOUNTS.filter { !AppEnvironment.repoProviders.contains($0.account.provider) }
-            + AppEnvironment.repoAccounts(repos: PICKED_REPOS.filter(isValidRepo), orgs: PICKED_ORGS)
-        AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
-        ENV.load(ACCOUNTS)
-    }
+/// The config of the globals, as saveConfig writes it. On a client, the accounts are the kept ones.
+func currentConfig() -> AppConfig {
     var c = AppConfig(repos: PICKED_REPOS.filter { isValidRepo($0) },
                       orgs: PICKED_ORGS.isEmpty ? nil : PICKED_ORGS, pollInterval: POLL_NORMAL,
                       pollActiveInterval: POLL_ACTIVE, runsPerRepo: RUNS_PER_REPO,
@@ -1223,10 +1256,50 @@ func saveConfig() {
     c.mode = MODE == .client ? .client : nil
     c.machines = MACHINES == MachinesConfig() ? nil : MACHINES
     c.email = MY_EMAIL
+    return c
+}
+
+/// Sets the globals that the home settings cover from a config. The picked repos and orgs are the picks, not REPOS.
+func adoptShared(_ c: AppConfig) {
+    PICKED_REPOS = c.repos.filter { isValidRepo($0) }
+    PICKED_ORGS = c.orgs ?? []
+    RUNS_PER_REPO = min(max(1, c.runsPerRepo ?? 10), 100)
+    FILTER_DEFAULT_BRANCHES = c.filterDefaultBranches ?? false
+    SORT_BY_RECENT = c.sortByRecent ?? true
+    ONE_ROW_PER_WORKFLOW = c.oneRowPerWorkflow ?? true
+    LATEST_ACROSS_BRANCHES = c.latestAcrossBranches ?? false
+    REPO_COLORS = c.repoColors ?? [:]
+    if let p = c.projects { PROJECTS_CFG.shared = p.shared }
+    if let l = c.linking { LINKING = l }
+    if let a = c.agents { AGENTS = a }
+    if let a = c.ai { AIJobs(a).apply(to: &AI_CFG) }
+    MACHINES.sessions = c.machines?.sessions
+}
+
+/// Called after each save. The source app sends the settings doc to the mirror then.
+nonisolated(unsafe) var onConfigSaved: () -> Void = {}
+
+func saveConfig() {
+    guard CONFIG_READ else { return }
+    try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
+    if MODE == .full {
+        ACCOUNTS = ACCOUNTS.filter { !AppEnvironment.repoProviders.contains($0.account.provider) }
+            + AppEnvironment.repoAccounts(repos: PICKED_REPOS.filter(isValidRepo), orgs: PICKED_ORGS)
+        AppEnvironment.applyLegacyFields(ACCOUNTS, to: &PROJECTS_CFG)
+        ENV.load(ACCOUNTS)
+    }
+    var c = currentConfig()
+    if MODE == .client {
+        // The shared sections go to home. This Mac keeps its own sections and the other keys of the file.
+        let file = FileManager.default.contents(atPath: CONFIG_PATH).flatMap { try? JSONDecoder().decode(AppConfig.self, from: $0) }
+        c = c.clientMerge(file: file ?? c)
+        ClientSettings.shared.sync()
+    }
     if let data = try? JSONEncoder().encode(c) {
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         if let pretty = try? JSONSerialization.data(withJSONObject: json as Any, options: .prettyPrinted) {
             try? pretty.write(to: URL(fileURLWithPath: CONFIG_PATH))
         }
     }
+    if MODE == .full { onConfigSaved() }
 }

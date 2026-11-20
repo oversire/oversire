@@ -18,6 +18,7 @@ protocol MirrorDocSource {
     /// The entries that are not older than `since`.
     func activityDocs(since: Date?) -> [MirrorDoc]
     func catalogDoc() -> MirrorDoc
+    func settingsDoc() -> MirrorDoc
 }
 
 extension MirrorDoc {
@@ -49,8 +50,9 @@ final class MirrorPublisher {
         var prs = Set<String>(), allPRs = false
         var activity = false
         var catalog = false
+        var settings = false
 
-        var isEmpty: Bool { !allProjects && projects.isEmpty && !allRuns && runs.isEmpty && !allPRs && prs.isEmpty && !activity && !catalog }
+        var isEmpty: Bool { !allProjects && projects.isEmpty && !allRuns && runs.isEmpty && !allPRs && prs.isEmpty && !activity && !catalog && !settings }
 
         mutating func merge(_ o: Pending) {
             projects.formUnion(o.projects); allProjects = allProjects || o.allProjects
@@ -58,6 +60,7 @@ final class MirrorPublisher {
             prs.formUnion(o.prs); allPRs = allPRs || o.allPRs
             activity = activity || o.activity
             catalog = catalog || o.catalog
+            settings = settings || o.settings
         }
     }
 
@@ -139,8 +142,10 @@ final class MirrorPublisher {
         case .prs:
             if let ids { pending.prs.formUnion(ids) } else { pending.allPRs = true }
         case .activity: pending.activity = true
-        case .catalog: pending.catalog = true
-        case .settings: return
+        case .catalog:
+            pending.catalog = true
+            pending.settings = true   // the account summaries follow the accounts
+        case .settings: pending.settings = true
         }
         schedule(after: debounce)
     }
@@ -224,7 +229,7 @@ final class MirrorPublisher {
                            uniquingKeysWith: { a, _ in a })
         base = client.base
         pending = Pending()
-        let wanted = docs.projectDocs(nil) + docs.runDocs(nil) + docs.prDocs(nil) + docs.activityDocs(since: cutoff()) + [docs.catalogDoc()]
+        let wanted = docs.projectDocs(nil) + docs.runDocs(nil) + docs.prDocs(nil) + docs.activityDocs(since: cutoff()) + [docs.catalogDoc(), docs.settingsDoc()]
         needsAll = true
         try await send(client, wanted: wanted, inScope: { _ in true }, ready: true)
         needsAll = false
@@ -263,6 +268,10 @@ final class MirrorPublisher {
             if p.catalog {
                 wanted.append(docs.catalogDoc())
                 scopes.append { $0.kind == .catalog }
+            }
+            if p.settings {
+                wanted.append(docs.settingsDoc())
+                scopes.append { $0.kind == .settings }
             }
             try await send(client, wanted: wanted, inScope: { e in scopes.contains { $0(e) } }, ready: false)
         } catch {

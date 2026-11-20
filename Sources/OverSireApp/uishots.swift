@@ -1167,6 +1167,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.planState(p, in: w)
                     } else if p.hasPrefix("clicks:") {
                         self.clicksScene(String(p.dropFirst(7)), in: w)
+                    } else if UIShots.settingsClientScenes.contains(p) {
+                        self.settingsClientScene(p, in: w)
                     } else if UIShots.clientScenes.contains(p) {
                         self.clientScene(p, in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
@@ -1182,7 +1184,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; MachinesController.shared.link = { nil } }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = [] }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; MachinesController.shared.link = { nil } }; if UIShots.settingsClientScenes.contains(p) { MODE = .full; KEPT_ACCOUNTS = []; ClientSettings.shared.reset() }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1895,6 +1897,32 @@ extension UIShots {
         } else {
             w.router.go(.work(.items))
         }
+    }
+
+    /// OVERSIRE-529: the shared settings of a client of mbp. The state stays in memory: no scene saves the config.
+    /// accounts-client: Accounts and sync. The others show Agents and queue with the header and the banner of that state.
+    static let settingsClientScenes = ["accounts-client", "settings-client", "settings-client-saving", "settings-client-conflict", "settings-client-failed"]
+
+    func settingsClientScene(_ scene: String, in w: AppWindow) {
+        MODE = .client
+        KEPT_ACCOUNTS = []
+        var home = homeSettings(from: currentConfig())
+        home.accounts = [
+            AccountSummary(kind: "tracker", provider: "plane", displayName: "Plane", detail: "ocral, big-time-data", status: "ok", features: []),
+            AccountSummary(kind: "codeHost", provider: "github", displayName: "GitHub", detail: "Big-Time-Data, flarco", status: "ok", features: []),
+            AccountSummary(kind: "ci", provider: "githubActions", displayName: "GitHub Actions", detail: "Big-Time-Data, flarco", status: "ok", features: []),
+            AccountSummary(kind: "tracker", provider: "bigtimer", displayName: "Big Timer", detail: "bt.bigtimedata.io", status: "ok", features: []),
+        ]
+        let state: ClientSettings.SaveState
+        switch scene {
+        case "settings-client-saving": state = .saving
+        case "settings-client-conflict": state = .conflict
+        case "settings-client-failed": state = .failed(ClientSettings.noAnswer("mbp"))
+        default: state = .idle
+        }
+        ClientSettings.shared.seed(home, state: state)
+        w.router.go(.settings(.general))   // a fresh page
+        w.router.go(scene == "accounts-client" ? .settings(.accounts) : .settings(.agents))
     }
 
     /// Settings › Machines with sample data, and its dialogs.

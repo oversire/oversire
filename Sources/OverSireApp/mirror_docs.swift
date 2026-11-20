@@ -11,18 +11,21 @@ final class AppMirrorDocs: MirrorDocSource {
     private let projects: () -> [ProjectSummary]
     private let layers: (Layer) -> Set<Capability>
     private let trackers: () -> [String]
+    private let settings: () -> HomeSettings
     // An item that did not change keeps its doc, so a change of one project does not encode all items again.
     private var items: [String: (item: Item, doc: MirrorDoc)] = [:]
     private var activity: [String: MirrorDoc] = [:]
 
     init(store: ProjectStore, runs: @escaping () -> [(String, [Run])], prs: @escaping () -> [(String, [ChangeRequest])],
-         projects: @escaping () -> [ProjectSummary], layers: @escaping (Layer) -> Set<Capability>, trackers: @escaping () -> [String]) {
+         projects: @escaping () -> [ProjectSummary], layers: @escaping (Layer) -> Set<Capability>, trackers: @escaping () -> [String],
+         settings: @escaping () -> HomeSettings = { homeSettings(from: currentConfig(), accounts: AccountSummary.list(ENV)) }) {
         self.store = store
         self.runs = runs
         self.prs = prs
         self.projects = projects
         self.layers = layers
         self.trackers = trackers
+        self.settings = settings
     }
 
     func projectDocs(_ keys: [String]?) -> [MirrorDoc] {
@@ -87,6 +90,11 @@ final class AppMirrorDocs: MirrorDocSource {
         let catalog = ClientCatalog(projects: list, capabilities: caps, trackers: trackers())
         return MirrorDoc.make(.catalog, id: MirrorCodec.catalogID, catalog)
             ?? MirrorDoc(kind: .catalog, id: MirrorCodec.catalogID, v: MirrorCodec.version, at: Date(), body: .object([:]))
+    }
+
+    func settingsDoc() -> MirrorDoc {
+        MirrorDoc.make(.settings, id: MirrorCodec.settingsID, settings())
+            ?? MirrorDoc(kind: .settings, id: MirrorCodec.settingsID, v: MirrorCodec.version, at: Date(), body: .object([:]))
     }
 
     private static func sorted(_ s: Set<Capability>) -> [Capability] { s.sorted { $0.rawValue < $1.rawValue } }

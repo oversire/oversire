@@ -215,6 +215,8 @@ public enum MirrorCodec {
     /// The doc ids. `project` is the store key, `item` is `<store key>/<item id>`, `runs` and `prs` are `<owner>/<repo>`,
     /// `activity` is the entry id, `catalog` is `home`.
     public static let catalogID = "home"
+    /// The id of the one `settings` doc.
+    public static let settingsID = "home"
     public static func itemID(project: String, item: String) -> String { "\(project)/\(item)" }
 
     /// The store key of an item doc id: the text before the last "/".

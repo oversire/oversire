@@ -22,6 +22,14 @@ extension SettingsPage {
     private var setup: CloudSetup { data.cloudSetup }
 
     func accounts(_ b: NSStackView) {
+        if MODE == .client {
+            clientProviders(b)
+            let v = NSStackView(v: [SectionTitle("Live updates")], spacing: 6)
+            v.addFull(NSTextField.text("Live updates come from \(data.clientName).", size: 12, color: Palette.dim, lines: 0))
+            v.identifier = SettingsAnchor.live.id
+            b.addFull(v)
+            return
+        }
         providers(b)
         live(b)
     }
