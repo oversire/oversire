@@ -36,7 +36,7 @@ final class PlaneDownTests: XCTestCase {
 
     private func trackAndWait(_ want: (PagePart) -> Bool) async throws {
         data.projectStore.track([summary], live: [])
-        for _ in 0..<300 where !want(data.projectStore.plane) { try await Task.sleep(nanoseconds: 10_000_000) }
+        _ = await Wait.until(timeout: .seconds(3)) { want(data.projectStore.plane) }
         XCTAssertTrue(want(data.projectStore.plane), "the state did not come")
     }
 

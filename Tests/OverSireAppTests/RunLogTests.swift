@@ -1,5 +1,6 @@
 import AppKit
 import OverSireCore
+import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
@@ -61,7 +62,7 @@ final class RunLogTests: XCTestCase {
         let p = RunPage(.run(repo: "o/a", id: id), data: data, router: Router())
         page = p
         p.viewDidAppear()
-        for _ in 0..<200 where p.parts.count < 2 { try await Task.sleep(nanoseconds: 10_000_000) }
+        _ = await Wait.until(timeout: .seconds(2)) { p.parts.count >= 2 }
         XCTAssertEqual(p.parts.map(\.id), ["jobs", "log"])
         await p.logRead(job(id)).settled()
         return p

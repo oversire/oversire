@@ -125,11 +125,6 @@ final class ProjectCommentTests: XCTestCase {
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
 
-    private func until(_ what: String, _ ok: @escaping () -> Bool) async {
-        for _ in 0..<300 where !ok() { try? await Task.sleep(nanoseconds: 10_000_000) }
-        XCTAssertTrue(ok(), what)
-    }
-
     private func settle(_ store: ProjectStore) async {
         await until("the reads end") { store.refreshing.isEmpty && !store.commentsPending }
         try? await Task.sleep(nanoseconds: 30_000_000)

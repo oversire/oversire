@@ -54,10 +54,7 @@ final class AIOutputBookTests: XCTestCase {
 
     /// Waits for the queued store writes, sends them, and reads them in `to` as the watch of a remote change does.
     private func sync(_ from: App, _ to: App, hash: String) async throws {
-        for _ in 0..<100 {
-            if try await from.store.local.all(AIOutput.self).contains(where: { $0.hash == hash }) { break }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+        _ = await Wait.until(timeout: .seconds(1)) { (try? await from.store.local.all(AIOutput.self).contains(where: { $0.hash == hash })) ?? false }
         await from.store.sync()
         await to.store.sync()
         let got = expectation(forNotification: ItemSummaries.changed, object: to.sums) { _ in to.sums.summary("A-1")?.hash == hash }
@@ -90,10 +87,7 @@ final class AIOutputBookTests: XCTestCase {
         a.outputs = owner.book
         b.outputs = other.book
         a.makeDigest(facts: ["2 runs failed."])
-        for _ in 0..<100 {
-            if try await owner.store.local.all(AIOutput.self).contains(where: { $0.kind == "ci-digest" }) { break }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+        _ = await Wait.until(timeout: .seconds(1)) { (try? await owner.store.local.all(AIOutput.self).contains(where: { $0.kind == "ci-digest" })) ?? false }
         await owner.store.sync()
         await other.store.sync()
         let got = expectation(forNotification: CIAssist.changed, object: b) { _ in b.digest != nil }

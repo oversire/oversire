@@ -212,12 +212,6 @@ final class RelationCacheTests: XCTestCase {
     }
 
     @MainActor
-    private func until(_ ok: () -> Bool) async {
-        for _ in 0..<500 where !ok() { try? await Task.sleep(nanoseconds: 10_000_000) }
-        XCTAssertTrue(ok())
-    }
-
-    @MainActor
     func testPrimeShowsThenLoadReplaces() async throws {
         let p = Plan()
         try await p.make(2)
@@ -287,7 +281,7 @@ final class RelationCacheTests: XCTestCase {
         let p = Plan()
         try await p.make(25)
         p.cache.loadPlan(p.keys, updatedAt: { _ in nil })
-        await until { p.fake.relationReads == 25 && p.cache.loading.isEmpty }
+        await until(timeout: .seconds(5)) { p.fake.relationReads == 25 && p.cache.loading.isEmpty }
         let prios = p.fake.relationReadPriorities
         XCTAssertEqual(prios.filter { $0 == .user }.count, 20)
         XCTAssertEqual(prios.filter { $0 == .background }.count, 5)
@@ -300,7 +294,7 @@ final class RelationCacheTests: XCTestCase {
         try await p.make(4)
         p.cache.loadPlan(p.keys, updatedAt: { _ in nil }, first: 1)
         XCTAssertEqual(p.cache.loading.count, 2, "one user read and one background read")
-        await until { p.fake.relationReads == 4 && p.cache.loading.isEmpty }
+        await until(timeout: .seconds(5)) { p.fake.relationReads == 4 && p.cache.loading.isEmpty }
     }
 
     @MainActor

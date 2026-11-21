@@ -74,7 +74,7 @@ final class StartKeyTests: XCTestCase {
                 XCTAssertNil(q.state(ref.storeKey)?.error)
             }
         }
-        for _ in 0..<100 where daemon.runtime.orders.count < 2 { try await Task.sleep(nanoseconds: 20_000_000) }
+        _ = await Wait.until(timeout: .seconds(2)) { daemon.runtime.orders.count >= 2 }
         let keys = daemon.runtime.orders.compactMap { o -> String? in if case .start(let r) = o.order { return r.key } else { return nil } }
         XCTAssertEqual(keys, ["work:OVERSIRE-2", "work:OVERSIRE-2"])
         XCTAssertEqual(daemon.sessions.count, 1, "the second start gets the live session")

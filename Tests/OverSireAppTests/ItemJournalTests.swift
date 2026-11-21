@@ -1,4 +1,5 @@
 import OverSireCore
+import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
@@ -36,7 +37,7 @@ final class ItemJournalTests: XCTestCase {
 
     /// A read that the journal began, to its end.
     private func settle(_ j: ItemJournal, _ key: String = "K-1") async {
-        for _ in 0..<100 where j.isLoading(key) || j.part(key).state == .idle { try? await Task.sleep(nanoseconds: 10_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { !j.isLoading(key) && j.part(key).state != .idle }
     }
 
     func testAFailedJournalReadKeepsTheRowsAndTellsThePart() async {

@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 import OverSireCore
+import OverSireTestKit
 
 let acme = AccountID(provider: "github-actions", id: "acme")
 
@@ -37,13 +38,10 @@ func take<T: Sendable>(_ n: Int, from stream: AsyncStream<T>, timeout: TimeInter
     return result
 }
 
-/// Waits until a condition holds, or fails after about 2 s.
+/// Waits until a condition holds, or fails after 4 s. The old 2000 sleeps of 1 ms took about 3.6 s.
 func eventually(_ what: String, file: StaticString = #filePath, line: UInt = #line,
                 _ ok: @Sendable () async -> Bool) async {
-    for _ in 0..<2000 {
-        if await ok() { return }
-        try? await Task.sleep(nanoseconds: 1_000_000)
-    }
+    if await Wait.until(timeout: .seconds(4), every: .milliseconds(1), ok) { return }
     XCTFail("timeout: \(what)", file: file, line: line)
 }
 

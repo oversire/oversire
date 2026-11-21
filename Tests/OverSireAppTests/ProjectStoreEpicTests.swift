@@ -49,7 +49,8 @@ final class EpicRig {
     func track() async throws {
         let s = try await summary
         await MainActor.run { d.projectStore.track([s], live: []) }
-        try await until("the first snapshot") { await MainActor.run { self.d.projectStore.snapshot("FAKE") != nil } }
+        let seen = await Wait.until { await MainActor.run { self.d.projectStore.snapshot("FAKE") != nil } }
+        XCTAssertTrue(seen, "timeout: the first snapshot")
     }
 
     func snapshot() async -> ProjectSnapshot? { await MainActor.run { d.projectStore.snapshot("FAKE") } }
@@ -76,14 +77,6 @@ final class EpicRig {
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
         return await outlet.rows
-    }
-
-    func until(_ what: String, _ ok: @escaping () async -> Bool) async throws {
-        for _ in 0..<300 {
-            if await ok() { return }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
-        XCTFail("timeout: \(what)")
     }
 }
 

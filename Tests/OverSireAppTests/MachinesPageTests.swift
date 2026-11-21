@@ -58,7 +58,7 @@ final class JoinFlowTests: XCTestCase {
         let f = flow(local: local)
         await f.join(found: info("mbp", "100.97.81.23"))
         local.group = group([member("mbp", "100.97.81.23"), member("mba", "100.71.4.12")])
-        for _ in 0..<100 where f.phase != .joined(machine: "mbp") { try await Task.sleep(for: .milliseconds(10)) }
+        _ = await Wait.until(timeout: .seconds(1)) { f.phase == .joined(machine: "mbp") }
         XCTAssertEqual(f.phase, .joined(machine: "mbp"))
     }
 
@@ -554,7 +554,7 @@ final class MachineUpdateTests: XCTestCase {
     }
 
     private func settle(_ c: MachinesController) async {
-        for _ in 0..<200 where !c.updating.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.updating.isEmpty }
     }
 
     func testRunThemHereTakesTheLease() async {
@@ -574,7 +574,7 @@ final class MachineUpdateTests: XCTestCase {
 
         c.takeAutomations()
         XCTAssertEqual(c.automationCall, "Run them here")
-        for _ in 0..<200 where c.automationCall != nil { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.automationCall == nil }
         XCTAssertEqual(c.model.automations?.state, .here)
         XCTAssertTrue(me.mayAct)
         await first.refresh()
@@ -590,13 +590,13 @@ final class MachineUpdateTests: XCTestCase {
         c.use(s)
         c.retry("mba", runtime: "orca")
         XCTAssertEqual(c.runtimeCalls["mba/orca"], "Retry")
-        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.runtimeCalls.isEmpty }
         XCTAssertEqual(mba.calls, ["POST /v1/runtimes/orca/retry"])
         XCTAssertEqual(c.model.runtimes.first?.state, .live)
         XCTAssertNil(c.notice)
 
         c.retry("mba", runtime: "nope")
-        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.runtimeCalls.isEmpty }
         XCTAssertEqual(c.notice?.hasPrefix("Retry nope on mba:"), true)
 
         let none = controller(nil)
@@ -614,19 +614,19 @@ final class MachineUpdateTests: XCTestCase {
         c.use(s)
         c.pair("mba", runtime: "orca", link: "bad")
         XCTAssertEqual(c.runtimeCalls["mba/orca"], "Pair")
-        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.runtimeCalls.isEmpty }
         XCTAssertEqual(c.notice, "Pair orca on mba: Orca refused the device token.")
         XCTAssertEqual(c.model.runtimes.first?.state, .textOnly)
 
         c.notice = nil
         c.pair("mba", runtime: "orca", link: "orca://pair?code=x")
-        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.runtimeCalls.isEmpty }
         XCTAssertNil(c.notice)
         XCTAssertEqual(c.model.runtimes.first?.state, .live)
         XCTAssertEqual(c.model.runtimes.first?.canUnpair, true)
 
         c.unpair("mba", runtime: "orca")
-        for _ in 0..<200 where !c.runtimeCalls.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { c.runtimeCalls.isEmpty }
         XCTAssertEqual(c.model.runtimes.first?.canPair, true)
         XCTAssertEqual(mba.calls, ["POST /v1/runtimes/orca/pair", "POST /v1/runtimes/orca/pair", "DELETE /v1/runtimes/orca/pair"])
     }

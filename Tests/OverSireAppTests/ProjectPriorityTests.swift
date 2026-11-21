@@ -85,11 +85,6 @@ final class ProjectPriorityTests: XCTestCase {
         await MainActor.run { store.seed(snap) }
     }
 
-    private func until(_ what: String, _ ok: @escaping () -> Bool) async {
-        for _ in 0..<300 where !ok() { try? await Task.sleep(nanoseconds: 10_000_000) }
-        XCTAssertTrue(ok(), what)
-    }
-
     func testPageLoadsRunAsUserCalls() async throws {
         let store = store!, key = key, item = item!, intake = intake!, probe = probe!
         let itemKey = try XCTUnwrap(store.item(item.id)?.item.key)

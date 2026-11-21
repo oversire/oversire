@@ -451,14 +451,11 @@ final class EnhanceTicketTests: XCTestCase {
                        "a ticket has no duplicate action: the duplicate is a relates to")
 
         // The apply stops the session. The other app then drops its result.
-        for _ in 0..<500 where !daemon.sessions.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        _ = await Wait.until(timeout: .seconds(5)) { daemon.sessions.isEmpty }
         XCTAssertTrue(daemon.sessions.isEmpty)
         let gone = try await host.workspaces()
         await MainActor.run { otherAgents.absorb(gone) }
-        for _ in 0..<500 {
-            if try await !LocalStore(dir: dir).all(AIOutput.self).isEmpty { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        _ = await Wait.until(timeout: .seconds(5)) { (try? await !LocalStore(dir: dir).all(AIOutput.self).isEmpty) ?? false }
         await MainActor.run { writes.changed(AIOutput.collection) }
         XCTAssertEqual(other.state(target), .applied(accepted: false), "the mark of the other app")
 

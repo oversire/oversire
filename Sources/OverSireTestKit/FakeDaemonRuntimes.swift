@@ -41,22 +41,9 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
     /// Orders with this op fail with the text.
     public func fail(_ op: SessionOrder.Op, _ error: String?) { with { _fail[op] = error } }
 
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = .sortedKeys
-        return e
-    }()
-
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
-    private func ok<T: Encodable>(_ v: T) throws -> (Int, Data) { (200, try Self.encoder.encode(v)) }
+    private func ok<T: Encodable>(_ v: T) throws -> (Int, Data) { (200, try FakeDaemon.encoder.encode(v)) }
     private func error(_ code: Int, _ text: String) -> (Int, Data) {
-        (code, (try? Self.encoder.encode(["error": text])) ?? Data())
+        (code, (try? FakeDaemon.encoder.encode(["error": text])) ?? Data())
     }
 
     /// nil: not a runtime route. `sessions` are the sessions of the FakeDaemon.
@@ -70,14 +57,14 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
             case (let m, let p) where (m == "POST" || m == "DELETE") && p.count == 4 && p[1] == "runtimes" && p[3] == "pair":
                 guard let i = _runtimes.firstIndex(where: { $0.id == p[2] }) else { return error(404, "no runtime \(p[2])") }
                 // As the daemon: the link "bad" does not pair.
-                if m == "POST", try Self.decoder.decode(RuntimePair.self, from: body ?? Data()).link == "bad" { return error(400, "Orca refused the device token.") }
+                if m == "POST", try FakeDaemon.decoder.decode(RuntimePair.self, from: body ?? Data()).link == "bad" { return error(400, "Orca refused the device token.") }
                 _runtimes[i].stream = m == "POST" ? RuntimeStream(state: .live, pairable: true, paired: true)
                     : RuntimeStream(state: .textOnly, reason: "Pair Orca to see the live terminal.", pairable: true, paired: false)
                 return try ok(_runtimes[i])
             case ("GET", ["v1", "repos"]): return try ok(DaemonReposPage(repos: _repos))
             case ("GET", ["v1", "workspaces"]): return try ok(DaemonWorkspacesPage(workspaces: _workspaces))
             case ("DELETE", let p) where p.count == 3 && p[1] == "workspaces":
-                let rm = try Self.decoder.decode(WorkspaceRemove.self, from: body ?? Data())
+                let rm = try FakeDaemon.decoder.decode(WorkspaceRemove.self, from: body ?? Data())
                 guard let w = _workspaces.first(where: { $0.id == p[2] && $0.runtime == rm.runtime }) else { return error(404, "no workspace \(p[2])") }
                 guard w.kind != .main else { return error(502, "OverSire does not remove the main checkout of a repo.") }
                 _workspaces.removeAll { $0.id == w.id }
@@ -85,7 +72,7 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                 return try ok(WorkspaceRemoval(warning: nil))
             case ("POST", let p) where p.count == 4 && p[1] == "sessions" && p[3] == "handover":
                 // The fake moves the session at once. The daemon waits for the end of the turn.
-                let h = try Self.decoder.decode(SessionHandover.self, from: body ?? Data())
+                let h = try FakeDaemon.decoder.decode(SessionHandover.self, from: body ?? Data())
                 guard let i = sessions.firstIndex(where: { $0.id == p[2] }) else { return error(404, "no session \(p[2])") }
                 guard _runtimes.contains(where: { $0.id == sessions[i].runtime && $0.capabilities.contains("sessionHandover") }) else {
                     return error(501, "The runtime cannot move the session.")
@@ -93,21 +80,21 @@ public final class FakeDaemonRuntimes: @unchecked Sendable {
                 sessions[i].view = h.view
                 return (202, Data("{}".utf8))
             case ("POST", ["v1", "files"]):
-                let f = try Self.decoder.decode(WorkspaceFiles.self, from: body ?? Data())
+                let f = try FakeDaemon.decoder.decode(WorkspaceFiles.self, from: body ?? Data())
                 _files.append(f.files)
                 let dir = "/Users/ada/.oversire/files/\(String(format: "%016x", _files.count))"
                 return try ok(WorkspaceFilesResult(paths: f.files.map { dir + "/" + $0.name }))
             case ("POST", ["v1", "reveal"]):
-                _reveals.append(try Self.decoder.decode(SessionRef.self, from: body ?? Data()))
+                _reveals.append(try FakeDaemon.decoder.decode(SessionRef.self, from: body ?? Data()))
                 return (204, Data())
             case ("POST", ["v1", "orders"]):
-                let o = try Self.decoder.decode(WorkOrder.self, from: body ?? Data())
+                let o = try FakeDaemon.decoder.decode(WorkOrder.self, from: body ?? Data())
                 // As the daemon: wire.WorkOrder.UnmarshalJSON.
                 guard !o.id.isEmpty, !o.runner.isEmpty, !o.suggestion.isEmpty else { return error(400, "wire: order needs id, runner and suggestion") }
                 if let st = _states[o.id] { return try ok(st) }
                 _orders.append(o)
                 _states[o.id] = run(o, machine: machine, sessions: &sessions)
-                return (202, try Self.encoder.encode(["order": o]))
+                return (202, try FakeDaemon.encoder.encode(["order": o]))
             case ("GET", let p) where p.count == 3 && p[1] == "orders":
                 guard let st = _states[p[2]] else { return error(404, "not found") }
                 // The first read gives acked: the order runs.

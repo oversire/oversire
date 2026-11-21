@@ -23,10 +23,6 @@ final class MachineRuntimeCallerTests: XCTestCase {
         return h
     }
 
-    private func wait(_ f: () -> Bool) async {
-        for _ in 0..<200 where !f() { try? await Task.sleep(nanoseconds: 5_000_000) }
-    }
-
     // MARK: GroupSync
 
     /// An apply before the first load of the group must not make this app the solo owner (OVERSIRE-329: mba summarized at launch).
@@ -48,7 +44,7 @@ final class MachineRuntimeCallerTests: XCTestCase {
         XCTAssertNotEqual(sync.owner.role, AutomationRole.solo)
 
         sync.reread()
-        for _ in 0..<200 where sync.owner.role == AutomationRole.paused("") { try await Task.sleep(nanoseconds: 5_000_000) }
+        _ = await Wait.until(timeout: .seconds(1)) { sync.owner.role != AutomationRole.paused("") }
         XCTAssertEqual(sync.owner.role, AutomationRole.paused("mbp"), "the group has a home, and this test has no link to it")
     }
 
@@ -106,9 +102,9 @@ final class MachineRuntimeCallerTests: XCTestCase {
         h.use([mbp])
         XCTAssertFalse(h.noLocalDaemon)
         h.refresh()
-        await wait { h.read }
+        _ = await Wait.until(timeout: .seconds(1)) { h.read }
         h.use([mbp])
-        await wait { h.noLocalDaemon }
+        _ = await Wait.until(timeout: .seconds(1)) { h.noLocalDaemon }
         XCTAssertTrue(h.noLocalDaemon)
         h.use([mba, mbp])
         XCTAssertFalse(h.noLocalDaemon)
@@ -119,9 +115,9 @@ final class MachineRuntimeCallerTests: XCTestCase {
         d.online = false
         let h = hub(d)
         h.refresh()
-        await wait { h.read }
+        _ = await Wait.until(timeout: .seconds(1)) { h.read }
         h.use([mbp])
-        await wait { h.noLocalDaemon }
+        _ = await Wait.until(timeout: .seconds(1)) { h.noLocalDaemon }
         XCTAssertTrue(h.needsDaemon, "this Mac runs the sessions")
         h.config = { MachinesConfig(sessions: "mbp") }
         XCTAssertFalse(h.needsDaemon, "the sessions run on mbp")

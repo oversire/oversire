@@ -1,9 +1,6 @@
 import XCTest
 @testable import OverSireCore
-
-private struct NoHTTP: HTTPTransport {
-    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw ProviderError.transport("offline") }
-}
+import OverSireTestKit
 
 private struct NoCommands: CommandRunner {
     func run(_ exe: String, _ args: [String], stdin: Data?, timeout: Duration) async throws -> CommandOutput {

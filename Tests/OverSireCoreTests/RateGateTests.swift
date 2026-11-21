@@ -1,5 +1,6 @@
 import XCTest
 import OverSireCore
+import OverSireTestKit
 
 /// A test clock for RateGate: a sleep moves the time at once.
 final class GateClock: @unchecked Sendable {
@@ -135,17 +136,17 @@ final class RateGateTests: XCTestCase {
             try await gate.enter(priority: .background)
             await order.add("bg")
         }
-        try await c.waitForSleepers(1)
+        await c.waitForSleepers(1)
         Task {
             try await gate.enter(priority: .user)
             await order.add("user")
         }
-        try await c.waitForSleepers(2)
+        await c.waitForSleepers(2)
         c.advance(10)
         try await Task.sleep(nanoseconds: 50_000_000)
         var seen = await order.list
         XCTAssertEqual(seen, ["user"], "the user call takes the token")
-        try await c.waitForSleepers(1)
+        await c.waitForSleepers(1)
         c.advance(10)
         try await Task.sleep(nanoseconds: 50_000_000)
         seen = await order.list
@@ -287,11 +288,8 @@ final class SleepGateClock: @unchecked Sendable {
         })
     }
 
-    func waitForSleepers(_ n: Int) async throws {
-        for _ in 0..<200 {
-            if lock.withLock({ sleepers.count }) == n { return }
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
+    func waitForSleepers(_ n: Int) async {
+        if await Wait.until(timeout: .seconds(2), { lock.withLock { sleepers.count } == n }) { return }
         XCTFail("expected \(n) sleepers")
     }
 

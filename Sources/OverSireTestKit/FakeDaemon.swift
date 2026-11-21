@@ -166,14 +166,14 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         return r.value(forHTTPHeaderField: "Authorization") == "Bearer \(token)"
     }
 
-    private static let encoder: JSONEncoder = {
+    static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         e.outputFormatting = .sortedKeys
         return e
     }()
 
-    private static let decoder: JSONDecoder = {
+    static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d

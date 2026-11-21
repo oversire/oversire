@@ -1,4 +1,5 @@
 import AgentBinder
+import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
@@ -29,10 +30,6 @@ private actor GateProber: CLIProber {
 
 @MainActor
 final class LocalCLITests: XCTestCase {
-    private func until(_ f: () -> Bool) async {
-        for _ in 0..<400 where !f() { try? await Task.sleep(nanoseconds: 5_000_000) }
-    }
-
     func testEachResultPostsInArrivalOrderAndTheLimitsComeAfter() async {
         let probe = GateProber()
         let cli = LocalCLI(prober: probe, harnesses: [.claude, .codex, .gemini])
@@ -49,13 +46,13 @@ final class LocalCLITests: XCTestCase {
         XCTAssertEqual(cli.progress.done, 0)
         XCTAssertEqual(cli.progress.total, 3)
         await probe.open(.codex)
-        await until { cli.detections?.count == 1 }
+        _ = await Wait.until(timeout: .seconds(2)) { cli.detections?.count == 1 }
         XCTAssertEqual(cli.pending, [.claude, .gemini])
         XCTAssertEqual(cli.progress.done, 1)
         await probe.open(.gemini)
-        await until { cli.detections?.count == 2 }
+        _ = await Wait.until(timeout: .seconds(2)) { cli.detections?.count == 2 }
         await probe.open(.claude)
-        await until { !cli.detecting }
+        _ = await Wait.until(timeout: .seconds(2)) { !cli.detecting }
 
         XCTAssertEqual(posts, [
             " |  | true",

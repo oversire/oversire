@@ -236,23 +236,10 @@ public final class FakeRunbookEngine: @unchecked Sendable {
 
     // MARK: HTTP
 
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = .sortedKeys
-        return e
-    }()
-
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
     /// The /v1/runbook-runs routes. nil: not a runbook route.
     func route(_ method: String, _ p: [String], query: [URLQueryItem], body: Data?) -> (Int, Data)? {
         guard p.count >= 2, p[0] == "v1", p[1] == "runbook-runs" else { return nil }
-        func decode<T: Decodable>(_: T.Type) throws -> T { try Self.decoder.decode(T.self, from: body ?? Data("{}".utf8)) }
+        func decode<T: Decodable>(_: T.Type) throws -> T { try FakeDaemon.decoder.decode(T.self, from: body ?? Data("{}".utf8)) }
         do {
             let id = p.count > 2 ? RunbookRunID(rawValue: p[2]) : nil
             let r: any Encodable
@@ -279,16 +266,16 @@ public final class FakeRunbookEngine: @unchecked Sendable {
             case ("PATCH", 5) where p[3] == "steps": r = try act(.patch(try decode(StepPatch.self)), step: p[4], on: id!)
             default: return (404, Data(#"{"error":"not_found"}"#.utf8))
             }
-            return (status, try Self.encoder.encode(r))
+            return (status, try FakeDaemon.encoder.encode(r))
         } catch let e as RunbookRefusal {
             struct Body: Encodable { let error: String; let problems: [RunbookProblem] }
-            return (400, (try? Self.encoder.encode(Body(error: e.message, problems: e.problems))) ?? Data())
+            return (400, (try? FakeDaemon.encoder.encode(Body(error: e.message, problems: e.problems))) ?? Data())
         } catch ProviderError.notFound {
             return (404, Data(#"{"error":"not_found"}"#.utf8))
         } catch ProviderError.vendor(let code, let message) {
-            return (Int(code) ?? 500, (try? Self.encoder.encode(["error": message])) ?? Data())
+            return (Int(code) ?? 500, (try? FakeDaemon.encoder.encode(["error": message])) ?? Data())
         } catch {
-            return (400, (try? Self.encoder.encode(["error": String(describing: error)])) ?? Data())
+            return (400, (try? FakeDaemon.encoder.encode(["error": String(describing: error)])) ?? Data())
         }
     }
 }

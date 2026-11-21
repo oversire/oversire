@@ -81,11 +81,6 @@ final class ProjectRefreshTests: XCTestCase {
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
 
-    private func until(_ what: String, _ ok: @escaping () -> Bool) async {
-        for _ in 0..<200 where !ok() { try? await Task.sleep(nanoseconds: 10_000_000) }
-        XCTAssertTrue(ok(), what)
-    }
-
     func testForcedRefreshesDuringOneGiveOneMore() async throws {
         let t = SlowTracker()
         let store = try store(t)
@@ -96,11 +91,11 @@ final class ProjectRefreshTests: XCTestCase {
             store.track([summary], live: [])
             for _ in 0..<3 { store.refresh([key], force: true) { _ in finished += 1 } }
         }
-        await until("the first refresh runs") { t.blocked == 1 }
+        await until("the first refresh runs", timeout: .seconds(2)) { t.blocked == 1 }
         t.release()
-        await until("one more refresh runs") { t.blocked == 1 && t.calls == 2 }
+        await until("one more refresh runs", timeout: .seconds(2)) { t.blocked == 1 && t.calls == 2 }
         t.release()
-        await until("the three callers end with the second run") { finished == 3 }
+        await until("the three callers end with the second run", timeout: .seconds(2)) { finished == 3 }
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.calls, 2, "3 forced refreshes during one give 1 more")
     }
@@ -117,14 +112,14 @@ final class ProjectRefreshTests: XCTestCase {
         let a = summary("a"), b = summary("b")
         var result: Bool?
         await MainActor.run { store.track([a, b], live: []) }
-        await until("the poll reads a") { t.blocked("a") == 1 }
+        await until("the poll reads a", timeout: .seconds(2)) { t.blocked("a") == 1 }
         await MainActor.run { store.refresh([b.ref.storeKey], force: true, priority: .user) { result = $0 } }
-        await until("the write refresh reads b at once") { t.blocked("b") == 1 }
+        await until("the write refresh reads b at once", timeout: .seconds(2)) { t.blocked("b") == 1 }
         t.release("b")
-        await until("the write refresh ends while the poll reads a") { result == true }
+        await until("the write refresh ends while the poll reads a", timeout: .seconds(2)) { result == true }
         XCTAssertEqual(t.blocked("a"), 1)
         t.release("a")
-        await until("the poll ends") { store.refreshing.isEmpty }
+        await until("the poll ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         XCTAssertEqual(t.calls, 2, "the poll does not read b again")
     }
 
@@ -147,9 +142,9 @@ final class ProjectRefreshTests: XCTestCase {
 
     /// The poll reads a. A user refresh takes the key and its read parks. The call of the poll is still parked.
     private func takeA(_ t: SlowTracker, _ store: ProjectStore, _ a: ProjectSummary, done: @escaping (Bool) -> Void) async {
-        await until("the poll reads a") { t.blocked("a") == 1 }
+        await until("the poll reads a", timeout: .seconds(2)) { t.blocked("a") == 1 }
         await MainActor.run { store.refresh([a.ref.storeKey], force: true, priority: .user, done: done) }
-        await until("the user read of a runs") { t.blocked("a") == 2 }
+        await until("the user read of a runs", timeout: .seconds(2)) { t.blocked("a") == 2 }
     }
 
     func testUserRefreshTakesTheKeyFromABackgroundRead() async throws {
@@ -162,15 +157,15 @@ final class ProjectRefreshTests: XCTestCase {
         await MainActor.run { store.track([a, b], live: []) }
         await takeA(t, store, a) { result = $0 }
         XCTAssertEqual(t.lanes("a"), [.background, .user])
-        await until("the poll goes on to b without the old call of a") { t.blocked("b") == 1 }
+        await until("the poll goes on to b without the old call of a", timeout: .seconds(2)) { t.blocked("b") == 1 }
         t.release("a")
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(store.refreshing.contains(a.ref.storeKey), "the stale answer does not end the hold of the user")
         XCTAssertNil(result)
         t.release("a")
-        await until("the caller ends") { result == true }
+        await until("the caller ends", timeout: .seconds(2)) { result == true }
         t.release("b")
-        await until("the poll ends") { store.refreshing.isEmpty }
+        await until("the poll ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         XCTAssertEqual(t.calls, 3, "no fourth read of a")
         XCTAssertTrue(pollLines(lines, .error).isEmpty)
     }
@@ -188,10 +183,10 @@ final class ProjectRefreshTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.blocked("a"), 1, "no cancel")
         t.release("a")
-        await until("the rerun runs") { t.blocked("a") == 1 && t.calls == 3 }
+        await until("the rerun runs", timeout: .seconds(2)) { t.blocked("a") == 1 && t.calls == 3 }
         t.release("a")
-        await until("both callers end") { first != nil && second == true }
-        await until("the refresh ends") { store.refreshing.isEmpty }
+        await until("both callers end", timeout: .seconds(2)) { first != nil && second == true }
+        await until("the refresh ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
     }
 
     private final class ProbeTrackers: TrackerDirectory {
@@ -207,14 +202,14 @@ final class ProjectRefreshTests: XCTestCase {
         let p = try await probe.projects()[0]
         let key = p.ref.storeKey
         await MainActor.run { store.track([p], live: []) }
-        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await until("the first refresh ends", timeout: .seconds(2)) { store.snapshots[key] != nil && store.refreshing.isEmpty }
         probe.clear()
         await MainActor.run { store.viewed(key) }
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertTrue(probe.priorities("items").isEmpty, "a fresh snapshot reads nothing")
         store.now = { Date() + 120 }
         await MainActor.run { store.viewed(key) }
-        await until("the view reads once") { probe.priorities("items").count == 1 }
+        await until("the view reads once", timeout: .seconds(2)) { probe.priorities("items").count == 1 }
         XCTAssertEqual(probe.priorities("items"), [.user])
     }
 
@@ -223,7 +218,7 @@ final class ProjectRefreshTests: XCTestCase {
         let store = try store(t)
         let key = order.ref.storeKey
         await MainActor.run { store.track([order], live: []) }
-        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await until("the first refresh ends", timeout: .seconds(2)) { store.snapshots[key] != nil && store.refreshing.isEmpty }
         store.now = { Date() + 10 }
         await MainActor.run { store.viewed(key) }
         try await Task.sleep(nanoseconds: 100_000_000)
@@ -241,7 +236,7 @@ final class ProjectRefreshTests: XCTestCase {
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.blocked("a"), 1)
         t.release("a")
-        await until("the refresh ends") { store.refreshing.isEmpty }
+        await until("the refresh ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.calls, 2, "no rerun")
     }
@@ -262,9 +257,9 @@ final class ProjectRefreshTests: XCTestCase {
         await MainActor.run { store.track([p], live: []) }
         XCTAssertEqual(store.key(identifier: "slow"), p.ref.storeKey)
         XCTAssertNil(store.key(identifier: "other"))
-        await until("the poll reads") { t.blocked == 1 }
+        await until("the poll reads", timeout: .seconds(2)) { t.blocked == 1 }
         t.release()
-        await until("the poll ends") { store.refreshing.isEmpty }
+        await until("the poll ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
     }
 
     func testStuckReadLetsTheKeyGoAndWarns() async throws {
@@ -275,23 +270,23 @@ final class ProjectRefreshTests: XCTestCase {
         let a = summary("a"), b = summary("b")
         let ka = a.ref.storeKey
         await MainActor.run { store.track([a, b], live: []) }
-        await until("the poll reads a") { t.blocked("a") == 1 }
+        await until("the poll reads a", timeout: .seconds(2)) { t.blocked("a") == 1 }
         store.now = { Date() + 200 }
         await MainActor.run { store.releaseStuckReads() }
         XCTAssertFalse(store.refreshing.contains(ka))
         XCTAssertNotNil(store.errors[ka])
-        await until("the loop reads b") { t.blocked("b") == 1 }
+        await until("the loop reads b", timeout: .seconds(2)) { t.blocked("b") == 1 }
         let warns = pollLines(lines, .warn)
         XCTAssertEqual(warns.count, 1)
         XCTAssertEqual([warns[0].area.rawValue, warns[0].job, warns[0].subject, warns[0].host], ["sync", "slow poll", "A", "ws"])
         await MainActor.run { store.poll() }
-        await until("the poll reads a again") { t.blocked("a") == 2 }
+        await until("the poll reads a again", timeout: .seconds(2)) { t.blocked("a") == 2 }
         t.release("a")
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertNil(store.snapshots[ka], "the stale answer writes nothing")
         t.release("a")
         t.release("b")
-        await until("all reads end") { store.refreshing.isEmpty }
+        await until("all reads end", timeout: .seconds(2)) { store.refreshing.isEmpty }
         XCTAssertNotNil(store.snapshots[ka])
     }
 
@@ -302,13 +297,13 @@ final class ProjectRefreshTests: XCTestCase {
         defer { restore() }
         let a = summary("a")
         await MainActor.run { store.track([a], live: []) }
-        await until("the poll reads a") { t.blocked("a") == 1 }
+        await until("the poll reads a", timeout: .seconds(2)) { t.blocked("a") == 1 }
         store.now = { Date() + 100 }
         await MainActor.run { store.releaseStuckReads() }
         XCTAssertTrue(store.refreshing.contains(a.ref.storeKey))
         XCTAssertTrue(pollLines(lines, .warn).isEmpty)
         t.release("a")
-        await until("the poll ends") { store.refreshing.isEmpty }
+        await until("the poll ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
     }
 
     func testWakeReadsTheShownProjectFirstThenTheOldest() async throws {
@@ -317,26 +312,26 @@ final class ProjectRefreshTests: XCTestCase {
         let a = summary("a"), b = summary("b"), c = summary("c")
         await MainActor.run { store.track([a, b, c], live: []) }
         for k in ["a", "b", "c"] {
-            await until("the first sweep reads \(k)") { t.blocked(k) == 1 }
+            await until("the first sweep reads \(k)", timeout: .seconds(2)) { t.blocked(k) == 1 }
             t.release(k)
         }
-        await until("the first sweep ends") { store.refreshing.isEmpty }
+        await until("the first sweep ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         await MainActor.run {
             store.seed(snap(a, at: Date()))
             store.seed(snap(b, at: Date() - 3600))
             store.seed(snap(c, at: .distantPast))
             store.wake(first: a.ref.storeKey)
         }
-        await until("a reads as a user call and c reads first") { t.blocked("a") == 1 && t.blocked("c") == 1 }
+        await until("a reads as a user call and c reads first", timeout: .seconds(2)) { t.blocked("a") == 1 && t.blocked("c") == 1 }
         XCTAssertEqual(t.lanes("a"), [.background, .user])
         XCTAssertEqual(t.lanes("c"), [.background, .background])
         XCTAssertEqual(t.blocked("b"), 0, "b waits for c")
         t.release("c")
-        await until("b reads after c") { t.blocked("b") == 1 }
+        await until("b reads after c", timeout: .seconds(2)) { t.blocked("b") == 1 }
         XCTAssertEqual(t.lanes("b"), [.background, .background])
         t.release("a")
         t.release("b")
-        await until("all reads end") { store.refreshing.isEmpty }
+        await until("all reads end", timeout: .seconds(2)) { store.refreshing.isEmpty }
         XCTAssertEqual(t.lanes("a"), [.background, .user], "the sweep does not read a")
     }
 
@@ -347,15 +342,15 @@ final class ProjectRefreshTests: XCTestCase {
         defer { restore() }
         let a = summary("a")
         await MainActor.run { store.track([a], live: []) }
-        await until("the poll reads a") { t.blocked("a") == 1 }
+        await until("the poll reads a", timeout: .seconds(2)) { t.blocked("a") == 1 }
         store.now = { Date() + 3600 }
         await MainActor.run { store.wake(first: nil) }
-        await until("a reads again") { t.blocked("a") == 2 }
+        await until("a reads again", timeout: .seconds(2)) { t.blocked("a") == 2 }
         XCTAssertEqual(pollLines(lines, .warn).count, 1)
         XCTAssertEqual(t.lanes("a"), [.background, .background])
         t.release("a")
         t.release("a")
-        await until("the reads end") { store.refreshing.isEmpty }
+        await until("the reads end", timeout: .seconds(2)) { store.refreshing.isEmpty }
     }
 
     func testOldestFirst() {
@@ -376,11 +371,11 @@ final class ProjectRefreshTests: XCTestCase {
             store.seed(snap(b, at: Date() - 3600))
             store.track([a, b], live: [])
         }
-        await until("b reads first") { t.blocked("b") == 1 && t.blocked("a") == 0 }
+        await until("b reads first", timeout: .seconds(2)) { t.blocked("b") == 1 && t.blocked("a") == 0 }
         t.release("b")
-        await until("a reads next") { t.blocked("a") == 1 }
+        await until("a reads next", timeout: .seconds(2)) { t.blocked("a") == 1 }
         t.release("a")
-        await until("the sweep ends") { store.refreshing.isEmpty }
+        await until("the sweep ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
     }
 
     func testRateLimitPausesTheWorkspace() async throws {
@@ -390,7 +385,7 @@ final class ProjectRefreshTests: XCTestCase {
         let summary = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
         let key = summary.ref.storeKey
         await MainActor.run { store.track([summary], live: []) }
-        await until("the refresh fails") { store.cooldown["ws"] != nil && !store.refreshing.contains(key) }
+        await until("the refresh fails", timeout: .seconds(2)) { store.cooldown["ws"] != nil && !store.refreshing.contains(key) }
         let pause = store.cooldown["ws"]!.timeIntervalSinceNow
         XCTAssertGreaterThan(pause, 50, "at least cooldownMin")
         var result: Bool?
@@ -406,14 +401,14 @@ final class ProjectRefreshTests: XCTestCase {
         store.leads = { false }
         store.otherMacDelay = 0.2
         await MainActor.run { store.track([summary], live: []) }
-        await until("the poll refresh runs") { t.blocked == 1 }
+        await until("the poll refresh runs", timeout: .seconds(2)) { t.blocked == 1 }
         t.release()
-        await until("the poll refresh ends") { store.refreshing.isEmpty }
+        await until("the poll refresh ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         var result: Bool?
         await MainActor.run { store.refreshForEvents([(workspace: "ws", project: nil)]) { result = $0 } }
         XCTAssertEqual(result, true)
         XCTAssertEqual(t.calls, 1, "no refresh at once")
-        await until("the refresh runs after the delay") { t.calls == 2 }
+        await until("the refresh runs after the delay", timeout: .seconds(2)) { t.calls == 2 }
         t.release()
     }
 
@@ -524,7 +519,7 @@ final class ProjectRefreshTests: XCTestCase {
         let key = summary.ref.storeKey
         var changes: [DataChange] = []
         await MainActor.run { store.onChange = { changes.append($0) }; store.track([summary], live: []) }
-        await until("the first snapshot") { store.snapshots[key] != nil }
+        await until("the first snapshot", timeout: .seconds(2)) { store.snapshots[key] != nil }
         try await Task.sleep(nanoseconds: 100_000_000)
         let first = await MainActor.run { changes.filter { $0.projects.contains(key) }.count }
         XCTAssertGreaterThan(first, 0, "the first snapshot is a change")
@@ -540,7 +535,7 @@ final class ProjectRefreshTests: XCTestCase {
         let summary = try await fake.projects()[0]
         let key = summary.ref.storeKey
         await MainActor.run { store.track([summary], live: []) }
-        await until("the first snapshot") { store.snapshots[key] != nil }
+        await until("the first snapshot", timeout: .seconds(2)) { store.snapshots[key] != nil }
         try await Task.sleep(nanoseconds: 300_000_000)
         var changes: [DataChange] = []
         await MainActor.run {
@@ -595,12 +590,12 @@ final class ProjectRefreshTests: XCTestCase {
         let key = order.ref.storeKey
         store.relayIsLive = { true }
         await MainActor.run { store.track([order], live: [key]) }
-        await until("the refresh fails") { store.errors[key] != nil && store.refreshing.isEmpty }
+        await until("the refresh fails", timeout: .seconds(2)) { store.errors[key] != nil && store.refreshing.isEmpty }
         XCTAssertEqual(store.errors[key], ProjectStore.noToken + " (no token in the Keychain)")
         let t = OrderTracker()
         dir.t = t
         await MainActor.run { store.poll() }
-        await until("the poll loads the live project again") { t.calls.contains("items") && store.errors[key] == nil }
+        await until("the poll loads the live project again", timeout: .seconds(2)) { t.calls.contains("items") && store.errors[key] == nil }
     }
 
     func testPollRefreshesOnlyAStaleLiveProject() async throws {
@@ -609,14 +604,14 @@ final class ProjectRefreshTests: XCTestCase {
         let key = order.ref.storeKey
         store.relayIsLive = { true }
         await MainActor.run { store.track([order], live: [key]) }
-        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await until("the first refresh ends", timeout: .seconds(2)) { store.snapshots[key] != nil && store.refreshing.isEmpty }
         let loads = { t.calls.filter { $0 == "items" }.count }
         await MainActor.run { store.poll() }
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(loads(), 1, "a fresh live project waits for its events")
         store.now = { Date().addingTimeInterval(3600) }
         await MainActor.run { store.poll() }
-        await until("a stale live project polls") { loads() == 2 }
+        await until("a stale live project polls", timeout: .seconds(2)) { loads() == 2 }
     }
 
     func testPollSkipsAFreshProjectOfALiveFeed() async throws {
@@ -627,7 +622,7 @@ final class ProjectRefreshTests: XCTestCase {
         store.relayIsLive = { false }
         store.feedIsLive = { $0 == account }
         await MainActor.run { store.track([order], live: []) }
-        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await until("the first refresh ends", timeout: .seconds(2)) { store.snapshots[key] != nil && store.refreshing.isEmpty }
         await MainActor.run { store.poll() }
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.calls.filter { $0 == "items" }.count, 1, "a fresh feed project waits for its events")
@@ -642,10 +637,10 @@ final class ProjectRefreshTests: XCTestCase {
         store.relayIsLive = { false }
         store.feedIsLive = { _ in false }
         await MainActor.run { store.track([order], live: []) }
-        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await until("the first refresh ends", timeout: .seconds(2)) { store.snapshots[key] != nil && store.refreshing.isEmpty }
         let loads = { t.calls.filter { $0 == "items" }.count }
         await MainActor.run { store.poll() }
-        await until("the poll loads the project") { loads() == 2 }
+        await until("the poll loads the project", timeout: .seconds(2)) { loads() == 2 }
         XCTAssertFalse(store.isLive(key))
         XCTAssertFalse(store.showsLive(key))
     }
@@ -658,10 +653,10 @@ final class ProjectRefreshTests: XCTestCase {
         store.relayIsLive = { false }
         store.feedIsLive = { $0 == account }
         await MainActor.run { store.track([order], live: []) }
-        await until("the first refresh ends") { store.snapshots[key] != nil && store.refreshing.isEmpty }
+        await until("the first refresh ends", timeout: .seconds(2)) { store.snapshots[key] != nil && store.refreshing.isEmpty }
         store.now = { Date().addingTimeInterval(3600) }
         await MainActor.run { store.poll() }
-        await until("a stale feed project polls") { t.calls.filter { $0 == "items" }.count == 2 }
+        await until("a stale feed project polls", timeout: .seconds(2)) { t.calls.filter { $0 == "items" }.count == 2 }
     }
 
     func testLimitChangeDuringARefreshRunsAgain() async throws {
@@ -672,11 +667,11 @@ final class ProjectRefreshTests: XCTestCase {
         let store = try store(t)
         let summary = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
         await MainActor.run { store.track([summary], live: []) }
-        await until("the first refresh runs") { t.blocked == 1 }
+        await until("the first refresh runs", timeout: .seconds(2)) { t.blocked == 1 }
         PROJECTS_CFG.itemsPerProject = 0
         await MainActor.run { store.track([summary], live: []) }
         t.release()
-        await until("one more refresh runs with the new limit") { t.blocked == 1 && t.calls == 2 }
+        await until("one more refresh runs with the new limit", timeout: .seconds(2)) { t.blocked == 1 && t.calls == 2 }
         t.release()
         XCTAssertEqual(t.limits, [100, 200])
     }

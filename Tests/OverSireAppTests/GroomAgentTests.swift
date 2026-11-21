@@ -232,7 +232,7 @@ final class GroomAgentTests: XCTestCase {
         XCTAssertEqual(two?.statusOptionId, "s-cancel")
         XCTAssertEqual(r.fake.triages.map(\.action).last, .duplicate(of: "i1"))
         XCTAssertFalse(r.daemon.sessions.contains { $0.key == "groom:FAKE" }, "Apply stops the Groom session")
-        for _ in 0..<100 where !r.daemon.sessions.contains(where: { $0.key == "enhance:FAKE-7" }) { try await Task.sleep(nanoseconds: 20_000_000) }
+        _ = await Wait.until(timeout: .seconds(2)) { r.daemon.sessions.contains(where: { $0.key == "enhance:FAKE-7" }) }
         XCTAssertTrue(r.daemon.sessions.contains { $0.key == "enhance:FAKE-7" }, "\(r.daemon.sessions.map(\.key))")
         XCTAssertNil(r.agent.outputs?.all(.groomReview, as: GroomAgent.Review.self).first, "the review goes after Apply")
     }
@@ -249,9 +249,7 @@ final class GroomAgentTests: XCTestCase {
         r.agent.askAgain(r.pk)
         guard case .grooming(let run) = r.agent.states[r.pk] else { return XCTFail("\(String(describing: r.agent.states[r.pk]))") }
         XCTAssertEqual(run.rounds, 2)
-        for _ in 0..<100 where !r.daemon.runtime.orders.contains(where: { if case .send = $0.order { return true } else { return false } }) {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+        _ = await Wait.until(timeout: .seconds(2)) { r.daemon.runtime.orders.contains(where: { if case .send = $0.order { return true } else { return false } }) }
         XCTAssertTrue(r.daemon.runtime.orders.contains { if case .send = $0.order { return true } else { return false } })
         try await absorb(r)
         XCTAssertEqual(r.agent.states[r.pk]?.isLive, true, "the old done phase is the old result")
