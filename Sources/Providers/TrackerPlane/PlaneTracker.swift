@@ -18,6 +18,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     private var memberCache: (people: [PersonDetail], names: [String: String], at: Date)?
     private var identifiers: [String: String] = [:]                    // project id → "ENG"
     var indexCache: [String: (stubs: [ItemStub], at: Date)] = [:]
+    private var indexWrites: [String: Int] = [:]                        // project id → item writes so far
     var itemCache: [String: [String: Item]] = [:]                       // project id → the last items
     var membership: [String: [String: [EpicID]]] = [:]                  // project id → item id → its modules, first is the epic
     var moduleCache: [String: (epics: [Epic], at: Date)] = [:]          // project id → the modules, in sort order
@@ -215,6 +216,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef {
+        defer { dropIndex(p) }
         let o = try await api.send("POST", "\(ws)/projects/\(p.id)/issues/", body: d.planeFields) as? [String: Any]
         guard let o, let id = PlaneAPI.id(o["id"]) else { throw ProviderError.decoding("no id for the new item") }
         let key = "\(try await identifier(of: p))-\(PlaneAPI.int(o["sequence_id"]) ?? 0)"
@@ -222,10 +224,12 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
+        defer { dropIndex(i.project) }
         _ = try await api.send("PATCH", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/", body: patch.planeFields)
     }
 
     public func comment(_ i: ItemRef, markdown: String) async throws {
+        defer { dropIndex(i.project) }
         _ = try await api.send("POST", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/comments/",
                                body: ["comment_html": PlaneMarkup.html(fromMarkdown: markdown)])
     }
@@ -248,6 +252,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func setDescription(_ i: ItemRef, html: String) async throws {
+        defer { dropIndex(i.project) }
         _ = try await api.send("PATCH", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/", body: ["description_html": html])
     }
 
@@ -265,6 +270,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     /// The v1 list has `last_activity_at`, which a comment moves. Only v2 has `module_ids`, so a second call reads them.
     func index(_ p: ProjectRef, maxAge: TimeInterval) async throws -> [ItemStub] {
         if let c = lock.withLock({ indexCache[p.id] }), -c.at.timeIntervalSinceNow < maxAge { return c.stubs }
+        let writes = lock.withLock { indexWrites[p.id] ?? 0 }
         let q = [URLQueryItem(name: "fields", value: "id,parent,state,last_activity_at,sequence_id")]
         let rows = try await api.list("\(ws)/projects/\(p.id)/issues/", query: q, max: 5000)
         let members = await moduleMembers(p)
@@ -275,8 +281,20 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
                             activityAt: parseISO(r["last_activity_at"] as? String), epicId: members[id]?.first,
                             key: identifier.flatMap { i in PlaneAPI.int(r["sequence_id"]).map { "\(i)-\($0)" } })
         }
-        lock.withLock { indexCache[p.id] = (stubs, Date()); membership[p.id] = members }
+        lock.withLock {
+            guard (indexWrites[p.id] ?? 0) == writes else { return }
+            indexCache[p.id] = (stubs, Date())
+            membership[p.id] = members
+        }
         return stubs
+    }
+
+    /// An item write makes the cached index old. A read that began before the write does not store its rows.
+    func dropIndex(_ p: ProjectRef) {
+        lock.withLock {
+            indexCache[p.id] = nil
+            indexWrites[p.id, default: 0] += 1
+        }
     }
 
     /// Item id → its modules, first is the epic. One v2 call for the items in a module. Empty on any failure (Modules off).
@@ -442,6 +460,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
 
     /// Only v1 gives the new work item with its sequence number.
     public func createIntake(_ d: ItemDraft, in p: ProjectRef) async throws -> (item: ItemRef, intake: IntakeItem) {
+        defer { dropIndex(p) }
         let o: [String: Any]?
         do {
             o = try await api.send("POST", "\(ws)/projects/\(p.id)/intake-issues/", body: ["issue": d.planeFields]) as? [String: Any]
@@ -466,6 +485,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
 
     // The plain update endpoint refuses a status change, so status changes use /status/.
     public func triage(_ i: IntakeItem, in p: ProjectRef, _ a: IntakeAction) async throws {
+        defer { dropIndex(p) }
         let path = "\(ws)/projects/\(p.id)/intake-issues/\(i.workItemId)/"
         switch a {
         case .delete:
@@ -487,6 +507,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func setIntakeDescription(_ p: ProjectRef, workItem: String, html: String) async throws {
+        defer { dropIndex(p) }
         _ = try await api.send("PATCH", "\(ws)/projects/\(p.id)/intake-issues/\(workItem)/", body: ["issue": ["description_html": html]])
     }
 
@@ -596,6 +617,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
 
     /// Adds before it removes. Plane removes a relation by the other item only.
     public func apply(_ patch: RelationPatch, to item: ItemRef) async throws {
+        defer { dropIndex(item.project) }
         let path = "\(ws)/projects/\(item.project.id)/work-items/\(item.id)/relations/"
         let types = Dictionary(Self.relationKinds.map { ($0.value, $0.key) }, uniquingKeysWith: { a, _ in a })
         for (kind, rels) in Dictionary(grouping: patch.add, by: \.kind).sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
@@ -691,6 +713,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func addLink(_ i: ItemRef, url: URL, title: String) async throws {
+        defer { dropIndex(i.project) }
         _ = try await api.send("POST", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/links/",
                                body: ["url": url.absoluteString, "title": title])
     }
@@ -698,6 +721,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     /// Three steps: Plane gives a presigned storage form, the file goes to storage, then Plane marks it as uploaded.
     /// A description asset does not link to the item, so this uses the attachment endpoints.
     public func attach(_ f: AttachmentUpload, to i: ItemRef) async throws -> String {
+        defer { dropIndex(i.project) }
         let path = "/api/v2/workspaces/\(workspace.slug)/projects/\(i.project.id)/work-items/\(i.id)/attachments/"
         let o = try await api.send("POST", path, body: ["name": f.name, "size": f.data.count, "type": f.mimeType]) as? [String: Any]
         let form = o?["upload_data"] as? [String: Any]

@@ -10,6 +10,8 @@ final class RecordedPlane: HTTPTransport, @unchecked Sendable {
     private(set) var requests: [URLRequest] = []
 
     private var pages: [String: [[String]]] = [:]
+    /// Runs on each request, before the answer. It gets "METHOD path".
+    var onRequest: (@Sendable (String) -> Void)?
 
     func on(_ method: String, _ path: String, status: Int = 200, _ body: String) {
         lock.withLock { answers[method + " " + path] = (status, body); pages[method + " " + path] = nil }
@@ -23,6 +25,7 @@ final class RecordedPlane: HTTPTransport, @unchecked Sendable {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let key = (request.httpMethod ?? "GET") + " " + (request.url?.path(percentEncoded: false) ?? "")
         let cursor = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cursor" }?.value
+        onRequest?(key)
         let (status, body) = lock.withLock {
             requests.append(request)
             if let list = pages[key] {
@@ -335,6 +338,96 @@ final class TrackerPlaneTests: XCTestCase {
         http.on("GET", "\(ws)/projects/P1/issues/i1/", #"{"id":"i1","assignees":["u2"]}"#)
         try await plane.assignMe(ref)
         XCTAssertEqual(http.body("PATCH", "\(ws)/projects/P1/issues/i1/")?["assignees"] as? [String], ["u2", "u1"])
+    }
+
+    // MARK: The index after an item write (OVERSIRE-540)
+
+    private var list: String { "\(ws)/projects/P1/issues/" }
+    private var ref: ItemRef { ItemRef(project: project, id: "i1", key: "ENG-1", url: URL(string: "https://app.plane.so/acme/browse/ENG-1/")!) }
+    private var indexReads: Int { http.requests.filter { $0.url?.path() == list && $0.url?.query()?.contains("last_activity_at") == true }.count }
+
+    private func seedList(_ title: String = "One") {
+        http.on("GET", list, #"{"results":[{"id":"i1","name":"\#(title)","sequence_id":1,"state":"s1","last_activity_at":"2026-10-16T10:00:00Z"}],"next_page_results":false}"#)
+    }
+
+    func testCreateClearsTheIndex() async throws {
+        seedList()
+        _ = try await plane.items(project, since: nil, limit: 50)
+        http.on("POST", list, #"{"id":"i2","sequence_id":2}"#)
+        _ = try await plane.create(ItemDraft(title: "Two"), in: project)
+        http.on("GET", list, #"{"results":[{"id":"i2","name":"Two","sequence_id":2,"state":"s1","last_activity_at":"2026-10-16T11:00:00Z"},{"id":"i1","name":"One","sequence_id":1,"state":"s1","last_activity_at":"2026-10-16T10:00:00Z"}],"next_page_results":false}"#)
+        http.on("GET", "\(list)i2/", #"{"id":"i2","name":"Two","sequence_id":2,"state":"s1","last_activity_at":"2026-10-16T11:00:00Z"}"#)
+        let items = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(Set(items.map(\.id)), ["i1", "i2"])
+    }
+
+    func testUpdateClearsTheIndex() async throws {
+        seedList()
+        _ = try await plane.items(project, since: nil, limit: 50)
+        let before = indexReads
+        http.on("PATCH", "\(list)i1/", "{}")
+        try await plane.update(ref, ItemPatch(title: "Changed"))
+        seedList("Changed")
+        http.on("GET", "\(list)i1/", #"{"id":"i1","name":"Changed","sequence_id":1,"state":"s1","last_activity_at":"2026-10-16T12:00:00Z"}"#)
+        _ = try await plane.items(project, since: nil, limit: 50)
+        XCTAssertEqual(indexReads, before + 1, "the index loads again within 10 s")
+    }
+
+    func testEachItemWriteClearsTheIndex() async throws {
+        let other = ItemRef(project: project, id: "i2", key: "ENG-2", url: URL(string: "https://app.plane.so/acme/browse/ENG-2/")!)
+        let intake = IntakeItem(id: "n1", workItemId: "w1", name: "Ask", priority: nil, createdAt: Date(), author: nil, source: nil)
+        for (name, path) in [("POST", list), ("PATCH", "\(list)i1/"), ("POST", "\(list)i1/comments/"), ("POST", "\(list)i1/links/"),
+                             ("POST", "\(ws)/projects/P1/intake-issues/"), ("PATCH", "\(ws)/projects/P1/intake-issues/w1/")] {
+            http.on(name, path, #"{"id":"i2","sequence_id":2}"#)
+        }
+        http.on("POST", "\(ws)/projects/P1/work-items/i1/relations/", "{}")
+        http.on("DELETE", "\(ws)/projects/P1/intake-issues/w1/", "{}")
+        http.on("GET", "\(list)i1/", #"{"id":"i1","assignees":["u2"]}"#)
+        let writes: [(String, () async throws -> Void)] = [
+            ("create", { _ = try await self.plane.create(ItemDraft(title: "T"), in: self.project) }),
+            ("update", { try await self.plane.update(self.ref, ItemPatch(title: "T")) }),
+            ("assignMe", { try await self.plane.assignMe(self.ref) }),
+            ("comment", { try await self.plane.comment(self.ref, markdown: "Hi") }),
+            ("setDescription", { try await self.plane.setDescription(self.ref, html: "<p>x</p>") }),
+            ("createIntake", { _ = try await self.plane.createIntake(ItemDraft(title: "T"), in: self.project) }),
+            ("triage", { try await self.plane.triage(intake, in: self.project, .delete) }),
+            ("setIntakeDescription", { try await self.plane.setIntakeDescription(self.project, workItem: "w1", html: "<p>x</p>") }),
+            ("apply", { try await self.plane.apply(RelationPatch(add: [ItemRelation(kind: .blocks, item: other)]), to: self.ref) }),
+            ("addLink", { try await self.plane.addLink(self.ref, url: URL(string: "https://example.com")!, title: "Spec") }),
+            ("attach", { _ = try await self.plane.attach(AttachmentUpload(name: "a.png", mimeType: "image/png", data: Data([1])), to: self.ref) }),
+        ]
+        seedList()
+        for (name, write) in writes {
+            _ = try await plane.index(project)
+            XCTAssertNotNil(plane.indexCache["P1"], "\(name): the index is cached")
+            try? await write()
+            XCTAssertNil(plane.indexCache["P1"], "\(name): the index is dropped")
+        }
+    }
+
+    func testFailedWriteClearsTheIndex() async throws {
+        seedList()
+        _ = try await plane.index(project)
+        http.on("PATCH", "\(list)i1/", status: 500, #"{"detail":"boom"}"#)
+        do { try await plane.update(ref, ItemPatch(title: "T")); XCTFail("no error") } catch {}
+        XCTAssertNil(plane.indexCache["P1"])
+    }
+
+    func testCreateLabelKeepsTheIndex() async throws {
+        seedList()
+        _ = try await plane.index(project)
+        http.on("POST", "\(ws)/projects/P1/labels/", ##"{"id":"l1","name":"bug","color":"#ff0000"}"##)
+        _ = try? await plane.createLabel("bug", color: "#ff0000", in: project)
+        XCTAssertNotNil(plane.indexCache["P1"])
+    }
+
+    func testIndexReadDuringAWriteIsNotKept() async throws {
+        seedList()
+        let plane = self.plane!, project = self.project, list = self.list
+        http.onRequest = { key in if key == "GET \(list)" { plane.dropIndex(project) } }
+        let stubs = try await plane.index(project)
+        XCTAssertEqual(stubs.map(\.id), ["i1"])
+        XCTAssertNil(plane.indexCache["P1"])
     }
 
     func testIntake() async throws {

@@ -105,9 +105,9 @@ extension PlaneTracker: EpicTracking {
 
     /// A write changes the members, so the index and the items load again.
     func clearEpicCaches(_ p: ProjectRef) {
+        dropIndex(p)
         lock.withLock {
             moduleCache[p.id] = nil
-            indexCache[p.id] = nil
             itemCache[p.id] = nil
         }
     }

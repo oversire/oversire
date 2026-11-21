@@ -22,6 +22,7 @@ final class ProjectRefreshTests: XCTestCase {
         private var seenLimits: [Int] = []
         private var seenLanes: [(project: String, lane: CallPriority)] = []
         var limited = false
+        var failCreate = false
         var limits: [Int] { lock.withLock { seenLimits } }
         var calls: Int { lock.withLock { count } }
         var blocked: Int { lock.withLock { waiting.count } }
@@ -52,7 +53,12 @@ final class ProjectRefreshTests: XCTestCase {
         }
         func detail(_ i: ItemRef) async throws -> ItemDetail { throw ProviderError.notFound }
         func comments(_ i: ItemRef) async throws -> [Comment] { [] }
-        func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef { throw ProviderError.notFound }
+        func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef {
+            if lock.withLock({ failCreate }) { throw ProviderError.notFound }
+            let n = lock.withLock { created += 1; return created }
+            return ItemRef(project: p, id: "i\(n)", key: "SLOW-\(n)", url: URL(string: "https://x/SLOW-\(n)")!)
+        }
+        private var created = 0
         func update(_ i: ItemRef, _ patch: ItemPatch) async throws {}
         func comment(_ i: ItemRef, markdown: String) async throws {}
     }
@@ -121,6 +127,48 @@ final class ProjectRefreshTests: XCTestCase {
         t.release("a")
         await until("the poll ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         XCTAssertEqual(t.calls, 2, "the poll does not read b again")
+    }
+
+    // MARK: Create (OVERSIRE-540)
+
+    func testCreateAnswersBeforeTheRefresh() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let p = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        let key = t.project.storeKey
+        var made: Result<MadeItem, ProviderError>?
+        await MainActor.run { store.track([p], live: []) }
+        await until("the first read runs", timeout: .seconds(2)) { t.blocked == 1 }
+        t.release()
+        await until("the first read ends", timeout: .seconds(2)) { store.refreshing.isEmpty && store.snapshots[key] != nil }
+        await MainActor.run { store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:]), by: EventActor(type: .agent, name: "a")) { made = $0 } }
+        await until("create answers", timeout: .seconds(2)) { made != nil }
+        guard case .success(let m)? = made else { return XCTFail("\(String(describing: made))") }
+        XCTAssertEqual(m.ref.key, "SLOW-1")
+        await until("the refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        let marked = await MainActor.run { store.writeActors[m.ref.id] }
+        XCTAssertNotNil(marked)
+        let found = await MainActor.run { store.item(key: "slow-1")?.item.id }
+        XCTAssertEqual(found, m.ref.id, "the stub answers before a snapshot has the item")
+        t.release()
+        await until("the mark ends with the refresh", timeout: .seconds(2)) { store.writeActors.isEmpty }
+        let after = await MainActor.run { store.item(m.ref.id) }
+        XCTAssertNotNil(after, "the stub stays until a snapshot holds the item or it expires")
+    }
+
+    func testCreateFailureStartsNoRefresh() async throws {
+        let t = SlowTracker()
+        t.failCreate = true
+        let store = try store(t)
+        let key = t.project.storeKey
+        var made: Result<MadeItem, ProviderError>?
+        await MainActor.run { store.absorb(snap(ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false), at: Date())) }
+        await MainActor.run { store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:])) { made = $0 } }
+        await until("create answers", timeout: .seconds(2)) { made != nil }
+        guard case .failure? = made else { return XCTFail("\(String(describing: made))") }
+        XCTAssertNotNil(store.lastError)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(t.calls, 0)
     }
 
     // MARK: Page view, wake and watchdog (OVERSIRE-463)

@@ -209,16 +209,16 @@ struct ItemActions {
                     if !names.isEmpty, !d.projectStore.has(.labels, in: snap) { done(ActionLink.unsupported(snap, "labels")); return }
                     let make = { (labelIds: [String]) in
                         let new = NewItem(projectKey: snap.summary.ref.storeKey, title: a.string("title") ?? "", body: a.string("body") ?? "",
-                                          fieldOptions: options, labels: labelIds, parent: parent?.id)
-                        d.projectStore.create(new, by: a.caller.actor) { ok, err in
-                            guard ok, let id = d.projectStore.lastCreated, let made = d.projectStore.item(id) else { done(.failed(err ?? "The tracker did not make the item.")); return }
-                            let key = made.item.key
-                            let note = parent.map { " under \($0.key)" } ?? ""
-                            let data = JSONValue.object(["key": .string(key), "id": .string(id), "url": .string(made.item.url)])
-                            guard let epic else { done(.ok(summary: "\(key) is made\(note).", data: data)); return }
-                            d.projectStore.setEpic(epic.id, itemId: id, by: a.caller.actor) { ok in
-                                let tail = ok ? " in \(epic.title)" : ". It is not in \(epic.title): \(d.projectStore.lastError ?? "the tracker refused")"
-                                done(.ok(summary: "\(key) is made\(note)\(tail).", data: data))
+                                          fieldOptions: options, labels: labelIds, parent: parent?.id, epic: epic?.id)
+                        d.projectStore.create(new, by: a.caller.actor) { r in
+                            switch r {
+                            case .failure(let e): done(.failed(e.message))
+                            case .success(let m):
+                                let note = parent.map { " under \($0.key)" } ?? ""
+                                let data = JSONValue.object(["key": .string(m.ref.key), "id": .string(m.ref.id), "url": .string(m.ref.url.absoluteString)])
+                                var tail = ""
+                                if let epic { tail = m.epicError.map { ". It is not in \(epic.title): \($0)" } ?? " in \(epic.title)" }
+                                done(.ok(summary: "\(m.ref.key) is made\(note)\(tail).", data: data))
                             }
                         }
                     }

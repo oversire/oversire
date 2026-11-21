@@ -13,6 +13,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var projectList: [ProjectSummary] = []
     private var statusList: [String: [StatusOption]] = [:]
     private var itemList: [String: [Item]] = [:]
+    private var frozenList: [String: [Item]]?
     private var commentList: [String: [Comment]] = [:]
     private var settingsList: [String: ProjectSettings] = [:]
     private var patchList: [ProjectSettingsPatch] = []
@@ -76,9 +77,13 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
         }
     }
 
+    /// Keeps the list as it is now. `items` gives it until `thawList()`. This copies a stale Plane index.
+    public func freezeList() { base.lockedValue { frozenList = itemList } }
+    public func thawList() { base.lockedValue { frozenList = nil } }
+
     public func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
         try base.locked {
-            let all = (itemList[p.id] ?? []).sorted { $0.activityAt > $1.activityAt }
+            let all = ((frozenList ?? itemList)[p.id] ?? []).sorted { $0.activityAt > $1.activityAt }
             return Array(all.filter { since == nil || $0.activityAt >= since! }.prefix(limit)).map(inEpics)
         }
     }

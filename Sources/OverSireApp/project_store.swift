@@ -9,6 +9,13 @@ struct NewItem {
     var fieldOptions: [String: String]      // field id ("state", "priority") → option id
     var labels: [String] = []               // label ids
     var parent: String?                     // item id
+    var epic: EpicID? = nil
+}
+
+/// What `create` made. `epicError` is nil when there is no epic step or the step worked.
+struct MadeItem {
+    let ref: ItemRef
+    let epicError: String?
 }
 
 /// A comment event: the project, and the item when the event names it.
@@ -60,8 +67,9 @@ final class ProjectStore {
     private var reads: [String: Read] = [:]
     private var lastRefresh = 0
     private(set) var lastError: String?
-    /// The id of the item that `create` made last.
-    private(set) var lastCreated: String?
+    /// Item id → a stub of an item that `create` made and no snapshot holds yet.
+    private var madeItems: [String: (project: String, item: Item, at: Date)] = [:]
+    private let madeKeep: TimeInterval = 120
     /// The last fetch error of each project, by store key. A good fetch clears it.
     private(set) var errors: [String: String] = [:]
     private(set) var tracked: [ProjectSummary] = []
@@ -1153,10 +1161,10 @@ final class ProjectStore {
         publish(DataChange([.projects, .intake], origin: .event))
     }
 
-    // `done(created, message)`.
-    func create(_ new: NewItem, by actor: EventActor = .user, done: @escaping (Bool, String?) -> Void) {
+    /// Answers when the tracker has made the item. The refresh runs after the answer.
+    func create(_ new: NewItem, by actor: EventActor = .user, done: @escaping (Result<MadeItem, ProviderError>) -> Void) {
         guard let snap = snapshots[new.projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
-            done(false, "The project is not loaded yet"); return
+            done(.failure(.vendor(code: "store", message: "The project is not loaded yet"))); return
         }
         let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
@@ -1164,24 +1172,44 @@ final class ProjectStore {
                               labels: new.labels, parent: new.parent)
         let project = snap.summary.ref
         CallPriority.task(.user) { [weak self] in
-            let added = await Result(awaiting: { try await client.create(draft, in: project).id })
+            let added = await Result(awaiting: { () async throws -> MadeItem in
+                let ref = try await client.create(draft, in: project)
+                guard let epic = new.epic else { return MadeItem(ref: ref, epicError: nil) }
+                do {
+                    guard let t = client as? any EpicTracking else { throw ProviderError.unsupported(.epics) }
+                    try await t.setEpic(epic, for: ref)
+                    return MadeItem(ref: ref, epicError: nil)
+                } catch {
+                    return MadeItem(ref: ref, epicError: (error as? ProviderError)?.message ?? error.localizedDescription)
+                }
+            })
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 switch added {
                 case .failure(let e):
                     self.lastError = e.message
-                    done(false, e.message)
-                case .success(let itemId):
-                    self.lastCreated = itemId
-                    self.suppressNotify.insert(itemId)
-                    if actor.type != .human { self.writeActors[itemId] = actor }
+                    done(.failure(e))
+                case .success(let made):
+                    let id = made.ref.id
+                    self.suppressNotify.insert(id)
+                    let marked = actor.type != .human || new.epic != nil
+                    if marked { self.writeActors[id] = actor }
+                    self.madeItems[id] = (new.projectKey, self.stub(of: new, made.ref), self.now())
+                    done(.success(made))
                     self.refresh([new.projectKey], force: true, priority: .user) { _ in
-                        if actor.type != .human { self.writeActors[itemId] = nil }
-                        done(true, nil)
+                        if marked { self.writeActors[id] = nil }
                     }
                 }
             }
         }
+    }
+
+    private func stub(of new: NewItem, _ ref: ItemRef) -> Item {
+        let at = now()
+        return Item(id: ref.id, key: ref.key, title: new.title, url: ref.url.absoluteString,
+                    statusOptionId: new.fieldOptions[ProjectSnapshot.statusFieldId], fields: [:], assignees: [], labels: new.labels,
+                    author: nil, updatedBy: nil, updatedAt: at, activityAt: at, commentCount: 0, lastComment: nil, mentionsMe: false,
+                    body: new.body, parentId: new.parent, epicId: new.epic)
     }
 
     // Runs one change off the main queue, then reloads the project. A change made here is not news.
@@ -1363,8 +1391,11 @@ final class ProjectStore {
         for (key, snap) in snapshots {
             if let item = snap.items.first(where: { $0.id == id }) { return (key, snap, item) }
         }
+        if let made = madeItems[id], let snap = snapshots[made.project], fresh(made.at) { return (made.project, snap, made.item) }
         return nil
     }
+
+    private func fresh(_ at: Date) -> Bool { now().timeIntervalSince(at) < madeKeep }
 
     func item(key: String) -> (key: String, snap: ProjectSnapshot, item: Item)? {
         if keyIndex == nil {
@@ -1376,8 +1407,11 @@ final class ProjectStore {
             }
             keyIndex = index
         }
-        guard let hit = keyIndex?[key.uppercased()], let snap = snapshots[hit.project] else { return nil }
-        return (hit.project, snap, snap.items[hit.at])
+        if let hit = keyIndex?[key.uppercased()], let snap = snapshots[hit.project] { return (hit.project, snap, snap.items[hit.at]) }
+        if let made = madeItems.values.first(where: { $0.item.key.uppercased() == key.uppercased() && fresh($0.at) }), let snap = snapshots[made.project] {
+            return (made.project, snap, made.item)
+        }
+        return nil
     }
 
     /// Finished: closed, and all sub-items closed. A Done blocker with open sub-items still blocks.
@@ -1504,6 +1538,7 @@ final class ProjectStore {
             return !back.contains(c.itemId)
         }
         seenItems.formUnion(snap.items.map(\.id))
+        madeItems = madeItems.filter { _, m in fresh(m.at) && (m.project != key || !snap.items.contains { $0.id == m.item.id }) }
         let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
         digests[key] = nil

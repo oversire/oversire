@@ -176,9 +176,54 @@ final class ItemCliActionsTests: XCTestCase {
                                                "parent": .string(rig.items[0].key)])
         guard case .ok(let summary, let data, _) = r, let key = data?["key"]?.string else { return XCTFail("\(r)") }
         XCTAssertEqual(summary, "\(key) is made under \(rig.items[0].key).")
+        await until("the snapshot has the item") { await rig.snapshot()?.items.contains { $0.key == key } == true }
         let made = await MainActor.run { rig.d.projectStore.item(key: key)?.item }
         XCTAssertEqual(made?.labels, ["l-bug"])
         XCTAssertEqual(made?.parentId, rig.items[0].id)
+    }
+
+    /// A refresh that misses the new item must not fail the call (OVERSIRE-540).
+    func testCreateAnswersWhenTheRefreshMissesTheItem() async throws {
+        let rig = try await EpicRig()
+        rig.fake.freezeList()
+        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("Late")])
+        guard case .ok(_, let data, _) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(data?["key"]?.string, "FAKE-4")
+        XCTAssertEqual(data?["id"]?.string, "i4")
+        XCTAssertEqual(data?["url"]?.string, "https://tracker.fake/FAKE-4")
+    }
+
+    func testCreateWithEpicSetsTheEpicBeforeTheAnswer() async throws {
+        let rig = try await EpicRig()
+        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("In epic"), "epic": .string("Review desk")])
+        guard case .ok(let summary, let data, _) = r, let id = data?["id"]?.string else { return XCTFail("\(r)") }
+        XCTAssertEqual(summary, "FAKE-4 is made in Review desk.")
+        let epics = try await rig.fake.items(rig.fake.project, since: nil, limit: 50)
+        XCTAssertEqual(epics.first { $0.id == id }?.epicId, rig.epic.id)
+    }
+
+    func testCreateEpicFailureStillMakesTheItem() async throws {
+        let rig = try await EpicRig()
+        rig.fake.failWrites(to: "i4")
+        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("Not in epic"), "epic": .string("Review desk")])
+        guard case .ok(let summary, let data, _) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(data?["key"]?.string, "FAKE-4")
+        XCTAssertTrue(summary.hasPrefix("FAKE-4 is made. It is not in Review desk:"), summary)
+    }
+
+    func testNewItemIsFoundBeforeTheRefresh() async throws {
+        let rig = try await EpicRig()
+        rig.fake.freezeList()
+        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("Fresh")])
+        guard case .ok(_, let data, _) = r, let key = data?["key"]?.string else { return XCTFail("\(r)") }
+        let c = await run(rig, "item.comment", ["key": .string(key), "body": .string("Hello")])
+        guard case .ok = c else { return XCTFail("\(c)") }
+        rig.fake.thawList()
+        await rig.reload()
+        let inSnapshot = await rig.snapshot()?.items.contains { $0.key == key }
+        XCTAssertEqual(inSnapshot, true)
+        let stubs = await MainActor.run { rig.d.projectStore.item(key: key)?.item.commentCount }
+        XCTAssertEqual(stubs, 1, "the snapshot item replaces the stub")
     }
 
     func testCreateBadLabel() async throws {

@@ -176,6 +176,17 @@ final class PlaneEpicsTests: XCTestCase {
         XCTAssertEqual(p[0].body["add"] as? [String], ["i1"])
     }
 
+    func testEpicWriteClearsTheIndex() async throws {
+        try loadFixtures()
+        http.on("GET", "\(v2)/projects/P1/work-items/i1/", #"{"id":"i1","module_ids":["m1"]}"#)
+        http.on("POST", "\(v2)/projects/P1/modules/m2/work-items/", try fixture("module-link"))
+        http.on("POST", "\(v2)/projects/P1/modules/m1/work-items/", try fixture("module-unlink"))
+        _ = try await plane.index(project)
+        XCTAssertNotNil(plane.indexCache["P1"])
+        try await plane.setEpic("m2", for: item("i1"))
+        XCTAssertNil(plane.indexCache["P1"])
+    }
+
     func testSetEpicKeepsTheTargetModule() async throws {
         try loadFixtures()
         http.on("GET", "\(v2)/projects/P1/work-items/i1/", #"{"id":"i1","module_ids":["m1","m2"]}"#)

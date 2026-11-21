@@ -235,6 +235,7 @@ final class ActionCatalogTests: XCTestCase {
         guard case .ok(let summary, let data, _) = r else { return XCTFail("\(r)") }
         XCTAssertTrue(summary.hasSuffix(" in Review desk."), summary)
         let key = try XCTUnwrap(data?["key"]?.string)
+        await until("the snapshot has the item") { await rig.snapshot()?.items.contains { $0.key == key } == true }
         let snap = await rig.snapshot()
         let made = try XCTUnwrap(snap?.items.first { $0.key == key })
         XCTAssertEqual(made.epicId, rig.epic.id)
