@@ -873,12 +873,30 @@ final class ProjectStore {
 
     /// Uploads a file to the item and gives the attachment id. It does not refresh the project.
     func attach(itemId: String, _ file: AttachmentUpload, done: @escaping (Result<String, ProviderError>) -> Void) {
-        guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
-              let ref = found.item.ref(in: found.snap.summary.ref) else { done(.failure(.notFound)); return }
+        guard let found = item(itemId), let ref = found.item.ref(in: found.snap.summary.ref) else { done(.failure(.notFound)); return }
+        attach(file, to: ref, done: done)
+    }
+
+    /// Uploads a file to an item that the store may not hold yet, for example a new intake item. Home only.
+    func attach(_ file: AttachmentUpload, to ref: ItemRef, done: @escaping (Result<String, ProviderError>) -> Void) {
+        guard let client = trackers.tracker(ref.project.workspace) else { done(.failure(.notFound)); return }
         CallPriority.task(.user) {
             let r = await Result(awaiting: {
                 guard let a = client as? any AttachmentUploading else { throw ProviderError.unsupported(.attachments) }
                 return try await a.attach(file, to: ref)
+            })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    /// Makes an intake item. The poll shows it. Home only: a client runs `intake.create`.
+    func createIntake(_ d: ItemDraft, projectKey: String, done: @escaping (Result<(item: ItemRef, intake: IntakeItem), ProviderError>) -> Void) {
+        guard let snap = snapshot(projectKey), let client = trackers.tracker(snap.summary.ref.workspace) else { done(.failure(.notFound)); return }
+        let project = snap.summary.ref
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: {
+                guard let t = client as? any IntakeCreating else { throw ProviderError.unsupported(.intakeCreate) }
+                return try await t.createIntake(d, in: project)
             })
             DispatchQueue.main.async { done(r) }
         }

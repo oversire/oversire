@@ -1355,7 +1355,7 @@ extension UIShots {
     /// session:<frame>: the New panel. Frames: empty, list, files, direct, listening, noworkspace, failed, toast, intake, intakeoff, item, itemtoast,
     /// agent, agentmenu, agentwarn, agentterm (the agent chip).
     static func sessionSample(_ frame: String, shooting w: AppWindow) -> NSWindow? {
-        let c = NewSessionController(projects: { [] })
+        let c = NewSessionController(projects: { [] }, filing: .catalog(w.data.actions, store: w.data.projectStore))
         let choices = [NewSessionModel.Choice(key: "OVERSIRE", name: "OverSire", store: "plane:ocral/OVERSIRE", root: NSHomeDirectory() + "/Projects/oversire"),
                        NewSessionModel.Choice(key: "SLING", name: "Sling Platform", store: "plane:ocral/SLING", root: NSHomeDirectory() + "/Projects/sling"),
                        NewSessionModel.Choice(key: "TREBI", name: "Trebi", store: "plane:ocral/TREBI", root: nil,

@@ -179,23 +179,21 @@ final class SessionStarter {
         }
     }
 
-    typealias IntakeTracker = IntakeCreating & AttachmentUploading
-
     private let project: (String) -> ProjectRef?
-    private let tracker: (ProjectRef) -> (any OverSireCore.Tracker)?
+    private let filing: ItemFiling
     private let terminal: () -> AgentTerminal?
     private let hostFiles: () -> (any HostFileWriting)?
     private let root: (String) -> String?
     private let uploader: AttachmentUploader
 
     init(project: @escaping (String) -> ProjectRef?,
-         tracker: @escaping (ProjectRef) -> (any OverSireCore.Tracker)?,
+         filing: ItemFiling,
          terminal: @escaping () -> AgentTerminal?,
          hostFiles: @escaping () -> (any HostFileWriting)?,
          root: @escaping (String) -> String?,
          uploader: AttachmentUploader = AttachmentUploader()) {
         self.project = project
-        self.tracker = tracker
+        self.filing = filing
         self.terminal = terminal
         self.hostFiles = hostFiles
         self.root = root
@@ -204,13 +202,13 @@ final class SessionStarter {
 
     /// False when the project has its intake off. Nil when the tracker does not tell.
     func intakeOn(_ store: String) async -> Bool? {
-        guard let p = project(store), let t = tracker(p) as? any ProjectSettingsReading else { return nil }
-        return try? await t.settings(p).features[.intake]
+        guard let p = project(store) else { return nil }
+        return await filing.intakeOn(p)
     }
 
     func enableIntake(_ store: String) async throws {
-        guard let p = project(store), let t = tracker(p) as? any ProjectSettingsEditing else { throw ProviderError.unsupported(.projectSettingsEdit) }
-        try await t.update(p, ProjectSettingsPatch(features: [.intake: true]))
+        guard let p = project(store) else { throw ProviderError.notFound }
+        try await filing.enableIntake(p)
     }
 
     /// Makes an intake item (`intake`) or a work item, then sends the files to it. No terminal opens.
@@ -219,24 +217,21 @@ final class SessionStarter {
         let key = p.key ?? r.project
         let draft = ItemDraft(title: r.title ?? NewSessionModel.title(r.text), bodyMarkdown: r.text,
                               status: intake ? nil : r.state, priority: intake || r.priority == "none" ? nil : r.priority)
-        let t = tracker(p)
         let files = r.files.map { AttachmentUpload(name: $0.name, mimeType: $0.mimeType, data: $0.data) }
-        let up = t as? any AttachmentUploading
-        if !files.isEmpty && !(up?.capabilities.contains(.attachments) ?? false) { throw SessionStartError.noCreate(key) }
+        if !files.isEmpty && !filing.can(p, .attachments) { throw SessionStartError.noCreate(key) }
         let item: ItemRef
         if intake {
-            guard let it = t as? any IntakeCreating, it.capabilities.contains(.intakeCreate) else { throw SessionStartError.noIntake(key) }
+            guard filing.can(p, .intakeCreate) else { throw SessionStartError.noIntake(key) }
             progress("Creating intake…")
-            item = try await it.createIntake(draft, in: p).item
+            item = try await filing.createIntake(draft, p).item
         } else {
-            guard let t else { throw SessionStartError.noProject(key) }
             progress("Creating item…")
-            item = try await t.create(draft, in: p)
+            item = try await filing.create(draft, p)
         }
         var missing: [String] = []
-        if let up, !files.isEmpty {
+        if !files.isEmpty {
             progress("Sending \(files.count) file\(files.count == 1 ? "" : "s")…")
-            missing = await uploader.upload(files, to: item, with: up)
+            missing = await uploader.upload(files, to: item) { [filing] in try await filing.attach($0, item) }
         }
         return Made(item: item, missing: missing)
     }
@@ -255,12 +250,9 @@ final class SessionStarter {
         do { launch.command = try cfg.command(for: agent).resolve(name: name, key: key, title: title) } catch {
             throw SessionStartError.badCommand(String(describing: error))
         }
-        var intake: (any IntakeTracker)?
         var host: (any HostFileWriting)?
         if r.intake {
-            guard let t = tracker(p) as? any IntakeTracker, t.capabilities.contains(.intakeCreate),
-                  r.files.isEmpty || t.capabilities.contains(.attachments) else { throw SessionStartError.noIntake(key) }
-            intake = t
+            guard filing.can(p, .intakeCreate), r.files.isEmpty || filing.can(p, .attachments) else { throw SessionStartError.noIntake(key) }
         } else if !r.files.isEmpty {
             guard let h = hostFiles(), h.capabilities.contains(.hostFiles) else { throw SessionStartError.hostFiles("the runtime cannot take files.") }
             host = h
@@ -270,14 +262,14 @@ final class SessionStarter {
         var paths: [String] = [], missing: [String] = []
         let prompt: String
         let count = "\(r.files.count) file\(r.files.count == 1 ? "" : "s")"
-        if let t = intake {
+        if r.intake {
             progress("Creating item…")
-            let made = try await t.createIntake(ItemDraft(title: r.title ?? title, bodyMarkdown: r.text), in: p)
+            let made = try await filing.createIntake(ItemDraft(title: r.title ?? title, bodyMarkdown: r.text), p)
             item = made.item
             if !r.files.isEmpty {
                 progress("Sending \(count)…")
                 let files = r.files.map { AttachmentUpload(name: $0.name, mimeType: $0.mimeType, data: $0.data) }
-                missing = await uploader.upload(files, to: made.item, with: t)
+                missing = await uploader.upload(files, to: made.item) { [filing] in try await filing.attach($0, made.item) }
             }
             prompt = SessionPrompt.intake(cfg.sessionIntakePrompt, values: [
                 "text": r.text, "key": made.item.key, "item": made.item.id, "intake": made.intake.id,

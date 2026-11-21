@@ -165,7 +165,7 @@ struct ItemActions {
                     d.projectStore.closeSubItems(ids, parentId: f.item.id) { done(ActionLink.stored(d, $0, "\(ids.count) sub-item\(ids.count == 1 ? "" : "s") of \(f.item.key) closed.")) }
                 }
             },
-            ActionSpec(id: "item.create", title: "New item", help: "Makes a work item in a project. Returns its key.", kind: .change,
+            ActionSpec(id: "item.create", title: "New item", help: "Makes a work item in a project. Returns its key, id and url.", kind: .change,
                        input: ActionSpec.args(["project": Self.project, "title": ("string", "The title."), "body": ("string", "The Markdown description."),
                                                "status": ("string", "A status name, id or category word."), "priority": ("string", "A priority name."),
                                                "parent": ("string", "The key of the parent item."),
@@ -204,10 +204,11 @@ struct ItemActions {
                             guard ok, let id = d.projectStore.lastCreated, let made = d.projectStore.item(id) else { done(.failed(err ?? "The tracker did not make the item.")); return }
                             let key = made.item.key
                             let note = parent.map { " under \($0.key)" } ?? ""
-                            guard let epic else { done(.ok(summary: "\(key) is made\(note).", data: .object(["key": .string(key)]))); return }
+                            let data = JSONValue.object(["key": .string(key), "id": .string(id), "url": .string(made.item.url)])
+                            guard let epic else { done(.ok(summary: "\(key) is made\(note).", data: data)); return }
                             d.projectStore.setEpic(epic.id, itemId: id, by: a.caller.actor) { ok in
                                 let tail = ok ? " in \(epic.title)" : ". It is not in \(epic.title): \(d.projectStore.lastError ?? "the tracker refused")"
-                                done(.ok(summary: "\(key) is made\(note)\(tail).", data: .object(["key": .string(key)])))
+                                done(.ok(summary: "\(key) is made\(note)\(tail).", data: data))
                             }
                         }
                     }
@@ -266,27 +267,43 @@ struct ItemActions {
                     }
                 }
             },
-            ActionSpec(id: "item.attach", title: "Attach file", help: "Uploads a file to an item. The file is base64 text of at most \(Self.maxAttachBytes >> 20) MB.", kind: .change,
+            ActionSpec(id: "item.attach", title: "Attach file", help: "Uploads a file to an item. The file is base64 text of at most \(Self.maxAttachBytes >> 20) MB. "
+                           + "For an item that is not loaded yet, give `project`, `id` and `url` too.", kind: .change,
                        input: ActionSpec.args(["key": Self.key, "name": ("string", "The file name."), "data": ("string", "The file bytes as base64."),
-                                               "mimeType": ("string", "The media type. Default application/octet-stream.")],
+                                               "mimeType": ("string", "The media type. Default application/octet-stream."),
+                                               "project": Self.project, "id": ("string", "The work item id. For an item that is not loaded."),
+                                               "url": ("string", "The item URL. For an item that is not loaded.")],
                                               required: ["key", "name", "data"]),
                        capability: .attachments) { a in
-                await link.item(a) { d, f, done in
-                    guard d.projectStore.has(.attachments, in: f.snap) else { done(ActionLink.unsupported(f.snap, "attachments")); return }
+                guard let key = a.string("key")?.uppercased(), !key.isEmpty else { return .notAllowed("Give the key of an item, for example OVERSIRE-12.") }
+                return await link.run { d, done in
+                    let snap: ProjectSnapshot, ref: ItemRef
+                    if let f = d.projectStore.item(key: key) {
+                        guard let r = f.item.ref(in: f.snap.summary.ref) else { done(.failed("The item has no tracker ref.")); return }
+                        snap = f.snap
+                        ref = r
+                    } else if let p = a.string("project"), let id = a.string("id"), !id.isEmpty {
+                        guard let s = d.projectStore.snapshot(p) else { done(.notAllowed("OverSire has no loaded project \(p).")); return }
+                        snap = s
+                        ref = ItemRef(project: s.summary.ref, id: id, key: key, url: a.string("url").flatMap(URL.init(string:)) ?? URL(string: s.summary.url) ?? URL(fileURLWithPath: "/"))
+                    } else {
+                        done(.notAllowed("OverSire has no loaded item \(key).")); return
+                    }
+                    guard d.projectStore.has(.attachments, in: snap) else { done(ActionLink.unsupported(snap, "attachments")); return }
                     guard let name = a.string("name"), !name.isEmpty else { done(.notAllowed("Give the file name.")); return }
                     guard let data = a.string("data").flatMap({ Data(base64Encoded: $0) }) else { done(.notAllowed("The data is not base64.")); return }
                     guard data.count <= Self.maxAttachBytes else {
                         done(.notAllowed("The file has \((data.count + (1 << 20) - 1) >> 20) MB. The limit is \(Self.maxAttachBytes >> 20) MB.")); return
                     }
                     let mime = a.string("mimeType").flatMap { $0.isEmpty ? nil : $0 } ?? "application/octet-stream"
-                    d.projectStore.attach(itemId: f.item.id, AttachmentUpload(name: name, mimeType: mime, data: data)) { r in
+                    d.projectStore.attach(AttachmentUpload(name: name, mimeType: mime, data: data), to: ref) { r in
                         switch r {
                         case .failure(let e): done(.failed(e.message))
                         case .success(let id):
-                            d.projectStore.events.action(.itemAttachmentAdded, item: f.item.key, project: f.snap.summary.identifier, verb: "attach", name,
+                            d.projectStore.events.action(.itemAttachmentAdded, item: key, project: snap.summary.identifier, verb: "attach", name,
                                                          payload: ["attachment": .string(id), "name": .string(name), "size": .int(data.count), "mimeType": .string(mime)],
                                                          actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
-                            done(.ok(summary: "\(name) is attached to \(f.item.key).", data: .object(["id": .string(id)])))
+                            done(.ok(summary: "\(name) is attached to \(key).", data: .object(["id": .string(id)])))
                         }
                     }
                 }

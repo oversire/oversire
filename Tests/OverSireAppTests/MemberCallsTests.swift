@@ -58,6 +58,44 @@ final class MemberCallsTests: XCTestCase {
         XCTAssertEqual(rig.fake.projectCalls, 2)
     }
 
+    // OVERSIRE-536
+    func testIntakeCreateGivesTheIntakeItem() async throws {
+        let rig = try await EpicRig(items: 0, epics: [])
+        let r = await rig.d.actions.run("intake.create", ActionArgs(.object(["project": .string("FAKE"), "title": .string("Ask"), "body": .string("Why?")])))
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        XCTAssertNotNil(data["key"]?.string)
+        XCTAssertNotNil(data["id"]?.string)
+        XCTAssertNotNil(data["url"]?.string)
+        let intake = try MirrorCodec.value(IntakeItem.self, from: try XCTUnwrap(data["intake"]))
+        XCTAssertEqual(intake.name, "Ask")
+        let pending = try await rig.fake.intake(rig.fake.project)
+        XCTAssertEqual(pending.map(\.id), [intake.id])
+        let none = await rig.d.actions.run("intake.create", ActionArgs(.object(["project": .string("NOPE"), "title": .string("x")])))
+        XCTAssertEqual(none, .notAllowed("OverSire has no loaded project NOPE."))
+    }
+
+    // OVERSIRE-536
+    func testAttachToAnItemThatIsNotLoaded() async throws {
+        let rig = try await EpicRig(items: 0, epics: [])
+        let made = try await rig.fake.createIntake(ItemDraft(title: "New"), in: rig.fake.project)
+        XCTAssertNil(rig.d.projectStore.item(key: made.item.key), "the poll has not loaded it")
+        let args: [String: JSONValue] = ["key": .string(made.item.key), "project": .string("FAKE"), "id": .string(made.item.id), "url": .string(made.item.url.absoluteString),
+                                         "name": .string("a.png"), "mimeType": .string("image/png"), "data": .string(Data("png".utf8).base64EncodedString())]
+        let caller = ActionCaller.member(machine: "mba", name: "Fritz")
+        let r = await rig.d.actions.run("item.attach", ActionArgs(.object(args), caller: caller))
+        guard case .ok = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(rig.fake.uploads.map(\.file.name), ["a.png"])
+        XCTAssertEqual(rig.fake.uploads.first?.item.id, made.item.id)
+        let row = await rig.row(.itemAttachmentAdded)
+        XCTAssertEqual(row?.item, made.item.key)
+        XCTAssertEqual(row?.via, "app@mba")
+        var bare = args
+        bare["project"] = nil
+        bare["id"] = nil
+        let none = await rig.d.actions.run("item.attach", ActionArgs(.object(bare)))
+        XCTAssertEqual(none, .notAllowed("OverSire has no loaded item \(made.item.key.uppercased())."))
+    }
+
     func testFlushesBeforeResult() async {
         let log = Log()
         let spec = ActionSpec(id: "item.comment", title: "Comment", help: "", kind: .change) { _ in

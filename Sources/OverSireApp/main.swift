@@ -105,10 +105,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var captureHotKey: GlobalHotKey?
     var windowHotKey: GlobalHotKey?
     var assistantHotKey: GlobalHotKey?
-    lazy var snap = SnapController(projects: { [weak self] in self?.projectStore.tracked ?? [] })
+    lazy var snap = SnapController(projects: { [weak self] in self?.projectStore.tracked ?? [] },
+                                   filing: .catalog(actions, store: projectStore))
     lazy var newSession = NewSessionController(projects: { [weak self] in self?.projectStore.tracked ?? [] },
                                                states: { [weak self] k in self?.projectStore.snapshots[k]?.statusOptions ?? [] },
-                                               priority: { [weak self] k in self?.projectStore.snapshots[k]?.hasPriority ?? false })
+                                               priority: { [weak self] k in self?.projectStore.snapshots[k]?.hasPriority ?? false },
+                                               filing: .catalog(actions, store: projectStore))
     let workstreams = WorkstreamIndex()
     let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)

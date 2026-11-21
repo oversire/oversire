@@ -10,6 +10,7 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
 
     var onClose: ((_ projectKey: String?, _ notice: String?) -> Void)?
     private let store: ProjectStore
+    private let actions: AppActionCatalog
     private let projects: [ProjectSummary]
     private let ai: AIClient?
     private var target: String?          // nil = Auto
@@ -47,8 +48,9 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
     private var pad: CGFloat { 16 }
     private var innerW: CGFloat { cardW - 2 * pad }
 
-    init(store: ProjectStore, projects: [ProjectSummary], target: String?, prefill: String?, w: CGFloat) {
+    init(store: ProjectStore, actions: AppActionCatalog, projects: [ProjectSummary], target: String?, prefill: String?, w: CGFloat) {
         self.store = store
+        self.actions = actions
         self.projects = projects
         self.ai = AIClient.current
         self.cardW = w - 40
@@ -526,13 +528,17 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         creating = true
         show(nil)
         let name = projects.first { $0.ref.storeKey == key }?.title ?? key
-        store.create(NewItem(projectKey: key, title: title, body: body, fieldOptions: options)) { [weak self] ok, msg in
+        var args: [String: JSONValue] = ["project": .string(key), "title": .string(title), "body": .string(body)]
+        if let o = options[ProjectSnapshot.statusFieldId] { args["status"] = .string(o) }
+        if let o = options[ProjectSnapshot.priorityFieldId] { args["priority"] = .string(o) }
+        actions.run("item.create", args) { [weak self] r in
             guard let self else { return }
             self.creating = false
-            if ok {
-                self.onClose?(key, msg.map { "Added to \(name). \($0)" } ?? "Added to \(name)")
-            } else {
-                self.show(msg ?? "Could not create the item", error: true)
+            switch r {
+            case .ok:
+                self.onClose?(key, "Added to \(name)")
+            case .failed(let m), .notAllowed(let m):
+                self.show(m, error: true)
             }
         }
     }

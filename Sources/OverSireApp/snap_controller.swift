@@ -23,17 +23,19 @@ final class SnapController {
     private var snapHotKey: GlobalHotKey?
     private var basketHotKey: GlobalHotKey?
     private let projects: () -> [ProjectSummary]
+    private let filing: ItemFiling
     private var editor: ShotEditorPanel?
     private(set) lazy var sender = SnapSender(
         store: store,
         project: { [weak self] k in self?.summary(k)?.ref },
-        tracker: { ENV.tracker($0.workspace) },
+        filing: filing,
         terminal: { ENV.runtime as? AgentTerminal },
         root: { [weak self] k in self?.summary(k).flatMap { PROJECTS_CFG.orcaRoot($0) } })
 
-    init(store: SnapStore = SnapStore(), projects: @escaping () -> [ProjectSummary]) {
+    init(store: SnapStore = SnapStore(), projects: @escaping () -> [ProjectSummary], filing: ItemFiling) {
         self.store = store
         self.projects = projects
+        self.filing = filing
         store.purge(olderThan: Date().addingTimeInterval(-Double(PROJECTS_CFG.capture.snap.keepDays) * 86_400))
     }
 

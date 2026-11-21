@@ -725,17 +725,19 @@ final class NewSessionController {
     private var hotKey: GlobalHotKey?
     private var intakeOn: [String: Bool] = [:]
     private var intakeAsked: Set<String> = []
+    private let filing: ItemFiling
     private(set) lazy var starter = SessionStarter(
         project: { [weak self] k in self?.summary(k)?.ref },
-        tracker: { ENV.tracker($0.workspace) },
+        filing: filing,
         terminal: { ENV.runtime as? AgentTerminal },
         hostFiles: { ENV.runtime as? HostFileWriting },
         root: { [weak self] k in self?.summary(k).flatMap { PROJECTS_CFG.orcaRoot($0) } })
 
     /// `states` gives the status options of a project by its store key. `priority` tells if its tracker has priority.
     init(projects: @escaping () -> [ProjectSummary], states: @escaping (String) -> [StatusOption] = { _ in [] },
-         priority: @escaping (String) -> Bool = { _ in true }) {
+         priority: @escaping (String) -> Bool = { _ in true }, filing: ItemFiling) {
         self.projects = projects
+        self.filing = filing
         self.states = states
         self.priority = priority
     }

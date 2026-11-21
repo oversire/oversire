@@ -25,7 +25,8 @@ final class SnapSendTests: XCTestCase {
 
     private var dir: URL!
     private var store: SnapStore!
-    private var tracker: FakeTracker!
+    private var rig: EpicRig!
+    private var tracker: FakeTracker { rig.fake }
     private var term: Terminal!
     private var roots: [String: String] = ["FAKE": "/src/fake"]
 
@@ -41,21 +42,23 @@ final class SnapSendTests: XCTestCase {
         return out as Data
     }()
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("snap-send-\(UUID().uuidString)")
         store = SnapStore(dir: dir)
-        tracker = FakeTracker()
+        rig = try await EpicRig(items: 0, epics: [])
         term = Terminal()
     }
 
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }
 
-    private func sender(tracker t: (any Tracker)? = nil, terminal: AgentTerminal? = nil) -> SnapSender {
-        let tr: any Tracker = t ?? tracker
+    /// The real catalog over a project store on the fake tracker: the home path.
+    private func sender(_ r: EpicRig? = nil, terminal: AgentTerminal? = nil) -> SnapSender {
+        let r = r ?? rig!
         let tm = terminal ?? term
-        let ref = tracker.project
+        let ref = r.fake.project
         let roots = self.roots
-        return SnapSender(store: store, project: { $0 == "FAKE" ? ref : nil }, tracker: { _ in tr }, terminal: { tm }, root: { roots[$0] })
+        return SnapSender(store: store, project: { $0 == "FAKE" ? ref : nil }, filing: .catalog(r.d.actions, store: r.d.projectStore),
+                          terminal: { tm }, root: { roots[$0] })
     }
 
     /// Two shots. The second has a small mark, so it gets a zoom file.
@@ -111,14 +114,14 @@ final class SnapSendTests: XCTestCase {
 
     func testTrackerWithoutAttachmentsGivesTheCopyFallback() async throws {
         let b = try basket()
-        let plain = FakeTracker(capabilities: [.intake, .intakeCreate])
+        let plain = try await EpicRig(items: 0, epics: [], capabilities: [.intake, .intakeCreate])
         do {
-            _ = try await sender(tracker: plain).send(b, agent: true)
+            _ = try await sender(plain).send(b, agent: true)
             XCTFail("expected an error")
         } catch {
             XCTAssertEqual(error as? SnapSendError, .noAttachments)
         }
-        let made = try await plain.intake(plain.project)
+        let made = try await plain.fake.intake(plain.fake.project)
         XCTAssertTrue(made.isEmpty, "no half ticket")
     }
 
@@ -134,6 +137,21 @@ final class SnapSendTests: XCTestCase {
         }
         let made = try await tracker.intake(tracker.project)
         XCTAssertTrue(made.isEmpty)
+    }
+
+    func testTargetUsesFilingCapabilities() throws {
+        let b = try basket()
+        func filing(_ caps: Set<Capability>) -> SnapSender {
+            let ref = tracker.project
+            return SnapSender(store: store, project: { $0 == "FAKE" ? ref : nil },
+                              filing: ItemFiling(can: { _, c in caps.contains(c) }, create: { _, _ in throw ProviderError.notFound },
+                                                 createIntake: { _, _ in throw ProviderError.notFound }, attach: { _, _ in throw ProviderError.notFound },
+                                                 intakeOn: { _ in nil }, enableIntake: { _ in }),
+                              terminal: { nil }, root: { _ in nil })
+        }
+        XCTAssertEqual(try filing([.intakeCreate, .attachments]).target(b), tracker.project)
+        XCTAssertThrowsError(try filing([.intakeCreate]).target(b)) { XCTAssertEqual($0 as? SnapSendError, .noAttachments) }
+        XCTAssertThrowsError(try filing([.attachments]).target(b)) { XCTAssertEqual($0 as? SnapSendError, .noAttachments) }
     }
 
     func testCopyPutsTheTextAndTheFiles() throws {

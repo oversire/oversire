@@ -346,7 +346,7 @@ final class ActionCatalogTests: XCTestCase {
         }
         XCTAssertGreaterThan(pages.count, 10)
         let mutator = try NSRegularExpression(pattern: #"""
-            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate|setEpic|createEpic|updateEpic|edit)\(|tracker\??\.(move|post)\(|\
+            (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate|setEpic|createEpic|updateEpic|edit|create)\(|tracker\??\.(move|post)\(|\
             (projectStore|store)\.update\(itemId|queue\.(add|remove|move|start)\(|agentIndex\.(send|reveal|start)\(|\
             statusJob\.(approve|hold|markBlocked|snooze)\(|job\.(approve|hold|markBlocked|snooze)\(|questions\.(answer|dismiss)\(|\
             cleaner\.run\(|REPO_CLIENT\.(perform|rerunJob)\(|suggestions\.(accept|dismiss)\(
@@ -428,13 +428,32 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(c, .notAllowed("The project is not loaded."))
     }
 
+    // OVERSIRE-536
+    func testItemCreateGivesIdAndURL() async throws {
+        let rig = try await EpicRig(items: 0, epics: [])
+        let r = await rig.d.actions.run("item.create", ActionArgs(.object(["project": .string("FAKE"), "title": .string("Made")])))
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let items = try await rig.fake.items(rig.fake.project, since: nil, limit: 10)
+        XCTAssertEqual(data["key"]?.string, items.first?.key)
+        XCTAssertEqual(data["id"]?.string, items.first?.id)
+        XCTAssertEqual(data["url"]?.string, items.first?.url)
+    }
+
+    /// The new item sheet makes items through the catalog. A direct `store.create(` fails on a client.
+    func testSheetsDoNotCreateItemsDirectly() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
+        let sheets = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix("_sheet.swift") }
+        XCTAssertFalse(sheets.isEmpty)
+        let hits = try sheets.filter { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8).contains("tore.create(") }
+        XCTAssertEqual(hits, [])
+    }
+
     /// A client path reads a tracker through the home. The gap files below read it directly until the named item fixes them.
     func testClientPathsDoNotReadTheTrackerDirectly() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
         // The home runs these, or they hold the home branch.
         let home: Set<String> = ["project_store.swift", "project_catalog.swift", "mirror_docs.swift", "main.swift", "AppEnvironment.swift", "plane_writeback.swift"]
         let gaps: Set<String> = [
-            "snap_controller.swift", "snap_send.swift", "session_starter.swift", "new_session_panel.swift",      // OVERSIRE-536 files
             "enhance_agent.swift", "groom_agent.swift", "intake_page.swift",                                     // OVERSIRE-537 Enhance and Groom
         ]
         let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter {

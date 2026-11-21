@@ -3,6 +3,32 @@ import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
+/// A client `forward` that records the calls and answers like a home.
+final class ForwardCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [MemberCallRequest] = []
+    var actions: [String] { lock.withLock { seen.map(\.action) } }
+    var args: [JSONValue] { lock.withLock { seen.map(\.args) } }
+
+    var forward: @Sendable (MemberCallRequest) async throws -> AppCallResult {
+        { [self] r in
+            lock.withLock { seen.append(r) }
+            switch r.action {
+            case "intake.create":
+                let intake = IntakeItem(id: "n1", workItemId: "w1", name: "x", priority: nil, createdAt: Date(timeIntervalSince1970: 0), author: nil, source: nil)
+                let data: JSONValue = .object(["key": .string("FAKE-9"), "id": .string("w1"), "url": .string("https://tracker.fake/FAKE-9"), "intake": try MirrorCodec.body(intake)])
+                return AppCallResult(id: "m", status: .ok, summary: "FAKE-9 is in the intake.", data: data)
+            case "item.create":
+                return AppCallResult(id: "m", status: .ok, summary: "FAKE-9 is made.", data: .object(["key": .string("FAKE-9"), "id": .string("w1"), "url": .string("https://tracker.fake/FAKE-9")]))
+            case "item.attach":
+                return AppCallResult(id: "m", status: .ok, summary: "attached", data: .object(["id": .string("a1")]))
+            default:
+                return AppCallResult(id: "m", status: .ok, summary: "done")
+            }
+        }
+    }
+}
+
 final class SessionStarterTests: XCTestCase {
     private final class Terminal: AgentTerminal, @unchecked Sendable {
         var opened: [(path: String, title: String, command: String, prompt: String)] = []
@@ -20,25 +46,27 @@ final class SessionStarterTests: XCTestCase {
         func show(_ s: SessionRef) async throws { revealed.append(s) }
     }
 
-    private var tracker: FakeTracker!
+    private var rig: EpicRig!
+    private var tracker: FakeTracker { rig.fake }
     private var runtime: FakeRuntime!
     private var term: Terminal!
     private var roots: [String: String] = [:]
     private var hasTerminal = true
 
-    override func setUp() {
-        tracker = FakeTracker()
+    override func setUp() async throws {
+        rig = try await EpicRig(items: 0, epics: [])
         runtime = FakeRuntime()
         term = Terminal()
         roots = [tracker.project.storeKey: "/src/fake"]
         hasTerminal = true
     }
 
-    private func starter(tracker t: (any OverSireCore.Tracker)? = nil) -> SessionStarter {
-        let tr: any OverSireCore.Tracker = t ?? tracker
-        let ref = tracker.project, rt = runtime!, tm = term!, roots = self.roots, has = hasTerminal
-        return SessionStarter(project: { $0 == ref.storeKey ? ref : nil }, tracker: { _ in tr }, terminal: { has ? tm : nil },
-                              hostFiles: { rt }, root: { roots[$0] })
+    /// The real catalog over a project store on the fake tracker: the home path.
+    private func starter(_ r: EpicRig? = nil, filing: ItemFiling? = nil) -> SessionStarter {
+        let r = r ?? rig!
+        let ref = r.fake.project, rt = runtime!, tm = term!, roots = self.roots, has = hasTerminal
+        return SessionStarter(project: { $0 == ref.storeKey ? ref : nil }, filing: filing ?? .catalog(r.d.actions, store: r.d.projectStore),
+                              terminal: { has ? tm : nil }, hostFiles: { rt }, root: { roots[$0] })
     }
 
     private func request(_ text: String, files: Int = 0, intake: Bool) -> SessionStarter.Request {
@@ -46,9 +74,9 @@ final class SessionStarterTests: XCTestCase {
         return SessionStarter.Request(project: tracker.project.storeKey, text: text, files: f, intake: intake)
     }
 
-    private func start(_ r: SessionStarter.Request, tracker t: (any OverSireCore.Tracker)? = nil) async throws -> (SessionStarter.Result, [String]) {
+    private func start(_ r: SessionStarter.Request, rig other: EpicRig? = nil) async throws -> (SessionStarter.Result, [String]) {
         var steps: [String] = []
-        let res = try await starter(tracker: t).start(r) { steps.append($0) }
+        let res = try await starter(other).start(r) { steps.append($0) }
         return (res, steps)
     }
 
@@ -81,9 +109,10 @@ final class SessionStarterTests: XCTestCase {
     }
 
     func testCreateChecksFilesBeforeAnyChange() async throws {
-        let t = FakeTracker(capabilities: [.intake, .intakeCreate])
+        let plain = try await EpicRig(items: 0, epics: [], capabilities: [.intake, .intakeCreate])
+        let t = plain.fake
         do {
-            _ = try await starter(tracker: t).create(request("x", files: 1, intake: false), intake: false) { _ in }
+            _ = try await starter(plain).create(request("x", files: 1, intake: false), intake: false) { _ in }
             XCTFail("a tracker with no attachments cannot take files")
         } catch let e as SessionStartError {
             XCTAssertEqual(e, .noCreate("FAKE"))
@@ -164,15 +193,16 @@ final class SessionStarterTests: XCTestCase {
     }
 
     func testChecksComeBeforeAnyChange() async throws {
-        func expect(_ e: SessionStartError, _ r: SessionStarter.Request, tracker t: (any OverSireCore.Tracker)? = nil,
+        func expect(_ e: SessionStartError, _ r: SessionStarter.Request, rig other: EpicRig? = nil,
                     line: UInt = #line) async throws {
             do {
-                _ = try await start(r, tracker: t)
+                _ = try await start(r, rig: other)
                 XCTFail("expected \(e)", line: line)
             } catch {
                 XCTAssertEqual(error as? SessionStartError, e, line: line)
             }
-            let made = try await tracker.intake(tracker.project)
+            let fake = (other ?? rig).fake
+            let made = try await fake.intake(fake.project)
             XCTAssertTrue(made.isEmpty, line: line)
             XCTAssertTrue(term.opened.isEmpty, line: line)
         }
@@ -185,8 +215,10 @@ final class SessionStarterTests: XCTestCase {
         hasTerminal = false
         try await expect(.noRuntime, request("go", intake: true))
         hasTerminal = true
-        try await expect(.noIntake("FAKE"), request("go", intake: true), tracker: FakeTracker(capabilities: [.intake]))
-        try await expect(.noIntake("FAKE"), request("go", files: 1, intake: true), tracker: FakeTracker(capabilities: [.intake, .intakeCreate]))
+        let noCreate = try await EpicRig(items: 0, epics: [], capabilities: [.intake])
+        try await expect(.noIntake("FAKE"), request("go", intake: true), rig: noCreate)
+        let noFiles = try await EpicRig(items: 0, epics: [], capabilities: [.intake, .intakeCreate])
+        try await expect(.noIntake("FAKE"), request("go", files: 1, intake: true), rig: noFiles)
         runtime.base.capabilities = [.sessionInput]
         try await expect(.hostFiles("the runtime cannot take files."), request("go", files: 1, intake: false))
     }
@@ -200,6 +232,31 @@ final class SessionStarterTests: XCTestCase {
             XCTAssertEqual(error as? SessionStartError, .hostFiles("a.png did not arrive whole on the sessions machine."))
         }
         XCTAssertTrue(term.opened.isEmpty)
+    }
+
+    // OVERSIRE-536
+    func testClientCreateWithFilesUsesFiling() async throws {
+        let calls = ForwardCalls()
+        rig.d.actions.forward = calls.forward
+        let (r, steps) = try await start(request("Look at these", files: 2, intake: true))
+        XCTAssertEqual(calls.actions, ["intake.create", "item.attach", "item.attach"])
+        XCTAssertEqual(calls.args[0]["project"], .string(tracker.project.storeKey))
+        XCTAssertEqual(calls.args[1]["id"], .string("w1"))
+        XCTAssertEqual(calls.args[1]["name"], .string("shot-1.png"))
+        XCTAssertEqual(calls.args[1]["data"], .string(Data("png0".utf8).base64EncodedString()))
+        XCTAssertEqual(r.item?.key, "FAKE-9")
+        XCTAssertEqual(r.missing, [])
+        XCTAssertEqual(steps, ["Creating item…", "Sending 2 files…", "Opening terminal…"])
+        XCTAssertTrue(tracker.uploads.isEmpty, "the client path reaches no tracker")
+    }
+
+    // OVERSIRE-536
+    func testEnableIntakeRunsUpdateSettings() async throws {
+        let calls = ForwardCalls()
+        rig.d.actions.forward = calls.forward
+        try await starter().enableIntake(tracker.project.storeKey)
+        XCTAssertEqual(calls.actions, ["project.updateSettings"])
+        XCTAssertEqual(calls.args[0]["patch"], try MirrorCodec.body(ProjectSettingsPatch(features: [.intake: true])))
     }
 
     func testPromptResolveIsOnePass() {

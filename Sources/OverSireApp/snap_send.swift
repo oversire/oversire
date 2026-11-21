@@ -31,38 +31,34 @@ final class SnapSender {
         var session: SessionRef?
     }
 
-    typealias Tracker = IntakeCreating & AttachmentUploading
-
     private let store: SnapStore
     private let renderer: SnapRenderer
     private let project: (String) -> ProjectRef?
-    private let tracker: (ProjectRef) -> (any OverSireCore.Tracker)?
+    private let filing: ItemFiling
     private let terminal: () -> AgentTerminal?
     private let root: (String) -> String?
     private let uploader: AttachmentUploader
 
     init(store: SnapStore, renderer: SnapRenderer = SnapRenderer(),
          project: @escaping (String) -> ProjectRef?,
-         tracker: @escaping (ProjectRef) -> (any OverSireCore.Tracker)?,
+         filing: ItemFiling,
          terminal: @escaping () -> AgentTerminal?,
          root: @escaping (String) -> String?,
          uploader: AttachmentUploader = AttachmentUploader()) {
         self.store = store
         self.renderer = renderer
         self.project = project
-        self.tracker = tracker
+        self.filing = filing
         self.terminal = terminal
         self.root = root
         self.uploader = uploader
     }
 
-    /// The tracker of the basket's project, when it can take the ticket. Else the error to show.
-    func target(_ b: SnapBasket) throws -> (ProjectRef, any Tracker) {
+    /// The basket's project, when its tracker can take the ticket. Else the error to show.
+    func target(_ b: SnapBasket) throws -> ProjectRef {
         guard let p = project(b.project) else { throw SnapSendError.noProject(b.project) }
-        guard let t = tracker(p) as? any Tracker, t.capabilities.contains(.intakeCreate), t.capabilities.contains(.attachments) else {
-            throw SnapSendError.noAttachments
-        }
-        return (p, t)
+        guard filing.can(p, .intakeCreate), filing.can(p, .attachments) else { throw SnapSendError.noAttachments }
+        return p
     }
 
     /// Renders each shot into out/. Returns the files in ticket order.
@@ -81,7 +77,7 @@ final class SnapSender {
 
     /// Plane mode: the intake item and its files. The agent mode adds the terminal.
     func send(_ b: SnapBasket, agent: Bool) async throws -> Result {
-        let (p, t) = try target(b)
+        let p = try target(b)
         // Check the agent side before the item exists, so a missing root does not leave a half ticket.
         var launch: (AgentTerminal, String, AgentLaunch)?
         if agent {
@@ -96,8 +92,8 @@ final class SnapSender {
             launch = (term, r, cmd)
         }
         let files = try render(b)
-        let made = try await t.createIntake(ItemDraft(title: SnapTicket.title(b), bodyMarkdown: SnapTicket.markdown(b)), in: p)
-        let missing = await upload(files, to: made.item, with: t)
+        let made = try await filing.createIntake(ItemDraft(title: SnapTicket.title(b), bodyMarkdown: SnapTicket.markdown(b)), p)
+        let missing = await upload(files, to: made.item)
         var result = Result(item: made.item, missing: missing, session: nil)
         guard let (term, path, cmd) = launch else { return result }
         let prompt = SnapTicket.prompt(template: PROJECTS_CFG.runtime.snapPrompt, values: [
@@ -110,17 +106,19 @@ final class SnapSender {
         return result
     }
 
-    func upload(_ files: [SnapFile], to item: ItemRef, with t: any Tracker) async -> [String] {
-        await uploader.upload(files.map { AttachmentUpload(name: $0.name, mimeType: "image/png", data: $0.data) }, to: item, with: t)
+    func upload(_ files: [SnapFile], to item: ItemRef) async -> [String] {
+        await uploader.upload(files.map { AttachmentUpload(name: $0.name, mimeType: "image/png", data: $0.data) }, to: item) { [filing] in
+            try await filing.attach($0, item)
+        }
     }
 
     /// Uploads the missing files of a partly sent basket again.
     func retry(_ b: SnapBasket) async throws -> [String] {
         guard case .partial(_, let missing) = b.state, let item = b.item else { return [] }
-        let (_, t) = try target(b)
+        _ = try target(b)
         let out = store.outDir(b.id)
         let files = missing.compactMap { n in (try? Data(contentsOf: out.appendingPathComponent(n))).map { SnapFile(name: n, data: $0, role: .clean) } }
-        return await upload(files, to: item, with: t) + missing.filter { n in !files.contains { $0.name == n } }
+        return await upload(files, to: item) + missing.filter { n in !files.contains { $0.name == n } }
     }
 
     /// Markdown mode: the text and the rendered PNG files as file URLs.

@@ -26,6 +26,25 @@ struct IntakeActions {
                    extra: ["body": ("string", "The new description, in Markdown."), "priority": ("string", "The priority: urgent, high, medium, low or none.")]) { a in
                 .update(IntakeEdit(patch: ItemPatch(priority: a.string("priority"), bodyMarkdown: a.string("body"))))
             },
+            ActionSpec(id: "intake.create", title: "New intake item", help: "Makes an intake item in a project. Returns the key, the work item id, the url and the intake item.", kind: .change,
+                       input: ActionSpec.args(["project": ItemActions.project, "title": ("string", "The title."), "body": ("string", "The Markdown description."),
+                                               "priority": ("string", "A priority name.")], required: ["project", "title"]),
+                       capability: .intakeCreate) { [link] a in
+                await link.run { d, done in
+                    guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else { done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return }
+                    guard d.projectStore.has(.intakeCreate, in: snap) else { done(ActionLink.unsupported(snap, "intake")); return }
+                    let draft = ItemDraft(title: a.string("title") ?? "", bodyMarkdown: a.string("body"), priority: a.string("priority"))
+                    d.projectStore.createIntake(draft, projectKey: snap.summary.ref.storeKey) { r in
+                        switch r {
+                        case .failure(let e): done(.failed(e.message))
+                        case .success(let made):
+                            guard let intake = try? MirrorCodec.body(made.intake) else { done(.failed("The tracker gave an intake item that OverSire cannot read.")); return }
+                            done(.ok(summary: "\(made.item.key) is in the intake.",
+                                     data: .object(["key": .string(made.item.key), "id": .string(made.item.id), "url": .string(made.item.url.absoluteString), "intake": intake])))
+                        }
+                    }
+                }
+            },
             ActionSpec(id: "intake.triageAll", title: "Triage all with AI", help: "Starts an Enhance session for each pending intake item of a project.", kind: .change,
                        input: ActionSpec.args(["project": ItemActions.project], required: ["project"]), capability: .intake) { [link] a in
                 await link.run { d, done in

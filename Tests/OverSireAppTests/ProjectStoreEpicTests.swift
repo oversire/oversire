@@ -29,7 +29,7 @@ final class EpicRig {
     /// `capabilities`: the capabilities of the fake. The default is the full set.
     init(items n: Int = 3, epics titles: [String] = ["Review desk"], tracking: Bool = true, capabilities: Set<Capability>? = nil) async throws {
         fake = capabilities.map { FakeTracker(capabilities: $0) } ?? FakeTracker()
-        for i in 1...n { items.append(try await fake.create(ItemDraft(title: "Item \(i)"), in: fake.project)) }
+        for i in stride(from: 1, through: n, by: 1) { items.append(try await fake.create(ItemDraft(title: "Item \(i)"), in: fake.project)) }
         for t in titles {
             let e = try await fake.createEpic(EpicDraft(title: t), in: fake.project)
             epic = epic ?? e
