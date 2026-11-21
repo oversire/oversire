@@ -22,11 +22,11 @@ struct SessionStartMenu {
     func shipGate(_ item: Item, snap: ProjectSnapshot, in window: NSWindow?, ship: @escaping () -> Void) {
         guard let state = snap.unplanned(item) else { ship(); return }
         let spec = Self.gateSpec(key: item.key, state: state)
-        let agents = data.agentIndex
+        let agents = data.agentIndex, store = data.projectStore
         AlertConfirm.show(spec, in: window) { a in
             switch a.button {
             case 0:
-                PlanStarter(agents).start(.item(item), in: snap.summary) { err in
+                PlanStarter(agents, store: store).start(.item(item), in: snap.summary) { err in
                     if let err { AlertConfirm.tell("Plan did not start", info: err, in: window) }
                 }
             case 1: ship()

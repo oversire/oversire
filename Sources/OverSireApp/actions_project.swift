@@ -91,6 +91,42 @@ struct ProjectActions {
                     done(.ok(summary: "The north star of \(ident) is set."))
                 }
             },
+            ActionSpec(id: "project.updateSettings", title: "Update project settings",
+                       help: "Changes the settings of a project in its tracker: name, description, logo, lead, default assignee, visibility, features or new labels.",
+                       kind: .change,
+                       input: ActionSpec.args(["project": EpicActions.project, "patch": ("object", "The change: ProjectSettingsPatch. A missing key stays as it is. A null clears the logo, the lead or the default assignee.")],
+                                              required: ["project", "patch"]),
+                       capability: .projectSettingsEdit) { a in
+                await link.run { d, done in
+                    let store = d.projectStore
+                    guard let snap = store.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    guard let v = a["patch"], let patch = try? MirrorCodec.value(ProjectSettingsPatch.self, from: v) else {
+                        done(.notAllowed("Give a change.")); return
+                    }
+                    guard !patch.isEmpty else { done(.notAllowed("Give a change.")); return }
+                    let ref = snap.summary.ref, name = ENV.trackerName(ref.account)
+                    guard let t = store.tracker(of: ref) as? any ProjectSettingsEditing else { done(ActionLink.unsupported(snap, "project settings editing")); return }
+                    if let field = patch.fields.sorted(by: { $0.rawValue < $1.rawValue }).first(where: { !t.editableSettings.contains($0) }) {
+                        done(.notAllowed("\(name) cannot change \(field.label.lowercased()).")); return
+                    }
+                    let fields = patch.fields.map(\.rawValue).sorted()
+                    CallPriority.task(.user) {
+                        let r = await Result(awaiting: { try await t.update(ref, patch) })
+                        DispatchQueue.main.async {
+                            if case .failure(let e) = r { done(.failed(e.message)); return }
+                            let ident = snap.summary.identifier
+                            store.events.action(.projectSettingsChanged, item: nil, project: ident, verb: "settings",
+                                                "Settings of \(ident) changed: \(fields.joined(separator: ", "))",
+                                                payload: ["project": .string(ident), "fields": .array(fields.map(JSONValue.string))],
+                                                actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
+                            store.refresh([ref.storeKey], force: true) { _ in }
+                            done(.ok(summary: "Changed \(fields.joined(separator: ", ")) of \(ident) in \(name)."))
+                        }
+                    }
+                }
+            },
             ActionSpec(id: "project.catalogRefresh", title: "Refresh the project list",
                        help: "Fetches the projects of a tracker workspace again. A client app uses it for the picker of Track a project.", kind: .change,
                        input: ActionSpec.args(["workspace": ("string", "The tracker account id. Leave out to fetch all workspaces.")])) { a in

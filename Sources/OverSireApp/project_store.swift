@@ -70,7 +70,8 @@ final class ProjectStore {
     /// The catalog of the home. A client reads the capabilities of a project from it.
     var catalog: ClientCatalog?
     /// Set on a client. It asks the source app for the reads that need a live tracker. `what` is "comments", "timeline",
-    /// "options", "intakeDetail", "labels" or "links". It gives the `data` of the answer.
+    /// "options", "intakeDetail", "labels", "links", "projectSettings", "attachments", "attachmentLink", "intakeKeys"
+    /// or "images". It gives the `data` of the answer.
     var remote: ((_ what: String, _ args: JSONValue) async throws -> JSONValue)?
     /// Items that came before their project doc, by store key.
     private var orphans: [String: [Item]] = [:]
@@ -911,6 +912,55 @@ final class ProjectStore {
         }
     }
 
+    /// The tracker settings of a project, and the fields that the tracker can change.
+    func projectSettings(projectKey: String, done: @escaping (Result<ProjectSettingsRead, ProviderError>) -> Void) {
+        if remote != nil { remoteRead("projectSettings", ["project": .string(projectKey)], done: done); return }
+        guard let snap = snapshot(projectKey), let client = trackers.tracker(snap.summary.ref.workspace) else { done(.failure(.notFound)); return }
+        let project = snap.summary.ref
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: {
+                guard let t = client as? any ProjectSettingsReading else { throw ProviderError.unsupported(.projectSettings) }
+                let editable = (t as? any ProjectSettingsEditing)?.editableSettings ?? []
+                return ProjectSettingsRead(settings: try await t.settings(project), editable: editable)
+            })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    /// The uploaded files of an item.
+    func attachments(of ref: ItemRef, done: @escaping (Result<[ItemAttachment], ProviderError>) -> Void) {
+        if remote != nil {
+            remoteRead("attachments", ["ref": (try? MirrorCodec.body(ref)) ?? .null], done: done)
+            return
+        }
+        guard let t = attachmentReader(ref) else { done(.failure(.unsupported(.attachmentsRead))); return }
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: { try await t.attachments(of: ref) })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    /// A signed download link of an uploaded file.
+    func attachmentLink(_ a: ItemAttachment, of ref: ItemRef, done: @escaping (Result<URL, ProviderError>) -> Void) {
+        if remote != nil {
+            let args: [String: JSONValue] = ["ref": (try? MirrorCodec.body(ref)) ?? .null, "attachment": (try? MirrorCodec.body(a)) ?? .null]
+            remoteRead("attachmentLink", args) { (r: Result<String, ProviderError>) in
+                done(r.flatMap { s in URL(string: s).map { .success($0) } ?? .failure(.decoding("The link of the file is not a URL.")) })
+            }
+            return
+        }
+        guard let t = attachmentReader(ref) else { done(.failure(.unsupported(.attachmentsRead))); return }
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: { try await t.attachmentURL(a, of: ref) })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    private func attachmentReader(_ ref: ItemRef) -> (any AttachmentReading)? {
+        guard let t = tracker(of: ref.project), t.capabilities.contains(.attachmentsRead) else { return nil }
+        return t as? any AttachmentReading
+    }
+
     /// True when the tracker of the project has the capability.
     func has(_ c: Capability, in snap: ProjectSnapshot) -> Bool {
         if let catalog {
@@ -1191,16 +1241,32 @@ final class ProjectStore {
         }
     }
 
+    /// The intake numbers of a project, from the tracker. The home answers a client with this.
+    func intakeSequences(projectKey: String) async -> Result<[String: Int], ProviderError> {
+        guard let snap = snapshot(projectKey), let client = trackers.tracker(snap.summary.ref.workspace) else { return .failure(.notFound) }
+        let project = snap.summary.ref
+        return await Result(awaiting: {
+            guard let t = client as? any IntakeKeying else { throw ProviderError.unsupported(.intake) }
+            return try await t.intakeSequences(project)
+        })
+    }
+
     // The numbers do not change, so one load per new item is enough.
     func loadIntakeKeys(projectKey: String, done: @escaping () -> Void) {
         guard let snap = snapshots[projectKey], let intake = snap.intake,
-              intake.contains(where: { intakeKeys[$0.workItemId] == nil && !askedKeys.contains($0.workItemId) }), !loadingKeys.contains(projectKey),
-              let client = trackers.tracker(snap.summary.ref.workspace) as? any IntakeKeying else { return }
+              intake.contains(where: { intakeKeys[$0.workItemId] == nil && !askedKeys.contains($0.workItemId) }), !loadingKeys.contains(projectKey) else { return }
+        let read: @Sendable () async -> Result<[String: Int], ProviderError>
+        if remote != nil {
+            read = { [weak self] in await self?.remoteRows("intakeKeys", ["project": .string(projectKey)]) ?? .failure(.notFound) }
+        } else {
+            guard let client = trackers.tracker(snap.summary.ref.workspace) as? any IntakeKeying else { return }
+            let project = snap.summary.ref
+            read = { await Result(awaiting: { try await client.intakeSequences(project) }) }
+        }
         loadingKeys.insert(projectKey)
-        let project = snap.summary.ref
         let asked = intake.map(\.workItemId)
         CallPriority.task(.user) { [weak self] in
-            let r = await Result(awaiting: { try await client.intakeSequences(project) })
+            let r = await read()
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.loadingKeys.remove(projectKey)
@@ -1216,6 +1282,13 @@ final class ProjectStore {
 
     // Plane images have an asset id as src. This puts signed download links in their place.
     func resolveImages(_ markdown: String, projectKey: String, done: @escaping (String) -> Void) {
+        if remote != nil {
+            Task { [weak self] in
+                let r: Result<String, ProviderError>? = await self?.remoteRows("images", ["project": .string(projectKey), "markdown": .string(markdown)])
+                await MainActor.run { done((try? r?.get()) ?? markdown) }
+            }
+            return
+        }
         let linker = snapshots[projectKey].flatMap { trackers.tracker($0.summary.ref.workspace) as? any AssetLinking }
         let ids = linker?.assetIds(in: markdown) ?? []
         let todo = ids.filter { id in assetCache[id].map { -$0.at.timeIntervalSinceNow > 3000 } ?? true }

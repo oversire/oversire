@@ -15,30 +15,41 @@ final class PlanStarterTests: XCTestCase {
     private var rt: FakeRuntime!
     private var agents: AgentIndex!
     private var cfg = ProjectsConfig()
+    private var data: TestAppData!
 
-    override func setUp() {
+    override func setUp() async throws {
         fake = FakeTracker()
         rt = FakeRuntime()
         agents = AgentIndex(writes: nil)
         let rt = rt!
         agents.runtime = { rt }
         cfg = ProjectsConfig()
+        let fake = fake!
+        data = await MainActor.run { TestAppData(trackers: Trackers(fake)) }
     }
 
-    private func starter() -> PlanStarter {
-        var s = PlanStarter(agents)
-        let fake = fake!, cfg = cfg
-        s.tracker = { _ in fake }
+    private func starter(_ store: ProjectStore? = nil) -> PlanStarter {
+        var s = PlanStarter(agents, store: store ?? data.projectStore)
+        let cfg = cfg
         s.root = { _ in "/src/fake" }
         s.cfg = { cfg }
         return s
     }
 
-    private func start(_ t: PlanTarget) async throws -> LaunchRequest {
+    /// Tracks the project in the home store, so that the store reads the fake tracker.
+    private func track(_ summary: ProjectSummary) async {
+        let store = data.projectStore
+        await MainActor.run { store.track([summary], live: []) }
+        let seen = await Wait.until { await MainActor.run { store.snapshot(summary.identifier) != nil } }
+        XCTAssertTrue(seen, "timeout: the first snapshot")
+    }
+
+    private func start(_ t: PlanTarget, store: ProjectStore? = nil) async throws -> LaunchRequest {
         let summary = try await fake.projects()[0]
+        if store == nil { await track(summary) }
         let done = expectation(description: "start")
         var err: String?
-        let s = starter()
+        let s = starter(store)
         await MainActor.run { s.start(t, in: summary) { err = $0; done.fulfill() } }
         await fulfillment(of: [done], timeout: 5)
         XCTAssertNil(err)
@@ -185,5 +196,25 @@ final class PlanStarterTests: XCTestCase {
         XCTAssertEqual(fake.intakeEdits.map(\.patch), [ItemPatch(bodyMarkdown: "## New body"), ItemPatch(priority: "high")])
         let still = try await fake.intake(fake.project)
         XCTAssertEqual(still.map(\.id), [i.id], "an edit keeps the item in the intake")
+    }
+
+    // OVERSIRE-535
+    func testIntakeBodyAndFilesComeFromTheStore() async throws {
+        final class Seen: @unchecked Sendable { var whats: [String] = [] }
+        let seen = Seen()
+        let i = try await intake("Labels drop", body: "The tracker body.")
+        let file = ItemAttachment(id: "a1", name: "shot.png", size: 3, mimeType: "image/png", createdAt: Date())
+        let detail = try MirrorCodec.body(MirrorRows(rows: IntakeDetail(sequence: 1, body: "The remote body.", labels: [])))
+        let files = try MirrorCodec.body(MirrorRows(rows: [file]))
+        let store = await MainActor.run { () -> ProjectStore in
+            let s = data.projectStore
+            s.client = true
+            s.remote = { what, _ in seen.whats.append(what); return what == "intakeDetail" ? detail : files }
+            return s
+        }
+        let r = try await start(.intake(i, key: "FAKE-1", body: nil), store: store)
+        XCTAssertTrue(r.prompt.hasPrefix("Labels drop\n\nThe remote body."), r.prompt)
+        XCTAssertTrue(r.prompt.contains("attachment download"), r.prompt)
+        XCTAssertEqual(seen.whats.sorted(), ["attachments", "intakeDetail"])
     }
 }

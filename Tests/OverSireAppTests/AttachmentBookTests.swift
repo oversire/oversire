@@ -1,5 +1,6 @@
 import XCTest
 import OverSireCore
+import OverSireSync
 import OverSireTestKit
 @testable import OverSireApp
 
@@ -21,7 +22,8 @@ final class AttachmentBookTests: XCTestCase {
 
     private func book(asks: (() -> Void)? = nil, download: @escaping (URL) async throws -> Data) -> AttachmentBook {
         let t = tracker!
-        let b = AttachmentBook(reader: { _ in asks?(); return t }, download: download)
+        let b = AttachmentBook(list: { ref in asks?(); return try await t.attachments(of: ref) },
+                               link: { a, ref in try await t.attachmentURL(a, of: ref) }, download: download)
         b.dir = dir
         return b
     }
@@ -63,14 +65,21 @@ final class AttachmentBookTests: XCTestCase {
     }
 
     func testANewerItemAsksAgain() async throws {
-        var asks = 0
-        let b = book(asks: { asks += 1 }) { _ in Data() }
+        final class Asks: @unchecked Sendable {
+            private let lock = NSLock()
+            private var n = 0
+            var count: Int { lock.withLock { n } }
+            func add() { lock.withLock { n += 1 } }
+        }
+        let asks = Asks()
+        let b = book(asks: { asks.add() }) { _ in Data() }
         _ = await list(b)
-        XCTAssertEqual(asks, 1)
+        XCTAssertEqual(asks.count, 1)
         _ = b.files(of: ref, changedAt: .distantPast)
-        XCTAssertEqual(asks, 1, "a new list needs no second call")
+        XCTAssertEqual(asks.count, 1, "a new list needs no second call")
         _ = b.files(of: ref, changedAt: Date().addingTimeInterval(60))
-        XCTAssertEqual(asks, 2, "the item changed after the list")
+        let again = await Wait.until { asks.count == 2 }
+        XCTAssertTrue(again, "the item changed after the list")
     }
 
     func testOpenStateIsPerItem() {
@@ -80,5 +89,31 @@ final class AttachmentBookTests: XCTestCase {
         XCTAssertTrue(b.isOpen(ref))
         b.toggle(ref)
         XCTAssertFalse(b.isOpen(ref))
+    }
+
+    func testBookListsThroughTheStoreOnClient() async throws {
+        final class Seen: @unchecked Sendable { var whats: [String] = [] }
+        let seen = Seen()
+        let summary = ProjectSummary(ref: ref.project, identifier: "FAKE", title: "Fake", url: "", closed: false)
+        let file = ItemAttachment(id: "a1", name: "shot.png", size: 3, mimeType: "image/png", createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let rows = try MirrorCodec.body(MirrorRows(rows: [file]))
+        let store = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                 statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+        store.client = true
+        store.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.attachmentsRead])], capabilities: [:], trackers: [])
+        var delta = MirrorDelta()
+        delta.projects[ref.project.storeKey] = ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date())
+        store.mirrored(delta)
+        store.remote = { what, _ in seen.whats.append(what); return rows }
+        let b = AttachmentBook(store: store)
+        b.dir = dir
+        let got = await list(b)
+        XCTAssertEqual(got, [file])
+        XCTAssertEqual(seen.whats, ["attachments"])
+    }
+
+    private final class NoTrackers: TrackerDirectory {
+        var trackerIds: [String] { [] }
+        func tracker(_ id: String) -> (any Tracker)? { nil }
     }
 }

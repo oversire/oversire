@@ -1,4 +1,7 @@
+import AppKit
+import OverSireAssistant
 import OverSireCore
+import OverSireSync
 import OverSireTestKit
 import XCTest
 @testable import OverSireApp
@@ -123,5 +126,57 @@ final class ProjectSettingsPageTests: XCTestCase {
         var rc = RuntimeConfig()
         rc.prompt = "Run `oversire item show {KEY}` and fix it"
         XCTAssertEqual(rc.prompt(for: it), "Run `oversire item show ACME-12` and fix it")
+    }
+
+    // OVERSIRE-535
+    private final class NoTrackers: TrackerDirectory {
+        var trackerIds: [String] { [] }
+        func tracker(_ id: String) -> (any Tracker)? { nil }
+    }
+
+    private func texts(_ v: NSView) -> [String] {
+        ((v as? NSTextField).map { [$0.stringValue] } ?? []) + v.subviews.flatMap(texts)
+    }
+
+    @MainActor
+    private func clientData() -> TestAppData {
+        let data = TestAppData()
+        let store = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                 statePath: data.tmp + "/s.json", activityPath: data.tmp + "/a.jsonl")
+        store.client = true
+        let summary = ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "", closed: false)
+        var delta = MirrorDelta()
+        delta.projects[ref.storeKey] = ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date())
+        store.mirrored(delta)
+        store.track([summary], live: [])
+        data.projectStore = store
+        return data
+    }
+
+    @MainActor
+    func testClientLoadReadsRemote() async throws {
+        let data = clientData()
+        let body = try MirrorCodec.body(MirrorRows(rows: ProjectSettingsRead(settings: ProjectSettings(name: "From mbp"), editable: [.name])))
+        var asked: [String] = []
+        data.projectStore.remote = { what, _ in asked.append(what); return body }
+        let page = ProjectSettingsPage(.projectSettings("SLING", .general), data: data, router: Router())
+        _ = page.view
+        let shown = await Wait.until(timeout: .seconds(3)) { await MainActor.run { self.texts(page.view).contains("From mbp") } }
+        XCTAssertTrue(shown, "the page shows the name that the home gave")
+        XCTAssertEqual(asked, ["projectSettings"])
+    }
+
+    @MainActor
+    func testClientSaveForwardsTheAction() async throws {
+        let data = clientData()
+        var calls: [MemberCallRequest] = []
+        data.actions.forward = { calls.append($0); return AppCallResult(id: "m-1", status: .ok, summary: "Changed.") }
+        data.actions.sourceName = { "mbp" }
+        let patch = try MirrorCodec.body(ProjectSettingsPatch(features: [.intake: true]))
+        let r = await data.actions.run("project.updateSettings", ActionArgs(.object(["project": .string("SLING"), "patch": patch])))
+        XCTAssertEqual(r, .ok(summary: "Changed."))
+        XCTAssertEqual(calls.map(\.action), ["project.updateSettings"])
+        let sent = try MirrorCodec.value(ProjectSettingsPatch.self, from: try XCTUnwrap(calls.first?.args["patch"]))
+        XCTAssertEqual(sent.features, [.intake: true])
     }
 }

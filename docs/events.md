@@ -44,7 +44,7 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 | Domain | Kinds |
 |---|---|
 | agent | `session.started`, `session.ended`, `turn.started`, `turn.ended`, `turn.interrupted`, `wait.started`, `wait.ended`, `context.compacted`, `subagent.ended`, `review.ready`, `groom.applied`, `sweep.applied`, `worker.started`, `worker.answered`, `worker.nudged`, `worker.escalated`, `worker.done` |
-| human | `prompt.submitted`*, `question.answered`, `review.submitted`, `review.approved`, `review.viewed`, `review.unviewed`, `item.shipped`, `plan.started`, `item.state_changed`, `item.viewed`, `item.favorited`, `item.unfavorited` |
+| human | `prompt.submitted`*, `question.answered`, `review.submitted`, `review.approved`, `review.viewed`, `review.unviewed`, `item.shipped`, `plan.started`, `item.state_changed`, `item.viewed`, `item.favorited`, `item.unfavorited`, `project.settings_changed` |
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |

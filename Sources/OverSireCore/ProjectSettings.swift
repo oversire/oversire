@@ -40,6 +40,19 @@ public enum ProjectFeature: String, Hashable, Sendable, Codable, CaseIterable {
     }
 }
 
+/// A feature map encodes as a JSON object, not as an array of pairs.
+extension ProjectFeature: CodingKeyRepresentable {
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    public var codingKey: any CodingKey { Key(stringValue: rawValue) }
+    public init?<T: CodingKey>(codingKey: T) { self.init(rawValue: codingKey.stringValue) }
+}
+
 public enum ProjectSettingsField: String, Hashable, Sendable, Codable, CaseIterable {
     case name, description, logo, lead, defaultAssignee, visibility, features, labels, statuses
 
@@ -58,7 +71,7 @@ public enum ProjectSettingsField: String, Hashable, Sendable, Codable, CaseItera
     }
 }
 
-public struct ProjectMember: Hashable, Sendable {
+public struct ProjectMember: Hashable, Sendable, Codable {
     public var person: PersonRef
     public var role: String?          // "admin", "member", "guest"
 
@@ -68,7 +81,7 @@ public struct ProjectMember: Hashable, Sendable {
     }
 }
 
-public struct ProjectSettings: Hashable, Sendable {
+public struct ProjectSettings: Hashable, Sendable, Codable {
     public var name: String
     public var key: String?
     public var description: String?   // Markdown
@@ -107,7 +120,7 @@ public struct ProjectSettings: Hashable, Sendable {
 }
 
 /// A new label for a project.
-public struct LabelDraft: Hashable, Sendable {
+public struct LabelDraft: Hashable, Sendable, Codable {
     public var name: String
     public var color: String
 
@@ -157,6 +170,49 @@ public struct ProjectSettingsPatch: Hashable, Sendable {
     }
 
     public var isEmpty: Bool { fields.isEmpty }
+}
+
+/// A missing key means no change. A JSON null for logo, lead or defaultAssignee means clear.
+extension ProjectSettingsPatch: Codable {
+    private enum Keys: String, CodingKey { case name, description, logo, lead, defaultAssignee, visibility, features, newLabels }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        visibility = try c.decodeIfPresent(ProjectVisibility.self, forKey: .visibility)
+        features = try c.decodeIfPresent([ProjectFeature: Bool].self, forKey: .features)
+        newLabels = try c.decodeIfPresent([LabelDraft].self, forKey: .newLabels)
+        logo = try Self.clearable(c, .logo)
+        lead = try Self.clearable(c, .lead)
+        defaultAssignee = try Self.clearable(c, .defaultAssignee)
+    }
+
+    private static func clearable<T: Decodable>(_ c: KeyedDecodingContainer<Keys>, _ k: Keys) throws -> T?? {
+        guard c.contains(k) else { return nil }
+        if try c.decodeNil(forKey: k) { return .some(nil) }
+        return .some(try c.decode(T.self, forKey: k))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encodeIfPresent(name, forKey: .name)
+        try c.encodeIfPresent(description, forKey: .description)
+        try c.encodeIfPresent(visibility, forKey: .visibility)
+        try c.encodeIfPresent(features, forKey: .features)
+        try c.encodeIfPresent(newLabels, forKey: .newLabels)
+        try Self.put(&c, logo, .logo)
+        try Self.put(&c, lead, .lead)
+        try Self.put(&c, defaultAssignee, .defaultAssignee)
+    }
+
+    private static func put<T: Encodable>(_ c: inout KeyedEncodingContainer<Keys>, _ v: T??, _ k: Keys) throws {
+        switch v {
+        case .none: break
+        case .some(.none): try c.encodeNil(forKey: k)
+        case .some(.some(let x)): try c.encode(x, forKey: k)
+        }
+    }
 }
 
 public protocol ProjectSettingsReading: Tracker {

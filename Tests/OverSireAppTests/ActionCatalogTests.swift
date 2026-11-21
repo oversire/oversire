@@ -434,9 +434,8 @@ final class ActionCatalogTests: XCTestCase {
         // The home runs these, or they hold the home branch.
         let home: Set<String> = ["project_store.swift", "project_catalog.swift", "mirror_docs.swift", "main.swift", "AppEnvironment.swift", "plane_writeback.swift"]
         let gaps: Set<String> = [
-            "intake_page.swift", "attachment_strip.swift", "project_settings_page.swift", "plan_starter.swift",  // OVERSIRE-535 reads
             "snap_controller.swift", "snap_send.swift", "session_starter.swift", "new_session_panel.swift",      // OVERSIRE-536 files
-            "enhance_agent.swift", "groom_agent.swift",                                                          // OVERSIRE-537 Enhance and Groom
+            "enhance_agent.swift", "groom_agent.swift", "intake_page.swift",                                     // OVERSIRE-537 Enhance and Groom
         ]
         let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter {
             $0.hasSuffix(".swift") && !$0.hasPrefix("actions_") && !home.contains($0) && !gaps.contains($0)

@@ -45,11 +45,15 @@ enum PlanTarget: Equatable {
 /// Enhance is different: an agent rewrites the text alone, with no talk.
 struct PlanStarter {
     let agents: AgentIndex
-    var tracker: (ProjectRef) -> (any OverSireCore.Tracker)? = { ENV.tracker($0.workspace) }
+    /// Reads the intake body and the file list: the tracker on the home, the home on a client.
+    let store: ProjectStore
     var root: (ProjectSummary) -> String? = { PROJECTS_CFG.orcaRoot($0) }
     var cfg: () -> ProjectsConfig = { PROJECTS_CFG }
 
-    init(_ agents: AgentIndex) { self.agents = agents }
+    init(_ agents: AgentIndex, store: ProjectStore) {
+        self.agents = agents
+        self.store = store
+    }
 
     /// The session of the key, when one runs. The Plan button then opens it.
     func session(_ key: String) -> AgentSession? {
@@ -67,6 +71,11 @@ struct PlanStarter {
         }
     }
 
+    /// Runs a store read on the main thread and waits for its answer.
+    private static func onMain<T>(_ call: @escaping (@escaping (T) -> Void) -> Void) async -> T {
+        await withCheckedContinuation { c in DispatchQueue.main.async { call { c.resume(returning: $0) } } }
+    }
+
     /// Opens a terminal in the Orca workspace folder of the project. `done` gets nil, or the reason of a failure.
     func start(_ t: PlanTarget, in summary: ProjectSummary, done: @escaping (String?) -> Void) {
         guard let root = root(summary), !root.isEmpty else { done(SessionStartError.noRoot(summary.identifier).errorDescription); return }
@@ -81,20 +90,26 @@ struct PlanStarter {
             return
         }
         let ref = ItemRef(project: summary.ref, id: t.workItemId, key: t.key, url: URL(string: summary.url) ?? URL(string: "about:blank")!)
-        let tracker = tracker(summary.ref)
+        let store = store
         let note: String? = { if case .item(let i) = t { return i.url }; return nil }()
         // plan:<KEY>: the daemon sends the plan review to this session, and the code review to the work session.
         let startKey = StartKey.plan(t.key)
         let agents = agents
         CallPriority.task(.user) {
             var t = t
-            if case .intake(let i, let k, nil) = t, let triage = tracker as? any IntakeTriaging {
-                t = .intake(i, key: k, body: (try? await triage.intakeDetail(i, in: summary.ref))?.body)
+            if case .intake(let i, let k, nil) = t {
+                let detail: Result<IntakeDetail, ProviderError> = await Self.onMain { done in
+                    store.intakeDetail(projectKey: summary.ref.storeKey, item: i, done: done)
+                }
+                t = .intake(i, key: k, body: (try? detail.get())?.body)
             }
             // An unknown file list keeps the download line.
             var files = true
-            if let reader = tracker as? any AttachmentReading, reader.capabilities.contains(.attachmentsRead),
-               let list = try? await reader.attachments(of: ref) { files = !list.isEmpty }
+            let list: Result<[ItemAttachment], ProviderError>? = await Self.onMain { done in
+                if let snap = store.snapshot(summary.ref.storeKey), !store.has(.attachmentsRead, in: snap) { done(nil); return }
+                store.attachments(of: ref) { done($0) }
+            }
+            if let list = try? list?.get() { files = !list.isEmpty }
             let prompt = Self.prompt(t, project: summary.ref, runtime: rt, files: files)
             DispatchQueue.main.async {
                 agents.launch(key: t.key, note: note, root: root, agent: launch, prompt: prompt, title: name, inPlace: true, startKey: startKey) { r in

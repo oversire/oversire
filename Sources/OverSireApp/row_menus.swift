@@ -264,7 +264,7 @@ final class RowCommander {
         }
         if case .refine(let key) = c {
             guard let found = store.item(key: key) else { return }
-            PlanStarter(data.agentIndex).start(.item(found.item), in: found.snap.summary) { err in
+            PlanStarter(data.agentIndex, store: data.projectStore).start(.item(found.item), in: found.snap.summary) { err in
                 if let err { AlertConfirm.tell("Plan did not start", info: err, in: anchor?.window) }
             }
             go(.item(found.item.key, .overview))

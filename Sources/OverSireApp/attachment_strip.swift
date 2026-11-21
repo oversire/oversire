@@ -10,7 +10,8 @@ final class AttachmentBook {
     static let listAge: TimeInterval = 300
     static let linkAge: TimeInterval = 3000
 
-    private let reader: (ItemRef) -> (any AttachmentReading)?
+    private let list: (ItemRef) async throws -> [ItemAttachment]
+    private let link: (ItemAttachment, ItemRef) async throws -> URL
     private let download: (URL) async throws -> Data
     var dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("oversire-attachments")
     /// `--uishots`: the list of an item, with no tracker call.
@@ -23,17 +24,33 @@ final class AttachmentBook {
     private(set) var failed: Set<String> = []                                // attachment ids
     private var open: Set<String> = []                                       // item ids
 
-    init(reader: @escaping (ItemRef) -> (any AttachmentReading)?,
+    init(list: @escaping (ItemRef) async throws -> [ItemAttachment],
+         link: @escaping (ItemAttachment, ItemRef) async throws -> URL,
          download: @escaping (URL) async throws -> Data = { try await URLSession.shared.data(from: $0).0 }) {
-        self.reader = reader
+        self.list = list
+        self.link = link
         self.download = download
     }
 
+    /// Reads through the store: the tracker on the home, the home on a client.
     convenience init(store: ProjectStore) {
-        self.init(reader: { [weak store] ref in
-            guard let t = store?.tracker(of: ref.project), t.capabilities.contains(.attachmentsRead) else { return nil }
-            return t as? any AttachmentReading
+        self.init(list: { [weak store] ref in
+            try await Self.read(store, ref) { store, ref, done in store.attachments(of: ref, done: done) }
+        }, link: { [weak store] a, ref in
+            try await Self.read(store, ref) { store, ref, done in store.attachmentLink(a, of: ref, done: done) }
         })
+    }
+
+    /// Asks the store on the main thread. A project with no `attachmentsRead` gives `.unsupported`.
+    private static func read<T>(_ store: ProjectStore?, _ ref: ItemRef,
+                                _ call: @escaping (ProjectStore, ItemRef, @escaping (Result<T, ProviderError>) -> Void) -> Void) async throws -> T {
+        try await withCheckedThrowingContinuation { c in
+            DispatchQueue.main.async {
+                guard let store, let snap = store.snapshot(ref.project.storeKey) else { c.resume(throwing: ProviderError.notFound); return }
+                guard store.has(.attachmentsRead, in: snap) else { c.resume(throwing: ProviderError.unsupported(.attachmentsRead)); return }
+                call(store, ref) { c.resume(with: $0.mapError { $0 as Error }) }
+            }
+        }
     }
 
     /// The last list, also when it is old. Nil: no list yet. An old list or a newer item asks again.
@@ -45,9 +62,10 @@ final class AttachmentBook {
     }
 
     private func ask(_ ref: ItemRef) {
-        guard let r = reader(ref), asking.insert(ref.id).inserted else { return }
+        guard asking.insert(ref.id).inserted else { return }
+        let list = list
         Task { [weak self] in
-            let got = await CallPriority.user { try? await r.attachments(of: ref) }
+            let got = await CallPriority.user { try? await list(ref) }
             guard let self else { return }
             self.asking.remove(ref.id)
             // A failed call keeps the old list and waits for the next age.
@@ -78,13 +96,13 @@ final class AttachmentBook {
     /// Downloads the file one time. `done` gets the local copy, or nil when the download fails.
     func fetch(_ a: ItemAttachment, of ref: ItemRef, done: ((URL?) -> Void)? = nil) {
         if let u = local(a) { done?(u); return }
-        guard let r = reader(ref), fetching.insert(a.id).inserted else { done?(nil); return }
+        guard fetching.insert(a.id).inserted else { done?(nil); return }
         failed.remove(a.id)
         let cached = links[a.id].flatMap { -$0.at.timeIntervalSinceNow < Self.linkAge ? $0.url : nil }
-        let target = path(a), download = download
+        let target = path(a), download = download, signed = link
         Task { [weak self] in
             var link = cached
-            if link == nil { link = try? await r.attachmentURL(a, of: ref) }
+            if link == nil { link = try? await signed(a, ref) }
             var file: URL?
             if let link, let data = try? await download(link),
                (try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)) != nil,

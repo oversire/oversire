@@ -36,4 +36,36 @@ final class ProjectActionsTests: XCTestCase {
         let unknown = await call(rig, "project.setNorthStar", ["project": .string("NOPE"), "text": .string("x")])
         guard case .notAllowed = unknown else { return XCTFail("\(unknown)") }
     }
+
+    // OVERSIRE-535
+    private func update(_ rig: EpicRig, _ patch: ProjectSettingsPatch) async throws -> ActionResult {
+        let spec = ProjectActions(link: ActionLink(rig.d)).specs.first { $0.id == "project.updateSettings" }!
+        let args: [String: JSONValue] = ["project": .string("FAKE"), "patch": try MirrorCodec.body(patch)]
+        return await spec.perform(ActionArgs(.object(args), caller: .member(machine: "mba", name: "Fritz")))
+    }
+
+    func testUpdateSettingsWritesTheEvent() async throws {
+        let rig = try await EpicRig()
+        let r = try await update(rig, ProjectSettingsPatch(features: [.intake: false]))
+        guard case .ok = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(rig.fake.patches.count, 1)
+        XCTAssertEqual(rig.fake.patches.first?.features, [.intake: false])
+        let rows = await rig.rows(count: 1).filter { $0.kind == .projectSettingsChanged }
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.via, "app@mba")
+        XCTAssertEqual(rows.first?.payload?["fields"], .array([.string("features")]))
+        XCTAssertEqual(rows.first?.project, "fake")
+    }
+
+    func testUpdateSettingsRefusesAFieldThatIsNotEditable() async throws {
+        let rig = try await EpicRig()
+        rig.fake.editableSettings = [.name]
+        let r = try await update(rig, ProjectSettingsPatch(visibility: .public))
+        guard case .notAllowed = r else { return XCTFail("\(r)") }
+        let empty = try await update(rig, ProjectSettingsPatch())
+        XCTAssertEqual(empty, .notAllowed("Give a change."))
+        XCTAssertEqual(rig.fake.patches.count, 0, "no tracker call")
+        let rows = await rig.outlet.rows.filter { $0.kind == .projectSettingsChanged }
+        XCTAssertTrue(rows.isEmpty)
+    }
 }

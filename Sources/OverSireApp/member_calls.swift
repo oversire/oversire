@@ -40,6 +40,12 @@ struct MirrorRows<T: Codable & Sendable>: Codable, Sendable {
     var rows: T
 }
 
+/// The answer to `mirror.read` with `projectSettings`: the settings and the fields that the tracker can change.
+struct ProjectSettingsRead: Codable, Sendable {
+    var settings: ProjectSettings
+    var editable: Set<ProjectSettingsField>
+}
+
 /// The actions that only a client uses: its reads of a live tracker, and its refresh.
 struct MemberActions {
     let link: ActionLink
@@ -48,10 +54,14 @@ struct MemberActions {
         let link = link
         return [
             ActionSpec(id: "mirror.read", title: "Read from the tracker",
-                       help: "Reads comments, the timeline, options, intake details, labels or links of the tracker, for a client app.", kind: .read,
-                       input: ActionSpec.args(["what": ("string", "comments, timeline, options, intakeDetail, labels or links."),
+                       help: "Reads comments, the timeline, options, intake details, labels, links, project settings, attachments, intake keys or images of the tracker, for a client app.",
+                       kind: .read,
+                       input: ActionSpec.args(["what": ("string", "comments, timeline, options, intakeDetail, labels, links, projectSettings, attachments, attachmentLink, intakeKeys or images."),
                                                "project": ("string", "The store key of the project."), "item": ("string", "The key or id of the item."),
-                                               "intake": ("object", "The intake item, for intakeDetail.")], required: ["what"])) { a in
+                                               "intake": ("object", "The intake item, for intakeDetail."),
+                                               "ref": ("object", "The item ref, for attachments and attachmentLink."),
+                                               "attachment": ("object", "The file, for attachmentLink."),
+                                               "markdown": ("string", "The text with asset ids, for images.")], required: ["what"])) { a in
                 await link.main(.failed("The app is closing.")) { d, done in Self.read(a, d, done) }
             },
             ActionSpec(id: "app.refresh", title: "Refresh the app", help: "Loads all data again from the providers, for a client app.", kind: .change) { _ in
@@ -87,6 +97,24 @@ struct MemberActions {
         case "intakeDetail":
             guard let v = a["intake"], let i = try? MirrorCodec.value(IntakeItem.self, from: v) else { done(.notAllowed("Give the intake item.")); return }
             store.intakeDetail(projectKey: project, item: i) { rows($0, done) }
+        case "projectSettings":
+            guard store.snapshot(project) != nil else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
+            store.projectSettings(projectKey: project) { rows($0, done) }
+        case "attachments", "attachmentLink":
+            guard let v = a["ref"], let ref = try? MirrorCodec.value(ItemRef.self, from: v) else { done(.notAllowed("Give the item ref.")); return }
+            guard store.snapshot(ref.project.storeKey) != nil else { done(.notAllowed("OverSire has no loaded project \(ref.project.storeKey).")); return }
+            if a.string("what") == "attachments" { store.attachments(of: ref) { rows($0, done) }; return }
+            guard let f = a["attachment"], let file = try? MirrorCodec.value(ItemAttachment.self, from: f) else { done(.notAllowed("Give the file.")); return }
+            store.attachmentLink(file, of: ref) { rows($0.map(\.absoluteString), done) }
+        case "intakeKeys":
+            guard store.snapshot(project) != nil else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
+            Task {
+                let r = await store.intakeSequences(projectKey: project)
+                await MainActor.run { rows(r, done) }
+            }
+        case "images":
+            guard store.snapshot(project) != nil else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
+            store.resolveImages(a.string("markdown") ?? "", projectKey: project) { rows(.success($0), done) }
         default: done(.notAllowed("mirror.read has no read \(a.string("what") ?? "")."))
         }
     }

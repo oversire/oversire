@@ -608,24 +608,17 @@ final class ProjectSettingsPage: Page {
 
     private func load(_ p: ProjectSummary) {
         loadingKey = key
-        guard let t = ENV.tracker(p.ref.workspace) as? any ProjectSettingsReading else {
-            remoteError = "\(trackerName) gives no project settings to OverSire."
-            return
-        }
-        let editable = (t as? any ProjectSettingsEditing)?.editableSettings ?? []
         pageBusy = true
-        let k = key, ref = p.ref
-        Task { [weak self] in
-            let r = await Result(awaiting: { try await t.settings(ref) })
-            await MainActor.run {
-                guard let self, self.key == k else { return }
-                self.pageBusy = false
-                switch r {
-                case .success(let s): self.remote = TrackerSettingsView(settings: s, editable: editable); self.remoteError = nil; self.loadedAt = Date()
-                case .failure(let e): self.remoteError = e.message
-                }
-                if !self.isEditing || self.draft.isEmpty { self.reload() }
+        let k = key
+        data.projectStore.projectSettings(projectKey: p.ref.storeKey) { [weak self] r in
+            guard let self, self.key == k else { return }
+            self.pageBusy = false
+            switch r {
+            case .success(let read): self.remote = TrackerSettingsView(settings: read.settings, editable: read.editable); self.remoteError = nil; self.loadedAt = Date()
+            case .failure(.unsupported): self.remoteError = "\(self.trackerName) gives no project settings to OverSire."
+            case .failure(let e): self.remoteError = e.message
             }
+            if !self.isEditing || self.draft.isEmpty { self.reload() }
         }
     }
 
@@ -815,28 +808,25 @@ final class ProjectSettingsPage: Page {
     }
 
     private func save() {
-        guard let p = project, let t = ENV.tracker(p.ref.workspace) as? any ProjectSettingsEditing, !draft.isEmpty else { return }
+        guard let p = project, !draft.isEmpty, let patch = try? MirrorCodec.body(draft) else { return }
         saving = true
         reload()
-        let patch = draft, ref = p.ref, k = key
+        let fields = draft.fields, ref = p.ref, k = key
         let token = data.busy.begin("Saving the \(trackerName) settings of \(k)")
-        Task { [weak self] in
-            let r = await Result(awaiting: { try await t.update(ref, patch) })
-            await MainActor.run {
-                guard let self else { return }
-                self.data.busy.end(token)
-                self.saving = false
-                switch r {
-                case .success:
-                    self.draft = ProjectSettingsPatch()
-                    self.note = (.ok, "\(self.trackerName) saved \(patch.fields.map(\.label).sorted().joined(separator: ", ")).")
-                    self.load(p)
-                    self.data.projectStore.refresh([ref.storeKey], force: true) { _ in }
-                case .failure(let e):
-                    self.note = (.bad, "\(self.trackerName) did not save: \(e.message)")
-                }
-                self.reload()
+        data.actions.click("project.updateSettings", ["project": .string(p.identifier), "patch": patch], in: view.window) { [weak self] r in
+            guard let self else { return }
+            self.data.busy.end(token)
+            self.saving = false
+            switch r {
+            case .ok:
+                self.draft = ProjectSettingsPatch()
+                self.note = (.ok, "\(self.trackerName) saved \(fields.map(\.label).sorted().joined(separator: ", ")).")
+                self.load(p)
+                self.data.projectStore.refresh([ref.storeKey], force: true) { _ in }
+            case .failed(let m), .notAllowed(let m):
+                self.note = (.bad, "\(self.trackerName) did not save: \(m)")
             }
+            self.reload()
         }
     }
 }

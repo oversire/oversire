@@ -1,5 +1,6 @@
 import OverSireAssistant
 import OverSireCore
+import OverSireTestKit
 import XCTest
 @testable import OverSireApp
 
@@ -116,6 +117,95 @@ final class MemberCallsTests: XCTestCase {
         _ = try MirrorCodec.value(MirrorRows<ItemOptions>.self, from: data)
         let bad = await rig.d.actions.run("mirror.read", ActionArgs(.object(["what": .string("nope")])))
         XCTAssertEqual(bad, .notAllowed("mirror.read has no read nope."))
+    }
+
+    /// A fake that also has intake numbers and asset links.
+    private final class AssetFake: Tracker, IntakeKeying, AssetLinking, @unchecked Sendable {
+        let fake = FakeTracker()
+        var id: ProviderID { fake.id }
+        var account: AccountID { fake.account }
+        var capabilities: Set<Capability> { fake.capabilities }
+        var pollPolicy: PollPolicy { fake.pollPolicy }
+        var keyFormat: KeyFormat { fake.keyFormat }
+
+        func probe() async throws -> Identity { try await fake.probe() }
+        func poll(since: Cursor?) async throws -> EventPage { try await fake.poll(since: since) }
+        func projects() async throws -> [ProjectSummary] { try await fake.projects() }
+        func statuses(_ p: ProjectRef) async throws -> [StatusOption] { try await fake.statuses(p) }
+        func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] { try await fake.items(p, since: since, limit: limit) }
+        func detail(_ i: ItemRef) async throws -> ItemDetail { try await fake.detail(i) }
+        func comments(_ i: ItemRef) async throws -> [Comment] { try await fake.comments(i) }
+        func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef { try await fake.create(d, in: p) }
+        func update(_ i: ItemRef, _ patch: ItemPatch) async throws { try await fake.update(i, patch) }
+        func comment(_ i: ItemRef, markdown: String) async throws { try await fake.comment(i, markdown: markdown) }
+        func intakeSequences(_ p: ProjectRef) async throws -> [String: Int] { ["wi-1": 12] }
+        func assetURL(_ id: String) async throws -> URL { URL(string: "https://files.example/\(id)?sig=1")! }
+        func assetIds(in markdown: String) -> Set<String> { markdown.contains("](asset-1)") ? ["asset-1"] : [] }
+    }
+
+    private final class AssetTrackers: TrackerDirectory {
+        let t: AssetFake
+        init(_ t: AssetFake) { self.t = t }
+        var trackerIds: [String] { [t.account.id] }
+        func tracker(_ id: String) -> (any Tracker)? { id == t.account.id ? t : nil }
+    }
+
+    private func assetRig() async throws -> (TestAppData, String) {
+        let t = AssetFake()
+        let summary = try await t.projects()[0]
+        let d = await MainActor.run { TestAppData(trackers: AssetTrackers(t)) }
+        await MainActor.run { d.projectStore.track([summary], live: []) }
+        let seen = await Wait.until { await MainActor.run { d.projectStore.snapshot("FAKE") != nil } }
+        XCTAssertTrue(seen, "timeout: the first snapshot")
+        return (d, summary.ref.storeKey)
+    }
+
+    private func read(_ d: TestAppData, _ args: [String: JSONValue]) async -> ActionResult {
+        await d.actions.run("mirror.read", ActionArgs(.object(args)))
+    }
+
+    // OVERSIRE-535
+    func testMirrorReadGivesProjectSettings() async throws {
+        let rig = try await EpicRig()
+        let r = await read(rig.d, ["what": .string("projectSettings"), "project": .string("FAKE")])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let got = try MirrorCodec.value(MirrorRows<ProjectSettingsRead>.self, from: data).rows
+        XCTAssertEqual(got.settings.name, "Fake project")
+        XCTAssertTrue(got.editable.contains(.features))
+        let none = await read(rig.d, ["what": .string("projectSettings"), "project": .string("NOPE")])
+        XCTAssertEqual(none, .notAllowed("OverSire has no loaded project NOPE."))
+    }
+
+    func testMirrorReadGivesAttachmentsAndLink() async throws {
+        let rig = try await EpicRig()
+        let item = rig.items[0]
+        _ = try await rig.fake.attach(AttachmentUpload(name: "a.png", mimeType: "image/png", data: Data([1])), to: item)
+        let ref = try MirrorCodec.body(item)
+        let r = await read(rig.d, ["what": .string("attachments"), "ref": ref])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let rows = try MirrorCodec.value(MirrorRows<[ItemAttachment]>.self, from: data).rows
+        XCTAssertEqual(rows.map(\.name), ["a.png"])
+        let l = await read(rig.d, ["what": .string("attachmentLink"), "ref": ref, "attachment": try MirrorCodec.body(rows[0])])
+        guard case .ok(_, let linkData?, _) = l else { return XCTFail("\(l)") }
+        let expected = try await rig.fake.attachmentURL(rows[0], of: item).absoluteString
+        XCTAssertEqual(try MirrorCodec.value(MirrorRows<String>.self, from: linkData).rows, expected)
+        let other = ItemRef(project: ProjectRef(workspace: "other", id: "x"), id: "i", key: "X-1", url: item.url)
+        let bad = await read(rig.d, ["what": .string("attachments"), "ref": try MirrorCodec.body(other)])
+        guard case .notAllowed = bad else { return XCTFail("\(bad)") }
+    }
+
+    func testMirrorReadGivesIntakeKeys() async throws {
+        let (d, key) = try await assetRig()
+        let r = await read(d, ["what": .string("intakeKeys"), "project": .string(key)])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(try MirrorCodec.value(MirrorRows<[String: Int]>.self, from: data).rows, ["wi-1": 12])
+    }
+
+    func testMirrorReadResolvesImages() async throws {
+        let (d, key) = try await assetRig()
+        let r = await read(d, ["what": .string("images"), "project": .string(key), "markdown": .string("![a](asset-1)")])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(try MirrorCodec.value(MirrorRows<String>.self, from: data).rows, "![a](https://files.example/asset-1?sig=1)")
     }
 
     func testSetStatusWithSubItemsWritesTheEventVia() async throws {
