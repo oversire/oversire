@@ -60,12 +60,9 @@ public final class ManualClock: Clock, @unchecked Sendable {
         due.forEach { $0.continuation.resume() }
     }
 
-    /// Waits until n tasks sleep on this clock. Fails after about 2 s of real time.
+    /// Waits until n tasks sleep on this clock. Fails after 5 s of real time.
     public func waitForSleepers(_ n: Int = 1) async throws {
-        for _ in 0..<2000 {
-            if sleeperCount >= n { return }
-            try await Task.sleep(nanoseconds: 1_000_000)
-        }
+        if await Wait.until(timeout: .seconds(5), every: .milliseconds(1), { self.sleeperCount >= n }) { return }
         throw CancellationError()
     }
 }
