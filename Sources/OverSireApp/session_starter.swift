@@ -40,19 +40,49 @@ enum SessionPrompt {
 
         This request is intake item {key}. It is not a ticket yet. Plan it. Do not implement it.
         First accept the intake item, so that it becomes a real work item with the same ID ({key}):
-          plane-cli intake update {intake} -w {workspace} -p {project} --status 1
+          oversire intake accept {key}
         Do not make a new ticket.
-        Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
+        Its files: oversire vendor run --project {project} -- wi attachment download {item} --dir .oversire/{key}
         """ + "\n\n" + planSteps
     /// Plan on a work item (OVERSIRE-373, was Refine in OVERSIRE-310).
     static let refineDefault = """
         {text}
 
         This is work item {key}. Plan it. Do not implement it.
-        Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
+        Its files: oversire vendor run --project {project} -- wi attachment download {item} --dir .oversire/{key}
         """ + "\n\n" + planSteps
     /// The steps of each Plan session. The plan ends at the plan review in Work › Review.
     static let planSteps = """
+        Ask the user questions when a decision is theirs.
+        Write the plan to .oversire/plans/{key}.md. Start each part with a ## heading:
+        logic flow, files and interfaces, test plan, order.
+        Replace the description of {key} with the refined details:
+          oversire item edit {key} --body-file <file>
+        Do not edit the OverSire block in the description.
+        For a sizeable item, add sub-items in a sensible order, each with the same detail,
+        and set the "blocked by" relations. Post the plan as a comment on {key}.
+        Then hand off the plan for review, and stop:
+          oversire review ready --key {key} --kind plan --plan .oversire/plans/{key}.md --note "<one line>"
+        The review comes back to this session. Answer each comment, change the plan, and run the same command again.
+        """
+    /// The intake default of OVERSIRE-373 to OVERSIRE-574, with `plane-cli`. A saved copy of it moves to `intakeDefault`.
+    static let intakePlaneCLI = """
+        {text}
+
+        This request is intake item {key}. It is not a ticket yet. Plan it. Do not implement it.
+        First accept the intake item, so that it becomes a real work item with the same ID ({key}):
+          plane-cli intake update {intake} -w {workspace} -p {project} --status 1
+        Do not make a new ticket.
+        Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
+        """ + "\n\n" + planStepsPlaneCLI
+    /// The Plan default of OVERSIRE-373 to OVERSIRE-574, with `plane-cli`. A saved copy of it moves to `refineDefault`.
+    static let refinePlaneCLI = """
+        {text}
+
+        This is work item {key}. Plan it. Do not implement it.
+        Its files: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir .oversire/{key}
+        """ + "\n\n" + planStepsPlaneCLI
+    static let planStepsPlaneCLI = """
         Ask the user questions when a decision is theirs.
         Write the plan to .oversire/plans/{key}.md. Start each part with a ## heading:
         logic flow, files and interfaces, test plan, order.
@@ -102,8 +132,8 @@ enum SessionPrompt {
         """
 
     /// An edited template stays. An old default becomes the new one.
-    static func migrate(intake t: String) -> String { t == intakeOld || t == intakeRefine ? intakeDefault : t }
-    static func migrate(refine t: String) -> String { t == refineOld ? refineDefault : t }
+    static func migrate(intake t: String) -> String { [intakeOld, intakeRefine, intakePlaneCLI].contains(t) ? intakeDefault : t }
+    static func migrate(refine t: String) -> String { t == refineOld || t == refinePlaneCLI ? refineDefault : t }
     static let filesDefault = "{text}\n\nAttached files:\n{paths}"
     /// The last paragraph of each item start. A Done parent with open sub-items is not finished (OVERSIRE-205).
     static let subItemsRule = "When you set the parent to Done, set each finished sub-item to Done too. "

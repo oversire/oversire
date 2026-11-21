@@ -768,7 +768,7 @@ struct RuntimeConfig: Codable, Equatable {
         env = try c.decodeIfPresent([String: [EnvVar]].self, forKey: .env) ?? [:]
         runsOn = try c.decodeIfPresent([String: [String]].self, forKey: .runsOn) ?? [:]
         shareOfferClosed = try c.decodeIfPresent(Bool.self, forKey: .shareOfferClosed) ?? false
-        snapPrompt = try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt
+        snapPrompt = SnapTicket.migrate(try c.decodeIfPresent(String.self, forKey: .snapPrompt) ?? SnapTicket.defaultPrompt)
         sessionIntakePrompt = SessionPrompt.migrate(intake: try c.decodeIfPresent(String.self, forKey: .sessionIntakePrompt) ?? SessionPrompt.intakeDefault)
         sessionFilesPrompt = try c.decodeIfPresent(String.self, forKey: .sessionFilesPrompt) ?? SessionPrompt.filesDefault
         refinePrompt = SessionPrompt.migrate(refine: try c.decodeIfPresent(String.self, forKey: .refinePrompt) ?? SessionPrompt.refineDefault)

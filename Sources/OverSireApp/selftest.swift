@@ -879,13 +879,18 @@ func runSelfTest() {
     let intakeValues = ["text": "Fix it", "key": "K-1", "item": "i1", "intake": "n1", "workspace": "w", "project": "K"]
     let intakePrompt = SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: false)
     check(intakePrompt.hasPrefix("Fix it\n\nThis request is intake item K-1. It is not a ticket yet. Plan it.")
-          && intakePrompt.contains("  plane-cli intake update n1 -w w -p K --status 1\n") && !intakePrompt.contains("Its files:")
+          && intakePrompt.contains("  oversire intake accept K-1\n") && !intakePrompt.contains("Its files:")
           && intakePrompt.contains("oversire review ready --key K-1 --kind plan"),
           "session: intake prompt without files \(intakePrompt)")
-    check(SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: true).contains("download i1 -w w -p K --dir .oversire/K-1\n"),
+    check(SessionPrompt.intake(SessionPrompt.intakeDefault, values: intakeValues, files: true).contains("oversire vendor run --project K -- wi attachment download i1 --dir .oversire/K-1\n"),
           "session: intake prompt with files")
     check(SessionPrompt.migrate(intake: SessionPrompt.intakeOld) == SessionPrompt.intakeDefault, "session: the old intake default migrates")
     check(SessionPrompt.migrate(intake: "{text} mine") == "{text} mine", "session: an edited intake template stays")
+    check(SessionPrompt.migrate(intake: SessionPrompt.intakePlaneCLI) == SessionPrompt.intakeDefault
+          && SessionPrompt.migrate(refine: SessionPrompt.refinePlaneCLI) == SessionPrompt.refineDefault, "session: the Plane CLI defaults migrate")
+    check(SnapTicket.migrate(SnapTicket.planeCLIPrompt) == SnapTicket.defaultPrompt, "snap: the Plane CLI prompt migrates")
+    check(![SessionPrompt.intakeDefault, SessionPrompt.refineDefault, SnapTicket.defaultPrompt].contains { $0.contains("plane-cli") },
+          "session: no default has plane-cli")
     let clicks: [(IconClick.Window, Bool, IconClick.Action)] = [
         (.closed, false, .panel), (.minimized, false, .raise), (.background, false, .raise),
         (.front, false, .panel), (.elsewhere, false, .panel), (.background, true, .closePanel), (.closed, true, .closePanel),

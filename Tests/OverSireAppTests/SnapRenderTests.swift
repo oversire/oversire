@@ -139,8 +139,8 @@ final class SnapRenderTests: XCTestCase {
                                   values: ["key": "OVERSIRE-200", "item": "w-1", "intake": "i-1", "count": "2",
                                            "workspace": "ocral", "project": "oversire", "dir": "/tmp/s"])
         XCTAssertTrue(p.hasPrefix("Intake item OVERSIRE-200 holds a basket of screenshots (2 shots)."))
-        XCTAssertTrue(p.contains("plane-cli wi attachment download w-1 -w ocral -p oversire --dir /tmp/s"))
-        XCTAssertTrue(p.contains("plane-cli intake update i-1 -w ocral -p oversire"))
+        XCTAssertTrue(p.contains("oversire vendor run --project oversire -- wi attachment download w-1 --dir /tmp/s"))
+        XCTAssertTrue(p.contains("oversire intake edit OVERSIRE-200 --title"))
         XCTAssertFalse(p.contains("{"))
         XCTAssertEqual(SnapTicket.prompt(template: "{key} {other}", values: ["key": "A"]), "A {other}")
     }

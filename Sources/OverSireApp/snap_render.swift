@@ -133,12 +133,22 @@ struct SnapRenderer {
 enum SnapTicket {
     static let defaultPrompt = """
         Intake item {key} holds a basket of screenshots ({count} shots). They are one request.
+        Download them: oversire vendor run --project {project} -- wi attachment download {item} --dir {dir}
+        Read the description. Each mark is a numbered box on snap-N.png, with its pixel box in the text.
+        Read the code in this checkout to find the cause and the files. Then write a clear title and description into {key}: \
+        oversire intake edit {key} --title "…" --body-file <file>. \
+        Keep each file name and mark number next to its note. Ask me if a shot is not clear.
+        """
+    /// The prompt of OVERSIRE-200 to OVERSIRE-574, with `plane-cli`. A saved copy of it moves to `defaultPrompt`.
+    static let planeCLIPrompt = """
+        Intake item {key} holds a basket of screenshots ({count} shots). They are one request.
         Download them: plane-cli wi attachment download {item} -w {workspace} -p {project} --dir {dir}
         Read the description. Each mark is a numbered box on snap-N.png, with its pixel box in the text.
         Read the code in this checkout to find the cause and the files. Then write a clear title and description into {key}: \
         plane-cli intake update {intake} -w {workspace} -p {project} --name "…" --description-md @file. \
         Keep each file name and mark number next to its note. Ask me if a shot is not clear.
         """
+    static func migrate(_ t: String) -> String { t == planeCLIPrompt ? defaultPrompt : t }
 
     static func title(_ b: SnapBasket) -> String {
         let n = b.shots.count

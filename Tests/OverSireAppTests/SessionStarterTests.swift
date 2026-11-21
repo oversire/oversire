@@ -147,7 +147,7 @@ final class SessionStarterTests: XCTestCase {
         XCTAssertTrue(tracker.uploads.allSatisfy { $0.item == item })
         let p = term.opened[0].prompt
         XCTAssertTrue(p.hasPrefix("Look at {key} these\n\n"), "the user text keeps its braces: \(p)")
-        XCTAssertTrue(p.contains("plane-cli wi attachment download \(item.id) -w fake -p FAKE --dir .oversire/\(item.key)"), p)
+        XCTAssertTrue(p.contains("oversire vendor run --project FAKE -- wi attachment download \(item.id) --dir .oversire/\(item.key)"), p)
         XCTAssertEqual(steps, ["Creating item…", "Sending 2 files…", "Opening terminal…"])
         XCTAssertTrue(runtime.hostFiles.isEmpty)
     }

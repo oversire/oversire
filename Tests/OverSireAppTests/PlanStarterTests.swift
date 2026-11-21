@@ -94,9 +94,9 @@ final class PlanStarterTests: XCTestCase {
         XCTAssertEqual(r.key, "plan:FAKE-1", "plan comments go to this session")
         XCTAssertNil(r.item, "no worktree for an item")
         XCTAssertTrue(r.prompt.hasPrefix("Labels drop\n\nThe sync drops labels."), "the start reads the body: \(r.prompt)")
-        XCTAssertTrue(r.prompt.contains("plane-cli intake update \(i.id) -w fake -p FAKE --status 1"), r.prompt)
+        XCTAssertTrue(r.prompt.contains("oversire intake accept FAKE-1"), r.prompt)
         XCTAssertTrue(r.prompt.contains("FAKE-1"), r.prompt)
-        let accept = try XCTUnwrap(r.prompt.range(of: "plane-cli intake update"))
+        let accept = try XCTUnwrap(r.prompt.range(of: "oversire intake accept"))
         let ready = try XCTUnwrap(r.prompt.range(of: "oversire review ready --key FAKE-1 --kind plan --plan .oversire/plans/FAKE-1.md"), r.prompt)
         XCTAssertLessThan(accept.lowerBound, ready.lowerBound, "the plan accepts the intake item first")
         XCTAssertFalse(r.prompt.contains("attachment download"), "no files: no download line")
@@ -112,7 +112,7 @@ final class PlanStarterTests: XCTestCase {
         _ = try await fake.attach(AttachmentUpload(name: "shot.png", mimeType: "image/png", data: Data("png".utf8)), to: ref)
         let r = try await start(.intake(i, key: "FAKE-1", body: "Known body"))
         XCTAssertTrue(r.prompt.hasPrefix("Labels drop\n\nKnown body"), r.prompt)
-        XCTAssertTrue(r.prompt.contains("plane-cli wi attachment download \(i.workItemId) -w fake -p FAKE --dir .oversire/FAKE-1"), r.prompt)
+        XCTAssertTrue(r.prompt.contains("oversire vendor run --project FAKE -- wi attachment download \(i.workItemId) --dir .oversire/FAKE-1"), r.prompt)
     }
 
     func testItemPlanUsesTheEditedTemplate() async throws {
@@ -130,7 +130,7 @@ final class PlanStarterTests: XCTestCase {
         let item = try await fake.detail(ref).item
         let r = try await start(.item(item))
         XCTAssertTrue(r.prompt.contains("oversire review ready --key \(item.key) --kind plan"), r.prompt)
-        XCTAssertFalse(r.prompt.contains("plane-cli intake update"), "a work item has nothing to accept")
+        XCTAssertFalse(r.prompt.contains("oversire intake accept"), "a work item has nothing to accept")
     }
 
     func testAPlanSessionIsTheAgentOfItsItem() {

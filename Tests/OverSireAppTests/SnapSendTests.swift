@@ -86,8 +86,8 @@ final class SnapSendTests: XCTestCase {
         XCTAssertEqual(term.opened[0].title, "snap-" + r.key)
         let prompt = term.opened[0].prompt
         XCTAssertTrue(prompt.hasPrefix("Intake item \(r.key) holds a basket of screenshots (2 shots)."), prompt)
-        XCTAssertTrue(prompt.contains("plane-cli wi attachment download \(r.item.id) -w fake -p FAKE --dir \(store.outDir(b.id).path)/download"), prompt)
-        XCTAssertTrue(prompt.contains("plane-cli intake update \(made[0].id) "), prompt)
+        XCTAssertTrue(prompt.contains("oversire vendor run --project FAKE -- wi attachment download \(r.item.id) --dir \(store.outDir(b.id).path)/download"), prompt)
+        XCTAssertTrue(prompt.contains("oversire intake edit \(r.key) --title"), prompt)
         XCTAssertFalse(prompt.contains("{") || prompt.contains("\n"))
         XCTAssertEqual(term.revealed.count, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.outDir(b.id).appendingPathComponent("snap-2-mark-1.png").path))
