@@ -32,6 +32,7 @@ final class CIAssist {
     private var state = State()
     private(set) var busy: Set<String> = []
     private(set) var errors: [String: String] = [:]
+    private var flights: [String: Task<Result<RunExplanation, AIError>, Never>] = [:]
     private var seen: [String: (attempt: Int, failed: Bool)] = [:]   // run URL → last state
     private let path: String
     private let ai: () -> AIClient?
@@ -140,32 +141,54 @@ final class CIAssist {
 
     // A cached cause is kept for each run and attempt. `force` asks the engine again.
     func explain(repo: String, run r: Run, job: Job, log: [String], force: Bool = false) {
+        guard force || state.explanations[CIAssist.runKey(r)] == nil, ai() != nil, !busy.contains(CIAssist.runKey(r)) else { return }
+        Task { @MainActor in _ = await explainNow(repo: repo, run: r, job: job, log: log, force: force) }
+    }
+
+    /// Gives the cached cause, or runs the AI task, saves and shares its result. One task for each run attempt at a time.
+    @MainActor
+    func explainNow(repo: String, run r: Run, job: Job, log: [String], force: Bool) async -> Result<RunExplanation, AIError> {
         let k = CIAssist.runKey(r)
-        guard force || state.explanations[k] == nil, let ai = ai(), !busy.contains(k) else { return }
+        if !force, let e = state.explanations[k] { return .success(e) }
+        if let flight = flights[k] { return await flight.value }
+        guard let ai = ai() else { return .failure(.notConfigured) }
         busy.insert(k)
         errors[k] = nil
         publish()
-        q.async { [weak self, changedFiles] in
-            let files = changedFiles(repo, r.headSha)
-            ai.run(.failureReason, CIAssist.explainInput(run: r, job: job.name, log: log, files: files), id: "failureReason:\(k)") { result in
-                guard let self else { return }
-                self.busy.remove(k)
-                switch result {
-                case .success(let t):
-                    if let e = CIAssist.parseExplanation(t) {
-                        self.state.explanations[k] = e
-                        self.outputs?.put(.ciExplanation, k, hash: k, e, at: e.at, keep: 100)
-                        self.trim()
-                        self.save()
-                    } else {
-                        self.errors[k] = "The AI reply had no cause."
-                        self.publish()
-                    }
-                case .failure(let e):
-                    self.errors[k] = e.message
-                    self.publish()
-                }
+        let flight = Task { @MainActor in await self.runExplain(ai, repo: repo, run: r, job: job, log: log) }
+        flights[k] = flight
+        let result = await flight.value
+        flights[k] = nil
+        return result
+    }
+
+    @MainActor
+    private func runExplain(_ ai: AIClient, repo: String, run r: Run, job: Job, log: [String]) async -> Result<RunExplanation, AIError> {
+        let k = CIAssist.runKey(r)
+        let files = await withCheckedContinuation { c in
+            q.async { [changedFiles] in c.resume(returning: changedFiles(repo, r.headSha)) }
+        }
+        let input = CIAssist.explainInput(run: r, job: job.name, log: log, files: files)
+        let reply: Result<String, AIError> = await withCheckedContinuation { c in
+            ai.run(.failureReason, input, id: "failureReason:\(k)") { c.resume(returning: $0) }
+        }
+        busy.remove(k)
+        switch reply {
+        case .success(let t):
+            guard let e = CIAssist.parseExplanation(t) else {
+                errors[k] = "The AI reply had no cause."
+                publish()
+                return .failure(.badReply("The AI reply had no cause."))
             }
+            state.explanations[k] = e
+            outputs?.put(.ciExplanation, k, hash: k, e, at: e.at, keep: 100)
+            trim()
+            save()
+            return .success(e)
+        case .failure(let e):
+            errors[k] = e.message
+            publish()
+            return .failure(e)
         }
     }
 

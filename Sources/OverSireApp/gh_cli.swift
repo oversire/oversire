@@ -50,6 +50,7 @@ protocol RawLogReading: CIProvider { func rawLog(_ j: JobRef) async throws -> St
 
 /// The CI reads of the keepers. RepoClient conforms.
 protocol CIDetailReading: Sendable {
+    func run(_ repo: String, id: String) async -> Run?
     func jobs(_ repo: String, runId: String) async -> [Job]?
     func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure]
     func rawLog(_ repo: String, jobId: String) async -> String?

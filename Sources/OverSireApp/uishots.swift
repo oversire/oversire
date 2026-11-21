@@ -2418,6 +2418,7 @@ extension UIShots {
 
 /// A CI reader with no data, for the fixed screenshots.
 struct NoCIReader: CIDetailReading {
+    func run(_ repo: String, id: String) async -> Run? { nil }
     func jobs(_ repo: String, runId: String) async -> [Job]? { nil }
     func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure] { [] }
     func rawLog(_ repo: String, jobId: String) async -> String? { nil }

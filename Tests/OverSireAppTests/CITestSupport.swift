@@ -9,16 +9,23 @@ final class FakeCIReader: CIDetailReading, @unchecked Sendable {
     private var _failures: [String: [Failure]] = [:]
     private var _logs: [String: String] = [:]
     private var _checks: [String: [CICheck]] = [:]
+    private var _runs: [String: Run] = [:]
     private var _counts: [String: Int] = [:]
     /// Pause in each `jobs` call, in nanoseconds.
     var jobsDelay: UInt64 = 0
 
+    func setRun(_ repo: String, _ run: Run) { lock.withLock { _runs["\(repo)/\(run.id)"] = run } }
     func setJobs(_ repo: String, run: String, _ jobs: [Job]) { lock.withLock { _jobs["\(repo)/\(run)"] = jobs } }
     func setFailures(_ repo: String, run: String, _ f: [Failure]) { lock.withLock { _failures["\(repo)/\(run)"] = f } }
     func setLog(_ job: String, _ text: String) { lock.withLock { _logs[job] = text } }
     func setChecks(_ repo: String, sha: String, _ c: [CICheck]) { lock.withLock { _checks["\(repo)/\(sha)"] = c } }
     func count(_ name: String) -> Int { lock.withLock { _counts[name] ?? 0 } }
     private func hit(_ name: String) { lock.withLock { _counts[name, default: 0] += 1 } }
+
+    func run(_ repo: String, id: String) async -> Run? {
+        hit("run")
+        return lock.withLock { _runs["\(repo)/\(id)"] }
+    }
 
     func jobs(_ repo: String, runId: String) async -> [Job]? {
         hit("jobs")

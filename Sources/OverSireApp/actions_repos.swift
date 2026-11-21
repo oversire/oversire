@@ -57,16 +57,6 @@ struct RepoActions {
                 let tail = log.count > Self.maxLog ? "…\n" + String(log.suffix(Self.maxLog)) : log
                 return .ok(summary: tail)
             },
-            ActionSpec(id: "run.explain", title: "Explain failure", help: "Gives the saved AI explanation of a failed run: cause, fix and confidence. Without one, read run.log.", kind: .read,
-                       input: ActionSpec.args(["repo": Self.repo, "runId": Self.runId], required: ["repo", "runId"])) { a in
-                await link.run { d, done in
-                    guard let repo = a.string("repo"), let r = d.grouped.first(where: { $0.0 == repo })?.1.first(where: { $0.id == a.string("runId") }) else {
-                        done(.notAllowed("OverSire has no loaded run \(a.string("runId") ?? "") in \(a.string("repo") ?? "").")); return
-                    }
-                    guard let e = d.ciAssist.explanation(r) else { done(.notAllowed("Run \(r.id) has no explanation yet. Read the failed job with run.log.")); return }
-                    done(.ok(summary: "Cause: \(e.cause)\nFix: \(e.fix)\nConfidence: \(e.confidence)"))
-                }
-            },
             ActionSpec(id: "repo.catalogRefresh", title: "Refresh the repo list",
                        help: "Fetches the repos of a GitHub owner again. A client app uses it for the repo picker.", kind: .change,
                        input: ActionSpec.args(["owner": ("string", "The owner login. Leave out to fetch the owner list and all repos.")])) { a in

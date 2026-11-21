@@ -35,7 +35,7 @@ final class AppCallsTests: XCTestCase {
     }
 
     func testCIReadsAllowed() async {
-        for id in ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        for id in ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
         XCTAssertFalse(AppCalls.allowed.contains("ci.rerun"))
         let posted = Posted()
         let read = ActionSpec(id: "ci.log", title: "Log", help: "", kind: .read) { _ in .ok(summary: "log") }

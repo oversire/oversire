@@ -10,7 +10,7 @@ final class AppCalls: @unchecked Sendable {
         "project.northStar", "project.setNorthStar",
         "item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start", "item.reopen",
         "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
-        "ci.log", "ci.jobs", "ci.workflows", "ci.refresh",
+        "ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain",
     ]
 
     private let catalog: any ActionCatalog

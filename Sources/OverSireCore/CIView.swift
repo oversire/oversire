@@ -407,6 +407,55 @@ public struct CIActionResult: Codable, Hashable, Sendable {
     }
 }
 
+/// The args of the action ci.explain, plus runId (P3).
+public struct CIExplainRequest: Codable, Hashable, Sendable {
+    public var repo: String
+    public var attempt: Int?
+    public var job: String?
+    public var force: Bool?
+    public var agent: String?
+
+    public init(repo: String, attempt: Int? = nil, job: String? = nil, force: Bool? = nil, agent: String? = nil) {
+        self.repo = repo
+        self.attempt = attempt
+        self.job = job
+        self.force = force
+        self.agent = agent
+    }
+}
+
+/// Where an explanation came from: a saved one, or an AI task that just ran.
+public enum CIExplanationSource: String, Codable, Hashable, Sendable {
+    case cache, ai
+}
+
+/// The data of an ok result of ci.explain: the cause of a failed run (P3).
+public struct CIExplanation: Codable, Hashable, Sendable {
+    public var repo: String
+    public var run: String
+    public var attempt: Int
+    public var job: String?
+    public var cause: String
+    public var fix: String
+    /// low, medium or high.
+    public var confidence: String
+    public var at: Date
+    public var source: CIExplanationSource
+
+    public init(repo: String, run: String, attempt: Int, job: String? = nil, cause: String, fix: String, confidence: String,
+                at: Date, source: CIExplanationSource) {
+        self.repo = repo
+        self.run = run
+        self.attempt = attempt
+        self.job = job
+        self.cause = cause
+        self.fix = fix
+        self.confidence = confidence
+        self.at = at
+        self.source = source
+    }
+}
+
 /// A request to keep the CI data of a ref fresh (P3). `ttl` is in seconds.
 public struct CIWatch: Codable, Hashable, Sendable {
     public var repo: String

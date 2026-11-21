@@ -1,5 +1,6 @@
 import OverSireAI
 import OverSireCore
+import OverSireSync
 import OverSireTestKit
 import XCTest
 @testable import OverSireApp
@@ -55,6 +56,66 @@ final class CIAssistTests: XCTestCase {
         XCTAssertFalse(cia.hasEngine)
         XCTAssertFalse(cia.canExplain)
         cia.explain(repo: "o/r", run: run(), job: job, log: ["x"])
+        XCTAssertTrue(cia.busy.isEmpty)
+    }
+
+    private func assist(_ engine: FakeAIEngine) -> CIAssist {
+        CIAssist(path: NSTemporaryDirectory() + "ci-assist-\(UUID().uuidString).json", ai: { AIClient(cfg: AIConfig(), router: AIRouter(engines: [engine])) },
+                 changedFiles: { _, _ in [] })
+    }
+
+    @MainActor
+    func testExplainNowUsesCache() async throws {
+        let engine = FakeAIEngine()
+        engine.on(.failureReason, .success(reply))
+        let cia = assist(engine)
+        _ = await cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: false)
+        XCTAssertEqual(engine.tasks.count, 1)
+        let again = await cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: false)
+        XCTAssertEqual(try again.get().confidence, "high")
+        XCTAssertEqual(engine.tasks.count, 1, "a saved cause needs no engine call")
+    }
+
+    @MainActor
+    func testExplainNowRunsOnce() async throws {
+        let engine = FakeAIEngine()
+        engine.on(.failureReason, .success(reply))
+        let cia = assist(engine)
+        async let a = cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: false)
+        async let b = cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: false)
+        let (ra, rb) = await (a, b)
+        XCTAssertEqual(try ra.get(), try rb.get())
+        XCTAssertEqual(engine.tasks.count, 1)
+        XCTAssertTrue(cia.busy.isEmpty)
+    }
+
+    @MainActor
+    func testExplainNowForce() async throws {
+        let engine = FakeAIEngine()
+        engine.on(.failureReason, .success(reply))
+        let cia = assist(engine)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ci-force-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let book = AIOutputBook(writes: StoreWrites(store: LocalStore(dir: dir)))
+        cia.outputs = book
+        _ = await cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: false)
+        engine.on(.failureReason, .success(#"{"cause":"A new cause.","fix":"Fix it.","confidence":"medium"}"#))
+        let r = await cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: true)
+        XCTAssertEqual(try r.get().cause, "A new cause.")
+        XCTAssertEqual(engine.tasks.count, 2)
+        XCTAssertEqual(cia.explanation(run())?.cause, "A new cause.")
+        let shared = book.all(.ciExplanation, as: RunExplanation.self)
+        XCTAssertEqual(shared.map(\.value.cause), ["A new cause."])
+    }
+
+    @MainActor
+    func testExplainNowNoCause() async {
+        let engine = FakeAIEngine()
+        engine.on(.failureReason, .success(#"{"fix":"x"}"#))
+        let cia = assist(engine)
+        let r = await cia.explainNow(repo: "o/r", run: run(), job: job, log: ["x"], force: false)
+        XCTAssertEqual(r, .failure(.badReply("The AI reply had no cause.")))
+        XCTAssertNil(cia.explanation(run()))
         XCTAssertTrue(cia.busy.isEmpty)
     }
 }

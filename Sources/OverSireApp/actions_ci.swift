@@ -1,4 +1,5 @@
 import Foundation
+import OverSireAI
 import OverSireCore
 import OverSireAssistant
 
@@ -34,7 +35,7 @@ struct CIActions {
     }
 
     var specs: [ActionSpec] {
-        [log, jobsSpec, workflows, refresh]
+        [log, jobsSpec, workflows, refresh, explainSpec(id: "ci.explain"), explainSpec(id: "run.explain")]
     }
 
     private var log: ActionSpec {
@@ -100,6 +101,55 @@ struct CIActions {
             if let r = untracked(repo) { return r }
             let ok = await link.main(false) { d, done in d.ciRefresh(repo, done: done) }
             return ok ? .ok(summary: "The runs of \(repo) are fresh.") : .failed("The runs of \(repo) did not load.")
+        }
+    }
+
+    private func explainSpec(id: String) -> ActionSpec {
+        ActionSpec(id: id, title: "Explain failure",
+                   help: "Explains a failed run: cause, fix and confidence. It uses the AI engine of the user.", kind: .read,
+                   input: ActionSpec.args(["repo": Self.repo, "runId": ("string", "The run id."), "attempt": ("integer", "The attempt. Default the newest."),
+                                           "job": ("string", "A job id. Default the first failed job."), "force": ("boolean", "Ask the AI engine again.")],
+                                          required: ["repo", "runId"])) { a in
+            await explain(a)
+        }
+    }
+
+    private func explain(_ a: ActionArgs) async -> ActionResult {
+        guard let repo = a.string("repo"), let id = a.string("runId") else { return .notAllowed("Give the repo and the run id.") }
+        if let r = untracked(repo) { return r }
+        guard let keeper = await jobs(), let assist = await link.main(CIAssist?.none, { d, done in done(d.ciAssist) }) else { return .failed("The app has no CI data.") }
+        var found = await link.main(Run?.none) { d, done in done(d.grouped.first { $0.0 == repo }?.1.first { $0.id == id }) }
+        if found == nil { found = await reader.run(repo, id: id) }
+        guard var run = found else { return .notAllowed("OverSire has no run \(id) in \(repo).") }
+        let attempt = a.int("attempt") ?? run.attempt ?? 1
+        var doc = await MainActor.run { keeper.doc(repo: repo, run: id, attempt: attempt) }
+        if attempt != (run.attempt ?? 1) {
+            guard let held = doc else { return .notAllowed("OverSire has no attempt \(attempt) of run \(id).") }
+            run = Run(id: run.id, name: run.name, displayTitle: run.displayTitle, status: held.status, conclusion: held.conclusion, headBranch: run.headBranch,
+                      headSha: run.headSha, event: run.event, url: run.url, updatedAt: run.updatedAt, createdAt: run.createdAt, startedAt: run.startedAt,
+                      number: run.number, workflowName: run.workflowName, actorLogin: run.actorLogin, attempt: attempt)
+        }
+        guard run.isFailure else { return .notAllowed("Run \(id) did not fail.") }
+        let force = a.bool("force") == true
+        let cached = await MainActor.run { !force && assist.explanation(run) != nil }
+        if !cached, !(await MainActor.run { assist.hasEngine }) { return .notAllowed("Set an AI engine in Settings › AI.") }
+        if doc == nil { doc = await keeper.fetchNow(repo: repo, run: run) }
+        let wanted = a.string("job")
+        let failure = doc?.failures.first { wanted == nil || $0.jobId == wanted }
+        let job = doc?.jobs.first { $0.id == (wanted ?? failure?.jobId) } ?? doc?.jobs.first { $0.conclusion == "failure" }
+            ?? Job(id: wanted ?? "", name: run.workflowName ?? run.name, status: nil, conclusion: nil, url: nil, startedAt: nil, completedAt: nil,
+                   runnerName: nil, steps: nil)
+        var lines = failure?.logTail
+        if lines == nil, !job.id.isEmpty, let text = await reader.rawLog(repo, jobId: job.id) {
+            lines = await MainActor.run { CIJobsKeeper.tail(text, lines: CIJobsKeeper.maxLogLines) }
+        }
+        let result = await assist.explainNow(repo: repo, run: run, job: job, log: lines ?? failure?.messages ?? [], force: force)
+        switch result {
+        case .failure(let e): return .failed(e.message)
+        case .success(let e):
+            let view = CIExplanation(repo: repo, run: id, attempt: attempt, job: job.id.isEmpty ? nil : job.id, cause: e.cause, fix: e.fix,
+                                     confidence: e.confidence, at: e.at, source: cached ? .cache : .ai)
+            return data("Cause: \(e.cause)\nFix: \(e.fix)\nConfidence: \(e.confidence)", view)
         }
     }
 }

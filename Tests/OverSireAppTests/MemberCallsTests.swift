@@ -30,6 +30,20 @@ final class MemberCallsTests: XCTestCase {
         XCTAssertEqual(r, AppCallResult(id: "m-1", status: .ok, summary: "OVERSIRE-12 is Done.", data: .object(["x": .int(1)])))
     }
 
+    func testCIExplainRunsAsMemberCall() async {
+        let log = Log()
+        let spec = ActionSpec(id: "ci.explain", title: "Explain", help: "", kind: .read) { a in
+            await log.saw(a.caller)
+            return .ok(summary: "Cause: x")
+        }
+        let c = MemberCall(id: "m-2", action: "ci.explain", args: .object(["repo": .string("o/r"), "runId": .string("9")]),
+                           from: MemberCaller(machine: "mba", name: "Fritz"), cli: MemberCLI(agent: "claude s1"))
+        let r = await MemberCalls().handle(c, actions: ActionList([spec])) {}
+        XCTAssertEqual(r.status, .ok)
+        let seen = await log.callers
+        XCTAssertEqual(seen.count, 1)
+    }
+
     func testRefusesLocalAction() async {
         let log = Log()
         let spec = ActionSpec(id: "machine.mode", title: "Mode", help: "", kind: .settings) { _ in
