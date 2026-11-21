@@ -23,6 +23,8 @@ final class ProjectRefreshTests: XCTestCase {
         private var seenLanes: [(project: String, lane: CallPriority)] = []
         var limited = false
         var failCreate = false
+        private var itemList: [Item] = []
+        var list: [Item] { get { lock.withLock { itemList } } set { lock.withLock { itemList = newValue } } }
         var limits: [Int] { lock.withLock { seenLimits } }
         var calls: Int { lock.withLock { count } }
         var blocked: Int { lock.withLock { waiting.count } }
@@ -49,7 +51,7 @@ final class ProjectRefreshTests: XCTestCase {
             await withCheckedContinuation { c in lock.withLock {
                 count += 1; seenLimits.append(limit); seenLanes.append((p.id, CallPriority.current)); waiting.append((p.id, c))
             } }
-            return []
+            return lock.withLock { itemList }
         }
         func detail(_ i: ItemRef) async throws -> ItemDetail { throw ProviderError.notFound }
         func comments(_ i: ItemRef) async throws -> [Comment] { [] }
@@ -78,11 +80,14 @@ final class ProjectRefreshTests: XCTestCase {
         func trackerError(_ id: String) -> String? { t == nil ? "no token in the Keychain" : nil }
     }
 
+    private var lastState = ""
+
     private func store(_ t: any Tracker) throws -> ProjectStore { try store(Trackers(t)) }
 
     private func store(_ trackers: TrackerDirectory) throws -> ProjectStore {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("refresh-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        lastState = dir.path + "/state.json"
         return ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, _ in }),
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
@@ -127,6 +132,141 @@ final class ProjectRefreshTests: XCTestCase {
         t.release("a")
         await until("the poll ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
         XCTAssertEqual(t.calls, 2, "the poll does not read b again")
+    }
+
+    // MARK: Writes (OVERSIRE-565)
+
+    private func slowItem(_ id: String, status: String = "a", title: String = "T") -> Item {
+        let at = Date(timeIntervalSince1970: 1000)
+        return Item(id: id, key: "SLOW-\(id.dropFirst())", title: title, url: "https://x/\(id)", statusOptionId: status, fields: [:],
+                    assignees: [], labels: [], author: nil, updatedBy: nil, updatedAt: at, activityAt: at, commentCount: 0, lastComment: nil,
+                    mentionsMe: false)
+    }
+
+    private let robot = EventActor(type: .agent, name: "codex")
+
+    /// A store with one read done: the snapshot holds item i1 with the status "a". No read runs.
+    private func loaded(_ t: SlowTracker) async throws -> (store: ProjectStore, key: String) {
+        t.list = [slowItem("i1")]
+        let store = try store(t)
+        let p = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        let key = t.project.storeKey
+        await MainActor.run { store.track([p], live: []) }
+        await until("the first read runs", timeout: .seconds(2)) { t.blocked == 1 }
+        t.release()
+        await until("the first read ends", timeout: .seconds(2)) { store.refreshing.isEmpty && store.snapshots[key] != nil }
+        return (store, key)
+    }
+
+    private func setStatus(_ store: ProjectStore, _ id: String, _ status: String, by actor: EventActor? = nil) async -> Bool {
+        await withCheckedContinuation { c in
+            DispatchQueue.main.async { store.setStatus(itemId: id, optionId: status, by: actor ?? self.robot) { c.resume(returning: $0) } }
+        }
+    }
+
+    func testWriteAnswersBeforeTheRefreshAndPatchesTheSnapshot() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        let ok = await setStatus(store, "i1", "b")
+        XCTAssertTrue(ok)
+        await until("the refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        let seen = await MainActor.run { (store.snapshots[key]?.items.first?.statusOptionId, store.writeActors["i1"]) }
+        XCTAssertEqual(seen.0, "b", "the view shows the write")
+        XCTAssertEqual(seen.1, robot)
+        await MainActor.run { store.flush() }
+        let disk = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: lastState))) as? [String: Any]
+        let saved = ((disk?["snapshots"] as? [String: Any])?[key] as? [String: Any])?["items"] as? [[String: Any]]
+        XCTAssertEqual(saved?.first?["statusOptionId"] as? String, "a", "the disk holds the base")
+        t.list = [slowItem("i1", status: "c")]
+        t.release()
+        await until("the patch and the mark end", timeout: .seconds(2)) { store.writeActors.isEmpty }
+        let after = await MainActor.run { store.snapshots[key]?.items.first?.statusOptionId }
+        XCTAssertEqual(after, "c", "the read replaces the patch")
+    }
+
+    func testTwoWritesKeepTheMarkUntilTheLastRead() async throws {
+        let t = SlowTracker()
+        let (store, _) = try await loaded(t)
+        let first = await setStatus(store, "i1", "b")
+        XCTAssertTrue(first)
+        await until("the first refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        let second = await setStatus(store, "i1", "c")
+        XCTAssertTrue(second)
+        t.release()
+        await until("the second read waits", timeout: .seconds(2)) { t.blocked == 1 && t.calls == 3 }
+        let kept = await MainActor.run { store.writeActors["i1"] }
+        XCTAssertEqual(kept, robot, "the first read does not cover the second write")
+        t.release()
+        await until("the mark ends", timeout: .seconds(2)) { store.writeActors.isEmpty }
+    }
+
+    func testALocalWriteEndsAfterItsKeepTime() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        await MainActor.run { store.localWriteKeep = 0.05 }
+        let ok = await setStatus(store, "i1", "b")
+        XCTAssertTrue(ok)
+        await until("the write expires", timeout: .seconds(2)) {
+            store.writeActors.isEmpty && store.snapshots[key]?.items.first?.statusOptionId == "a"
+        }
+    }
+
+    func testAReadThatStartedBeforeTheWriteKeepsThePatch() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        await MainActor.run { store.refresh([key], force: true, priority: .user) { _ in } }
+        await until("the read runs", timeout: .seconds(2)) { t.blocked == 1 }
+        let ok = await setStatus(store, "i1", "b")
+        XCTAssertTrue(ok)
+        t.release()
+        await until("the rerun waits", timeout: .seconds(2)) { t.blocked == 1 && t.calls == 3 }
+        let kept = await MainActor.run { store.snapshots[key]?.items.first?.statusOptionId }
+        XCTAssertEqual(kept, "b", "the old read does not hide the write")
+        t.release()
+        await until("the next read replaces the patch", timeout: .seconds(2)) {
+            store.writeActors.isEmpty && store.snapshots[key]?.items.first?.statusOptionId == "a"
+        }
+    }
+
+    func testPatchedAppliesTheChangesInOrder() throws {
+        let t = SlowTracker()
+        var item = slowItem("i1")
+        item.parentId = "p1"
+        item.epicId = "e1"
+        item.otherEpicIds = ["e2"]
+        let ref = t.project
+        let summary = ProjectSummary(ref: ref, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        let snap = ProjectSnapshot(summary: summary, statusOptions: [], items: [item, slowItem("i2")], fetchedAt: Date(),
+                                   fields: [ProjectField(id: "priority", name: "Priority", options: StatusOption.priorities)])
+        let patch = ItemPatch(title: "New", status: "s2", priority: "urgent", labels: ["l"], parent: "", bodyMarkdown: "Body")
+        XCTAssertEqual(ProjectStore.localChanges(patch, in: snap),
+                       [.title("New"), .body("Body"), .status("s2"), .priority("Urgent"), .parent(nil)])
+        XCTAssertEqual(ProjectStore.localChanges(ItemPatch(priority: "none"), in: snap), [.priority(nil)])
+        XCTAssertEqual(ProjectStore.localChanges(ItemPatch(priority: "zzz", assignees: ["me"]), in: snap), [])
+        let epic = Epic(id: "e3", title: "E", state: .active, url: "https://x/e3", project: ref)
+        let w = LocalWrite(project: ref.storeKey, at: Date(), marks: [], items: [
+            "i1": ProjectStore.localChanges(patch, in: snap) + [.status("s3"), .epic("e3")], "gone": [.status("x")]], epics: [epic])
+        let out = ProjectStore.patched(snap, [w])
+        let i1 = out.items[0]
+        XCTAssertEqual(i1.title, "New")
+        XCTAssertEqual(i1.body, "Body")
+        XCTAssertEqual(i1.statusOptionId, "s3", "the last change wins")
+        XCTAssertEqual(i1.fields["Priority"], "Urgent")
+        XCTAssertNil(i1.parentId)
+        XCTAssertEqual(i1.epicId, "e3")
+        XCTAssertNil(i1.otherEpicIds)
+        XCTAssertEqual(out.items[1], snap.items[1])
+        XCTAssertEqual(out.items.count, 2)
+        XCTAssertEqual(out.epics, [epic], "a nil epic list gets the epic")
+        XCTAssertEqual(out.fetchedAt, snap.fetchedAt)
+        XCTAssertEqual(snap.items[0].title, "T", "the base does not change")
+        XCTAssertEqual(snap.items[0].parentId, "p1")
+        let clear = ProjectStore.patched(i1, [.priority(nil)])
+        XCTAssertNil(clear.fields["Priority"])
+        var renamed = epic
+        renamed.title = "E2"
+        let again = ProjectStore.patched(out, [LocalWrite(project: ref.storeKey, at: Date(), marks: [], items: [:], epics: [renamed])])
+        XCTAssertEqual(again.epics, [renamed], "the same id replaces the epic")
     }
 
     // MARK: Create (OVERSIRE-540)

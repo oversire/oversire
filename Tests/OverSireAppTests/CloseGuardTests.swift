@@ -71,6 +71,32 @@ final class CloseGuardTests: XCTestCase {
         XCTAssertEqual(s, "s-todo")
     }
 
+    func testCloseSubItemsThenCloseTheParentWithoutARead() async throws {
+        let d = TestAppData(trackers: Trackers(fake))
+        let seed = try await ProjectSnapshot(summary: fake.projects()[0], statusOptions: fake.statuses(fake.project),
+                                             items: fake.items(fake.project, since: nil, limit: 50), fetchedAt: Date())
+        await MainActor.run { d.projectStore.seed(seed) }
+        await MainActor.run { d.projectStore.hold = true }
+        let closed = await d.actions.run("item.closeSubItems", ActionArgs(.object(["key": .string(parent.key)])))
+        guard case .ok = closed else { return XCTFail("\(closed)") }
+        let r = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string(parent.key), "status": .string("done")])))
+        guard case .ok = r else { return XCTFail("the parent close is refused: \(r)") }
+        let s = try await state(parent)
+        XCTAssertEqual(s, "s-done")
+    }
+
+    func testSetStatusWithSubItemsShowsAtOnce() async throws {
+        let store = store!, parent = parent!, child = child!
+        await MainActor.run { store.hold = true }
+        let ok: Bool = await withCheckedContinuation { c in
+            DispatchQueue.main.async { store.setStatusWithSubItems(itemId: parent.id, optionId: "s-done") { c.resume(returning: $0) } }
+        }
+        XCTAssertTrue(ok)
+        let seen = await MainActor.run { (store.item(parent.id)?.item.statusOptionId, store.item(child.id)?.item.statusOptionId) }
+        XCTAssertEqual(seen.0, "s-done")
+        XCTAssertEqual(seen.1, "s-done")
+    }
+
     func testDialogText() {
         let one = CloseGuard.spec(key: "A-1", state: "Done", open: 1)
         XCTAssertEqual(one.title, "A-1 has 1 open sub-item")

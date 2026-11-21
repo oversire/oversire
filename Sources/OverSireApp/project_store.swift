@@ -18,6 +18,26 @@ struct MadeItem {
     let epicError: String?
 }
 
+/// One field change of an item that the tracker took and that no read shows yet.
+enum LocalChange: Equatable {
+    case status(String)        // status option id
+    case title(String)
+    case body(String)          // Markdown
+    case priority(String?)     // name as in fields["Priority"]; nil removes it
+    case parent(String?)       // parent item id; nil removes it
+    case epic(EpicID?)
+}
+
+/// One finished tracker write. It lives until a read that started after it, or until it expires.
+struct LocalWrite {
+    let id = UUID()
+    let project: String               // store key
+    let at: Date                      // when the tracker call ended
+    let marks: [String]               // item or epic ids marked in writeActors
+    let items: [String: [LocalChange]]
+    let epics: [Epic]                 // created or changed epics
+}
+
 /// A comment event: the project, and the item when the event names it.
 struct CommentHint: Equatable {
     let workspace: String
@@ -70,6 +90,13 @@ final class ProjectStore {
     /// Item id → a stub of an item that `create` made and no snapshot holds yet.
     private var madeItems: [String: (project: String, item: Item, at: Date)] = [:]
     private let madeKeep: TimeInterval = 120
+    /// Key → the last tracker read, only while the key has open local writes. `snapshots` then holds the view.
+    private var polled: [String: ProjectSnapshot] = [:]
+    private var localWrites: [LocalWrite] = []
+    /// Id → the number of open writes that mark it in `writeActors`.
+    private var markCounts: [String: Int] = [:]
+    var localWriteKeep: TimeInterval = 300
+    private var expiryPending = false
     /// The last fetch error of each project, by store key. A good fetch clears it.
     private(set) var errors: [String: String] = [:]
     private(set) var tracked: [ProjectSummary] = []
@@ -209,6 +236,7 @@ final class ProjectStore {
     func poll() {
         guard !client else { return }
         releaseStuckReads()
+        expireLocalWrites()
         let keys = tracked.map(\.ref.storeKey).filter { key in
             // A live project waits for its events, unless its last refresh failed or is old.
             if isLive(key) {
@@ -414,6 +442,7 @@ final class ProjectStore {
 
     /// Lets go of each key whose read runs longer than `maxRead`.
     func releaseStuckReads() {
+        expireLocalWrites()
         let stuck = reads.filter { now().timeIntervalSince($0.value.started) > maxRead }
         for (key, read) in stuck {
             let seconds = Int(now().timeIntervalSince(read.started))
@@ -491,7 +520,9 @@ final class ProjectStore {
             let away = prior.map { now().timeIntervalSince($0.fetchedAt) > awayAfter } ?? false
             if away { snap = ProjectStore.settled(snap) }
             let before = digest(of: key)
+            let covered = started.map { s in localWrites.filter { $0.project == key && $0.at <= s } } ?? []
             absorb(snap, gone: gone, away: away ? Set(moved.map(\.id)) : nil)
+            drop(covered)
             if before != digest(of: key) { projects.insert(key) }
             save()
             queueComments(key, prior: away ? nil : prior, started: started)
@@ -594,7 +625,7 @@ final class ProjectStore {
 
     /// Applies a comment read to the current snapshot. The change goes through `absorb`: feed lines, notifications and event rows.
     private func mergeComments(_ key: String, _ read: [String: (at: Date, comments: [Comment])]) {
-        guard tracked.contains(where: { $0.ref.storeKey == key }), let cur = snapshots[key],
+        guard tracked.contains(where: { $0.ref.storeKey == key }), let cur = polled[key] ?? snapshots[key],
               let merged = ProjectStore.merged(cur, read) else { return }
         let before = digest(of: key)
         absorb(merged)
@@ -803,7 +834,7 @@ final class ProjectStore {
             if ok, let b = before { events.stateSet(b.item, in: b.snap, to: optionId, actor: actor) }
             done(ok)
         }
-        write(itemId, by: actor, failure: "Could not change the status", done: done) { c, ref in
+        write(itemId, by: actor, failure: "Could not change the status", patch: [.status(optionId)], done: done) { c, ref in
             try await c.update(ref, ItemPatch(status: optionId))
         }
     }
@@ -821,7 +852,8 @@ final class ProjectStore {
 
     func update(itemId: String, _ patch: ItemPatch, failure: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         if refusesClose(itemId, to: patch.status) { done(false); return }
-        write(itemId, by: actor, failure: failure, done: done) { c, ref in
+        let local = item(itemId).map { ProjectStore.localChanges(patch, in: $0.snap) } ?? []
+        write(itemId, by: actor, failure: failure, patch: local, done: done) { c, ref in
             try await c.update(ref, patch)
         }
     }
@@ -868,7 +900,7 @@ final class ProjectStore {
     }
 
     func edit(itemId: String, title: String, body: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
-        write(itemId, by: actor, failure: nil, done: done) { c, ref in
+        write(itemId, by: actor, failure: nil, patch: [.title(title), .body(body)], done: done) { c, ref in
             try await c.update(ref, ItemPatch(title: title, bodyMarkdown: body))
         }
     }
@@ -1006,11 +1038,7 @@ final class ProjectStore {
 
     /// A nil epic removes the item from its epic.
     func setEpic(_ epic: EpicID?, itemId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
-        writeActors[itemId] = actor
-        write(itemId, by: actor, failure: nil, done: { [weak self] ok in
-            self?.writeActors[itemId] = nil
-            done(ok)
-        }) { c, ref in
+        write(itemId, by: actor, markHuman: true, failure: nil, patch: [.epic(epic)], done: done) { c, ref in
             guard let t = c as? any EpicTracking else { throw ProviderError.unsupported(.epics) }
             try await t.setEpic(epic, for: ref)
         }
@@ -1024,7 +1052,8 @@ final class ProjectStore {
         epicCall(e.project.storeKey, actor: actor, done: { done($0.isOk) }) { t, _ in try await t.updateEpic(e, patch) }
     }
 
-    /// One epic write, then a user refresh of the project. A failure sets `lastError`. The refresh names `actor` in the epic rows.
+    /// One epic write. It answers when the tracker answers. A user refresh follows and names `actor` in the epic rows.
+    /// A failure sets `lastError`.
     private func epicCall(_ key: String, actor: EventActor, done: @escaping (Result<Epic, ProviderError>) -> Void,
                           _ op: @escaping @Sendable (any EpicTracking, ProjectSnapshot) async throws -> Epic) {
         guard let snap = snapshots[key], let client = trackers.tracker(snap.summary.ref.workspace) else {
@@ -1039,13 +1068,14 @@ final class ProjectStore {
             })
             DispatchQueue.main.async {
                 guard let self else { return }
-                let mark = (try? result.get())?.id.rawValue
-                if let mark { self.writeActors[mark] = actor }
-                if case .failure(let e) = result { self.lastError = e.message }
-                self.refresh([key], force: true, priority: .user) { _ in
-                    if let mark { self.writeActors[mark] = nil }
-                    done(result)
+                switch result {
+                case .success(let epic):
+                    self.record(LocalWrite(project: key, at: self.now(), marks: [epic.id.rawValue], items: [:], epics: [epic]), by: actor)
+                case .failure(let e):
+                    self.lastError = e.message
                 }
+                done(result)
+                self.refresh([key], force: true, priority: .user) { _ in }
             }
         }
     }
@@ -1074,13 +1104,14 @@ final class ProjectStore {
             if ok, let progress, current != progress.id { events.stateSet(found.item, in: found.snap, to: progress.id, actor: actor) }
             done(ok)
         }
-        write(itemId, by: actor, failure: nil, done: done) { c, ref in
+        let patch: [LocalChange] = progress.flatMap { current != $0.id ? [.status($0.id)] : nil } ?? []
+        write(itemId, by: actor, failure: nil, patch: patch, done: done) { c, ref in
             if let progress, current != progress.id { try await c.update(ref, ItemPatch(status: progress.id)) }
             try await ProjectStore.assignMe(c, ref)
         }
     }
 
-    // Sets each sub-item to the first completed state, with a comment, then reloads once.
+    // Sets each sub-item to the first completed state, with a comment. It answers, then reloads once.
     // A sub-item that is not loaded uses the parent URL: the tracker writes by id.
     func closeSubItems(_ ids: [String], parentId: String, done: @escaping (Bool) -> Void) {
         guard let found = item(parentId), let client = trackers.tracker(found.snap.summary.ref.workspace),
@@ -1095,21 +1126,26 @@ final class ProjectStore {
         ids.forEach { suppressNotify.insert($0) }
         CallPriority.task(.user) { [weak self] in
             var failed = 0
+            var worked: [String] = []
             for ref in refs {
                 do {
                     try await client.update(ref, ItemPatch(status: state.id))
+                    worked.append(ref.id)
                     try? await client.comment(ref, markdown: body)
                 } catch { failed += 1 }
             }
+            let closed = worked
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if failed > 0 { self.lastError = "Could not close \(failed) of \(refs.count) sub-items" }
-                self.refresh([found.key], force: true, priority: .user) { done($0 && failed == 0) }
+                self.record(LocalWrite(project: found.key, at: self.now(), marks: [], items: Dictionary(uniqueKeysWithValues: closed.map { ($0, [.status(state.id)]) }), epics: []))
+                done(failed == 0)
+                self.refresh([found.key], force: true, priority: .user) { _ in }
             }
         }
     }
 
-    // Sets the item and its open sub-items at all levels to the status, then reloads once (OVERSIRE-372).
+    // Sets the item and its open sub-items at all levels to the status. It answers, then reloads once (OVERSIRE-372).
     // A sub-item that is not loaded uses the parent URL: the tracker writes by id.
     func setStatusWithSubItems(itemId: String, optionId: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
@@ -1123,14 +1159,21 @@ final class ProjectStore {
         ids.forEach { suppressNotify.insert($0) }
         CallPriority.task(.user) { [weak self] in
             var failed = 0
+            var worked: [String] = []
             for ref in refs {
-                do { try await client.update(ref, ItemPatch(status: optionId)) } catch { failed += 1 }
+                do {
+                    try await client.update(ref, ItemPatch(status: optionId))
+                    worked.append(ref.id)
+                } catch { failed += 1 }
             }
+            let changed = worked
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if failed > 0 { self.lastError = "Could not set \(failed) of \(refs.count) items to \(state.name)" }
                 else { self.events.stateSet(found.item, in: snap, to: optionId, actor: actor) }
-                self.refresh([found.key], force: true, priority: .user) { done($0 && failed == 0) }
+                self.record(LocalWrite(project: found.key, at: self.now(), marks: [], items: Dictionary(uniqueKeysWithValues: changed.map { ($0, [.status(optionId)]) }), epics: []))
+                done(failed == 0)
+                self.refresh([found.key], force: true, priority: .user) { _ in }
             }
         }
     }
@@ -1147,13 +1190,18 @@ final class ProjectStore {
 
     /// For `--uishots`: a changed copy of a snapshot. The next refresh replaces it.
     func seed(_ snap: ProjectSnapshot) {
-        snapshots[snap.summary.ref.storeKey] = snap
-        digests[snap.summary.ref.storeKey] = nil
-        publish(DataChange(.projects, projects: [snap.summary.ref.storeKey]))
+        let key = snap.summary.ref.storeKey
+        drop(localWrites.filter { $0.project == key }, rebuild: false)
+        polled[key] = nil
+        snapshots[key] = snap
+        digests[key] = nil
+        publish(DataChange(.projects, projects: [key]))
     }
 
     /// For `--uishots`: Plane is down and no snapshot is left. The next refresh replaces this.
     func seedDown(_ why: String) {
+        drop(localWrites, rebuild: false)
+        polled = [:]
         snapshots = [:]
         digests = [:]
         for p in tracked { errors[p.ref.storeKey] = why }
@@ -1193,12 +1241,10 @@ final class ProjectStore {
                     let id = made.ref.id
                     self.suppressNotify.insert(id)
                     let marked = actor.type != .human || new.epic != nil
-                    if marked { self.writeActors[id] = actor }
+                    if marked { self.record(LocalWrite(project: new.projectKey, at: self.now(), marks: [id], items: [:], epics: []), by: actor) }
                     self.madeItems[id] = (new.projectKey, self.stub(of: new, made.ref), self.now())
                     done(.success(made))
-                    self.refresh([new.projectKey], force: true, priority: .user) { _ in
-                        if marked { self.writeActors[id] = nil }
-                    }
+                    self.refresh([new.projectKey], force: true, priority: .user) { _ in }
                 }
             }
         }
@@ -1226,30 +1272,105 @@ final class ProjectStore {
         "\(key) has \(n) open sub-item\(n == 1 ? "" : "s"). Close \(n == 1 ? "it" : "them") first."
     }
 
-    /// `actor`: an agent or the system is named in the poll rows of the write. The mark ends after the refresh.
-    private func write(_ itemId: String, by actor: EventActor = .user, failure: String?, done: @escaping (Bool) -> Void,
+    /// Answers when the tracker call ends, then starts the refresh. `actor`: an agent or the system is named in the poll rows
+    /// of the write. `markHuman` names a human too. The mark ends with the first read that started after the write.
+    /// `patch`: what the view shows until that read.
+    private func write(_ itemId: String, by actor: EventActor = .user, markHuman: Bool = false, failure: String?,
+                       patch: [LocalChange] = [], done: @escaping (Bool) -> Void,
                        _ op: @escaping @Sendable (any Tracker, ItemRef) async throws -> Void) {
         guard let found = item(itemId), let client = trackers.tracker(found.snap.summary.ref.workspace),
               let ref = found.item.ref(in: found.snap.summary.ref) else { done(false); return }
         suppressNotify.insert(itemId)
-        let marked = actor.type != .human
-        if marked { writeActors[itemId] = actor }
+        let marked = actor.type != .human || markHuman
         CallPriority.task(.user) { [weak self] in
             let result = await Result(awaiting: { try await op(client, ref) })
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                var items: [String: [LocalChange]] = [:]
                 if case .failure(let e) = result {
                     self.suppressNotify.remove(itemId)
                     self.lastError = failure ?? e.message
+                } else if !patch.isEmpty {
+                    items[itemId] = patch
                 }
                 self.timelineCache = self.timelineCache.filter { !$0.key.hasPrefix(itemId) }
-                self.refresh([found.key], force: true, priority: .user) {
-                    if marked { self.writeActors[itemId] = nil }
-                    done($0 && result.isOk)
+                // A failed call can leave a part of the change in the tracker: keep the mark.
+                if marked || !items.isEmpty {
+                    self.record(LocalWrite(project: found.key, at: self.now(), marks: marked ? [itemId] : [], items: items, epics: []), by: actor)
                 }
+                done(result.isOk)
+                self.refresh([found.key], force: true, priority: .user) { _ in }
             }
         }
     }
+
+    // MARK: Local writes
+
+    /// Keeps a finished write in the view until a read that started after it ends.
+    private func record(_ w: LocalWrite, by actor: EventActor = .user) {
+        localWrites.append(w)
+        for id in w.marks { mark(id, actor) }
+        if polled[w.project] == nil, let cur = snapshots[w.project] { polled[w.project] = cur }
+        if polled[w.project] != nil {
+            rebuild(w.project)
+            publish(DataChange(.projects, projects: [w.project], origin: .user))
+        }
+        scheduleExpiry()
+    }
+
+    private func mark(_ id: String, _ actor: EventActor) {
+        writeActors[id] = actor
+        markCounts[id, default: 0] += 1
+    }
+
+    private func unmark(_ id: String) {
+        let n = (markCounts[id] ?? 0) - 1
+        if n > 0 { markCounts[id] = n } else {
+            markCounts[id] = nil
+            writeActors[id] = nil
+        }
+    }
+
+    /// Sets the view of a key: the base and the open writes of the key.
+    private func rebuild(_ key: String) {
+        guard let base = polled[key] ?? snapshots[key] else { return }
+        let open = localWrites.filter { $0.project == key }
+        polled[key] = open.isEmpty ? nil : base
+        snapshots[key] = open.isEmpty ? base : ProjectStore.patched(base, open)
+        digests[key] = nil
+    }
+
+    /// Removes the writes, unmarks them and shows the new view of their keys.
+    private func drop(_ ws: [LocalWrite], rebuild show: Bool = true) {
+        guard !ws.isEmpty else { return }
+        let ids = Set(ws.map(\.id))
+        localWrites.removeAll { ids.contains($0.id) }
+        for w in ws { w.marks.forEach(unmark) }
+        if show { Set(ws.map(\.project)).forEach(rebuild) }
+    }
+
+    private func expireLocalWrites() {
+        let cutoff = now().addingTimeInterval(-localWriteKeep)
+        let old = localWrites.filter { $0.at <= cutoff }
+        if !old.isEmpty {
+            drop(old)
+            publish(DataChange(.projects, projects: Set(old.map(\.project)), origin: .event))
+        }
+        scheduleExpiry()
+    }
+
+    private func scheduleExpiry() {
+        guard !expiryPending, let first = localWrites.map(\.at).min() else { return }
+        expiryPending = true
+        let delay = max(0.01, first.addingTimeInterval(localWriteKeep).timeIntervalSince(now()))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.expiryPending = false
+            self?.expireLocalWrites()
+        }
+    }
+
+    /// The open changes of one item, in write order.
+    private func localChanges(of id: String) -> [LocalChange] { localWrites.flatMap { $0.items[id] ?? [] } }
 
     // MARK: Intake
 
@@ -1391,7 +1512,9 @@ final class ProjectStore {
         for (key, snap) in snapshots {
             if let item = snap.items.first(where: { $0.id == id }) { return (key, snap, item) }
         }
-        if let made = madeItems[id], let snap = snapshots[made.project], fresh(made.at) { return (made.project, snap, made.item) }
+        if let made = madeItems[id], let snap = snapshots[made.project], fresh(made.at) {
+            return (made.project, snap, ProjectStore.patched(made.item, localChanges(of: id)))
+        }
         return nil
     }
 
@@ -1409,7 +1532,7 @@ final class ProjectStore {
         }
         if let hit = keyIndex?[key.uppercased()], let snap = snapshots[hit.project] { return (hit.project, snap, snap.items[hit.at]) }
         if let made = madeItems.values.first(where: { $0.item.key.uppercased() == key.uppercased() && fresh($0.at) }), let snap = snapshots[made.project] {
-            return (made.project, snap, made.item)
+            return (made.project, snap, ProjectStore.patched(made.item, localChanges(of: made.item.id)))
         }
         return nil
     }
@@ -1499,6 +1622,7 @@ final class ProjectStore {
     // Applies changed status categories to the snapshots in memory.
     func applyLocalSettings() {
         snapshots = snapshots.mapValues { ProjectStore.localized($0) }
+        polled = polled.mapValues { ProjectStore.localized($0) }
         digests = [:]
         publish(DataChange(.projects, origin: .user))
     }
@@ -1525,7 +1649,7 @@ final class ProjectStore {
     /// `away`: the ids of the items that changed during a long break. They get one feed line in place of one line each.
     func absorb(_ snap: ProjectSnapshot, gone: Set<String> = [], away: Set<String>? = nil) {
         let key = snap.summary.ref.storeKey
-        let old = snapshots[key]
+        let old = polled[key] ?? snapshots[key]
         let all = ProjectStore.diff(old, snap)
         // An item that was in the index only joined the snapshot. It is not new.
         let known = Set(old?.index?.map(\.id) ?? [])
@@ -1540,13 +1664,14 @@ final class ProjectStore {
         seenItems.formUnion(snap.items.map(\.id))
         madeItems = madeItems.filter { _, m in fresh(m.at) && (m.project != key || !snap.items.contains { $0.id == m.item.id }) }
         let snap = ProjectStore.localized(snap)
-        snapshots[key] = snap
+        let open = localWrites.filter { $0.project == key }
+        polled[key] = open.isEmpty ? nil : snap
+        snapshots[key] = open.isEmpty ? snap : ProjectStore.patched(snap, open)
         digests[key] = nil
         notifyIntake(old: old, new: snap)
         commentActors = commentActors.filter { $0.value.until > now() }
         events.tracker(changes, old: old, new: snap, skipState: suppressNotify, actors: writeActors.merging(commentActors.mapValues(\.actor)) { a, _ in a })
         events.epics(old: old, new: snap, actors: writeActors)
-        for id in snap.items.map(\.id) where old?.epicId(of: id) != snap.epicId(of: id) { writeActors[id] = nil }
         if let away, old != nil {
             let n = away.subtracting(back).count
             if n > 0 {
@@ -1672,7 +1797,7 @@ final class ProjectStore {
 
     private func takeDisk() -> Disk {
         saveDue = false
-        return Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems), seenItems: Array(seenItems))
+        return Disk(snapshots: snapshots.merging(polled) { _, base in base }, readActivity: Array(readActivity), readItems: Array(readItems), seenItems: Array(seenItems))
     }
 
     /// The digest of `snapshots[key]`, kept until the snapshot changes.
@@ -1747,6 +1872,79 @@ extension ProjectStore {
 }
 
 extension ProjectStore {
+    /// The base with the writes of its project applied in order. An item that the base does not hold is skipped.
+    static func patched(_ base: ProjectSnapshot, _ writes: [LocalWrite]) -> ProjectSnapshot {
+        let key = base.summary.ref.storeKey
+        var changes: [String: [LocalChange]] = [:]
+        var epics = base.epics
+        for w in writes where w.project == key {
+            for (id, list) in w.items { changes[id, default: []] += list }
+            for e in w.epics {
+                var all = epics ?? []
+                if let n = all.firstIndex(where: { $0.id == e.id }) { all[n] = e } else { all.append(e) }
+                epics = all
+            }
+        }
+        var out = withItems(base, base.items.map { i in changes[i.id].map { patched(i, $0) } ?? i })
+        out.epics = epics
+        // An item that only the index holds still counts for its parent.
+        if let index = base.index {
+            out.index = index.map { stub in
+                guard let c = changes[stub.id] else { return stub }
+                var state = stub.stateId, parent = stub.parentId, epic = stub.epicId
+                for change in c {
+                    switch change {
+                    case .status(let s): state = s
+                    case .parent(let p): parent = p
+                    case .epic(let e): epic = e
+                    default: break
+                    }
+                }
+                return ItemStub(id: stub.id, parentId: parent, stateId: state, activityAt: stub.activityAt, epicId: epic, key: stub.key)
+            }
+        }
+        return out
+    }
+
+    /// A copy of the item with the changes applied in order.
+    static func patched(_ item: Item, _ changes: [LocalChange]) -> Item {
+        guard !changes.isEmpty else { return item }
+        var status = item.statusOptionId, title = item.title, fields = item.fields
+        var out = item
+        for c in changes {
+            switch c {
+            case .status(let s): status = s
+            case .title(let t): title = t
+            case .body(let b): out.body = b
+            case .priority(let p): fields["Priority"] = p
+            case .parent(let p): out.parentId = p
+            case .epic(let e):
+                out.epicId = e
+                out.otherEpicIds = nil
+            }
+        }
+        var copy = Item(id: item.id, key: item.key, title: title, url: item.url, statusOptionId: status, fields: fields,
+                        assignees: item.assignees, labels: item.labels, author: item.author, updatedBy: item.updatedBy,
+                        updatedAt: item.updatedAt, activityAt: item.activityAt, commentCount: out.commentCount,
+                        lastComment: out.lastComment, mentionsMe: out.mentionsMe, body: out.body, parentId: out.parentId,
+                        epicId: out.epicId, otherEpicIds: out.otherEpicIds)
+        copy.commentsAt = out.commentsAt
+        return copy
+    }
+
+    /// The local changes of an item patch. Labels and assignees are left to the next read.
+    static func localChanges(_ p: ItemPatch, in snap: ProjectSnapshot) -> [LocalChange] {
+        var out: [LocalChange] = []
+        if let t = p.title { out.append(.title(t)) }
+        if let b = p.bodyMarkdown { out.append(.body(b)) }
+        if let s = p.status { out.append(.status(s)) }
+        if let id = p.priority, let o = StatusOption.priorities.first(where: { $0.id == id }) {
+            out.append(.priority(id == "none" ? nil : o.name))
+        }
+        if let parent = p.parent { out.append(.parent(parent.isEmpty ? nil : parent)) }
+        return out
+    }
+
     static func withItems(_ s: ProjectSnapshot, _ items: [Item]) -> ProjectSnapshot {
         ProjectSnapshot(summary: s.summary, statusOptions: s.statusOptions, items: items, fetchedAt: s.fetchedAt,
                         fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake, epics: s.epics)

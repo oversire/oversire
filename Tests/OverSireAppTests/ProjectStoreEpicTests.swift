@@ -122,7 +122,6 @@ final class ProjectStoreEpicTests: XCTestCase {
         let ok: Bool = await withCheckedContinuation { c in
             DispatchQueue.main.async {
                 rig.d.projectStore.setEpic(rig.epic.id, itemId: item.id) { c.resume(returning: $0) }
-                XCTAssertEqual(rig.d.projectStore.writeActors, [item.id: .user])
             }
         }
         XCTAssertTrue(ok)
@@ -131,10 +130,29 @@ final class ProjectStoreEpicTests: XCTestCase {
         XCTAssertEqual(rows[1].actorType, .human)
         XCTAssertEqual(rows[1].item, item.key)
         XCTAssertEqual(rows[1].parentItem, rig.epic.eventKey)
-        let left = await MainActor.run { rig.d.projectStore.writeActors }
-        XCTAssertEqual(left, [:])
+        await until("the mark ends") { await MainActor.run { rig.d.projectStore.writeActors.isEmpty } }
         let snap = await rig.snapshot()
         XCTAssertEqual(snap?.epicId(of: item.id), rig.epic.id)
+    }
+
+    func testSetEpicShowsAtOnceAndTheReadWritesOneRow() async throws {
+        let rig = try await EpicRig()
+        let item = rig.items[0]
+        let agent = EventActor(type: .agent, name: "codex")
+        _ = await rig.rows(count: 1)
+        rig.fake.freezeList()
+        let ok: Bool = await withCheckedContinuation { c in
+            DispatchQueue.main.async { rig.d.projectStore.setEpic(rig.epic.id, itemId: item.id, by: agent) { c.resume(returning: $0) } }
+        }
+        XCTAssertTrue(ok)
+        await until("the view shows the epic") { await rig.snapshot()?.epicId(of: item.id) == rig.epic.id }
+        rig.fake.thawList()
+        await rig.reload()
+        let rows = await rig.rows(count: 2)
+        XCTAssertEqual(rows.map(\.kind), [.epicCreated, .epicItemAdded])
+        XCTAssertEqual(rows[1].actorType, .agent)
+        XCTAssertEqual(rows[1].actor, "codex")
+        await until("the mark ends") { await MainActor.run { rig.d.projectStore.writeActors.isEmpty } }
     }
 
     func testAFailedSetEpicClearsTheMark() async throws {
@@ -143,8 +161,7 @@ final class ProjectStoreEpicTests: XCTestCase {
             DispatchQueue.main.async { rig.d.projectStore.setEpic("nope", itemId: rig.items[0].id) { c.resume(returning: $0) } }
         }
         XCTAssertFalse(ok)
-        let left = await MainActor.run { rig.d.projectStore.writeActors }
-        XCTAssertEqual(left, [:])
+        await until("the mark ends") { await MainActor.run { rig.d.projectStore.writeActors.isEmpty } }
     }
 
     func testCreateAndUpdateEpic() async throws {

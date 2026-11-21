@@ -136,16 +136,45 @@ final class ItemCliActionsTests: XCTestCase {
         let rig = try await EpicRig()
         let key = rig.items[0].key
         _ = await run(rig, "item.assign", ["key": .string(key), "people": .array([.string("me")])])
-        var i = await item(rig)
-        XCTAssertEqual(i?.assignees, ["me"])
+        await until("me is assigned") { await self.item(rig)?.assignees == ["me"] }
         _ = await run(rig, "item.assign", ["key": .string(key), "people": .array([.string("bob stone"), .string("me")])])
-        i = await item(rig)
-        XCTAssertEqual(i?.assignees, ["bob", "me"])
+        await until("bob and me are assigned") { await self.item(rig)?.assignees == ["bob", "me"] }
         let r = await run(rig, "item.assign", ["key": .string(key), "people": .array([.string("zed")])])
         assertNotAllowed(r, "No person zed in FAKE. Use: Bob Stone, Me Fake.")
         _ = await run(rig, "item.assign", ["key": .string(key), "people": .array([])])
-        i = await item(rig)
-        XCTAssertEqual(i?.assignees, [])
+        await until("nobody is assigned") { await self.item(rig)?.assignees == [] }
+    }
+
+    /// The writes answer when the tracker answers. The view shows them while the refresh hangs (OVERSIRE-565).
+    func testWritesAnswerWhileTheRefreshHangs() async throws {
+        let rig = try await EpicRig()
+        await MainActor.run { rig.d.projectStore.hold = true }
+        let k0 = rig.items[0].key, k1 = rig.items[1].key, k2 = rig.items[2].key
+        let steps: [(String, [String: JSONValue])] = [
+            ("item.setStatus", ["key": .string(k0), "status": .string("done")]),
+            ("item.start", ["key": .string(k1)]),
+            ("item.comment", ["key": .string(k1), "body": .string("Hello")]),
+            ("item.edit", ["key": .string(k0), "title": .string("Renamed"), "body": .string("New body")]),
+            ("item.setPriority", ["key": .string(k1), "priority": .string("high")]),
+            ("item.update", ["key": .string(k2), "parent": .string(k0)]),
+            ("item.relate", ["key": .string(k1), "kind": .string("relatesTo"), "other": .string(k2)]),
+            ("item.link", ["key": .string(k1), "url": .string("https://example.com/a")]),
+        ]
+        for (id, args) in steps {
+            let r = await run(rig, id, args)
+            guard case .ok = r else { return XCTFail("\(id): \(r)") }
+        }
+        let a = await run(rig, "item.get", ["key": .string(k0)])
+        guard case .ok(_, let first?, _) = a else { return XCTFail("\(a)") }
+        XCTAssertEqual(first["title"]?.string, "Renamed")
+        XCTAssertEqual(first["status"]?.string, "Done")
+        XCTAssertEqual(first["body"]?.string, "New body")
+        let b = await run(rig, "item.get", ["key": .string(k1)])
+        guard case .ok(_, let second?, _) = b else { return XCTFail("\(b)") }
+        XCTAssertEqual(second["status"]?.string, "In Progress")
+        XCTAssertEqual(second["priority"]?.string, "High")
+        let c = await item(rig, 2)
+        XCTAssertEqual(c?.parentId, rig.items[0].id)
     }
 
     func testSetStatusByCategoryWord() async throws {

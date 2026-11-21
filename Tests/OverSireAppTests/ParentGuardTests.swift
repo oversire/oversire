@@ -59,6 +59,24 @@ final class ParentGuardTests: XCTestCase {
         return try await state(ref)
     }
 
+    func testSeedDropsTheOpenWrites() async throws {
+        let s = try await snap()
+        let store = store!, parent = parent!
+        await MainActor.run { store.seed(s) }
+        let actor = EventActor(type: .agent, name: "codex")
+        let ok: Bool = await withCheckedContinuation { c in
+            DispatchQueue.main.async { store.setStatus(itemId: parent.id, optionId: "s-doing", force: true, by: actor) { c.resume(returning: $0) } }
+        }
+        XCTAssertTrue(ok)
+        let patched = await MainActor.run { (store.item(parent.id)?.item.statusOptionId, store.writeActors[parent.id]) }
+        XCTAssertEqual(patched.0, "s-doing")
+        XCTAssertEqual(patched.1, actor)
+        await MainActor.run { store.seed(s) }
+        let after = await MainActor.run { (store.item(parent.id)?.item.statusOptionId, store.writeActors) }
+        XCTAssertEqual(after.0, "s-todo", "the view equals the seed")
+        XCTAssertTrue(after.1.isEmpty)
+    }
+
     func testReopensToTheLastOpenStateWithOneComment() async throws {
         try await poll("s-review")
         try await poll("s-done")

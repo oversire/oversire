@@ -268,6 +268,26 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(missing, .notAllowed("FAKE has no loaded item FAKE-99."))
     }
 
+    /// An epic made by `epic.create` is usable at once, while the refresh hangs (OVERSIRE-565).
+    func testEpicCreateThenAddItemsWhileTheRefreshHangs() async throws {
+        let rig = try await EpicRig()
+        await MainActor.run { rig.d.projectStore.hold = true }
+        let make = await rig.d.actions.run("epic.create", args(["project": .string("FAKE"), "title": .string("Billing")]))
+        guard case .ok(_, let data, _) = make, let id = data?["id"]?.string else { return XCTFail("\(make)") }
+        let keys = rig.items.prefix(2).map { JSONValue.string($0.key) }
+        let add = await rig.d.actions.run("epic.addItems", args(["project": .string("FAKE"), "epic": .string(id), "keys": .array(keys)]))
+        XCTAssertEqual(add, .ok(summary: "2 items are in Billing."))
+        let list = await rig.d.actions.run("epic.list", args(["project": .string("FAKE")]))
+        guard case .ok(_, let rows?, _) = list else { return XCTFail("\(list)") }
+        let billing = try XCTUnwrap(rows.array?.first { $0["title"]?.string == "Billing" })
+        XCTAssertEqual(billing["progress"]?.string, "0 of 2 done")
+        let upd = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Billing"), "state": .string("active")]))
+        XCTAssertEqual(upd, .ok(summary: "Epic Billing is updated."))
+        _ = await rig.d.actions.run("epic.create", args(["project": .string("FAKE"), "title": .string("Spare")]))
+        let close = await rig.d.actions.run("epic.close", args(["project": .string("FAKE"), "epic": .string("Spare")]))
+        guard case .ok = close else { return XCTFail("\(close)") }
+    }
+
     private func inEpic(_ rig: EpicRig, _ n: Int) async throws {
         for i in rig.items.prefix(n) { try await rig.fake.setEpic(rig.epic.id, for: i) }
         await rig.reload()
