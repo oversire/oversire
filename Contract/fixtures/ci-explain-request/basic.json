@@ -2,6 +2,6 @@
   "repo": "oversire/cli",
   "attempt": 1,
   "job": "70002",
-  "force": false,
+  "force": true,
   "agent": "claude s1"
 }
