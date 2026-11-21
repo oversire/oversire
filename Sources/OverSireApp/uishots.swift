@@ -1880,14 +1880,18 @@ extension UIShots {
             let list = [(1, "Big Timer"), (2, "Website"), (3, "Billing")].map {
                 ProjectSummary(ref: ref($0.0), identifier: ["BTD", "WEB", "BILL"][$0.0 - 1], title: $0.1, url: "", closed: false)
             }
-            projectCatalog.mirrored = ClientCatalog(projects: [], capabilities: [:], trackers: ["big-time-data"],
+            PROJECTS_CFG.allOf = []
+            PROJECTS_CFG.picked = [list[0].ref.storeKey]
+            projectCatalog.mirrored = ClientCatalog(projects: [CatalogProject(summary: list[0], capabilities: [])], capabilities: [:],
+                                                    trackers: ["big-time-data"],
                                                     workspaces: [CatalogWorkspace(id: "big-time-data", projects: list, fetchedAt: Date())])
-            projectCatalog.forwardRefresh = { _, _ in }
+            // The home answers at once, but not in the refreshing frame.
+            projectCatalog.forwardRefresh = { _, done in if frame == "projects" { done(nil) } }
             MODE = .client
+            projectCatalog.refresh("big-time-data", force: true)
             Disclosure.expand("track-project")
             w.router.go(.settings(.general))   // a fresh page
             w.router.go(.settings(.projects))
-            if frame == "projects-refreshing" { projectCatalog.refresh("big-time-data", force: true) }
         case "event":
             let e = Event(seq: 1, seenAt: Date(), draft: EventDraft(
                 id: "app:status-1", at: Date().addingTimeInterval(-300), kind: .itemStateChanged, item: "OVERSIRE-490", project: "OVERSIRE",
