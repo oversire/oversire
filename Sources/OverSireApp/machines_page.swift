@@ -19,6 +19,8 @@ struct MachinesSnapshot: Equatable {
     var group: Group?
     var peers: [DaemonInfo] = []
     var hooks: [HarnessHooks] = []
+    /// The hook switches of this Mac. nil: an old daemon.
+    var hookSettings: HookSettings?
     /// machine → its sessions. A machine without an entry has no count.
     var sessions: [String: [DaemonSession]] = [:]
     var health: [String: SourceHealth] = [:]
@@ -272,6 +274,8 @@ struct MachinesModel: Equatable {
     var machines: [Machine]
     var found: [Found]
     var hooks: [Hook]
+    /// The switch "Send CI polls to OverSire". nil: an old daemon.
+    var ciRedirect: Bool?
     var daemon: DaemonInfo?
     var installed: Bool
     var path: String
@@ -361,6 +365,7 @@ struct MachinesModel: Equatable {
             ? s.peers.filter { $0.machine.rawValue != me && !known.contains($0.machine) }.map(Found.init)
             : []
         hooks = s.info == nil ? [] : s.hooks.map(Self.hook)
+        ciRedirect = s.info == nil ? nil : s.hookSettings?.ciRedirect
         sessionChoices = machines.filter(\.isThis).map(\.name) + machines.filter { !$0.isThis }.map(\.name)
         sessionsMachine = machines.first(where: \.runsSessions)?.name
         runtimes = machines.flatMap { m in (s.runtimes[m.name] ?? []).map { Runtime(machine: m.name, $0) } }
@@ -463,6 +468,7 @@ final class MachinesController {
     /// The link of a client to its home. nil in Full mode.
     var link: () -> ClientLink? = { (NSApp?.delegate as? GHActionsBar)?.clientLink }
     var changed: () -> Void = { ChangeBus.shared.post(DataChange(.connection, origin: .user)) }
+    var desk: () -> EventDesk = { EVENTS }
 
     static let loadingChanged = Notification.Name("MachinesLoading")
 
@@ -525,6 +531,7 @@ final class MachinesController {
         if let me = s.info {
             if (s.group?.members.count ?? 0) <= 1 { s.peers = (try? await local.peers()) ?? [] }
             s.hooks = (try? await local.hookState()) ?? me.harnesses
+            s.hookSettings = try? await local.hookSettings()
             if let list = try? await local.sessions() { s.sessions[me.machine.rawValue] = list.sessions }
             if let page = try? await local.runtimes() { s.runtimes[me.machine.rawValue] = page.runtimes }
             await hub?.approvals.sync()
@@ -704,6 +711,22 @@ final class MachinesController {
     func remove(_ machine: String) { let l = local; run("Remove \(machine)") { try await l.remove(machine); return nil } }
     func installHooks(_ names: [String]) { let l = local; run("Install hooks") { _ = try await l.hooks(install: names); return nil } }
     func removeHooks(_ names: [String]) { let l = local; run("Remove hooks") { _ = try await l.removeHooks(names); return nil } }
+
+    /// Turns the refusal of gh and glab CI polls on or off for this Mac, and writes the settings.changed row.
+    func setCIRedirect(_ on: Bool) {
+        let l = local
+        Task { @MainActor in
+            let failed = await self.call("Send CI polls to OverSire") { _ in
+                let new = try await l.setHookSettings(HookSettings(ciRedirect: on))
+                self.snapshot.hookSettings = new
+                let me = self.snapshot.info?.machine.rawValue ?? self.desk().machine()
+                self.desk().action(.settingsChanged, item: nil, verb: "settings", "Hooks settings changed from \(me)",
+                                   payload: ["section": .string("hooks"), "keys": .array([.string("ciRedirect")]), "from": .string(me)])
+                return nil
+            }
+            if failed != nil { self.changed() }
+        }
+    }
 
     func setMuted(_ machine: String, _ on: Bool) {
         if on { MACHINES.muted.insert(machine) } else { MACHINES.muted.remove(machine) }
@@ -1049,7 +1072,15 @@ extension SettingsPage {
             }
             return Row(cells, height: 54, label: "\(h.title) hooks: \(h.status)")
         }
-        if rows.isEmpty { rows = [Padded(NSTextField.text("The daemon found no agent CLI on this Mac.", size: 12, color: Palette.dim))] }
+        if rows.isEmpty {
+            rows = [Padded(NSTextField.text("The daemon found no agent CLI on this Mac.", size: 12, color: Palette.dim))]
+        } else {
+            let old = m.ciRedirect == nil
+            rows.append(SwitchRow("Send CI polls to OverSire",
+                                  note: old ? "Update oversire to use this."
+                                  : "Agents that run gh run watch, gh run view, gh run list, gh pr checks or glab ci get the oversire ci command instead. This saves the GitHub quota.",
+                                  on: m.ciRedirect ?? false, enabled: !old) { c.setCIRedirect($0) })
+        }
         let v = NSStackView(v: [SectionTitle(SettingsAnchor.hooks.title)], spacing: 6)
         let card = ListCard()
         rows.forEach { card.add($0) }

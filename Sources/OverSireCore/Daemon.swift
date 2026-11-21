@@ -160,6 +160,14 @@ public struct HarnessHooks: Codable, Hashable, Sendable {
     }
 }
 
+/// The hook switches of one machine. GET and PUT /v1/hooks/settings, loopback only.
+public struct HookSettings: Codable, Hashable, Sendable {
+    /// The hooks refuse gh and glab CI polls and name the oversire ci command.
+    public var ciRedirect: Bool
+
+    public init(ciRedirect: Bool) { self.ciRedirect = ciRedirect }
+}
+
 /// GET /v1/whoami on a daemon.
 public struct DaemonInfo: Codable, Hashable, Sendable {
     public struct Listen: Codable, Hashable, Sendable {
@@ -182,7 +190,7 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
     public var update: DaemonUpdate?
-    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls, mirror-ci, ci
+    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls, mirror-ci, ci, ci-redirect
     public var listen: Listen
 
     public static let launchEnv = "launch-env"
@@ -192,6 +200,7 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public static let memberCalls = "member-calls"
     public static let mirrorCI = "mirror-ci"
     public static let ci = "ci"
+    public static let ciRedirect = "ci-redirect"
 
     public func has(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 

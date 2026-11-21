@@ -84,4 +84,21 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertEqual(removed.first?.hooks, .missing)
         XCTAssertEqual(d.body(of: "DELETE /v1/hooks/install")?["harnesses"] as? [String], ["claude"])
     }
+
+    func testHookSettings() async throws {
+        let d = FakeDaemon(machine: "mbp")
+        let c = DaemonClient(base: DaemonClient.loopback, token: nil, http: d)
+        let first = try await c.hookSettings()
+        XCTAssertTrue(first.ciRedirect)
+        let set = try await c.setHookSettings(HookSettings(ciRedirect: false))
+        XCTAssertFalse(set.ciRedirect)
+        XCTAssertEqual(d.body(of: "PUT /v1/hooks/settings")?["ciRedirect"] as? Bool, false)
+        let again = try await c.hookSettings()
+        XCTAssertFalse(again.ciRedirect)
+        d.hookSettings = nil
+        do {
+            _ = try await c.hookSettings()
+            XCTFail("an old daemon has no settings route")
+        } catch ProviderError.notFound {}
+    }
 }

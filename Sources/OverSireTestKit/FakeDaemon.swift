@@ -22,6 +22,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _sessionsError: ProviderError?
     private var _peers: [DaemonInfo] = []
     private var _hooks: [HarnessHooks] = []
+    private var _hookSettings: HookSettings? = HookSettings(ciRedirect: true)
     private var _codes: Set<String> = []
     private var _pending: [JoinRequestFrame] = []
     private var _decisions: [(id: String, approve: Bool)] = []
@@ -77,6 +78,8 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     public var peers: [DaemonInfo] { get { with { _peers } } set { with { _peers = newValue } } }
     /// GET /v1/hooks/install. POST sets the named ones to installed, DELETE to missing.
     public var hooks: [HarnessHooks] { get { with { _hooks } } set { with { _hooks = newValue } } }
+    /// GET and PUT /v1/hooks/settings. nil: 404, as from an old daemon.
+    public var hookSettings: HookSettings? { get { with { _hookSettings } } set { with { _hookSettings = newValue } } }
     /// The codes that POST /v1/group/join and POST /v1/group/enter accept. A code works once.
     public var codes: Set<String> { get { with { _codes } } set { with { _codes = newValue } } }
     /// The agent secrets, as "scope/agent/key" to the value. Only a test reads a value.
@@ -273,6 +276,11 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
             let names = Set(d["harnesses"] ?? [])
             _hooks = _hooks.map { h in names.contains(h.name) ? HarnessHooks(name: h.name, hooks: m == "POST" ? .installed : .missing) : h }
             return try ok(_hooks)
+        case ("GET", ["v1", "hooks", "settings"]): return try _hookSettings.map(ok) ?? missing
+        case ("PUT", ["v1", "hooks", "settings"]):
+            guard _hookSettings != nil else { return missing }
+            _hookSettings = try DaemonClient.decode(body ?? Data()) as HookSettings
+            return try ok(_hookSettings)
         case ("POST", ["v1", "events"]):
             let a = try DaemonClient.decode(body ?? Data()) as Event.Append
             var n = 0

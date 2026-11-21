@@ -805,3 +805,83 @@ final class AutoStartNoteTests: XCTestCase {
         XCTAssertNil(QueuePage.autoStartNote(nil, device: "app-mbp"))
     }
 }
+
+// MARK: CI redirect switch (OVERSIRE-555)
+
+@MainActor
+final class CIRedirectSwitchTests: XCTestCase {
+    private actor Rows: EventOutlet {
+        var rows: [EventDraft] = []
+        func append(_ drafts: [EventDraft]) { rows += drafts }
+        func link(_ links: [ItemLink]) {}
+    }
+
+    private func switches(_ v: NSView) -> [NSSwitch] {
+        ((v as? NSSwitch).map { [$0] } ?? []) + v.subviews.flatMap(switches)
+    }
+
+    private func texts(_ v: NSView) -> [String] {
+        ((v as? NSTextField).map { [$0.stringValue] } ?? []) + v.subviews.flatMap(texts)
+    }
+
+    private func page(_ c: MachinesController, settings: HookSettings?) -> SettingsPage {
+        var s = MachinesSnapshot()
+        s.installed = true
+        s.info = info("mbp")
+        s.hooks = [HarnessHooks(name: "claude", hooks: .installed), HarnessHooks(name: "codex", hooks: .untrusted)]
+        s.hookSettings = settings
+        c.use(s)
+        let p = SettingsPage(.settings(.machines), data: TestAppData(), router: Router())
+        _ = p.view
+        return p
+    }
+
+    func testCIRedirectSwitch() async throws {
+        let d = FakeDaemon(machine: "mbp")
+        let outlet = Rows()
+        let desk = EventDesk(outlet: outlet)
+        desk.machine = { "mbp" }
+        let c = MachinesController.shared
+        let saved = (c.local, c.desk, c.frozen, c.changed, c.config, c.owner)
+        defer { (c.local, c.desk, c.frozen, c.changed, c.config, c.owner) = saved }
+        c.local = client(d)
+        c.desk = { desk }
+        c.frozen = true
+        c.changed = {}
+        c.config = { MachinesConfig(hooksConsent: true) }
+        c.owner = { nil }
+
+        let p = page(c, settings: HookSettings(ciRedirect: true))
+        let sw = try XCTUnwrap(switches(p.view).first { $0.accessibilityLabel() == "Send CI polls to OverSire" })
+        XCTAssertEqual(sw.state, .on)
+        XCTAssertTrue(sw.isEnabled)
+        sw.performClick(nil)
+        _ = await Wait.until(timeout: .seconds(2)) { d.body(of: "PUT /v1/hooks/settings") != nil }
+        XCTAssertEqual(d.body(of: "PUT /v1/hooks/settings")?["ciRedirect"] as? Bool, false)
+        for _ in 0..<200 where await outlet.rows.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        let rows = await outlet.rows
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.kind, .settingsChanged)
+        XCTAssertEqual(rows.first?.payload, ["section": .string("hooks"), "keys": .array([.string("ciRedirect")]), "from": .string("mbp")])
+        XCTAssertEqual(c.model.ciRedirect, false)
+    }
+
+    func testOldDaemonShowsTheSwitchOff() throws {
+        let c = MachinesController.shared
+        let saved = (c.frozen, c.config, c.owner)
+        defer { (c.frozen, c.config, c.owner) = saved }
+        c.frozen = true
+        c.config = { MachinesConfig(hooksConsent: true) }
+        c.owner = { nil }
+        let p = page(c, settings: nil)
+        let sw = try XCTUnwrap(switches(p.view).first { $0.accessibilityLabel() == "Send CI polls to OverSire" })
+        XCTAssertEqual(sw.state, .off)
+        XCTAssertFalse(sw.isEnabled)
+        XCTAssertTrue(texts(p.view).contains("Update oversire to use this."))
+    }
+
+    func testSwitchIsFoundInTheSearch() {
+        let hits = SettingsIndex.entries.filter { $0.title == "Send CI polls to OverSire" }
+        XCTAssertEqual(hits.map(\.anchor), [.hooks])
+    }
+}

@@ -234,6 +234,7 @@ struct SettingsIndex {
         Entry("Orca live terminal", .runtimes, "runtime stream text only pairing retry"),
         Entry("Install hooks", .hooks, "claude codex opencode live status"),
         Entry("Remove hooks", .hooks, "claude codex opencode"),
+        Entry("Send CI polls to OverSire", .hooks, "gh run watch glab ci pr checks redirect refuse quota github agents"),
         Entry("Runner", .daemon, "work orders cloud hub"),
         Entry("Mute a project", .overrides, "unmute muted silence"),
     ]

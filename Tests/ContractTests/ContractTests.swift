@@ -64,6 +64,7 @@ final class ContractTests: XCTestCase {
         "agent-secret-list": roundTrip(AgentSecretList.self),
         "agent-secret-resolve": roundTrip(AgentSecretResolve.self),
         "agent-secret-values": roundTrip(AgentSecretValues.self),
+        "hook-settings": roundTrip(HookSettings.self),
         "session-digest": roundTrip(SessionDigest.self),
         "daemon-session": roundTrip(DaemonSession.self),
         "daemon-sessions-page": roundTrip(DaemonSessionsPage.self),

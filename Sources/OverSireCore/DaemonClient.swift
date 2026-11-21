@@ -70,6 +70,14 @@ public final class DaemonClient: Sendable {
     /// Loopback only. The hook state of all harnesses.
     public func hookState() async throws -> [HarnessHooks] { try await get("/v1/hooks/install") }
 
+    /// Loopback only. The hook switches of this machine. Errors: `ProviderError.notFound` from an old daemon.
+    public func hookSettings() async throws -> HookSettings { try await get("/v1/hooks/settings") }
+
+    /// Loopback only. Sets the hook switches of this machine, and gives the new value.
+    public func setHookSettings(_ s: HookSettings) async throws -> HookSettings {
+        try await call("PUT", "/v1/hooks/settings", s)
+    }
+
     /// Loopback only. Removes the hooks of the named harnesses, and gives the hook state of all harnesses.
     public func removeHooks(_ names: [String]) async throws -> [HarnessHooks] {
         try await call("DELETE", "/v1/hooks/install", ["harnesses": names])

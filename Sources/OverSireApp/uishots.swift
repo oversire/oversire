@@ -1760,6 +1760,7 @@ extension MachinesSnapshot {
                         lastSeen: now.addingTimeInterval(-seen), version: version)
         }
         s.info = info("mbp", "100.97.81.23", roles: ["serve", "runner"])
+        s.hookSettings = HookSettings(ciRedirect: true)
         s.hooks = [HarnessHooks(name: "claude", hooks: .installed), HarnessHooks(name: "codex", hooks: .untrusted),
                    HarnessHooks(name: "opencode", hooks: .missing)]
         func session(_ n: Int, _ state: DaemonSession.State, on m: MachineName) -> DaemonSession {
