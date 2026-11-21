@@ -417,7 +417,8 @@ public final class DaemonClient: Sendable {
         }
     }
 
-    package static func decode<T: Decodable>(_ data: Data) throws -> T {
+    /// ISO 8601 times with or without fractions, as the daemon writes them.
+    package static let decoder: JSONDecoder = {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .custom { d in
             let s = try d.singleValueContainer().decode(String.self)
@@ -426,7 +427,11 @@ public final class DaemonClient: Sendable {
             }
             return date
         }
-        do { return try dec.decode(T.self, from: data) } catch { throw ProviderError.decoding(String(describing: error)) }
+        return dec
+    }()
+
+    package static func decode<T: Decodable>(_ data: Data) throws -> T {
+        do { return try decoder.decode(T.self, from: data) } catch { throw ProviderError.decoding(String(describing: error)) }
     }
 }
 

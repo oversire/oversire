@@ -314,12 +314,10 @@ final class QueuePage: Page {
 
     private func freeSlots(_ n: Int, lane: QueueLane) -> [NSView] {
         let left = data.queue.left(lane)
-        let clock = DateFormatter()
-        clock.dateFormat = "HH:mm"
         return (0..<n).map { i in
             guard i < left.count else { return FreeSlot() }
             let l = left[i]
-            return FreeSlot("\(l.key) left: \(l.state.label) \(clock.string(from: l.at))")
+            return FreeSlot("\(l.key) left: \(l.state.label) \(clockFmt.string(from: l.at))")
         }
     }
 

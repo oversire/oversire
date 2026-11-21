@@ -149,7 +149,7 @@ final class AgentCatalogTests: XCTestCase {
         XCTAssertFalse(mba.catalog.needsShareOffer, "a built-in CLI at its defaults is not an offer")
         mba.cfg.add("pi-fast", cli: "pi")
         XCTAssertTrue(mba.catalog.needsShareOffer)
-        try mba.catalog.shareAll()
+        _ = try mba.catalog.share(mba.catalog.offerNames)
         XCTAssertEqual(mba.catalog.shared.map(\.name), ["pi-fast"])
         XCTAssertFalse(mba.catalog.needsShareOffer)
         XCTAssertTrue(mba.cfg.shareOfferClosed)

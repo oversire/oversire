@@ -3,7 +3,7 @@ import OverSireCore
 
 public struct PollIntervals: Hashable, Sendable {
     public var normal: Duration
-    public var active: Duration       // a run is in progress and the user looks
+    public var active: Duration       // a provider page is busy
     public var safety: Duration       // the cloud pushes changes; polling only reconciles
     public var maxBackoff: Duration
 

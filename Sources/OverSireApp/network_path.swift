@@ -113,8 +113,6 @@ final class NetworkPath: @unchecked Sendable {
 
     /// "Offline since 19:38".
     static func offlineText(_ since: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return "Offline since \(f.string(from: since))"
+        "Offline since \(clockFmt.string(from: since))"
     }
 }

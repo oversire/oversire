@@ -554,9 +554,14 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         defer { syncRefresh() }
         if c.domains.contains(.connection) { sidebar.live.show(data.relay, client: data.clientLink, name: data.clientName) }
         for p in cache where p !== page { p.receive(c) }
-        if page?.wants(c) == true { if held == nil { held = c } else { held?.merge(c) } }
         // A window behind other windows builds when it shows again. A build blocks the main thread and the menu bar panel.
-        guard isOnScreen else { changedWhileHidden = true; return }
+        // It holds the change with no `wants` check: that check builds the sections of the page.
+        guard isOnScreen else {
+            if held == nil { held = c } else { held?.merge(c) }
+            changedWhileHidden = true
+            return
+        }
+        if page?.wants(c) == true { if held == nil { held = c } else { held?.merge(c) } }
         reloadSidebar()
         if held != nil { gate.submit { [weak self] in self?.applyHeld() } }
     }
@@ -573,6 +578,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         guard changedWhileHidden, isOnScreen else { return }
         changedWhileHidden = false
         reloadSidebar()
+        if let c = held, page?.wants(c) != true { held = nil }
         if held != nil { gate.submit { [weak self] in self?.applyHeld() } }
     }
 
@@ -919,9 +925,6 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         sender.state = s.isOpen ? .on : .off
     }
     @objc func openSettings() { if case .settings = router.current { return }; router.go(.settings(.general)) }
-    @objc func goTo(_ sender: NSMenuItem) {
-        if let s = sender.representedObject as? String, let r = Route(path: s) { show(r) }
-    }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {

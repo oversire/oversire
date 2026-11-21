@@ -1493,8 +1493,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     @objc func showUpdates() { showSettings(.settings(.general, anchor: SettingsAnchor.startup.rawValue)) }
 
-    @objc func showRelaySettings() { showSettings(.settings(.accounts, anchor: SettingsAnchor.live.rawValue)) }
-
     @objc func showList() {
         popover.behavior = .transient
         applySystemAppearance()

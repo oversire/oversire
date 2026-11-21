@@ -13,7 +13,7 @@ struct IntakeActions {
             triage("intake.decline", "Decline", "Declines an intake item.", .change) { _ in .decline },
             triage("intake.snooze", "Snooze", "Hides an intake item until a day at 9:00.", .change,
                    extra: ["days": ("integer", "Days from today. Default 1."), "until": ("string", "An ISO 8601 time, in place of days.")]) { a in
-                if let t = a.string("until").flatMap({ ISO8601DateFormatter().date(from: $0) }) { return .snooze(until: t) }
+                if let t = a.string("until").flatMap({ isoFmt.date(from: $0) }) { return .snooze(until: t) }
                 let d = Calendar.current.date(byAdding: .day, value: max(1, a.int("days") ?? 1), to: Date()) ?? Date()
                 return .snooze(until: Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: d) ?? d)
             },
@@ -76,7 +76,7 @@ extension IntakeAction {
         case .decline: return ("intake.decline", args)
         case .delete: return ("intake.delete", args)
         case .pending: return nil
-        case .snooze(let t): args["until"] = .string(ISO8601DateFormatter().string(from: t)); return ("intake.snooze", args)
+        case .snooze(let t): args["until"] = .string(isoFmt.string(from: t)); return ("intake.snooze", args)
         case .duplicate(let of): args["of"] = .string(of); return ("intake.merge", args)
         case .update(let e):
             guard e.relations.isEmpty, e.patch == ItemPatch(priority: e.patch.priority, bodyMarkdown: e.patch.bodyMarkdown) else { return nil }

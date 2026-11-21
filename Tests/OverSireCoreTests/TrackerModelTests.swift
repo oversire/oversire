@@ -175,8 +175,6 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertEqual(s.listed(subItems: true).count, 5)
         XCTAssertEqual(s.children(of: "p").map(\.id), ["c2", "c1"], "children sort done last")
         XCTAssertTrue(s.progress(of: "p") == (1, 2) && s.progress(of: "c1") == (0, 0))
-        XCTAssertEqual(s.ancestors(of: "g1"), ["c2", "p"])
-        XCTAssertTrue(s.ancestors(of: "o").isEmpty)
         s.index = [ItemStub(id: "c1", parentId: "p", stateId: "s5", activityAt: nil),
                    ItemStub(id: "c2", parentId: "p", stateId: "s1", activityAt: nil),
                    ItemStub(id: "c3", parentId: "p", stateId: "s5", activityAt: nil)]
@@ -292,5 +290,18 @@ final class TrackerModelTests: XCTestCase {
         }
         XCTAssertFalse(snap([]).hasPriority)
         XCTAssertTrue(snap([ProjectField(id: ProjectSnapshot.priorityFieldId, name: "Priority", options: [])]).hasPriority)
+    }
+
+    func testKeyFormatFindsKeysInTextOrder() {
+        XCTAssertEqual(KeyFormat.projectDash.keys(in: "fix OVERSIRE-12 and abc-3, OVERSIRE-12"), ["OVERSIRE-12", "ABC-3"])
+        XCTAssertEqual(KeyFormat.projectDash.keys(in: "fix OVERSIRE-12 and abc-3, OVERSIRE-12", known: ["ABC"]), ["ABC-3"])
+    }
+
+    func testKeyFormatEqualityUsesThePattern() {
+        let a = KeyFormat(pattern: "#([0-9]+)\\b"), b = KeyFormat(pattern: "#([0-9]+)\\b")
+        XCTAssertEqual(a, b)
+        XCTAssertEqual(a.hashValue, b.hashValue)
+        XCTAssertNotEqual(a, KeyFormat.projectDash)
+        XCTAssertEqual(KeyFormat(pattern: "(").keys(in: "A-1"), [])
     }
 }

@@ -20,17 +20,16 @@ struct Recap: Codable, Equatable {
 
     /// Compact rows, newest kept when the budget is short. No payloads, no transcripts.
     static func input(key: String, title: String, since: Date?, rows: [Event]) -> AIInput {
-        let f = ISO8601DateFormatter()
         var lines: [String] = []
         var size = 0
         for e in rows.reversed() {
-            let l = "[\(e.id)] \(f.string(from: e.at)) \(e.item ?? key) \(e.kind.rawValue) \(e.actorType.rawValue):\(e.actor) \(e.isPrivate ? "(private)" : e.summary)"
+            let l = "[\(e.id)] \(isoFmt.string(from: e.at)) \(e.item ?? key) \(e.kind.rawValue) \(e.actorType.rawValue):\(e.actor) \(e.isPrivate ? "(private)" : e.summary)"
             if size + l.count + 1 > budget { break }
             size += l.count + 1
             lines.append(l)
         }
         return AIInput(text: lines.reversed().joined(separator: "\n"),
-                       context: ["key": key, "title": title, "since": since.map { f.string(from: $0) } ?? ""])
+                       context: ["key": key, "title": title, "since": since.map { isoFmt.string(from: $0) } ?? ""])
     }
 
     /// The reply of the AI. An entry with no id of `rows` is dropped.

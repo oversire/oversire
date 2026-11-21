@@ -206,14 +206,12 @@ final class StatusJob {
 
     /// Why the status is older than the screen or the item, or nil while it holds.
     func outOfDate(_ s: SessionStatus) -> String? {
-        let clock = DateFormatter()
-        clock.dateFormat = "HH:mm"
         // The status job does not read a done item again, so only "Looks done" holds.
         if s.state != .done, itemDone(s.key) { return "Out of date: the item is done" }
         guard let st = agents.state(s.key) else { return "Session closed" }
-        if let d = decided(after: s) { return "Out of date: you decided at \(clock.string(from: d.at))" }
+        if let d = decided(after: s) { return "Out of date: you decided at \(clockFmt.string(from: d.at))" }
         if let w = agents.watch(s.key), let screen = s.screen, w.fingerprint != screen {
-            return "Out of date: the screen changed at \(clock.string(from: w.changedAt))"
+            return "Out of date: the screen changed at \(clockFmt.string(from: w.changedAt))"
         }
         if let a = agents.agent(s.key), let m = s.message, m != a.messageHash, st != .working { return "Out of date: a new agent message" }
         return nil

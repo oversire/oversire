@@ -35,11 +35,9 @@ struct ItemStatus {
 
     static func resolve(status: SessionStatus?, outOfDate: String?, state: SessionState?, stateText: String?,
                         agent: AgentSession?, terminals: Int?, screen: String?, idleNote: String?, now: Date = Date()) -> ItemStatus? {
-        let clock = DateFormatter()
-        clock.dateFormat = "HH:mm"
         var facts: [String] = []
         if let st = state, let a = agent {
-            facts.append(st.ended || st == .closed ? "\(st.label) at \(clock.string(from: a.since))" : stateText ?? st.label)
+            facts.append(st.ended || st == .closed ? "\(st.label) at \(clockFmt.string(from: a.since))" : stateText ?? st.label)
         } else if let a = agent {
             facts.append(a.label(now: now))
         }

@@ -48,21 +48,15 @@ final class PollingSourceTests: XCTestCase {
         let h = await source.health()
         XCTAssertEqual(h, .live)
 
-        // A run starts: poll now, then at the active interval.
-        await source.setActive([acme])
-        await eventually("poll now") { clock.sleeps.count == 3 }
-        XCTAssertEqual(p.cursorsSeen.get().count, 3)
-        XCTAssertEqual(clock.sleeps.last, .seconds(10))
-
         // The cloud is live: the safety interval.
         await source.setCloudLive(true)
-        clock.advance(by: .seconds(10))
-        await eventually("next poll") { clock.sleeps.count == 4 }
+        clock.advance(by: .seconds(30))
+        await eventually("next poll") { clock.sleeps.count == 3 }
         XCTAssertEqual(clock.sleeps.last, .seconds(600))
 
         // The cloud drops: poll now to catch up.
         await source.setCloudLive(false)
-        await eventually("catch-up poll") { p.cursorsSeen.get().count == 5 }
+        await eventually("catch-up poll") { p.cursorsSeen.get().count == 4 }
         await source.stop()
     }
 

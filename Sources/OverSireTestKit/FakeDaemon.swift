@@ -129,12 +129,6 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
 
     public func push(_ frame: String) { with { sockets }.forEach { $0.push(frame) } }
 
-    /// Closes the open sockets, as a daemon that stops.
-    public func dropSockets() {
-        let s = with { () -> [FakeDaemonSocket] in defer { sockets = [] }; return sockets }
-        s.forEach { $0.close() }
-    }
-
     // MARK: WebSocketConnecting
 
     public func connect(_ request: URLRequest) async throws -> any WebSocketConnection {

@@ -173,7 +173,7 @@ public actor SessionStream {
             }
             if let conn { try await ack(conn, force: false) }
         case .text(let s):
-            guard let f = try? Self.decoder().decode(StreamDaemonFrame.self, from: Data(s.utf8)) else { return false }
+            guard let f = try? DaemonClient.decoder.decode(StreamDaemonFrame.self, from: Data(s.utf8)) else { return false }
             switch f {
             case .attached(let a):
                 attachedOnce = true
@@ -209,19 +209,6 @@ public actor SessionStream {
         guard force || received - acked >= Self.ackEvery else { return }
         acked = received
         try await c.send(Self.encode(.ack(seq: received)))
-    }
-
-    /// ISO 8601 times with or without fractions, as the daemon writes them.
-    static func decoder() -> JSONDecoder {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .custom { dec in
-            let s = try dec.singleValueContainer().decode(String.self)
-            guard let date = parseISO(s) else {
-                throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "not an ISO 8601 time: \(s)"))
-            }
-            return date
-        }
-        return d
     }
 
     static func encode(_ f: StreamClientFrame) -> String {

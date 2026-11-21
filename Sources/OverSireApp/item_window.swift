@@ -758,11 +758,9 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
         t.font = .systemFont(ofSize: 12.5, weight: .semibold)
         t.frame = NSRect(x: pad + 11, y: y + 8, width: send.frame.minX - pad - 20, height: 17)
         doc.addSubview(t)
-        let df = DateFormatter()
-        df.dateFormat = "HH:mm"
         var sub = [a.agent.rawValue, a.repo.isEmpty ? "Orca" : a.repo, agents.place].joined(separator: " · ")
         if let p = a.prompt, !p.isEmpty { sub += " \"\(p.count > 70 ? p.prefix(70) + "…" : Substring(p))\"" }
-        sub += " · since " + df.string(from: a.since)
+        sub += " · since " + clockFmt.string(from: a.since)
         let st = NSTextField(labelWithString: sub)
         st.font = .systemFont(ofSize: 11); st.textColor = .secondaryLabelColor
         st.lineBreakMode = .byTruncatingTail; st.toolTip = a.prompt

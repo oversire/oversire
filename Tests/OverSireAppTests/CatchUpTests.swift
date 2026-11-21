@@ -111,4 +111,15 @@ final class CatchUpTests: XCTestCase {
         job.confirm("OVERSIRE-377", r.choices[0])
         XCTAssertEqual(job.recap("OVERSIRE-377", rows: rows)?.choices, [])
     }
+
+    func testDayTimeFormats() {
+        let cal = Calendar.current
+        let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 6, hour: 12))!
+        let recent = cal.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 15, minute: 5))!
+        let older = cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 15, minute: 5))!
+        XCTAssertEqual(dayTime(recent, now: now), "Thu 15:05")
+        XCTAssertEqual(dayTime(older, now: now.addingTimeInterval(5 * 86400)), "Sun 1 Nov, 15:05")
+        XCTAssertEqual(CatchUpBuilder.day(recent, now: now), "Thu")
+        XCTAssertEqual(CatchUpBuilder.day(older, now: now.addingTimeInterval(5 * 86400)), "Sun 1 Nov")
+    }
 }

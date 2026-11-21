@@ -7,7 +7,6 @@ public actor PollingSource: EventSource {
     private let cursors: CursorStore
     private let clock: any Clock<Duration>
     private var intervals: PollIntervals
-    private var active: Set<AccountID> = []
     private var busy: Set<AccountID> = []
     private var cloudLive = false
     private var errors: [AccountID: String] = [:]
@@ -46,13 +45,6 @@ public actor PollingSource: EventSource {
 
     public func setIntervals(_ i: PollIntervals) { intervals = i }
 
-    /// Accounts with a run in progress poll at the active interval. A new one polls now.
-    public func setActive(_ accounts: Set<AccountID>) {
-        let new = accounts.subtracting(active)
-        active = accounts
-        if !cloudLive { new.forEach(pollNow) }
-    }
-
     /// A live cloud pushes changes, so polling slows to the safety interval.
     /// When the cloud drops, each account polls now to catch up.
     public func setCloudLive(_ live: Bool) {
@@ -79,7 +71,7 @@ public actor PollingSource: EventSource {
     }
 
     func mode(_ account: AccountID) -> PollMode {
-        cloudLive ? .safety : active.contains(account) || busy.contains(account) ? .active : .normal
+        cloudLive ? .safety : busy.contains(account) ? .active : .normal
     }
 
     private func start(_ cont: AsyncStream<ProviderEvent>.Continuation) {

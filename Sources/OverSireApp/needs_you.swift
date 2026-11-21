@@ -48,12 +48,10 @@ extension AgentIndex {
         guard let st = state(key), let a = agent(key) else { return "—" }
         let w = watch(key)
         let same = w.map { now().timeIntervalSince($0.changedAt) } ?? 0
-        let clock = DateFormatter()
-        clock.dateFormat = "HH:mm"
         switch st {
         case .closed: return "no live terminal"
         case .background: let n = w?.shells ?? 1; return "\(n) shell\(n == 1 ? "" : "s") \(n == 1 ? "runs" : "run")"
-        case .done, .blocked: return "done at \(clock.string(from: a.since))"
+        case .done, .blocked: return "done at \(clockFmt.string(from: a.since))"
         case .longCommand: return "screen same \(Int(same / 60)) min · counter moves"
         default: return w.map { relativeAgo($0.changedAt) } ?? "not read yet"
         }

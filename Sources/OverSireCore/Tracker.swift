@@ -420,17 +420,6 @@ public struct ProjectSnapshot: Codable, Sendable {
             ?? items.filter { $0.parentId == id }.map { ($0.id, $0.statusOptionId) }
     }
 
-    // Parent first, up to the root.
-    public func ancestors(of id: String) -> [String] {
-        var out: [String] = []
-        var next = items.first { $0.id == id }?.parentId
-        while let p = next, !out.contains(p), let item = items.first(where: { $0.id == p }) {
-            out.append(p)
-            next = item.parentId
-        }
-        return out
-    }
-
     public var sortedItems: [Item] { sorted(items) }
 
     /// One item for each id, the one with the newest activity. On a tie the later copy wins. The first position stays.
@@ -736,12 +725,19 @@ public struct KeyFormat: Hashable, Sendable {
     public static let projectDash = KeyFormat(pattern: "\\b([A-Za-z][A-Za-z0-9]*-[0-9]+)\\b")
 
     public let pattern: String   // capture group 1 is the key
+    private let regex: NSRegularExpression?
 
-    public init(pattern: String) { self.pattern = pattern }
+    public init(pattern: String) {
+        self.pattern = pattern
+        regex = try? NSRegularExpression(pattern: pattern)
+    }
+
+    public static func == (a: KeyFormat, b: KeyFormat) -> Bool { a.pattern == b.pattern }
+    public func hash(into hasher: inout Hasher) { hasher.combine(pattern) }
 
     /// Keys in text order, uppercased, without repeats. A non-empty known set keeps only keys of those project keys.
     public func keys(in text: String, known: Set<String> = []) -> [String] {
-        guard let re = try? NSRegularExpression(pattern: pattern) else { return [] }
+        guard let re = regex else { return [] }
         var out: [String] = []
         for m in re.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let r = Range(m.range(at: m.numberOfRanges > 1 ? 1 : 0), in: text) else { continue }

@@ -773,12 +773,6 @@ final class ProjectStore {
         publish(DataChange(.projects, origin: .user))
     }
 
-    func markActivityUnread(_ id: String) {
-        guard readActivity.remove(id) != nil else { return }
-        save()
-        publish(DataChange(.projects, origin: .user))
-    }
-
     /// Refuses to close a parent with open sub-items, unless `force` (OVERSIRE-396).
     func setStatus(itemId: String, optionId: String, force: Bool = false, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         if !force, refusesClose(itemId, to: optionId) { done(false); return }

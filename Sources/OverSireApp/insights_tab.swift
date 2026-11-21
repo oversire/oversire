@@ -9,7 +9,7 @@ import OverSireCore
 
 let DEPLOY_LOG_PATH = (CONFIG_DIR as NSString).appendingPathComponent("deploys.jsonl")
 
-struct DeployRecord: Codable {
+struct DeployRecord: Codable, Equatable {
     let repo: String
     let workflow: String
     let title: String
@@ -33,21 +33,26 @@ func isDeployWorkflow(_ name: String) -> Bool {
 final class DeployLog {
     static let shared = DeployLog()
     private let q = DispatchQueue(label: "com.oversire.app.deploylog")
+    private let path: String
+    private var records: [DeployRecord] = []
     private var seen = Set<String>()
     private var loaded = false
+
+    init(path: String = DEPLOY_LOG_PATH) { self.path = path }
 
     // Dedup on url+conclusion so a re-run that flips failure→success logs both events
     // (honest for flakiness insights) while stable polls of the same result don't dup.
     private func key(_ url: String, _ conclusion: String) -> String { "\(url)|\(conclusion)" }
 
     private func readRaw() -> String {
-        (try? String(contentsOfFile: DEPLOY_LOG_PATH, encoding: .utf8)) ?? ""
+        (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
     }
 
     private func ensureLoaded() {
         guard !loaded else { return }
         loaded = true
-        for r in DeployLog.parse(readRaw()) { seen.insert(key(r.url, r.conclusion)) }
+        records = DeployLog.parse(readRaw())
+        for r in records { seen.insert(key(r.url, r.conclusion)) }
     }
 
     static func parse(_ raw: String) -> [DeployRecord] {
@@ -65,6 +70,7 @@ final class DeployLog {
             let now = isoFmt.string(from: Date())
             let enc = JSONEncoder()
             var lines: [String] = []
+            var added: [DeployRecord] = []
             for (repo, runs) in grouped {
                 for r in runs where r.status == "completed" {
                     let concl = r.conclusion ?? "unknown"
@@ -80,24 +86,26 @@ final class DeployLog {
                         startedAt: r.startedAt, completedAt: r.updatedAt, durationSec: dur, loggedAt: now)
                     if let d = try? enc.encode(rec), let s = String(data: d, encoding: .utf8) {
                         lines.append(s)
+                        added.append(rec)
                     }
                 }
             }
             guard !lines.isEmpty else { return }
-            try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
+            self.records += added
+            try? FileManager.default.createDirectory(atPath: (self.path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
             let text = lines.joined(separator: "\n") + "\n"
-            if let h = FileHandle(forWritingAtPath: DEPLOY_LOG_PATH) {
+            if let h = FileHandle(forWritingAtPath: self.path) {
                 h.seekToEndOfFile()
                 if let d = text.data(using: .utf8) { h.write(d) }
                 try? h.close()
             } else {
-                try? text.write(toFile: DEPLOY_LOG_PATH, atomically: true, encoding: .utf8)
+                try? text.write(toFile: self.path, atomically: true, encoding: .utf8)
             }
             log.info("DeployLog: appended \(lines.count) record(s)")
         }
     }
 
-    func all() -> [DeployRecord] { DeployLog.parse(q.sync { readRaw() }) }
+    func all() -> [DeployRecord] { q.sync { ensureLoaded(); return records } }
 }
 // ponytail: log file + in-memory seen-set grow unbounded; fine for a personal tool
 // (~300B/record). Add rotation/pruning only if it ever gets large.

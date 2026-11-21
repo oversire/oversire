@@ -46,14 +46,15 @@ let isoFmt: ISO8601DateFormatter = {
     let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
 }()
 
+let clockFmt: DateFormatter = {
+    let f = DateFormatter(); f.dateFormat = "HH:mm"
+    f.timeZone = .autoupdatingCurrent; f.locale = .autoupdatingCurrent
+    return f
+}()
+
 let timestampFmt: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "MMM d, h:mm a"; return f
 }()
-
-func fmtTimestamp(_ iso: String) -> String {
-    guard let d = parseISO(iso) else { return "" }
-    return timestampFmt.string(from: d)
-}
 
 func fmtDuration(_ secs: TimeInterval) -> String {
     let s = Int(max(0, secs))

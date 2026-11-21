@@ -180,4 +180,21 @@ final class SessionStreamTests: XCTestCase {
         XCTAssertEqual(r.url?.absoluteString, "ws://mbp.tail.ts.net:7690/v1/sessions/s-1/stream")
         XCTAssertEqual(r.value(forHTTPHeaderField: "Authorization"), "Bearer t")
     }
+
+    func testFramesWithAndWithoutFractionsDecode() async throws {
+        let sockets = Sockets()
+        let s = SessionStream(request: request, view: .chat, socket: sockets, clock: ManualClock())
+        let events = s.events()
+        await eventually("connect") { sockets.all.get().count == 1 }
+        let t = { (seq: Int, at: String) in
+            #"{"seq":\#(seq),"role":"assistant","at":"\#(at)","text":"t\#(seq)"}"#
+        }
+        let frame = #"{"type":"turns","from":1,"to":2,"turns":[\#(t(1, "2027-01-15T08:00:00Z")),\#(t(2, "2027-01-15T08:00:00.250Z"))]}"#
+        sockets.socket(0).push(.text(frame))
+        let got = await take(2, from: events)
+        guard case .turns(let turns)? = got.last else { return XCTFail("\(got)") }
+        XCTAssertEqual(turns.map(\.text), ["t1", "t2"])
+        XCTAssertEqual(turns[1].at.timeIntervalSince(turns[0].at), 0.25, accuracy: 0.001)
+        await s.stop()
+    }
 }

@@ -167,9 +167,6 @@ final class AgentCatalog {
         return out
     }
 
-    @discardableResult
-    func shareAll() throws -> [String: [String]] { try share(local.map(\.name)) }
-
     /// Moves a shared agent to this Mac only. The other Macs lose it. Secret keys need a value again.
     @discardableResult
     func keepLocal(_ name: String) throws -> [String] {

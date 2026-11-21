@@ -287,11 +287,11 @@ struct CatchUpBuilder {
 
     /// "Wed", or "Wed 1 Nov" for an older day.
     static func day(_ d: Date, now: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = now.timeIntervalSince(d) < 6 * 86400 ? "EEE" : "EEE d MMM"
-        return f.string(from: d)
+        (now.timeIntervalSince(d) < 6 * 86400 ? recentDay : olderDay).string(from: d)
     }
+
+    private static let recentDay = posixFormatter("EEE")
+    private static let olderDay = posixFormatter("EEE d MMM")
 }
 
 extension JSONValue {
@@ -317,8 +317,15 @@ func spanText(_ s: TimeInterval) -> String {
 
 /// "Thu 15:05", or "Thu 1 Nov, 15:05" for an older day.
 func dayTime(_ d: Date, now: Date = Date()) -> String {
+    (now.timeIntervalSince(d) < 6 * 86400 ? recentDayTime : olderDayTime).string(from: d)
+}
+
+private let recentDayTime = posixFormatter("EEE HH:mm")
+private let olderDayTime = posixFormatter("EEE d MMM, HH:mm")
+
+private func posixFormatter(_ format: String) -> DateFormatter {
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
-    f.dateFormat = now.timeIntervalSince(d) < 6 * 86400 ? "EEE HH:mm" : "EEE d MMM, HH:mm"
-    return f.string(from: d)
+    f.dateFormat = format
+    return f
 }

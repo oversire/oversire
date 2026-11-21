@@ -171,20 +171,6 @@ public struct Job: Codable, Hashable, Sendable {
     }
 }
 
-public struct CheckAnnotation: Codable, Hashable, Sendable {
-    public let message: String?
-    public let path: String?
-    public let startLine: Int?
-    public let annotationLevel: String?
-
-    public init(message: String?, path: String?, startLine: Int?, annotationLevel: String?) {
-        self.message = message
-        self.path = path
-        self.startLine = startLine
-        self.annotationLevel = annotationLevel
-    }
-}
-
 /// Why a job failed: the failed step and the annotation messages.
 public struct Failure: Codable, Hashable, Sendable {
     public let job: String

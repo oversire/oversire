@@ -108,15 +108,4 @@ extension Page {
                               accept: { [weak self] drop in book.accept(s.id, drop: drop, by: device); done?(); self?.reload() },
                               dismiss: { [weak self] in book.dismiss(s.id, by: device); done?(); self?.reload() })
     }
-
-    /// The plan change as a card.
-    func planCard(_ s: Suggestion, draft: PlanDraft) -> NSView {
-        let c = Card(fill: Palette.intake.withAlphaComponent(0.06), border: Palette.intake.withAlphaComponent(0.55))
-        let lane = data.queue.lanes.first { $0.project == s.lane }
-        c.add(NSStackView(h: [Chiplet("Planner", symbol: "arrow.triangle.branch", color: Palette.intake),
-                              NSTextField.text("Plan change for \(lane?.identifier ?? "a lane")", size: 13, weight: .semibold), Spacer(),
-                              ActionButton("Show the plan", style: .link) { [weak self] in self?.go(.work(.lanes)) }, PlannerCard.cloudMark()], spacing: 7))
-        c.add(planReview(s, draft: draft))
-        return c
-    }
 }

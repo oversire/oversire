@@ -387,11 +387,6 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     /// The patches that update received, oldest first.
     public var patches: [ProjectSettingsPatch] { base.lockedValue { patchList } }
 
-    /// Replaces the settings of a project. The page tests and --uishots use it.
-    public func setSettings(_ s: ProjectSettings, for p: ProjectRef? = nil) {
-        base.lockedValue { settingsList[(p ?? project).id] = s }
-    }
-
     public func settings(_ p: ProjectRef) async throws -> ProjectSettings {
         try base.locked {
             guard let s = settingsList[p.id] else { throw ProviderError.notFound }

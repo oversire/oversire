@@ -74,6 +74,12 @@ final class WeekChart: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    private static let weekday: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE"
+        f.timeZone = .autoupdatingCurrent; f.locale = .autoupdatingCurrent
+        return f
+    }()
+
     override func draw(_ dirtyRect: NSRect) {
         let bottom: CGFloat = 16, top: CGFloat = 4
         let h = bounds.height - bottom - top
@@ -81,12 +87,11 @@ final class WeekChart: NSView {
         let peak = max(1, series.flatMap(\.values).max() ?? 1)
         let bar = min(10, (slot - 8) / CGFloat(max(1, series.count)))
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: Palette.dim]
-        let f = DateFormatter(); f.dateFormat = "EEE"
         Palette.line.setStroke()
         let base = NSBezierPath(); base.move(to: NSPoint(x: 0, y: bottom)); base.line(to: NSPoint(x: bounds.width, y: bottom)); base.stroke()
         for (i, d) in days.enumerated() {
             let mid = slot * (CGFloat(i) + 0.5)
-            let s = NSAttributedString(string: f.string(from: d), attributes: attrs)
+            let s = NSAttributedString(string: Self.weekday.string(from: d), attributes: attrs)
             s.draw(at: NSPoint(x: mid - s.size().width / 2, y: 1))
             let x0 = mid - bar * CGFloat(series.count) / 2
             for (j, ser) in series.enumerated() where ser.values.indices.contains(i) && ser.values[i] > 0 {

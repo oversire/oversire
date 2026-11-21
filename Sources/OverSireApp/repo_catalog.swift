@@ -66,17 +66,6 @@ final class RepoCatalog {
         return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    func checkAuth() {
-        Task { [weak self] in
-            let u = await REPO_CLIENT.me()
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.user = u; self.authChecked = true
-                self.notify()
-            }
-        }
-    }
-
     func refreshIfStale() { if isStale { refreshAll() } }
 
     func refreshAll() {

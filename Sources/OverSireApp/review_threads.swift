@@ -69,12 +69,6 @@ final class ReviewThreads {
     private var busy = false
     private var popover: NSPopover?
 
-    private static let time: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
     init(_ desk: ReviewDesk) { self.desk = desk }
 
     /// A hash of all that the comment parts show.
@@ -102,7 +96,7 @@ final class ReviewThreads {
         var parts: [NSView] = [NSTextField.text("Rounds", size: 12, weight: .semibold, color: Palette.mut)]
         for r in desk.rounds {
             let (mark, word) = Self.state(r)
-            let text = "Round \(r.n) · \(r.count) comment\(r.count == 1 ? "" : "s") · \(Self.time.string(from: r.submittedAt))"
+            let text = "Round \(r.n) · \(r.count) comment\(r.count == 1 ? "" : "s") · \(clockFmt.string(from: r.submittedAt))"
             let chip = Chiplet(text + " · " + word, icon: mark.view(size: 11))
             chip.setAccessibilityLabel("\(text), \(word)" + (r.error.map { ", \($0)" } ?? ""))
             chip.toolTip = r.error ?? r.summary

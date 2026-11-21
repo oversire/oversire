@@ -11,11 +11,13 @@ private final class CountPage: Page {
     override var watches: DataDomains { domains }
     override var shownRepos: Set<String>? { repos }
     var refreshed: [String] = []
+    var sectionCalls = 0
     override var parts: [PagePart] {
         ["a", "b"].map { id in PagePart(id: id, title: id, state: .idle, retry: nil) { [unowned self] in refreshed.append(id) } }
     }
     override func sections() -> [PageSection]? {
-        [PageSection("s", rows: rows.keys.sorted().map { id in
+        sectionCalls += 1
+        return [PageSection("s", rows: rows.keys.sorted().map { id in
             let v = rows[id]!
             return PageRow(id, v) { NSTextField.text("\(id) \(v)") }
         })]
@@ -91,6 +93,31 @@ final class PageWatchTests: XCTestCase {
         XCTAssertEqual(p.buildCount, 1)
         p.receive(DataChange(.runs, repos: ["o/a"]))
         XCTAssertEqual(p.buildCount, 2)
+    }
+
+    @MainActor
+    func testAHiddenWindowDoesNotBuildSectionsForAChange() {
+        _ = NSApplication.shared
+        let data = TestAppData()
+        var page: CountPage?
+        let w = AppWindow(data: data) { r, d, router in
+            let p = CountPage(r, data: d, router: router)
+            page = p
+            return p
+        }
+        defer { w.window?.orderOut(nil) }
+        guard let p = page else { return XCTFail("no page") }
+        _ = p.view
+        let before = p.sectionCalls
+        p.rows["a"] = 9
+        data.bus.post(DataChange(.runs))
+        data.clock.advance(1)
+        XCTAssertEqual(p.sectionCalls, before, "a hidden window does not build the sections")
+        w.window?.orderFront(nil)
+        // A test run with no window server never reports the window as visible.
+        guard w.window?.occlusionState.contains(.visible) == true else { return }
+        w.windowDidChangeOcclusionState(Notification(name: NSWindow.didChangeOcclusionStateNotification))
+        XCTAssertGreaterThan(p.sectionCalls, before, "the window checks the held change when it shows")
     }
 
     func testHiddenPageBuildsOnceWhenShown() {

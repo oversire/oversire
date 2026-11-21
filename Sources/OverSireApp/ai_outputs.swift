@@ -27,15 +27,6 @@ final class AIOutputBook {
         }
         return e
     }()
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .custom { dec in
-            let s = try dec.singleValueContainer().decode(String.self)
-            guard let d = parseISO(s) else { throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "not a date: \(s)")) }
-            return d
-        }
-        return d
-    }()
 
     init(writes: StoreWrites) {
         self.writes = writes
@@ -55,7 +46,7 @@ final class AIOutputBook {
     func all<T: Decodable>(_ kind: Kind, as: T.Type) -> [(subject: String, hash: String, at: Date, value: T)] {
         byID.values.filter { $0.kind == kind.rawValue }.compactMap { r in
             guard let d = try? JSONSerialization.data(withJSONObject: r.body.any),
-                  let v = try? Self.decoder.decode(T.self, from: d) else { return nil }
+                  let v = try? DaemonClient.decoder.decode(T.self, from: d) else { return nil }
             return (r.subject, r.hash, r.at, v)
         }
     }

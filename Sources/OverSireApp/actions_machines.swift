@@ -35,7 +35,7 @@ struct MachineActions {
                         var o: [String: JSONValue] = ["machine": .string(m.machine.rawValue), "home": .bool(m.machine == g.home),
                                                       "sessions": .int(s.sessions[m.machine.rawValue]?.count ?? 0)]
                         if let v = m.version { o["version"] = .string(v) }
-                        if let t = m.lastSeen { o["lastSeen"] = .string(ISO8601DateFormatter().string(from: t)) }
+                        if let t = m.lastSeen { o["lastSeen"] = .string(isoFmt.string(from: t)) }
                         return .object(o)
                     }
                     return .ok(summary: "\(g.members.count) machine\(g.members.count == 1 ? "" : "s") in \(g.name).", data: .array(rows))

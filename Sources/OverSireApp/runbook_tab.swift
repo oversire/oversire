@@ -477,13 +477,7 @@ final class RunbookTab {
         }
     }
 
-    private static let clock: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    static func span(_ a: Date, _ b: Date?) -> String { clock.string(from: a) + "–" + (b.map(clock.string) ?? "now") }
+    static func span(_ a: Date, _ b: Date?) -> String { clockFmt.string(from: a) + "–" + (b.map(clockFmt.string) ?? "now") }
 
     /// The run with only this round of its step, for the mark of one round.
     private static func only(_ r: RunbookRun, _ s: StepRun) -> RunbookRun {

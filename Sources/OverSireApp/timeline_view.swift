@@ -118,12 +118,14 @@ final class TimelineGraphView: NSView {
     }
 
     static func short(_ k: String) -> String { k.split(separator: "-").last.map(String.init) ?? k }
-    static func clock(_ d: Date) -> String {
+    private static let clockFormat: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm"
-        return f.string(from: d)
-    }
+        return f
+    }()
+
+    static func clock(_ d: Date) -> String { clockFormat.string(from: d) }
 
     static func who(_ e: Event) -> String {
         switch e.actorType {
