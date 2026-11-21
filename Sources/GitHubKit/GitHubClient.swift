@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import OverSireCore
 
@@ -7,6 +8,8 @@ public struct GitHubAnswer: Sendable {
     public let body: Data
     public let etag: String?
     public let budget: RateBudget?
+    /// The quota bucket of the call, for example `core` or `graphql`.
+    public let resource: String?
 }
 
 /// The GitHub calls of the two GitHub adapters. A token sends HTTP to the API.
@@ -37,14 +40,21 @@ public struct GitHubClient: Sendable {
     let http: any HTTPTransport
     let token: String?
     let cache: ETagCache
+    /// Keeps the budget of each answer. The app reads it.
+    public let meter: RateMeter
+    private let login: String
 
     public init(commands: any CommandRunner, http: any HTTPTransport, gh: String = GitHubClient.defaultPath, token: String? = nil,
-                cache: ETagCache = ETagCache()) {
+                cache: ETagCache = ETagCache(), meter: RateMeter = RateMeter()) {
         self.commands = commands
         self.http = http
         self.gh = gh
         self.cache = cache
-        self.token = token.flatMap { $0.isEmpty ? nil : $0 }
+        self.meter = meter
+        let token = token.flatMap { $0.isEmpty ? nil : $0 }
+        self.token = token
+        // The key names the login. The token itself is never kept.
+        login = token.map { "token:" + SHA256.hash(data: Data($0.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined() } ?? "gh"
     }
 
     // MARK: API
@@ -52,6 +62,7 @@ public struct GitHubClient: Sendable {
     /// A REST or GraphQL call. A 304 answer is a success with an empty body.
     public func api(_ method: String = "GET", _ path: String, body: Data? = nil, etag: String? = nil) async throws -> GitHubAnswer {
         let a = try await (token == nil ? viaCLI(method, path, body: body, etag: etag) : viaHTTP(method, path, body: body, etag: etag))
+        if let b = a.budget { meter.record(b, key: login, resource: a.resource ?? "core") }
         switch a.status {
         case 200..<300, 304: return a
         case 401: throw ProviderError.unauthorized
@@ -185,7 +196,8 @@ public struct GitHubClient: Sendable {
             (data, resp) = try await http.send(req)
         }
         return GitHubAnswer(status: resp.statusCode, body: data, etag: resp.value(forHTTPHeaderField: "ETag"),
-                            budget: Self.budget { resp.value(forHTTPHeaderField: $0) })
+                            budget: Self.budget { resp.value(forHTTPHeaderField: $0) },
+                            resource: resp.value(forHTTPHeaderField: "X-RateLimit-Resource"))
     }
 
     // The body goes through stdin, so that text never shows in the process list.
@@ -213,7 +225,7 @@ public struct GitHubClient: Sendable {
             headers[l[..<c].lowercased()] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
         }
         return GitHubAnswer(status: status, body: Data(out[r.upperBound...]), etag: headers["etag"],
-                            budget: budget { headers[$0.lowercased()] })
+                            budget: budget { headers[$0.lowercased()] }, resource: headers["x-ratelimit-resource"])
     }
 
     static func budget(_ header: (String) -> String?) -> RateBudget? {
@@ -277,6 +289,6 @@ public struct GitHubAccountSettings: Sendable {
         owner = config.values["owner"] ?? config.account.id
         repos = (config.values["repos"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        client = GitHubClient(commands: env.commands, http: env.http, token: token)
+        client = GitHubClient(commands: env.commands, http: env.http, token: token, meter: env.meter)
     }
 }

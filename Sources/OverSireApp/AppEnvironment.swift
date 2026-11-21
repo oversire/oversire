@@ -41,7 +41,7 @@ final class AppEnvironment: @unchecked Sendable {
         if p == .plane, let account { http = GatedTransport(http, gate: gate(account), log: AppLog(), host: account.id) }
         return ProviderEnvironment(http: http, streaming: p == .bigtimer ? URLSessionTransport.streams : nil,
                                    commands: ProcessRunner(environment: gh ? GitHubClient.environment : nil),
-                                   secrets: other ?? secrets, log: AppLog())
+                                   secrets: other ?? secrets, log: AppLog(), meter: RATE_METER)
     }
 
     /// Plane calls a minute for each token. Both Macs share the token, and Plane allows 60.

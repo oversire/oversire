@@ -197,4 +197,57 @@ final class CodeHostGitHubTests: XCTestCase {
         XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: x"])
         XCTAssertFalse(page.cursor.rawValue.contains("busy"))
     }
+
+    func testAnswerRecordsBudget() async throws {
+        gh.on("GET", "user", answer("200 OK", #"{"login":"ada","id":42,"name":""}"#, remaining: 120))
+        _ = try await host.probe()
+        let inWindow = Date(timeIntervalSince1970: 1_792_184_456 - 100)
+        XCTAssertEqual(host.client.meter.lowest(now: inWindow)?.remaining, 120)
+        XCTAssertEqual(host.client.meter.lowest(now: inWindow)?.limit, 5000)
+        XCTAssertNil(host.client.meter.lowest(now: inWindow.addingTimeInterval(200)), "a past window is ignored")
+    }
+
+    func testChecksDropActionsAndMapStatus() async throws {
+        let runs = #"{"check_runs":[{"name":"build","status":"completed","conclusion":"success","app":{"slug":"github-actions"},"html_url":"https://x/1"},{"name":"deploy","status":"completed","conclusion":"failure","app":{"slug":"vercel"},"html_url":"https://x/2","started_at":"2026-11-20T10:00:00Z","completed_at":"2026-11-20T10:01:00Z"}]}"#
+        let status = #"{"state":"pending","statuses":[{"context":"ci/legacy","state":"pending","target_url":"https://x/3"}]}"#
+        gh.on("GET", "repos/acme/app/commits/abc/check-runs?per_page=100", answer("200 OK", runs, etag: "\"c1\""))
+        gh.on("GET", "repos/acme/app/commits/abc/status", answer("200 OK", status, etag: "\"s1\""))
+        let list = try await host.checks(repo, sha: "abc")
+        XCTAssertEqual(list.map(\.name), ["deploy", "ci/legacy"])
+        XCTAssertEqual(list[0].app, "vercel")
+        XCTAssertEqual(list[0].kind, .checkRun)
+        XCTAssertEqual(list[0].state, .failure)
+        XCTAssertEqual(list[0].conclusion, "failure")
+        XCTAssertEqual(list[1].kind, .status)
+        XCTAssertEqual(list[1].state, .pending)
+        XCTAssertNil(list[1].app)
+    }
+
+    func testChecksStateMapping() {
+        func run(_ status: String, _ conclusion: String?) -> CICheckState? {
+            var c: [String: Any] = ["name": "x", "status": status]
+            if let conclusion { c["conclusion"] = conclusion }
+            return GitHubCodeHost.checkRun(c)?.state
+        }
+        XCTAssertEqual(run("queued", nil), .pending)
+        XCTAssertEqual(run("in_progress", nil), .running)
+        XCTAssertEqual(run("completed", "cancelled"), .cancelled)
+        XCTAssertEqual(run("completed", "skipped"), .skipped)
+        XCTAssertEqual(run("completed", "neutral"), .neutral)
+        XCTAssertEqual(run("completed", "timed_out"), .failure)
+        XCTAssertEqual(GitHubCodeHost.status(["context": "a", "state": "error"])?.state, .failure)
+        XCTAssertEqual(GitHubCodeHost.status(["context": "a", "state": "success"])?.state, .success)
+    }
+
+    func testChecksUseETag() async throws {
+        let runs = "repos/acme/app/commits/abc/check-runs?per_page=100"
+        let status = "repos/acme/app/commits/abc/status"
+        gh.on("GET", runs, answer("200 OK", #"{"check_runs":[{"name":"deploy","status":"completed","conclusion":"success","app":{"slug":"vercel"}}]}"#, etag: "\"c1\""),
+              answer("304 Not Modified", "", etag: "\"c1\""))
+        gh.on("GET", status, answer("200 OK", #"{"statuses":[]}"#, etag: "\"s1\""), answer("304 Not Modified", "", etag: "\"s1\""))
+        let first = try await host.checks(repo, sha: "abc")
+        let second = try await host.checks(repo, sha: "abc")
+        XCTAssertEqual(first, second, "a 304 gives the cached answer")
+        XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: \"s1\""])
+    }
 }

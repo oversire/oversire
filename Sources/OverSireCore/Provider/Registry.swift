@@ -80,15 +80,18 @@ public struct ProviderEnvironment: Sendable {
     public let secrets: any SecretReader
     public let clock: any Clock<Duration>
     public let log: any LogSink
+    /// The adapters record the rate budget of their answers here.
+    public let meter: RateMeter
 
     public init(http: any HTTPTransport, streaming: (any HTTPStreaming)? = nil, commands: any CommandRunner, secrets: any SecretReader,
-                clock: any Clock<Duration> = ContinuousClock(), log: any LogSink = NoLog()) {
+                clock: any Clock<Duration> = ContinuousClock(), log: any LogSink = NoLog(), meter: RateMeter = RateMeter()) {
         self.http = http
         self.streaming = streaming
         self.commands = commands
         self.secrets = secrets
         self.clock = clock
         self.log = log
+        self.meter = meter
     }
 }
 

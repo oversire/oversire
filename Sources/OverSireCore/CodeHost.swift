@@ -177,3 +177,8 @@ public protocol ChangeSearching: CodeHost {
 public protocol CollaboratorListing: CodeHost {
     func collaborators(_ repo: RepoRef) async throws -> [PersonRef]
 }
+
+/// The status checks of a commit that are not CI runs of this host, for example Vercel. Read only.
+public protocol CommitChecking: CodeHost {
+    func checks(_ r: RepoRef, sha: String) async throws -> [CICheck]
+}

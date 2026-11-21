@@ -210,6 +210,10 @@ public enum CodeHostConformance {
             r.expect(!people.isEmpty, "collaborators of \(repo.path) gave no person")
             r.expect(people.allSatisfy { !$0.id.isEmpty }, "a collaborator has no id")
         }
+        if let cc = h as? any CommitChecking, h.capabilities.contains(.commitChecks),
+           let checks = await r.step("checks", { try await cc.checks(repo, sha: sha) }) {
+            r.expect(!checks.contains { $0.app == "github-actions" }, "checks of \(sha) list a check of github-actions")
+        }
         guard let c = changes.first, let url = URL(string: c.url) else { return r }
         let ref = ChangeRef(repo: repo, number: c.number, url: url)
         if let cs = h as? any ChangeSearching, h.capabilities.contains(.changeSearch),

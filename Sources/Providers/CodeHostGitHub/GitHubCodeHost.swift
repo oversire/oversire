@@ -3,11 +3,11 @@ import GitHubKit
 import OverSireCore
 
 /// One GitHub owner (a user or an org). `repos` limits the poll. Empty polls nothing.
-public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, CollaboratorListing, RateReporting, @unchecked Sendable {
+public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, CollaboratorListing, CommitChecking, RateReporting, @unchecked Sendable {
     public let id: ProviderID = .github
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.changeActions, .deleteBranch, .changeSearch, .collaborators] }
+    public var capabilities: Set<Capability> { [.changeActions, .deleteBranch, .changeSearch, .collaborators, .commitChecks] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(15), requestsPerHour: 5000) }
 
     let client: GitHubClient
@@ -105,6 +105,55 @@ public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, Co
                              isDraft: n["isDraft"] as? Bool ?? false, labels: labels, body: n["body"] as? String)
         c.headSha = n["headRefOid"] as? String
         return c
+    }
+
+    // MARK: CommitChecking
+
+    /// The check runs of other apps and the commit statuses. The runs of GitHub Actions are in the CI runs.
+    public func checks(_ r: RepoRef, sha: String) async throws -> [CICheck] {
+        guard let runs = try await client.json("GET", "repos/\(r.path)/commits/\(sha)/check-runs?per_page=100") as? [String: Any],
+              let statuses = try await client.json("GET", "repos/\(r.path)/commits/\(sha)/status") as? [String: Any] else {
+            throw ProviderError.decoding("no checks in the answer")
+        }
+        let fromRuns = (runs["check_runs"] as? [[String: Any]] ?? []).compactMap(Self.checkRun)
+        let fromStatuses = (statuses["statuses"] as? [[String: Any]] ?? []).compactMap(Self.status)
+        return fromRuns + fromStatuses
+    }
+
+    static func checkRun(_ c: [String: Any]) -> CICheck? {
+        guard let name = c["name"] as? String else { return nil }
+        let app = (c["app"] as? [String: Any])?["slug"] as? String
+        if app == "github-actions" { return nil }
+        let conclusion = c["conclusion"] as? String
+        let state: CICheckState
+        switch c["status"] as? String {
+        case "completed":
+            switch conclusion {
+            case "success": state = .success
+            case "failure", "timed_out", "action_required", "startup_failure": state = .failure
+            case "cancelled": state = .cancelled
+            case "skipped": state = .skipped
+            default: state = .neutral
+            }
+        case "in_progress": state = .running
+        default: state = .pending
+        }
+        return CICheck(name: name, app: app, kind: .checkRun, state: state, conclusion: conclusion, url: c["html_url"] as? String,
+                       startedAt: c["started_at"] as? String, completedAt: c["completed_at"] as? String)
+    }
+
+    static func status(_ c: [String: Any]) -> CICheck? {
+        guard let name = c["context"] as? String else { return nil }
+        let raw = c["state"] as? String
+        let state: CICheckState
+        switch raw {
+        case "success": state = .success
+        case "failure", "error": state = .failure
+        default: state = .pending
+        }
+        let done = state != .pending
+        return CICheck(name: name, kind: .status, state: state, conclusion: done ? raw : nil, url: c["target_url"] as? String,
+                       startedAt: c["created_at"] as? String, completedAt: done ? c["updated_at"] as? String : nil)
     }
 
     public func changes(_ r: RepoRef, head branch: String) async throws -> [ChangeRequest] {
