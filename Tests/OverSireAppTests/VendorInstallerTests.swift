@@ -122,6 +122,7 @@ final class VendorInstallerTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("plane/0.2.2").path), ["plane-cli"],
                        "the archive goes after the unpack")
         XCTAssertEqual(http.urls, [Self.indexURL, Self.indexURL + ".sig", Self.binURL])
+        XCTAssertEqual(Set(http.asked.map(\.cachePolicy)), [.reloadIgnoringLocalCacheData], "a cached index hides a new release")
         let tar = try XCTUnwrap(commands.calls.first)
         XCTAssertEqual(tar.exe, "/usr/bin/tar")
         XCTAssertEqual(tar.args.last, "plane-cli", "only the binary is unpacked")

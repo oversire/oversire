@@ -282,7 +282,10 @@ struct VendorInstaller: VendorInstalling {
         return try await get(req, max: max)
     }
 
-    private func get(_ req: URLRequest, max: Int) async throws -> Data {
+    private func get(_ request: URLRequest, max: Int) async throws -> Data {
+        // The index has max-age=300: a cached copy hides a new release.
+        var req = request
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, res) = try await http.send(req)
         let host = req.url?.host ?? "The server"
         if req.url?.host == "api.github.com", res.statusCode == 403 || res.statusCode == 429 { throw VendorInstallError.rateLimited }
