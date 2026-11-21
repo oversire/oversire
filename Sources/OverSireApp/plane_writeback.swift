@@ -73,7 +73,7 @@ final class PlaneWriteBack {
         self.path = path
         self.store = store
         self.trackers = trackers
-        if let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode([String: Done].self, from: d) { done = s }
+        if let s = [String: Done].read(atPath: path) { done = s }
     }
 
     static func label(_ a: AgentSession) -> String? {
@@ -201,6 +201,6 @@ final class PlaneWriteBack {
     }
 
     private func save() {
-        if let d = try? JSONEncoder().encode(done) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        done.write(atPath: path)
     }
 }

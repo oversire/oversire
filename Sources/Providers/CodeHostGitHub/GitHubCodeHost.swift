@@ -24,19 +24,9 @@ public final class GitHubCodeHost: CodeHost, BranchDeleting, ChangeSearching, Co
         RepoRef(account: account, path: path, url: URL(string: "https://github.com/\(path)")!)
     }
 
-    public func probe() async throws -> Identity {
-        guard let o = try await client.json("GET", "user") as? [String: Any], let login = o["login"] as? String else {
-            throw ProviderError.decoding("no user in the answer")
-        }
-        let id = (o["id"] as? NSNumber)?.stringValue ?? login
-        let name = (o["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? login
-        return Identity(person: PersonRef(id: id, name: name, login: login))
-    }
+    public func probe() async throws -> Identity { try await client.identity() }
 
-    public func budget() async throws -> RateBudget {
-        guard let b = try await client.rateLimit().budget else { throw ProviderError.decoding("no rate limit buckets") }
-        return b
-    }
+    public func budget() async throws -> RateBudget { try await client.budget() }
 
     // MARK: CodeHost
 

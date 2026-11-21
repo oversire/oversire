@@ -19,8 +19,6 @@ public protocol ChatStreamDecoder: Sendable {
 }
 
 extension APIKeyEngine: ChatEngine {
-    public var chatDialect: any ChatDialect { config.format == .openai ? OpenAIDialect() : AnthropicDialect() }
-
     public func turn(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
         let clock = ChunkClock(limit: timeouts.firstByte)
         let idle = timeouts.idle
@@ -28,7 +26,7 @@ extension APIKeyEngine: ChatEngine {
             let main = Task {
                 do {
                     guard let streaming else { throw AIError.notConfigured }
-                    let dialect = chatDialect
+                    let dialect = self.dialect
                     let req = try await dialect.chatRequest(request, cfg: config, key: key)
                     let (resp, bytes) = try await streaming.stream(req)
                     clock.tick(idle)
@@ -38,7 +36,7 @@ extension APIKeyEngine: ChatEngine {
                             clock.tick(idle)
                             body += c
                         }
-                        throw Self.chatError(dialect, body, status: resp.statusCode)
+                        throw Self.chatError(body, status: resp.statusCode)
                     }
                     var sse = SSEParser()
                     var dec = dialect.decoder()
@@ -80,7 +78,7 @@ extension APIKeyEngine: ChatEngine {
     }
 
     /// 429 and 529 give unavailable, so the router can try the next engine.
-    static func chatError(_ d: any ChatDialect, _ body: Data, status: Int) -> AIError {
+    static func chatError(_ body: Data, status: Int) -> AIError {
         let e = OpenAIDialect().httpError(body, status: status)
         guard status == 429 || status == 529, case .http(_, let msg) = e else { return e }
         return .unavailable(msg.isEmpty ? "The AI endpoint is busy (HTTP \(status))." : msg)
@@ -169,8 +167,7 @@ public enum ChatWire {
 
 extension AnthropicDialect: ChatDialect {
     public func chatRequest(_ r: ChatRequest, cfg: APIKeyConfig, key: String) async throws -> URLRequest {
-        var req = try urlRequest(AIPrompt(system: r.system, user: "", maxTokens: r.maxTokens), cfg: cfg, key: key)
-        req.timeoutInterval = 60
+        var req = try baseRequest(cfg: cfg, key: key, timeout: 60)
         var body: [String: Any] = [
             "model": cfg.model,
             "max_tokens": r.maxTokens ?? cfg.maxTokens,
@@ -298,8 +295,7 @@ struct AnthropicStream: ChatStreamDecoder {
 
 extension OpenAIDialect: ChatDialect {
     public func chatRequest(_ r: ChatRequest, cfg: APIKeyConfig, key: String) async throws -> URLRequest {
-        var req = try urlRequest(AIPrompt(system: r.system, user: ""), cfg: cfg, key: key)
-        req.timeoutInterval = 60
+        var req = try baseRequest(cfg: cfg, key: key, timeout: 60)
         var body: [String: Any] = [
             "model": cfg.model,
             "stream": true,

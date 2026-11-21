@@ -122,7 +122,7 @@ final class GlanceVC: NSViewController {
 
     private func runs() {
         let latest = data.grouped.flatMap { g in latestPerWorkflow(g.1, acrossBranches: true).map { (g.0, $0) } }
-            .sorted { newerActivity($0.1, $1.1) }
+            .map { ($0, $0.1.activityRank) }.sorted { $0.1 > $1.1 }.map(\.0)
         if latest.isEmpty, data.firstLoad { body.addFull(LoadingNote("Loading runs", height: 200)); return }
         section("Latest run of each workflow", count: latest.count, latest.prefix(14).map { runRow($0.0, $0.1) },
                 more: ("All runs", .runs(.all)), empty: data.firstLoad ? "Loading runs…" : "No runs.")
@@ -175,7 +175,7 @@ final class GlanceVC: NSViewController {
         let t = Tone(r)
         let name = repo.split(separator: "/").last.map(String.init) ?? repo
         let link = data.workstreams.link(runId: r.id)
-        let sub = [name, r.headBranch, link?.key, relativeTime(lastActivity(r))].compactMap { $0 }.joined(separator: " · ")
+        let sub = [name, r.headBranch, link?.key, relativeTime(r.lastActivity)].compactMap { $0 }.joined(separator: " · ")
         let row = Row([Glyph(t), TwoLine("\(r.workflowName ?? r.name) #\(r.number)", sub)], height: 40,
                       label: "\(t.word): \(r.workflowName ?? r.name) #\(r.number), \(sub)") { [weak self] in self?.open(.run(repo: repo, id: r.id)) }
         if r.status != "completed" {

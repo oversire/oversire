@@ -9,6 +9,19 @@ final class CIModelTests: XCTestCase {
             number: 1, workflowName: wf, actorLogin: "a")
     }
 
+    func testStartDateFallsBackToCreatedAt() {
+        let created = "2026-10-01T10:00:00Z"
+        XCTAssertEqual(run("ci", created: created).startDate, parseISO(created))
+        let bad = Run(id: "3", name: "ci", displayTitle: "t", status: "completed", conclusion: nil, headBranch: "main", headSha: "s",
+                      event: "push", url: "u", updatedAt: "", createdAt: created, startedAt: "not a date", number: 1,
+                      workflowName: nil, actorLogin: nil)
+        XCTAssertEqual(bad.startDate, parseISO(created))
+        let started = Run(id: "3", name: "ci", displayTitle: "t", status: "completed", conclusion: nil, headBranch: "main", headSha: "s",
+                          event: "push", url: "u", updatedAt: "", createdAt: created, startedAt: "2026-10-01T10:05:00Z", number: 1,
+                          workflowName: nil, actorLogin: nil)
+        XCTAssertEqual(started.startDate, parseISO("2026-10-01T10:05:00Z"))
+    }
+
     func testGrouped() {
         let rows = [run("Deploy", sha: "s2"), run("Deploy", sha: "s1"), run("Deploy", sha: "s1"), run("Build", sha: "s1")].grouped()
         XCTAssertEqual(rows.map(\.count), [1, 1, 2], "other commits or the same workflow get their own row")

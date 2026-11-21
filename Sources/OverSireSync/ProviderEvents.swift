@@ -51,13 +51,13 @@ public struct CIEvents: Sendable {
             }
             if rank == 0 { row(.ciQueued, "queued", at: parseISO(r.createdAt), "\(name) queued on \(r.headBranch)") }
             if rank >= 1, (last ?? -1) < 1, rank == 1 || r.startedAt != nil {
-                row(.ciStarted, "started", at: parseISO(r.startedAt) ?? parseISO(r.createdAt), "\(name) started on \(r.headBranch)")
+                row(.ciStarted, "started", at: r.startDate, "\(name) started on \(r.headBranch)")
             }
             if rank == 2 {
                 let c = r.conclusion ?? "failure"
                 var extra: [String: JSONValue] = [:]
                 if Self.conclusions.contains(c) { extra["conclusion"] = .string(c) }
-                if let s = parseISO(r.startedAt) ?? parseISO(r.createdAt), let e = parseISO(r.updatedAt), e >= s {
+                if let s = r.startDate, let e = parseISO(r.updatedAt), e >= s {
                     extra["durationSec"] = .int(Int(e.timeIntervalSince(s)))
                 }
                 row(.ciCompleted, "completed", at: parseISO(r.updatedAt), "\(name) \(Self.word(c))", extra: extra)

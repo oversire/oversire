@@ -212,6 +212,24 @@ final class APIKeyChatTests: XCTestCase {
         XCTAssertEqual(msgs[7]["content"] as? String, "Thanks")
     }
 
+    func testChatRequestHeaders() async throws {
+        let ai = APIKeyConfig(format: .anthropic, baseURL: "https://api.anthropic.com", model: "m")
+        let oa = APIKeyConfig(baseURL: "https://api.openai.com/v1", model: "m")
+        let a = try await AnthropicDialect().chatRequest(history, cfg: ai, key: "k")
+        let o = try await OpenAIDialect().chatRequest(history, cfg: oa, key: "k")
+        for (req, cfg, dialect) in [(a, ai, AnthropicDialect() as AIDialect), (o, oa, OpenAIDialect())] {
+            let plain = try dialect.urlRequest(AIPrompt(system: "s", user: "u"), cfg: cfg, key: "k")
+            XCTAssertEqual(req.url, plain.url)
+            XCTAssertEqual(req.httpMethod, "POST")
+            XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(req.timeoutInterval, 60)
+            XCTAssertEqual(plain.timeoutInterval, 30)
+        }
+        XCTAssertEqual(a.value(forHTTPHeaderField: "x-api-key"), "k")
+        XCTAssertEqual(a.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+        XCTAssertEqual(o.value(forHTTPHeaderField: "Authorization"), "Bearer k")
+    }
+
     func testNoStreamingTransport() async throws {
         struct Plain: HTTPTransport {
             func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw ProviderError.transport("no") }

@@ -78,7 +78,7 @@ final class DeployLog {
                     if self.seen.contains(k) { continue }
                     self.seen.insert(k)
                     var dur = 0.0
-                    if let s = parseISO(r.startedAt) ?? parseISO(r.createdAt),
+                    if let s = r.startDate,
                        let e = parseISO(r.updatedAt) { dur = max(0, e.timeIntervalSince(s)) }
                     let rec = DeployRecord(repo: repo, workflow: r.workflowName ?? r.name,
                         title: r.displayTitle, branch: r.headBranch, event: r.event,

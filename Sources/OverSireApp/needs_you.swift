@@ -596,7 +596,7 @@ struct NeedsYou: Equatable {
             let link = ws.link(runId: r.id)
             let name = repo.split(separator: "/").last.map(String.init) ?? repo
             out.append(NeedsYou(kind: .runFailed, key: link?.key ?? "\(name) #\(r.number)",
-                                reason: "\(r.workflowName ?? r.name) #\(r.number) failed · \(r.headBranch)", at: lastActivity(r),
+                                reason: "\(r.workflowName ?? r.name) #\(r.number) failed · \(r.headBranch)", at: r.lastActivity,
                                 route: .run(repo: repo, id: r.id), act: .rerun(repo: repo, run: r),
                                 watched: link.flatMap { ws.stream($0.key)?.agent }.map { $0.phase != .done } ?? false))
         }
@@ -623,7 +623,7 @@ final class Snoozes {
 
     init(path: String) {
         self.path = path
-        if let d = FileManager.default.contents(atPath: path), let m = try? JSONDecoder().decode([String: Date].self, from: d) { until = m }
+        if let m = [String: Date].read(atPath: path) { until = m }
     }
 
     func has(_ id: String, now: Date = Date()) -> Bool { until[id].map { $0 > now } ?? false }
@@ -631,7 +631,7 @@ final class Snoozes {
     func snooze(_ id: String, for t: TimeInterval = 86400, now: Date = Date()) {
         until = until.filter { $0.value > now }
         until[id] = now.addingTimeInterval(t)
-        if let d = try? JSONEncoder().encode(until) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        until.write(atPath: path)
         ChangeBus.shared.post(DataChange(.questions, origin: .user))
     }
 }

@@ -32,7 +32,7 @@ final class ParentGuard {
     init(path: String?, store: ProjectStore) {
         self.path = path
         self.store = store
-        if let path, let d = FileManager.default.contents(atPath: path), let m = try? JSONDecoder().decode(Memory.self, from: d) { memory = m }
+        if let path, let m = Memory.read(atPath: path) { memory = m }
     }
 
     /// Runs after each tracker refresh. Main thread.
@@ -99,7 +99,7 @@ final class ParentGuard {
     }
 
     private func save() {
-        guard let path, let d = try? JSONEncoder().encode(memory) else { return }
-        try? d.write(to: URL(fileURLWithPath: path), options: .atomic)
+        guard let path else { return }
+        memory.write(atPath: path)
     }
 }

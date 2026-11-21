@@ -94,7 +94,7 @@ struct WorkContext {
 
     /// The latest run of each workflow: on each PR head, on the other linked branches, and on the base branches of the repos.
     private func runs(stream: Workstream?, prs: [WorkFacts.PR]) -> [WorkFacts.Run] {
-        let byRepo = Dictionary(data.grouped.map { ($0.0, $0.1.sorted { lastActivity($0) > lastActivity($1) }) }, uniquingKeysWith: { a, _ in a })
+        let byRepo = Dictionary(data.grouped.map { ($0.0, $0.1.sorted { $0.lastActivity > $1.lastActivity }) }, uniquingKeysWith: { a, _ in a })
         var out: [WorkFacts.Run] = []
         var seen = Set<String>()
         func add(_ repo: String, _ list: [Run], onBase: Bool) {
@@ -107,7 +107,7 @@ struct WorkContext {
             }
         }
         for p in prs { add(p.repo, (byRepo[p.repo] ?? []).filter { $0.headBranch == p.head }, onBase: false) }
-        let linked = Dictionary(grouping: (stream?.runs ?? []).sorted { lastActivity($0.run) > lastActivity($1.run) }, by: \.repo)
+        let linked = Dictionary(grouping: (stream?.runs ?? []).sorted { $0.run.lastActivity > $1.run.lastActivity }, by: \.repo)
         for (repo, list) in linked.sorted(by: { $0.key < $1.key }) { add(repo, list.map(\.run), onBase: false) }
         let repos = Set(prs.map(\.repo)).union(linked.keys)
         for repo in repos.sorted() {

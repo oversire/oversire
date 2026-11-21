@@ -96,11 +96,11 @@ enum ActivityFeed {
         out = grouped(out)
         let day = Date().addingTimeInterval(-86400)
         for (repo, runs) in data.grouped {
-            for r in latestPerWorkflow(runs) where r.status == "completed" && lastActivity(r) > day && (r.isFailure || data.workstreams.link(runId: r.id) != nil) {
+            for r in latestPerWorkflow(runs) where r.status == "completed" && r.lastActivity > day && (r.isFailure || data.workstreams.link(runId: r.id) != nil) {
                 let link = data.workstreams.link(runId: r.id)
                 out.append(FeedEntry(id: "run|\(r.id)|\(r.attempt ?? 1)", source: .run, title: "\(r.workflowName ?? r.name) #\(r.number) · \(Tone(r).word)",
                                          body: "\(repo) · \(r.headBranch)" + (link.map { " · \($0.key)" } ?? ""),
-                                         at: lastActivity(r), route: .run(repo: repo, id: r.id), url: r.url, itemKey: link?.key))
+                                         at: r.lastActivity, route: .run(repo: repo, id: r.id), url: r.url, itemKey: link?.key))
             }
         }
         for (key, a) in data.agentIndex.agents where a.phase != .working && a.phase != .starting {

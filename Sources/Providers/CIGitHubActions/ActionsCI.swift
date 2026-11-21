@@ -28,18 +28,9 @@ public final class ActionsCI: CIProvider, LogReading, JobRerunning, RateReportin
         RunRef(account: account, repo: repoRef(path), id: id, attempt: attempt ?? 1)
     }
 
-    public func probe() async throws -> Identity {
-        guard let o = try await client.json("GET", "user") as? [String: Any], let login = o["login"] as? String else {
-            throw ProviderError.decoding("no user in the answer")
-        }
-        let id = (o["id"] as? NSNumber)?.stringValue ?? login
-        return Identity(person: PersonRef(id: id, name: (o["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? login, login: login))
-    }
+    public func probe() async throws -> Identity { try await client.identity() }
 
-    public func budget() async throws -> RateBudget {
-        guard let b = try await client.rateLimit().budget else { throw ProviderError.decoding("no rate limit buckets") }
-        return b
-    }
+    public func budget() async throws -> RateBudget { try await client.budget() }
 
     // MARK: CIProvider
 

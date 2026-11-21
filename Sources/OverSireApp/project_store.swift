@@ -49,7 +49,9 @@ protocol AssetLinking: AssetResolving { func assetIds(in markdown: String) -> Se
 final class ProjectStore {
     static let changed = Notification.Name("ProjectStoreChanged")
 
-    private(set) var snapshots: [String: ProjectSnapshot] = [:]
+    private(set) var snapshots: [String: ProjectSnapshot] = [:] { didSet { keyIndex = nil } }
+    /// Upper-case item key → the project and the position in its items. Built on the first lookup after a write.
+    private var keyIndex: [String: (project: String, at: Int)]?
     /// The keys that a refresh holds. A refresh lets each key go when its read ends.
     var refreshing: Set<String> { Set(owner.keys) }
     /// Key → the refresh that holds it, and the lane of that refresh.
@@ -1252,11 +1254,17 @@ final class ProjectStore {
     }
 
     func item(key: String) -> (key: String, snap: ProjectSnapshot, item: Item)? {
-        let k = key.uppercased()
-        for (pk, snap) in snapshots {
-            if let item = snap.items.first(where: { $0.key.uppercased() == k }) { return (pk, snap, item) }
+        if keyIndex == nil {
+            var index: [String: (project: String, at: Int)] = [:]
+            for (pk, snap) in snapshots {
+                for (i, item) in snap.items.enumerated() where index[item.key.uppercased()] == nil {
+                    index[item.key.uppercased()] = (pk, i)
+                }
+            }
+            keyIndex = index
         }
-        return nil
+        guard let hit = keyIndex?[key.uppercased()], let snap = snapshots[hit.project] else { return nil }
+        return (hit.project, snap, snap.items[hit.at])
     }
 
     /// Finished: closed, and all sub-items closed. A Done blocker with open sub-items still blocks.

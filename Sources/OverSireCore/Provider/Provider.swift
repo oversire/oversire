@@ -83,10 +83,18 @@ public struct Identity: Hashable, Sendable, Codable {
 public struct Cursor: RawRepresentable, Hashable, Sendable, Codable {
     public let rawValue: String
     public init(rawValue: String) { self.rawValue = rawValue }
+    public init<T: Encodable>(encoding value: T) throws {
+        rawValue = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+    }
     public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         try c.encode(rawValue)
+    }
+
+    /// The JSON value in the cursor. Nil when the text is not JSON of `T`.
+    public func decoded<T: Decodable>(as type: T.Type) -> T? {
+        try? JSONDecoder().decode(T.self, from: Data(rawValue.utf8))
     }
 }
 

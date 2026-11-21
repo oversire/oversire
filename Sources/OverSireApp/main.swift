@@ -1251,7 +1251,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     }
                     if let ending = notificationEnding(run) {
                         notify(title: repo, subtitle: ending,
-                               body: "\(wf) on \(run.headBranch) \u{2014} \(runDuration(run))", id: "end-\(run.url)")
+                               body: "\(wf) on \(run.headBranch) \u{2014} \(run.durationText)", id: "end-\(run.url)")
                     }
                 }
             }

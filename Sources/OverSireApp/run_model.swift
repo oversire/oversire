@@ -63,17 +63,6 @@ func fmtDuration(_ secs: TimeInterval) -> String {
     return "\(s/3600)h \(s/60%60)m"
 }
 
-func runDuration(_ r: Run) -> String {
-    guard let s = parseISO(r.startedAt) ?? parseISO(r.createdAt),
-          let e = parseISO(r.updatedAt) else { return "" }
-    return fmtDuration(e.timeIntervalSince(s))
-}
-
-func runElapsed(_ r: Run) -> TimeInterval {
-    guard let s = parseISO(r.startedAt) ?? parseISO(r.createdAt) else { return 0 }
-    return -s.timeIntervalSinceNow
-}
-
 let startedFmt: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
 }()
@@ -178,22 +167,41 @@ func visibleGrouped(_ g: [(String, [Run])]) -> [(String, [Run])] {
     g.map { ($0.0, visibleRuns($0.1)) }
 }
 
-// Repos with an active run come first, then by newest visible run. Repos without runs go last.
-// A running or queued run is active now. A finished run was last active when it completed.
-func lastActivity(_ r: Run) -> Date {
-    if r.status != "completed" { return Date() }
-    return parseISO(r.updatedAt) ?? parseISO(r.createdAt) ?? .distantPast
+/// The order of runs by activity. A greater rank is newer: active runs first, then the newest.
+struct ActivityRank: Comparable {
+    let active: Bool
+    let at: Date
+
+    static func < (a: ActivityRank, b: ActivityRank) -> Bool {
+        a.active != b.active ? b.active : a.at < b.at
+    }
 }
 
-// Newest first. Active runs come first.
-func newerActivity(_ a: Run, _ b: Run) -> Bool {
-    let aActive = a.status != "completed", bActive = b.status != "completed"
-    if aActive != bActive { return aActive }
-    if aActive { return (parseISO(a.createdAt) ?? .distantPast) > (parseISO(b.createdAt) ?? .distantPast) }
-    return lastActivity(a) > lastActivity(b)
+extension Run {
+    var durationText: String {
+        guard let s = startDate, let e = parseISO(updatedAt) else { return "" }
+        return fmtDuration(e.timeIntervalSince(s))
+    }
+
+    var elapsed: TimeInterval {
+        guard let s = startDate else { return 0 }
+        return -s.timeIntervalSinceNow
+    }
+
+    var lastActivity: Date {
+        if status != "completed" { return Date() }
+        return parseISO(updatedAt) ?? parseISO(createdAt) ?? .distantPast
+    }
+
+    var activityRank: ActivityRank {
+        if status != "completed" { return ActivityRank(active: true, at: parseISO(createdAt) ?? .distantPast) }
+        return ActivityRank(active: false, at: parseISO(updatedAt) ?? parseISO(createdAt) ?? .distantPast)
+    }
 }
 
-func byLastActivity(_ runs: [Run]) -> [Run] { runs.sorted(by: newerActivity) }
+func byLastActivity(_ runs: [Run]) -> [Run] {
+    runs.map { ($0, $0.activityRank) }.sorted { $0.1 > $1.1 }.map(\.0)
+}
 
 // The newest run of each workflow on each branch, or over all branches. `runs` is newest first, as the API returns it.
 func latestPerWorkflow(_ runs: [Run], acrossBranches: Bool = false) -> [Run] {
@@ -201,8 +209,10 @@ func latestPerWorkflow(_ runs: [Run], acrossBranches: Bool = false) -> [Run] {
     return runs.filter { seen.insert(acrossBranches ? ($0.workflowName ?? $0.name) : "\($0.workflowName ?? $0.name)|\($0.headBranch)").inserted }
 }
 
+// Repos with an active run come first, then by newest visible run. Repos without runs go last.
+// A running or queued run is active now. A finished run was last active when it completed.
 func sortedByRecent(_ g: [(String, [Run])]) -> [(String, [Run])] {
-    func latest(_ runs: [Run]) -> Date { visibleRuns(runs).map(lastActivity).max() ?? .distantPast }
+    func latest(_ runs: [Run]) -> Date { visibleRuns(runs).map(\.lastActivity).max() ?? .distantPast }
     let keyed = g.map { (repo: $0, active: hasActive([($0.0, visibleRuns($0.1))]), latest: latest($0.1)) }
     return keyed.sorted { a, b in
         if a.active != b.active { return a.active }

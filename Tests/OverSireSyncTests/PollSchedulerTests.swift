@@ -59,4 +59,13 @@ final class PollSchedulerTests: XCTestCase {
         XCTAssertFalse(ids.contains("a"), "the oldest id leaves")
         XCTAssertTrue(ids.contains("c"))
     }
+
+    func testRecentIDsInsertContentsOf() {
+        var ids = RecentIDs(capacity: 3)
+        ids.insert(contentsOf: ["a", "b", "c"])
+        ids.insert(contentsOf: ["d", "a", "e"])
+        XCTAssertFalse(ids.contains("a"))
+        XCTAssertFalse(ids.contains("b"))
+        XCTAssertTrue(["c", "d", "e"].allSatisfy(ids.contains))
+    }
 }

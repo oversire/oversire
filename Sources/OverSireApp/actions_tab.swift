@@ -22,7 +22,7 @@ final class RunRow: HoverRow {
     // Priority: in_progress (longest-running) > queued > completed-failure > anything else.
     static func pickPrimary(_ group: [Run]) -> Run {
         let inProg = group.filter { $0.status == "in_progress" }
-        if let r = inProg.max(by: { runElapsed($0) < runElapsed($1) }) { return r }
+        if let r = inProg.max(by: { $0.elapsed < $1.elapsed }) { return r }
         if let r = group.first(where: { $0.status == "queued" }) { return r }
         if let r = group.first(where: { $0.isFailure && !IGNORED.contains($0) }) { return r }
         return group[0]
@@ -101,7 +101,7 @@ final class RunRow: HoverRow {
         addSubview(sub)
 
         // Time column. For groups: earliest start, longest elapsed (driven by primary).
-        let groupStart = group.compactMap { parseISO($0.startedAt) ?? parseISO($0.createdAt) }.min()
+        let groupStart = group.compactMap { $0.startDate }.min()
         let startedISO: String? = groupStart.map { isoFmt.string(from: $0) } ?? (primary.startedAt ?? primary.createdAt)
 
         let anyActive = group.contains { $0.status == "in_progress" || $0.status == "queued" }
@@ -112,7 +112,7 @@ final class RunRow: HoverRow {
             addSubview(started)
 
             let el = LiveLabel.make(.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium), C_RUNNING) {
-                "\(fmtDuration(runElapsed(primary))) elapsed"
+                "\(fmtDuration(primary.elapsed)) elapsed"
             }
             el.alignment = .right
             el.frame = NSRect(x: rightX, y: 22, width: rightW, height: 14)
@@ -121,7 +121,7 @@ final class RunRow: HoverRow {
             let est = primary.estimatedTotal(history: history)
             let eta = LiveLabel.make(.monospacedDigitSystemFont(ofSize: 10, weight: .regular), .secondaryLabelColor) {
                 guard let est = est else { return "estimating..." }
-                let rem = max(0, est - runElapsed(primary))
+                let rem = max(0, est - primary.elapsed)
                 return rem > 0 ? "~\(fmtDuration(rem)) remaining" : "finishing..."
             }
             eta.alignment = .right
@@ -140,7 +140,7 @@ final class RunRow: HoverRow {
                let e = group.compactMap({ parseISO($0.updatedAt) }).max() {
                 durText = fmtDuration(e.timeIntervalSince(s))
             } else {
-                durText = runDuration(primary)
+                durText = primary.durationText
             }
             // Spell out non-success outcomes so state is readable without colour.
             let concl = primary.conclusion ?? ""
@@ -313,7 +313,7 @@ class RunDetailView: Flipped {
         divider()
 
         // ── Timing ──
-        let groupStart = group.compactMap { parseISO($0.startedAt) ?? parseISO($0.createdAt) }.min()
+        let groupStart = group.compactMap { $0.startDate }.min()
         let allDone = group.allSatisfy { $0.status == "completed" }
         let groupEnd = group.compactMap { parseISO($0.updatedAt) }.max()
         if let s = groupStart { infoLine("Started", timestampFmt.string(from: s)) }
@@ -321,7 +321,7 @@ class RunDetailView: Flipped {
             infoLine("Completed", timestampFmt.string(from: e))
             if let s = groupStart { infoLine("Duration", fmtDuration(e.timeIntervalSince(s))) }
         } else {
-            infoLine("Elapsed", fmtDuration(runElapsed(primary)), C_RUNNING, live: true)
+            infoLine("Elapsed", fmtDuration(primary.elapsed), C_RUNNING, live: true)
         }
         if let est = primary.estimatedTotal(history: history) {
             infoLine("Expected", "~\(fmtDuration(est))")
@@ -346,8 +346,8 @@ class RunDetailView: Flipped {
             let st = LiveLabel.make(.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
                                     run.conclusion == "failure" ? C_FAILURE : .secondaryLabelColor) {
                 switch run.status {
-                case "completed": return "\(run.statusText) \u{00B7} \(runDuration(run))"
-                case "in_progress": return "\(fmtDuration(runElapsed(run))) elapsed"
+                case "completed": return "\(run.statusText) \u{00B7} \(run.durationText)"
+                case "in_progress": return "\(fmtDuration(run.elapsed)) elapsed"
                 default: return run.statusText
                 }
             }
@@ -499,10 +499,11 @@ func buildActionsContent(_ w: CGFloat) -> [NSView] {
         // Each group sorts by its most recent run.
         let items = data.flatMap { repo, runs in
             let visible = visibleRuns(runs)
-            return shownRuns(visible).grouped().map {
-                (repo: repo, group: $0, lead: $0.min(by: newerActivity)!, history: visible)
+            return shownRuns(visible).grouped().map { g in
+                let lead = g.max { $0.activityRank < $1.activityRank }!
+                return (repo: repo, group: g, lead: lead, rank: lead.activityRank, history: visible)
             }
-        }.sorted { newerActivity($0.lead, $1.lead) }
+        }.sorted { $0.rank > $1.rank }
         for it in items {
             appendRun(&rows, repo: it.repo, group: it.group, history: it.history, w: w, showRepo: selectedRepo == nil)
         }

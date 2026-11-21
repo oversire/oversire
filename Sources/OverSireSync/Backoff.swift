@@ -34,4 +34,13 @@ public struct RecentIDs: Sendable {
         if order.count > capacity { set.remove(order.removeFirst()) }
         return true
     }
+
+    /// Adds each new id, then drops the oldest ids above the capacity in one step.
+    public mutating func insert<S: Sequence>(contentsOf ids: S) where S.Element == String {
+        for id in ids where set.insert(id).inserted { order.append(id) }
+        guard order.count > capacity else { return }
+        let drop = order.prefix(order.count - capacity)
+        set.subtract(drop)
+        order.removeFirst(drop.count)
+    }
 }

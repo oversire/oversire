@@ -201,5 +201,8 @@ final class CIGitHubActionsTests: XCTestCase {
                                                                values: ["repos": "acme/app, acme/web"]), env)
         XCTAssertEqual((made as? ActionsCI)?.repoPaths, ["acme/app", "acme/web"])
         XCTAssertEqual(ActionsCI.descriptor.layer, .ci)
+        let spaced = try ActionsCI.descriptor.make(AccountConfig(account: AccountID(provider: .githubActions, id: "acme"),
+                                                                 values: ["repos": " a/b , ,c/d "]), env)
+        XCTAssertEqual((spaced as? ActionsCI)?.repoPaths, ["a/b", "c/d"])
     }
 }

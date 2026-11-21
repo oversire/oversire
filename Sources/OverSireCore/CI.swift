@@ -74,6 +74,9 @@ public struct Run: Codable, Hashable, Sendable {
 
     public var isFailure: Bool { status == "completed" && conclusion == "failure" }
 
+    /// When the run started. A run with no valid `startedAt` uses `createdAt`.
+    public var startDate: Date? { parseISO(startedAt) ?? parseISO(createdAt) }
+
     /// "waiting", "requested" and "pending" count as queued.
     public var phase: RunStatus { RunStatus(rawValue: status) ?? .queued }
     public var outcome: RunConclusion? { conclusion.flatMap(RunConclusion.init(rawValue:)) }
@@ -84,7 +87,7 @@ public struct Run: Codable, Hashable, Sendable {
         let cutoff = now.addingTimeInterval(-3 * 24 * 3600)
         let durs = history.compactMap { r -> TimeInterval? in
             guard (r.workflowName ?? r.name) == wf, r.status == "completed",
-                  let s = parseISO(r.startedAt) ?? parseISO(r.createdAt), s >= cutoff,
+                  let s = r.startDate, s >= cutoff,
                   let e = parseISO(r.updatedAt) else { return nil }
             let d = e.timeIntervalSince(s)
             return d > 0 ? d : nil

@@ -4,7 +4,7 @@ import OverSireCore
 extension PlaneTracker {
     /// The cursor holds the newest updated_at of each project. A new project sets its baseline and gives no events.
     public func poll(since: Cursor?) async throws -> EventPage {
-        var marks = since.flatMap { try? JSONDecoder().decode([String: Date].self, from: Data($0.rawValue.utf8)) } ?? [:]
+        var marks = since?.decoded(as: [String: Date].self) ?? [:]
         var events: [ProviderEvent] = []
         let q = [URLQueryItem(name: "order_by", value: "-updated_at"),
                  URLQueryItem(name: "fields", value: "id,name,sequence_id,created_at,updated_at")]
@@ -27,7 +27,6 @@ extension PlaneTracker {
             }
             if let newest, newest > mark { marks[p.ref.id] = newest }
         }
-        let data = try JSONEncoder().encode(marks)
-        return EventPage(events: events.sorted { $0.at < $1.at }, cursor: Cursor(rawValue: String(decoding: data, as: UTF8.self)))
+        return EventPage(events: events.sorted { $0.at < $1.at }, cursor: try Cursor(encoding: marks))
     }
 }

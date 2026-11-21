@@ -42,8 +42,7 @@ final class RepoCatalog {
 
     init(path: String) {
         self.path = path
-        guard let data = FileManager.default.contents(atPath: path),
-              let c = try? JSONDecoder().decode(RepoCatalogCache.self, from: data) else { return }
+        guard let c = RepoCatalogCache.read(atPath: path) else { return }
         user = c.user; owners = c.owners; fetchedAt = c.fetchedAt
     }
 
@@ -121,9 +120,7 @@ final class RepoCatalog {
 
     private func save() {
         let c = RepoCatalogCache(user: user, owners: owners, fetchedAt: fetchedAt)
-        guard let data = try? JSONEncoder().encode(c) else { return }
-        try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        c.write(atPath: path, makeDir: true)
     }
 
     private func notify() { NotificationCenter.default.post(name: RepoCatalog.changed, object: self) }

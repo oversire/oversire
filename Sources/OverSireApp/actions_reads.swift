@@ -160,7 +160,7 @@ struct ReadActions {
                 o["deletions"] = .int(p.deletions)
                 o["labels"] = .array(p.labels.map { .string($0.name) })
                 if let b = p.body { o["body"] = .string(b) }
-                let runs = latestPerWorkflow((d.grouped.first { $0.0 == r }?.1 ?? []).filter { $0.headBranch == p.headRefName }.sorted { lastActivity($0) > lastActivity($1) })
+                let runs = latestPerWorkflow((d.grouped.first { $0.0 == r }?.1 ?? []).filter { $0.headBranch == p.headRefName }.sorted { $0.lastActivity > $1.lastActivity })
                 o["runs"] = .array(runs.map { Self.run(r, $0, d) })
                 done(Self.ok("\(r)#\(n) \(p.title) (\(p.state.lowercased())).", .object(o)))
             }
@@ -178,7 +178,7 @@ struct ReadActions {
                 let groups = d.grouped.filter { g in only.map { g.0.caseInsensitiveCompare($0) == .orderedSame } ?? true }
                 var list = a.bool("failed") == true ? failingRuns(groups) : groups.flatMap { g in g.1.map { (repo: g.0, run: $0) } }
                 if let b = a.string("branch"), !b.isEmpty { list = list.filter { $0.run.headBranch == b } }
-                list.sort { lastActivity($0.run) > lastActivity($1.run) }
+                list.sort { $0.run.lastActivity > $1.run.lastActivity }
                 let rows = list.prefix(Self.limit(a, 30)).map { Self.run($0.repo, $0.run, d) }
                 done(Self.ok("\(list.count) run\(list.count == 1 ? "" : "s")\(a.bool("failed") == true ? " failing" : "").",
                              .object(["runs": .array(rows), "total": .int(list.count)])))

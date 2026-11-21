@@ -3,23 +3,25 @@ import OverSireCore
 
 // ─── PR Helpers ──────────────────────────────────────────────────────────────
 
-func prReviewIcon(_ pr: ChangeRequest) -> String {
-    if pr.isDraft { return "pencil.circle" }
-    switch pr.reviewDecision ?? "" {
-    case "APPROVED": return "checkmark.circle.fill"
-    case "CHANGES_REQUESTED": return "xmark.circle.fill"
-    case "REVIEW_REQUIRED": return "circle.badge.questionmark"
-    default: return "circle.dashed"
+extension ChangeRequest {
+    var reviewSymbol: String {
+        if isDraft { return "pencil.circle" }
+        switch reviewDecision ?? "" {
+        case "APPROVED": return "checkmark.circle.fill"
+        case "CHANGES_REQUESTED": return "xmark.circle.fill"
+        case "REVIEW_REQUIRED": return "circle.badge.questionmark"
+        default: return "circle.dashed"
+        }
     }
-}
 
-func prReviewColor(_ pr: ChangeRequest) -> NSColor {
-    if pr.isDraft { return .systemGray }
-    switch pr.reviewDecision ?? "" {
-    case "APPROVED": return C_SUCCESS
-    case "CHANGES_REQUESTED": return C_FAILURE
-    case "REVIEW_REQUIRED": return C_QUEUED
-    default: return .secondaryLabelColor
+    var reviewColor: NSColor {
+        if isDraft { return .systemGray }
+        switch reviewDecision ?? "" {
+        case "APPROVED": return C_SUCCESS
+        case "CHANGES_REQUESTED": return C_FAILURE
+        case "REVIEW_REQUIRED": return C_QUEUED
+        default: return .secondaryLabelColor
+        }
     }
 }
 
@@ -56,8 +58,8 @@ final class PRRow: HoverRow {
         // Review status icon
         let iv = NSImageView(frame: NSRect(x: pad, y: (PR_ROW_H - iconSz) / 2, width: iconSz, height: iconSz))
         let reviewDesc = pr.isDraft ? "Draft" : (pr.reviewDecision ?? "Pending review")
-        if let img = NSImage(systemSymbolName: prReviewIcon(pr), accessibilityDescription: reviewDesc) {
-            iv.image = img; iv.contentTintColor = prReviewColor(pr)
+        if let img = NSImage(systemSymbolName: pr.reviewSymbol, accessibilityDescription: reviewDesc) {
+            iv.image = img; iv.contentTintColor = pr.reviewColor
             iv.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
         }
         iv.toolTip = reviewDesc

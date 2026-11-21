@@ -41,3 +41,16 @@ public final class ETagCache: @unchecked Sendable {
         order.append(path)
     }
 }
+
+/// The poll mark of one repo. A nil `busy` is not in the JSON.
+public struct ETagMark: Codable, Sendable {
+    public var etag: String?
+    public var at: Date
+    public var busy: Bool?
+
+    public init(etag: String?, at: Date, busy: Bool? = nil) {
+        self.etag = etag
+        self.at = at
+        self.busy = busy
+    }
+}

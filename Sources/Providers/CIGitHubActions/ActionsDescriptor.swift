@@ -15,10 +15,7 @@ extension ActionsCI {
                  ConfigField(key: "token", label: "Token", kind: .secret, required: false, help: "Empty uses gh auth.")],
         auth: [.cli("gh"), .token], docsURL: URL(string: "https://cli.github.com/manual/gh_auth_login")
     ) { config, env in
-        let token = config.secretKeys.first.flatMap { env.secrets.secret($0) }
-        let repos = (config.values["repos"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        return ActionsCI(owner: config.values["owner"] ?? config.account.id, repos: repos,
-                         client: GitHubClient(commands: env.commands, http: env.http, token: token))
+        let s = GitHubAccountSettings(config, env)
+        return ActionsCI(owner: s.owner, repos: s.repos, client: s.client)
     }
 }

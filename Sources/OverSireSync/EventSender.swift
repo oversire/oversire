@@ -18,8 +18,7 @@ public actor EventSender: EventSink {
     private let limit: Int
     private var pending: [EventDraft] = []
     private var links: [String: ItemLink] = [:]
-    private var recent: [String] = []
-    private var recentSet: Set<String> = []
+    private var recent = RecentIDs(capacity: 20000)
     private var wait: TimeInterval = 2
     private var timer: Task<Void, Never>?
     private var sending = false
@@ -35,7 +34,7 @@ public actor EventSender: EventSink {
     /// Drops a row that this sender sent or keeps already. The daemon also drops a repeat.
     public func append(_ drafts: [EventDraft]) async {
         let ids = Set(pending.map(\.id))
-        for d in drafts where !recentSet.contains(d.id) && !ids.contains(d.id) { pending.append(d) }
+        for d in drafts where !recent.contains(d.id) && !ids.contains(d.id) { pending.append(d) }
         if pending.count > limit, !sending { pending.removeFirst(pending.count - limit) }
         await flush()
     }
@@ -57,7 +56,7 @@ public actor EventSender: EventSink {
                 let part = Array(pending.prefix(Self.batch))
                 _ = try await t.appendEvents(part)
                 pending.removeFirst(part.count)
-                remember(part.map(\.id))
+                recent.insert(contentsOf: part.map(\.id))
             }
             if !links.isEmpty {
                 let all = Array(links.values)
@@ -85,14 +84,5 @@ public actor EventSender: EventSink {
     private func fire() async {
         timer = nil
         await flush()
-    }
-
-    private func remember(_ ids: [String]) {
-        for id in ids where recentSet.insert(id).inserted { recent.append(id) }
-        if recent.count > 20000 {
-            let drop = recent.prefix(recent.count - 20000)
-            recentSet.subtract(drop)
-            recent.removeFirst(drop.count)
-        }
     }
 }

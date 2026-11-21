@@ -109,6 +109,7 @@ final class WorkstreamIndex {
     // Joins everything. Cheap: no I/O. Call it after each data change.
     func rebuild(store: ProjectStore, agents: AgentIndex, runs: [(String, [Run])], prs: [(String, [ChangeRequest])]) {
         let known = Set(store.tracked.map { $0.identifier.uppercased() })
+        let checkoutKeys = Set(checkouts.compactMap(\.key))
         var out: [String: Workstream] = [:]
         func touch(_ key: String) -> String {
             let k = key.uppercased()
@@ -119,7 +120,7 @@ final class WorkstreamIndex {
             for item in snap.items {
                 let k = item.key.uppercased()
                 // Only items with something attached become workstreams. The item fills in below.
-                if agents.agent(k) != nil || checkouts.contains(where: { $0.key == k }) {
+                if agents.agent(k) != nil || checkoutKeys.contains(k) {
                     let key = touch(k)
                     out[key]?.item = item
                     out[key]?.projectKey = pk
@@ -150,13 +151,9 @@ final class WorkstreamIndex {
         }
         // Fill items for streams that only got runs or PRs.
         for (k, var s) in out where s.item == nil {
-            for (pk, snap) in store.snapshots {
-                if let i = snap.items.first(where: { $0.key.uppercased() == k }) { s.item = i; s.projectKey = pk; break }
-            }
-            s.runs.sort { lastActivity($0.run) > lastActivity($1.run) }
-            out[k] = s
+            if let (pk, _, i) = store.item(key: k) { s.item = i; s.projectKey = pk; out[k] = s }
         }
-        for (k, var s) in out { s.runs.sort { lastActivity($0.run) > lastActivity($1.run) }; out[k] = s }
+        for (k, var s) in out { s.runs.sort { $0.run.lastActivity > $1.run.lastActivity }; out[k] = s }
         streams = out
         runLinks = links
         unlinked = loose

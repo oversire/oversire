@@ -41,7 +41,7 @@ final class SessionNotes {
         self.agents = agents
         self.store = store
         self.writeBack = writeBack
-        if let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode([String: SessionSummary].self, from: d) { summaries = s }
+        if let s = [String: SessionSummary].read(atPath: path) { summaries = s }
     }
 
     func summary(_ key: String) -> SessionSummary? { summaries[key.uppercased()] }
@@ -203,7 +203,7 @@ final class SessionNotes {
     }
 
     private func save() {
-        if let d = try? JSONEncoder().encode(summaries) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        summaries.write(atPath: path)
         publish()
     }
 

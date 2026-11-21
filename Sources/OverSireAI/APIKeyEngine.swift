@@ -54,7 +54,7 @@ public struct APIKeyEngine: AIEngine {
         self.timeouts = timeouts
     }
 
-    public var dialect: any AIDialect { config.format == .openai ? OpenAIDialect() : AnthropicDialect() }
+    public var dialect: any AIDialect & ChatDialect { config.format == .openai ? OpenAIDialect() : AnthropicDialect() }
 
     public func available() async -> Bool { !key.isEmpty && !config.baseURL.isEmpty && !config.model.isEmpty }
 
@@ -108,12 +108,17 @@ public struct OpenAIDialect: AIDialect {
         return b.hasSuffix("/chat/completions") ? b : b + "/chat/completions"
     }
 
-    public func urlRequest(_ p: AIPrompt, cfg: APIKeyConfig, key: String) throws -> URLRequest {
+    func baseRequest(cfg: APIKeyConfig, key: String, timeout: TimeInterval) throws -> URLRequest {
         guard let url = URL(string: Self.endpoint(cfg.baseURL)), url.scheme != nil else { throw AIError.notConfigured }
-        var req = URLRequest(url: url, timeoutInterval: 30)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        return req
+    }
+
+    public func urlRequest(_ p: AIPrompt, cfg: APIKeyConfig, key: String) throws -> URLRequest {
+        var req = try baseRequest(cfg: cfg, key: key, timeout: 30)
         var body: [String: Any] = [
             "model": cfg.model,
             "messages": [["role": "system", "content": p.system], ["role": "user", "content": p.user]],
@@ -147,13 +152,18 @@ public struct AnthropicDialect: AIDialect {
         return b + "/v1/messages"
     }
 
-    public func urlRequest(_ p: AIPrompt, cfg: APIKeyConfig, key: String) throws -> URLRequest {
+    func baseRequest(cfg: APIKeyConfig, key: String, timeout: TimeInterval) throws -> URLRequest {
         guard let url = URL(string: Self.endpoint(cfg.baseURL)), url.scheme != nil else { throw AIError.notConfigured }
-        var req = URLRequest(url: url, timeoutInterval: 30)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        return req
+    }
+
+    public func urlRequest(_ p: AIPrompt, cfg: APIKeyConfig, key: String) throws -> URLRequest {
+        var req = try baseRequest(cfg: cfg, key: key, timeout: 30)
         let body: [String: Any] = [
             "model": cfg.model,
             "max_tokens": p.maxTokens ?? cfg.maxTokens,

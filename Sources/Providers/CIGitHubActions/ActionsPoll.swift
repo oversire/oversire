@@ -1,17 +1,12 @@
 import Foundation
+import GitHubKit
 import OverSireCore
 
 extension ActionsCI {
-    struct Mark: Codable {
-        var etag: String?
-        var at: Date
-        var busy: Bool?
-    }
-
     /// The run list of each repo with its ETag. A 304 answer does not count against the quota.
     /// A new repo sets its baseline and gives no events. A run in progress makes the page busy.
     public func poll(since: Cursor?) async throws -> EventPage {
-        var marks = since.flatMap { try? JSONDecoder().decode([String: Mark].self, from: Data($0.rawValue.utf8)) } ?? [:]
+        var marks = since?.decoded(as: [String: ETagMark].self) ?? [:]
         var events: [ProviderEvent] = []
         var budget: RateBudget?
         for path in repoPaths {
@@ -23,7 +18,7 @@ extension ActionsCI {
             let newest = runs.compactMap { parseISO($0.updatedAt) }.max()
             let busy = runs.contains { $0.phase != .completed }
             guard let mark = marks[path] else {
-                marks[path] = Mark(etag: a.etag, at: newest ?? Date(timeIntervalSince1970: 0), busy: busy)
+                marks[path] = ETagMark(etag: a.etag, at: newest ?? Date(timeIntervalSince1970: 0), busy: busy)
                 continue
             }
             for r in runs {
@@ -35,10 +30,9 @@ extension ActionsCI {
                                             summary: EventSummary(title: r.workflowName ?? r.name, status: r.status,
                                                                   conclusion: r.conclusion, actor: r.actorLogin)))
             }
-            marks[path] = Mark(etag: a.etag, at: max(mark.at, newest ?? mark.at), busy: busy)
+            marks[path] = ETagMark(etag: a.etag, at: max(mark.at, newest ?? mark.at), busy: busy)
         }
-        let data = try JSONEncoder().encode(marks)
-        return EventPage(events: events.sorted { $0.at < $1.at }, cursor: Cursor(rawValue: String(decoding: data, as: UTF8.self)),
+        return EventPage(events: events.sorted { $0.at < $1.at }, cursor: try Cursor(encoding: marks),
                          budget: budget, busy: marks.values.contains { $0.busy == true })
     }
 }

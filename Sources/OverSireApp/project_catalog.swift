@@ -31,8 +31,7 @@ final class ProjectCatalog {
     init(trackers: TrackerDirectory, path: String) {
         self.trackers = trackers
         self.path = path
-        guard let data = FileManager.default.contents(atPath: path),
-              let c = try? JSONDecoder().decode(ProjectCatalogCache.self, from: data) else { return }
+        guard let c = ProjectCatalogCache.read(atPath: path) else { return }
         for w in c.workspaces {
             bySlug[w.slug] = w.projects
             fetchedAt[w.slug] = w.fetchedAt
@@ -117,9 +116,7 @@ final class ProjectCatalog {
 
     private func save() {
         let c = ProjectCatalogCache(workspaces: bySlug.map { .init(slug: $0.key, projects: $0.value, fetchedAt: fetchedAt[$0.key]) })
-        guard let data = try? JSONEncoder().encode(c) else { return }
-        try? FileManager.default.createDirectory(atPath: CONFIG_DIR, withIntermediateDirectories: true)
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        c.write(atPath: path, makeDir: true)
     }
 
     private func notify() { NotificationCenter.default.post(name: ProjectCatalog.changed, object: self) }

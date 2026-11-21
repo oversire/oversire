@@ -54,7 +54,7 @@ final class ProjectIconStore {
         self.http = http
         self.cacheDir = cacheDir
         self.uploadDir = uploadDir
-        if let d = try? Data(contentsOf: indexURL), let t = try? JSONDecoder().decode([String: Date].self, from: d) { tried = t }
+        if let t = [String: Date].read(atPath: indexURL.path) { tried = t }
     }
 
     private var indexURL: URL { cacheDir.appendingPathComponent("index.json") }
@@ -264,9 +264,7 @@ final class ProjectIconStore {
     }
 
     private func saveIndex() {
-        guard let d = try? JSONEncoder().encode(tried) else { return }
-        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        try? d.write(to: indexURL, options: .atomic)
+        tried.write(atPath: indexURL.path, makeDir: true)
     }
 
     private func fetch(_ s: IconSource) async -> Data? {

@@ -95,7 +95,7 @@ final class ItemSummaries {
     init(path: String, ai: @escaping () -> AIClient? = { AIClient.current }) {
         self.path = path
         self.ai = ai
-        if let d = FileManager.default.contents(atPath: path), let c = try? JSONDecoder().decode([String: ItemSummary].self, from: d) { cache = c }
+        if let c = [String: ItemSummary].read(atPath: path) { cache = c }
     }
 
     var hasEngine: Bool { ai() != nil }
@@ -179,7 +179,7 @@ final class ItemSummaries {
         if cache.count > ItemSummaries.keep {
             for (k, _) in cache.sorted(by: { $0.value.at < $1.value.at }).prefix(cache.count - ItemSummaries.keep) { cache[k] = nil }
         }
-        if let d = try? JSONEncoder().encode(cache) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        cache.write(atPath: path)
         publish()
     }
 

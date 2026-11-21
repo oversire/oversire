@@ -38,7 +38,7 @@ final class ItemJournal {
         self.now = now
         self.schedule = schedule
         self.lookPath = lookPath
-        if let p = lookPath, let d = FileManager.default.contents(atPath: p), let l = try? JSONDecoder().decode([String: Date].self, from: d) { looks = l }
+        if let p = lookPath, let l = [String: Date].read(atPath: p) { looks = l }
     }
 
     /// The home daemon when it is live, else the daemon of this Mac.
@@ -129,8 +129,8 @@ final class ItemJournal {
         if looks.count > Self.keepLooks {
             for (k, _) in looks.sorted(by: { $0.value < $1.value }).prefix(looks.count - Self.keepLooks) { looks[k] = nil }
         }
-        guard let p = lookPath, let d = try? JSONEncoder().encode(looks) else { return }
-        try? d.write(to: URL(fileURLWithPath: p), options: .atomic)
+        guard let p = lookPath else { return }
+        looks.write(atPath: p)
     }
 
     /// The last look before `opened`: this Mac, or an item.viewed row of another Mac.

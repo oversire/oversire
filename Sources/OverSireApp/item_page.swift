@@ -1340,7 +1340,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         for r in stream?.runs.prefix(20) ?? [] {
             let t = Tone(r.run)
             out.append(Event(source: .github, text: "\(r.run.workflowName ?? r.run.name) #\(r.run.number) \(t.word.lowercased()) on \(r.run.headBranch)",
-                             at: lastActivity(r.run), route: .run(repo: r.repo, id: r.run.id)))
+                             at: r.run.lastActivity, route: .run(repo: r.repo, id: r.run.id)))
         }
         // PRs and sessions come from the work facts, as in the assistant. Sessions on other machines show too.
         let facts = WorkContext(data).facts(item.key)

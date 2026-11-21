@@ -48,7 +48,7 @@ final class CIAssist {
         self.path = path
         self.ai = ai
         self.changedFiles = changedFiles
-        if let d = FileManager.default.contents(atPath: path), let s = try? JSONDecoder().decode(State.self, from: d) { state = s }
+        if let s = State.read(atPath: path) { state = s }
     }
 
     var digest: Digest? { state.digest }
@@ -95,7 +95,7 @@ final class CIAssist {
                 let retry = CIAssist.passedOnRetry(old: seen[r.url], new: r)
                 if marked.contains(r.id) || retry {
                     let k = CIAssist.workflowKey(repo: repo, r)
-                    let at = lastActivity(r)
+                    let at = r.lastActivity
                     if (state.flaky[k] ?? .distantPast) < at { state.flaky[k] = at; changed = true }
                 }
                 if r.status == "completed" { seen[r.url] = (r.attempt ?? 1, r.isFailure) }
@@ -267,7 +267,7 @@ final class CIAssist {
     }
 
     private func save() {
-        if let d = try? JSONEncoder().encode(state) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        state.write(atPath: path)
         publish()
     }
 

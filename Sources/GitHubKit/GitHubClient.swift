@@ -92,6 +92,21 @@ public struct GitHubClient: Sendable {
         return data
     }
 
+    /// The user of the token.
+    public func identity() async throws -> Identity {
+        guard let o = try await json("GET", "user") as? [String: Any], let login = o["login"] as? String else {
+            throw ProviderError.decoding("no user in the answer")
+        }
+        let id = (o["id"] as? NSNumber)?.stringValue ?? login
+        let name = (o["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? login
+        return Identity(person: PersonRef(id: id, name: name, login: login))
+    }
+
+    public func budget() async throws -> RateBudget {
+        guard let b = try await rateLimit().budget else { throw ProviderError.decoding("no rate limit buckets") }
+        return b
+    }
+
     /// The quota. This call does not count against it.
     public func rateLimit() async throws -> RateLimit {
         let a = try await api("GET", "rate_limit")
@@ -248,5 +263,20 @@ public struct RateLimit: Decodable, Sendable {
     public var budget: RateBudget? {
         guard let b = buckets.max(by: { $0.bucket.fraction < $1.bucket.fraction })?.bucket else { return nil }
         return RateBudget(limit: b.limit, remaining: b.limit - b.used, resetAt: Date(timeIntervalSince1970: b.reset))
+    }
+}
+
+/// The settings that the two GitHub descriptors share.
+public struct GitHubAccountSettings: Sendable {
+    public let owner: String
+    public let repos: [String]
+    public let client: GitHubClient
+
+    public init(_ config: AccountConfig, _ env: ProviderEnvironment) {
+        let token = config.secretKeys.first.flatMap { env.secrets.secret($0) }
+        owner = config.values["owner"] ?? config.account.id
+        repos = (config.values["repos"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        client = GitHubClient(commands: env.commands, http: env.http, token: token)
     }
 }

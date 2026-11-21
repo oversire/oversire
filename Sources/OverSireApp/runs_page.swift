@@ -48,8 +48,8 @@ final class RunLine: TableRow {
         } else {
             cells["item"] = NSTextField.text("—", color: Palette.dim)
         }
-        let when = live ? "running" : relativeTime(lastActivity(r))
-        cells["when"] = live ? RunClock(r, total: total, parts: .times) : RelativeTimeLabel(lastActivity(r))
+        let when = live ? "running" : relativeTime(r.lastActivity)
+        cells["when"] = live ? RunClock(r, total: total, parts: .times) : RelativeTimeLabel(r.lastActivity)
         super.init(RunLine.layout, cells: cells, height: 46,
                    label: "\(tone.word): \(r.workflowName ?? r.name) number \(r.number), \(name), branch \(r.headBranch), \(when)") {
             go(.run(repo: repo, id: r.id))
@@ -134,7 +134,7 @@ final class RunClock: NSStackView {
 
     private func tick() {
         if let w = window, !w.occlusionState.contains(.visible) { return }
-        let e = runElapsed(run)
+        let e = run.elapsed
         elapsed.stringValue = fmtDuration(e)
         var spoken = "Running, \(fmtDuration(e))"
         if let total {
@@ -227,7 +227,7 @@ final class RunsPage: Page {
         for (repo, runs) in data.grouped {
             for r in latestOnly ? latestPerWorkflow(runs, acrossBranches: true) : runs { all.append((repo, r)) }
         }
-        all.sort { newerActivity($0.run, $1.run) }
+        all = all.map { ($0, $0.run.activityRank) }.sorted { $0.1 > $1.1 }.map(\.0)
         let orgs = RunsPage.orgs(all.map(\.repo))
         let orgAll = all
         all = RunsPage.byOrg(all, org: org, repo: \.repo)
@@ -492,7 +492,7 @@ final class RunPage: Page {
                                Chiplet(r.headBranch, symbol: "arrow.triangle.branch", mono: true),
                                Chiplet(String(r.headSha.prefix(7)), mono: true),
                                Chiplet("\(r.event)\(r.actorLogin.map { " · \($0)" } ?? "")"),
-                               Chiplet(live ? fmtDuration(runElapsed(r)) : runDuration(r), symbol: "timer")]
+                               Chiplet(live ? fmtDuration(r.elapsed) : r.durationText, symbol: "timer")]
         if let link {
             chips.append(Chiplet("\(link.key) · \(link.reason.rawValue)", symbol: "link", color: Palette.fg) { [weak self] in self?.go(.item(link.key, .overview)) })
         } else {

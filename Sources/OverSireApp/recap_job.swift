@@ -66,7 +66,7 @@ final class RecapJob {
         self.path = path
         self.bus = bus
         self.ai = ai
-        if let path, let d = FileManager.default.contents(atPath: path), let c = try? JSONDecoder().decode([String: Recap].self, from: d) { cache = c }
+        if let path, let c = [String: Recap].read(atPath: path) { cache = c }
     }
 
     var hasEngine: Bool { ai() != nil }
@@ -108,8 +108,8 @@ final class RecapJob {
         if cache.count > Self.keep {
             for (k, _) in cache.sorted(by: { $0.value.at < $1.value.at }).prefix(cache.count - Self.keep) { cache[k] = nil }
         }
-        guard let path, let d = try? JSONEncoder().encode(cache) else { return }
-        try? d.write(to: URL(fileURLWithPath: path), options: .atomic)
+        guard let path else { return }
+        cache.write(atPath: path)
     }
 }
 

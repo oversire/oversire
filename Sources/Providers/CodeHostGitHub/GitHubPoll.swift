@@ -1,16 +1,12 @@
 import Foundation
+import GitHubKit
 import OverSireCore
 
 extension GitHubCodeHost {
-    struct Mark: Codable {
-        var etag: String?
-        var at: Date
-    }
-
     /// The PR list of each repo with its ETag. A 304 answer does not count against the quota.
     /// A new repo sets its baseline and gives no events.
     public func poll(since: Cursor?) async throws -> EventPage {
-        var marks = since.flatMap { try? JSONDecoder().decode([String: Mark].self, from: Data($0.rawValue.utf8)) } ?? [:]
+        var marks = since?.decoded(as: [String: ETagMark].self) ?? [:]
         var events: [ProviderEvent] = []
         var budget: RateBudget?
         for path in repoPaths {
@@ -21,7 +17,7 @@ extension GitHubCodeHost {
             let rows = (try? JSONSerialization.jsonObject(with: a.body)) as? [[String: Any]] ?? []
             let newest = rows.compactMap { parseISO($0["updated_at"] as? String) }.max()
             guard let mark = marks[path] else {
-                marks[path] = Mark(etag: a.etag, at: newest ?? Date(timeIntervalSince1970: 0))
+                marks[path] = ETagMark(etag: a.etag, at: newest ?? Date(timeIntervalSince1970: 0))
                 continue
             }
             let repo = repoRef(path)
@@ -35,10 +31,9 @@ extension GitHubCodeHost {
                                             summary: EventSummary(title: r["title"] as? String, status: r["state"] as? String,
                                                                   actor: (r["user"] as? [String: Any])?["login"] as? String)))
             }
-            marks[path] = Mark(etag: a.etag, at: max(mark.at, newest ?? mark.at))
+            marks[path] = ETagMark(etag: a.etag, at: max(mark.at, newest ?? mark.at))
         }
-        let data = try JSONEncoder().encode(marks)
-        return EventPage(events: events.sorted { $0.at < $1.at }, cursor: Cursor(rawValue: String(decoding: data, as: UTF8.self)),
+        return EventPage(events: events.sorted { $0.at < $1.at }, cursor: try Cursor(encoding: marks),
                          budget: budget)
     }
 

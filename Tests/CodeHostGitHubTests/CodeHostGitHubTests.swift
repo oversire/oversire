@@ -184,5 +184,17 @@ final class CodeHostGitHubTests: XCTestCase {
                                                                     values: ["repos": "acme/app, acme/web,"]), env)
         XCTAssertEqual((made as? GitHubCodeHost)?.repoPaths, ["acme/app", "acme/web"])
         XCTAssertEqual(made.account, AccountID(provider: .github, id: "acme"))
+        let spaced = try GitHubCodeHost.descriptor.make(AccountConfig(account: AccountID(provider: .github, id: "acme"),
+                                                                      values: ["repos": " a/b , ,c/d "]), env)
+        XCTAssertEqual((spaced as? GitHubCodeHost)?.repoPaths, ["a/b", "c/d"])
+    }
+
+    func testOldCursorStillDecodes() async throws {
+        let path = "repos/acme/app/pulls?state=all&sort=updated&direction=desc&per_page=30"
+        gh.on("GET", path, answer("304 Not Modified", "", etag: "x"))
+        let page = try await host.poll(since: Cursor(rawValue: #"{"acme/app":{"etag":"x","at":0}}"#))
+        XCTAssertTrue(page.events.isEmpty)
+        XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: x"])
+        XCTAssertFalse(page.cursor.rawValue.contains("busy"))
     }
 }

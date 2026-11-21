@@ -228,9 +228,7 @@ final class ProblemTracker {
     init(path: String?, now: @escaping () -> Date = Date.init) {
         self.path = path
         self.now = now
-        if let path, let data = FileManager.default.contents(atPath: path) {
-            all = (try? JSONDecoder().decode([Problem].self, from: data)) ?? []
-        }
+        if let path { all = [Problem].read(atPath: path) ?? [] }
         expire()
     }
 
@@ -296,7 +294,7 @@ final class ProblemTracker {
     }
 
     private func changed() {
-        if let path, let data = try? JSONEncoder().encode(all) { try? data.write(to: URL(fileURLWithPath: path), options: .atomic) }
+        if let path { all.write(atPath: path) }
         NotificationCenter.default.post(name: Self.changed, object: self)
     }
 }

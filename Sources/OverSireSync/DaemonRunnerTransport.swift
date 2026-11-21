@@ -7,13 +7,11 @@ import OverSireCore
 public final class DaemonRunnerTransport: RunnerTransport, RunnerAnswerSending, @unchecked Sendable {
     public let link: MachineLink
     private let client: DaemonClient
-    private let http: any HTTPTransport
     private let lock = NSLock()
     private var watchers: [UUID: AsyncStream<RunnerMessage>.Continuation] = [:]
 
     public init(link: MachineLink, http: any HTTPTransport) {
         self.link = link
-        self.http = http
         client = link.client(http: http)
     }
 
@@ -62,17 +60,7 @@ public final class DaemonRunnerTransport: RunnerTransport, RunnerAnswerSending, 
     }
 
     private func post<B: Encodable>(_ path: String, _ body: B) async throws -> (Int, Data) {
-        var r = client.request(path)
-        r.httpMethod = "POST"
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        r.httpBody = try enc.encode(body)
-        do {
-            let (data, resp) = try await http.send(r)
-            return (resp.statusCode, data)
-        } catch let e as ProviderError { throw e } catch {
-            throw ProviderError.transport(error.localizedDescription)
-        }
+        let (data, resp) = try await client.exchange(try client.json("POST", path, body))
+        return (resp.statusCode, data)
     }
 }
