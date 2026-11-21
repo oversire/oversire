@@ -54,8 +54,10 @@ struct ReadActions {
 
     /// The byte limit of the Markdown for a caller. A CLI caller gets a larger limit.
     static func markdownLimit(_ caller: ActionCaller) -> Int {
-        if case .cli = caller { return 256_000 }
-        return JSONValue.readLimit
+        switch caller {
+        case .cli, .remoteCLI: return 256_000
+        default: return JSONValue.readLimit
+        }
     }
 
     private var itemMarkdown: ActionSpec {

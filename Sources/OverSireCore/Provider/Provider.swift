@@ -66,6 +66,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let changeSearch: Capability = "changeSearch"
     public static let collaborators: Capability = "collaborators"
     public static let commitChecks: Capability = "commitChecks"
+    public static let dispatch: Capability = "dispatch"
+    public static let gates: Capability = "gates"
     public static let epics: Capability = "epics"
 }
 

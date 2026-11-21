@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory CI with one pipeline and one failed run in "fake/app".
-public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Sendable {
+public final class FakeCI: CIProvider, LogReading, JobRerunning, Dispatching, GateApproving, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -13,13 +13,35 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Send
     private var runList: [Run] = []
     private var logLines: [String] = (1...40).map { "line \($0)" } + ["error: the fake failed"]
 
-    public init(account: String = "fake", capabilities: Set<Capability> = [.rerun, .rerunJob, .cancel, .logs]) {
+    public init(account: String = "fake", capabilities: Set<Capability> = [.rerun, .rerunJob, .cancel, .logs, .dispatch, .gates]) {
         base = FakeProvider(id: "fake-ci", account: account, capabilities: capabilities)
         repo = RepoRef(account: base.account, path: "fake/app", url: URL(string: "https://code.fake/fake/app")!)
         runList = [Self.run(id: "1", status: "completed", conclusion: "failure", attempt: 1)]
     }
 
-    static func run(id: String, status: String, conclusion: String?, attempt: Int) -> Run {
+    private var _pending: [String: [Gate]] = [:]
+    private var _dispatched: [(pipeline: String, ref: String, inputs: [String: String])] = []
+    private var _vendorCalls = 0
+
+    /// The gates that wait, for each run id.
+    public var pending: [String: [Gate]] {
+        get { base.lockedValue { _pending } }
+        set { base.lockedValue { _pending = newValue } }
+    }
+
+    public var dispatched: [(pipeline: String, ref: String, inputs: [String: String])] { base.lockedValue { _dispatched } }
+
+    /// The count of the writes: perform, rerun, dispatch and approve.
+    public var vendorCalls: Int { base.lockedValue { _vendorCalls } }
+
+    /// Adds a run, or replaces the run with the same id.
+    public func put(_ run: Run) {
+        base.lockedValue {
+            if let at = runList.firstIndex(where: { $0.id == run.id }) { runList[at] = run } else { runList.append(run) }
+        }
+    }
+
+    public static func run(id: String, status: String, conclusion: String?, attempt: Int) -> Run {
         Run(id: id, name: "CI", displayTitle: "Add the fake", status: status, conclusion: conclusion, headBranch: "main", headSha: "abc1234",
             event: "push", url: "https://code.fake/fake/app/runs/\(id)", updatedAt: "2026-10-01T10:05:00Z",
             createdAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:05Z", number: Int(id) ?? 0, workflowName: "CI",
@@ -30,7 +52,7 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Send
     public func poll(since: Cursor?) async throws -> EventPage { try await base.poll(since: since) }
 
     public func pipelines(_ r: RepoRef) async throws -> [Pipeline] {
-        try base.locked { r == repo ? [Pipeline(id: "ci", name: "CI", path: ".fake/ci.yml")] : [] }
+        try base.locked { r.path == repo.path ? [Pipeline(id: "ci", name: "CI", path: ".fake/ci.yml")] : [] }
     }
 
     public func runs(_ q: RunQuery) async throws -> [Run] {
@@ -62,6 +84,7 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Send
         let need: Capability = a == .cancel ? .cancel : .rerun
         guard capabilities.contains(need) else { throw ProviderError.unsupported(need) }
         try base.locked {
+            _vendorCalls += 1
             guard let at = runList.firstIndex(where: { $0.id == r.id }) else { throw ProviderError.notFound }
             let o = runList[at]
             switch a {
@@ -75,10 +98,47 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Send
     public func rerun(_ j: JobRef) async throws {
         guard capabilities.contains(.rerunJob) else { throw ProviderError.unsupported(.rerunJob) }
         try base.locked {
+            _vendorCalls += 1
             guard let at = runList.firstIndex(where: { $0.id == j.run.id }) else { throw ProviderError.notFound }
             let o = runList[at]
             runList[at] = Self.run(id: o.id, status: "queued", conclusion: nil, attempt: (o.attempt ?? 1) + 1)
             base.emit(.job, "rerun", .job(JobRef(run: RunRef(account: account, repo: repo, id: o.id, attempt: runList[at].attempt ?? 1), id: j.id)))
+        }
+    }
+
+    public func dispatch(_ r: RepoRef, pipeline: String, ref: String, inputs: [String: String]) async throws -> RunRef? {
+        guard capabilities.contains(.dispatch) else { throw ProviderError.unsupported(.dispatch) }
+        return try base.locked {
+            guard r.path == repo.path, ["ci", "ci.yml", ".fake/ci.yml"].contains(pipeline) else { throw ProviderError.notFound }
+            _vendorCalls += 1
+            _dispatched.append((pipeline, ref, inputs))
+            let id = String(100 + _dispatched.count)
+            runList.append(Self.run(id: id, status: "queued", conclusion: nil, attempt: 1))
+            return RunRef(account: account, repo: repo, id: id)
+        }
+    }
+
+    public func gates(_ r: RunRef) async throws -> [Gate] {
+        guard capabilities.contains(.gates) else { throw ProviderError.unsupported(.gates) }
+        return try base.locked {
+            guard runList.contains(where: { $0.id == r.id }) else { throw ProviderError.notFound }
+            return _pending[r.id] ?? []
+        }
+    }
+
+    public func approve(_ r: RunRef, gates: [String], comment: String) async throws {
+        guard capabilities.contains(.gates) else { throw ProviderError.unsupported(.gates) }
+        try base.locked {
+            guard let at = runList.firstIndex(where: { $0.id == r.id }) else { throw ProviderError.notFound }
+            let waiting = _pending[r.id] ?? []
+            guard !gates.isEmpty, gates.allSatisfy({ g in waiting.contains { $0.id == g } }) else {
+                throw ProviderError.vendor(code: "422", message: "The gate does not wait.")
+            }
+            guard waiting.filter({ gates.contains($0.id) }).allSatisfy(\.canApprove) else { throw ProviderError.forbidden }
+            _vendorCalls += 1
+            _pending[r.id] = waiting.filter { !gates.contains($0.id) }
+            let o = runList[at]
+            runList[at] = Self.run(id: o.id, status: "queued", conclusion: nil, attempt: o.attempt ?? 1)
         }
     }
 

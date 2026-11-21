@@ -37,6 +37,13 @@ final class SettingsIndexTests: XCTestCase {
         }
     }
 
+    func testCISettingsAreFound() {
+        XCTAssertEqual(SettingsAnchor.agentCI.page, .agents)
+        for q in ["cancel runs", "approve deployments"] {
+            XCTAssertEqual(SettingsIndex.search(q).first?.anchor, .agentCI, q)
+        }
+    }
+
     func testCommonSearches() {
         for (q, a) in [("webhook", SettingsAnchor.live), ("theme", .appearance), ("poll", .live), ("quiet", .queue)] {
             XCTAssertEqual(SettingsIndex.search(q).first?.anchor, a, q)

@@ -44,6 +44,32 @@ final class MemberCallsTests: XCTestCase {
         XCTAssertEqual(seen.count, 1)
     }
 
+    private func cliCall(from machine: String) -> MemberCall {
+        MemberCall(id: "m-2", action: "ci.cancel", args: .object([:]), from: MemberCaller(machine: machine, name: "Fritz"), cli: MemberCLI(agent: "codex"))
+    }
+
+    private func caller(of call: MemberCall, here: String) async -> [ActionCaller] {
+        let log = Log()
+        let spec = ActionSpec(id: "ci.cancel", title: "Cancel", help: "", kind: .change) { a in
+            await log.saw(a.caller)
+            return .ok(summary: "ok")
+        }
+        var calls = MemberCalls()
+        calls.machine = { here }
+        _ = await calls.handle(call, actions: ActionList([spec])) {}
+        return await log.callers
+    }
+
+    func testCliFieldFromOtherMachineIsRemoteCLI() async {
+        let seen = await caller(of: cliCall(from: "mba"), here: "mbp")
+        XCTAssertEqual(seen, [.remoteCLI(machine: "mba", agent: "codex")])
+    }
+
+    func testCliFieldFromThisMacIsCli() async {
+        let seen = await caller(of: cliCall(from: "mbp"), here: "mbp")
+        XCTAssertEqual(seen, [.cli(agent: "codex")])
+    }
+
     func testRefusesLocalAction() async {
         let log = Log()
         let spec = ActionSpec(id: "machine.mode", title: "Mode", help: "", kind: .settings) { _ in

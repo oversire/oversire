@@ -12,15 +12,17 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
 
     let people: AppPeople
 
-    init(data: AppData, people: AppPeople? = nil, extra: [ActionSpec] = []) {
+    init(data: AppData, people: AppPeople? = nil, ci: CIOps? = nil, extra: [ActionSpec] = []) {
         let link = ActionLink(data)
         let people = people ?? AppPeople.live(data)
         self.link = link
         self.people = people
+        let ops = ci ?? CIOps(accounts: REPO_CLIENT.accounts, rights: { AGENTS.ci }, tracked: { Set(REPOS) }, desk: { EVENTS },
+                              refresh: { repo in _ = await link.main(false) { d, done in d.ciRefresh(repo, done: done) } })
         all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs + RunbookActions(link: link).specs
-            + RepoActions(link: link).specs + IntakeActions(link: link).specs + GroomActions(link: link).specs + MachineActions(link: link).specs
+            + RepoActions(link: link, ci: ops).specs + IntakeActions(link: link).specs + GroomActions(link: link).specs + MachineActions(link: link).specs
             + EpicActions(link: link).specs + ProjectActions(link: link).specs
-            + CIActions(link: link, jobs: { await MainActor.run { link.data?.ciJobs } }, reader: REPO_CLIENT).specs
+            + CIActions(link: link, jobs: { await MainActor.run { link.data?.ciJobs } }, reader: REPO_CLIENT, ops: ops).specs
             + MemberActions(link: link).specs + SettingsActions(link: link).specs + ReadActions(link: link).specs + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
         byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }

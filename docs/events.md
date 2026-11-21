@@ -53,6 +53,8 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 
 A reader keeps a row of a kind that it does not know.
 
+The CI writes of the app (`ci.rerun`, `ci.cancel`, `ci.dispatch`, `ci.approve`) go through `CIOps`. A rerun by an agent names the agent in the `ci.rerun` row of the next poll. `ci.cancelled`, `ci.dispatched` and `ci.approved` rows are written at once. The `ci.dispatched` payload has the input keys, never the values. A command from another machine of the group has `via` `cli@<machine>`.
+
 A write from an `oversire` command (an app call) names the agent as the actor. This holds for `item.state_changed`, `item.link_added`, `item.attachment_added` and the poll rows `item.created`, `item.updated` and `comment.created` of that write. The app marks the item until the refresh after the write ends.
 
 ## The path

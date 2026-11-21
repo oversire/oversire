@@ -71,6 +71,23 @@ enum QuestionNotice: String, Codable, CaseIterable {
     var delay: TimeInterval? { self == .now ? 0 : self == .later ? 1800 : nil }
 }
 
+// What an agent may do with CI. An agent can always rerun and start workflows.
+struct AgentCIRights: Codable, Equatable {
+    var cancel = true       // "Agents can cancel runs"
+    var approve = false     // "Agents can approve deployments"
+
+    init(cancel: Bool = true, approve: Bool = false) {
+        self.cancel = cancel
+        self.approve = approve
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        cancel = try c.decodeIfPresent(Bool.self, forKey: .cancel) ?? true
+        approve = try c.decodeIfPresent(Bool.self, forKey: .approve) ?? false
+    }
+}
+
 // The queue, the AI checks of agents, the intake agent and the write-back to Plane.
 struct AgentsConfig: Codable, Equatable {
     var autoStart = true                // the queue starts the next item when its condition holds
@@ -86,6 +103,7 @@ struct AgentsConfig: Codable, Equatable {
     var groomPrompt = GroomPrompt.template
     var writeBack = WriteBackConfig()
     var cleanup = CleanupConfig()
+    var ci = AgentCIRights()
 
     /// The user template of Contract/prompts/enhance.md.
     static var defaultIntakePrompt: String { EnhancePrompt.template }
@@ -109,6 +127,7 @@ struct AgentsConfig: Codable, Equatable {
         groomPrompt = try c.decodeIfPresent(String.self, forKey: .groomPrompt) ?? GroomPrompt.template
         writeBack = try c.decodeIfPresent(WriteBackConfig.self, forKey: .writeBack) ?? WriteBackConfig()
         cleanup = try c.decodeIfPresent(CleanupConfig.self, forKey: .cleanup) ?? CleanupConfig()
+        ci = try c.decodeIfPresent(AgentCIRights.self, forKey: .ci) ?? AgentCIRights()
     }
 
     func slots(_ projectKey: String) -> Int { max(1, slots[projectKey] ?? PlannerSettings.defaultSlots) }

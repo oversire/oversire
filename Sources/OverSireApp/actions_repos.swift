@@ -4,9 +4,10 @@ import GitHubKit
 import OverSireAI
 import OverSireAssistant
 
-// The CI and PR actions. They go through REPO_CLIENT, then reload the repos.
+// The CI and PR actions. The run writes go through CIOps. The PR actions go through REPO_CLIENT, then reload the repos.
 struct RepoActions {
     let link: ActionLink
+    let ci: CIOps
 
     static let repo = ("string", "The repo, for example oversire/oversire.")
     static let runId = ("string", "The run id.")
@@ -21,23 +22,28 @@ struct RepoActions {
             await refresh()
             return err.map { .failed($0) } ?? .ok(summary: ok)
         }
+        let ci = ci
+        // The summary of a run write, and a refusal as notAllowed.
+        let write: (() async throws -> CIActionResult) async -> ActionResult = { body in
+            do { return .ok(summary: try await body().summary) } catch CIOpError.vendor(let m) { return .failed(m) } catch let e as CIOpError { return .notAllowed(e.text) } catch { return .failed(error.localizedDescription) }
+        }
         return [
             ActionSpec(id: "run.rerun", title: "Re-run", help: "Runs a workflow run again. `failedOnly` runs only the failed jobs.", kind: .change,
                        input: ActionSpec.args(["repo": Self.repo, "runId": Self.runId, "failedOnly": ("boolean", "Only the failed jobs.")], required: ["repo", "runId"]),
                        capability: .rerun) { a in
                 guard let repo = a.string("repo"), let id = a.string("runId") else { return .notAllowed("Give the repo and the run id.") }
-                return await after(await REPO_CLIENT.perform(a.bool("failedOnly") == true ? .rerunFailed : .rerun, repo: repo, id: id), "Run \(id) runs again.")
+                return await write { try await ci.rerun(repo: repo, run: id, failedOnly: a.bool("failedOnly") == true, by: a.caller.actor) }
             },
             ActionSpec(id: "run.cancel", title: "Cancel run", help: "Cancels a running workflow run.", kind: .change,
                        input: ActionSpec.args(["repo": Self.repo, "runId": Self.runId], required: ["repo", "runId"]), capability: .cancel) { a in
                 guard let repo = a.string("repo"), let id = a.string("runId") else { return .notAllowed("Give the repo and the run id.") }
-                return await after(await REPO_CLIENT.perform(.cancel, repo: repo, id: id), "Run \(id) is cancelled.")
+                return await write { try await ci.cancel(repo: repo, run: id, by: a.caller.actor) }
             },
             ActionSpec(id: "run.rerunJob", title: "Re-run job", help: "Runs one job of a run again.", kind: .change,
                        input: ActionSpec.args(["repo": Self.repo, "runId": Self.runId, "jobId": ("string", "The job id.")], required: ["repo", "runId", "jobId"]),
                        capability: .rerunJob) { a in
                 guard let repo = a.string("repo"), let id = a.string("runId"), let job = a.string("jobId") else { return .notAllowed("Give the repo, the run id and the job id.") }
-                return await after(await REPO_CLIENT.rerunJob(repo: repo, runId: id, jobId: job), "Job \(job) runs again.")
+                return await write { try await ci.rerunJob(repo: repo, run: id, job: job, by: a.caller.actor) }
             },
             ActionSpec(id: "run.ignore", title: "Ignore failure", help: "Hides a failed run from the status light, or shows it again.", kind: .change,
                        input: ActionSpec.args(["repo": Self.repo, "runId": Self.runId, "on": ("boolean", "False shows the run again. Default true.")], required: ["repo", "runId"])) { a in

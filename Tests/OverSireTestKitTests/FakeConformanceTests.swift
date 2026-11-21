@@ -62,7 +62,7 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertTrue(host.passed, host.description)
         let readOnly = await CodeHostConformance.run { FakeCodeHost(capabilities: []) }
         XCTAssertTrue(readOnly.passed, "a host without changeActions refuses actions: \(readOnly)")
-        let ci = await CIConformance.run(repo: FakeCI().repo) { FakeCI() }
+        let ci = await CIConformance.run(repo: FakeCI().repo, dispatch: ("ci.yml", "main")) { FakeCI() }
         XCTAssertTrue(ci.passed, ci.description)
         let noCancel = await CIConformance.run(repo: FakeCI().repo) { FakeCI(capabilities: [.rerun, .logs]) }
         XCTAssertTrue(noCancel.passed, noCancel.description)
@@ -73,6 +73,8 @@ final class FakeConformanceTests: XCTestCase {
     func testBrokenFakesFail() async {
         let logs = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.changeActions, .deleteBranch, .logs]))
         XCTAssertEqual(logs.problems, ["capability logs needs LogReading"])
+        let dispatch = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.changeActions, .deleteBranch, .dispatch]))
+        XCTAssertEqual(dispatch.problems, ["capability dispatch needs Dispatching"])
         let mute = ProviderConformance.capabilities(FakeRuntime(capabilities: []))
         XCTAssertEqual(Set(mute.problems), ["SessionIO needs the capability sessionInput", "SessionIO needs the capability sessionTail",
                                             "Revealing needs the capability reveal", "HostFileWriting needs the capability hostFiles",

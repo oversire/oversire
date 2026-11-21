@@ -243,6 +243,38 @@ public protocol JobRerunning: CIProvider {
     func rerun(_ j: JobRef) async throws
 }
 
+/// Starts a pipeline by hand (GitHub `workflow_dispatch`, GitLab "run pipeline").
+public protocol Dispatching: CIProvider {
+    /// `pipeline` is a `Pipeline.id` or its file name. Gives nil when the vendor gives no run id.
+    /// Errors: `.notFound` (no pipeline, or no manual trigger), `.vendor` (a bad input), `.forbidden`, `.rateLimited`.
+    func dispatch(_ repo: RepoRef, pipeline: String, ref: String, inputs: [String: String]) async throws -> RunRef?
+}
+
+/// A deployment gate that holds a run (GitHub environment protection rule, GitLab manual job).
+public struct Gate: Codable, Hashable, Sendable {
+    /// GitHub: the environment id.
+    public var id: String
+    /// The environment name.
+    public var name: String
+    /// True when the signed-in user is a reviewer.
+    public var canApprove: Bool
+    public var url: String?
+
+    public init(id: String, name: String, canApprove: Bool, url: String? = nil) {
+        self.id = id
+        self.name = name
+        self.canApprove = canApprove
+        self.url = url
+    }
+}
+
+public protocol GateApproving: CIProvider {
+    /// The gates that wait for a review. Empty when no gate waits. Errors: `.notFound` (no run).
+    func gates(_ run: RunRef) async throws -> [Gate]
+    /// Approves the given gate ids. Errors: `.forbidden` (not a reviewer), `.vendor` (the gate does not wait now).
+    func approve(_ run: RunRef, gates: [String], comment: String) async throws
+}
+
 public protocol LogReading: CIProvider {
     /// The last lines of the job log, without time stamps and group markers.
     func log(_ j: JobRef, lines: Int) async throws -> [String]

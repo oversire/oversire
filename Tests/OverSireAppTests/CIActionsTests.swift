@@ -10,12 +10,14 @@ final class CIActionsTests: XCTestCase {
     private var data: TestAppData!
     private var link: ActionLink!
     private var spec: [String: ActionSpec] = [:]
+    private var rig: CIOpsTests.Rig!
 
     override func setUp() async throws {
         data = TestAppData()
+        rig = CIOpsTests.Rig()
         link = ActionLink(data)
         let keeper = data.ciJobs
-        let actions = CIActions(link: link, jobs: { keeper }, reader: data.ciReader, tracked: { ["o/r"] })
+        let actions = CIActions(link: link, jobs: { keeper }, reader: data.ciReader, ops: rig.ops, tracked: { ["o/r"] })
         spec = Dictionary(uniqueKeysWithValues: actions.specs.map { ($0.id, $0) })
     }
 
@@ -23,9 +25,28 @@ final class CIActionsTests: XCTestCase {
         await spec[id]!.perform(ActionArgs(.object(args)))
     }
 
-    func testSpecsAreReads() {
-        XCTAssertEqual(Set(spec.keys), ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain", "run.explain"])
-        XCTAssertTrue(spec.values.allSatisfy { $0.kind == .read })
+    func testCIRefusalIsNotAllowed() async {
+        rig.rights.set(AgentCIRights(cancel: false, approve: false))
+        let args = ActionArgs(.object(["repo": .string("fake/app"), "run": .string("1")]), caller: .cli(agent: "codex"))
+        for id in ["ci.cancel", "ci.approve"] {
+            let r = await spec[id]!.perform(args)
+            guard case .notAllowed(let m) = r else { return XCTFail("\(id): \(r)") }
+            XCTAssertTrue(m.contains("Settings"), m)
+        }
+        XCTAssertEqual(rig.fake.vendorCalls, 0)
+    }
+
+    func testCINoopIsOk() async {
+        rig.fake.put(FakeCI.run(id: "1", status: "in_progress", conclusion: nil, attempt: 2))
+        let r = await spec["ci.rerun"]!.perform(ActionArgs(.object(["repo": .string("fake/app"), "run": .string("1")]), caller: .cli(agent: nil)))
+        guard case .ok(let summary, let body?, _) = r else { return XCTFail("\(r)") }
+        XCTAssertTrue(summary.contains("No new rerun"), summary)
+        XCTAssertEqual(body.object?["noop"]?.bool, true)
+    }
+
+    func testSpecKinds() {
+        XCTAssertEqual(Set(spec.keys), ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain", "run.explain", "ci.rerun", "ci.rerunJob", "ci.cancel", "ci.dispatch", "ci.approve"])
+        for id in ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain", "run.explain"] { XCTAssertEqual(spec[id]?.kind, .read, id) }
         XCTAssertEqual(spec["ci.log"]?.capability, .logs)
     }
 

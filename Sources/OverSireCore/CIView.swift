@@ -180,6 +180,11 @@ public struct CIRunView: Codable, Hashable, Sendable {
     public var jobs: [Job]?
     public var failures: [CIFailureView]?
 
+    public init(_ r: Run) {
+        self.init(id: r.id, attempt: r.attempt ?? 1, name: r.name, workflow: r.workflowName, status: r.status, conclusion: r.conclusion,
+                  branch: r.headBranch, sha: r.headSha, event: r.event, url: r.url, startedAt: r.startedAt, updatedAt: r.updatedAt)
+    }
+
     public init(id: String, attempt: Int, name: String, workflow: String? = nil, status: String, conclusion: String? = nil,
                 branch: String, sha: String, event: String, url: String, startedAt: String? = nil, updatedAt: String,
                 durationS: Int? = nil, etaS: Int? = nil, jobs: [Job]? = nil, failures: [CIFailureView]? = nil) {

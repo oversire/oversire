@@ -36,15 +36,39 @@ final class AppCallsTests: XCTestCase {
 
     func testCIReadsAllowed() async {
         for id in ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
-        XCTAssertFalse(AppCalls.allowed.contains("ci.rerun"))
+        XCTAssertFalse(AppCalls.allowed.contains("ci.refreshAll"))
         let posted = Posted()
         let read = ActionSpec(id: "ci.log", title: "Log", help: "", kind: .read) { _ in .ok(summary: "log") }
-        let write = ActionSpec(id: "ci.rerun", title: "Rerun", help: "", kind: .change) { _ in .ok(summary: "ran") }
+        let write = ActionSpec(id: "ci.refreshAll", title: "Refresh", help: "", kind: .change) { _ in .ok(summary: "ran") }
         let calls = AppCalls(catalog: ActionList([read, write])) { await posted.add($0) }
         await calls.handle(AppCall(id: "a", action: "ci.log", args: .object([:])))
-        await calls.handle(AppCall(id: "b", action: "ci.rerun", args: .object([:])))
+        await calls.handle(AppCall(id: "b", action: "ci.refreshAll", args: .object([:])))
         let r = await posted.results
         XCTAssertEqual(r.map(\.status), [.ok, .notAllowed])
+    }
+
+    func testAllowsCIActions() {
+        for id in ["ci.rerun", "ci.rerunJob", "ci.cancel", "ci.dispatch", "ci.approve"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+    }
+
+    func testRemoteCLIActor() {
+        XCTAssertEqual(ActionCaller.remoteCLI(machine: "mba", agent: nil).actor, EventActor(type: .human, name: nil, via: "cli@mba"))
+        XCTAssertEqual(ActionCaller.remoteCLI(machine: "mba", agent: "codex").actor, EventActor(type: .agent, name: "codex", via: "cli@mba"))
+    }
+
+    func testCICallerReachesTheAction() async {
+        let posted = Posted()
+        let spec = ActionSpec(id: "ci.cancel", title: "Cancel", help: "", kind: .change) { a in
+            await posted.saw(a.caller)
+            return .notAllowed("Agents may not cancel runs.")
+        }
+        let results = Posted()
+        let calls = AppCalls(catalog: ActionList([spec])) { await results.add($0) }
+        await calls.handle(AppCall(id: "x", action: "ci.cancel", args: .object([:]), agent: "codex"))
+        let r = await results.results
+        XCTAssertEqual(r.first?.status, .notAllowed)
+        let seen = await posted.callers
+        XCTAssertEqual(seen, [.cli(agent: "codex")])
     }
 
     func testRunsItemCommentForCli() async throws {

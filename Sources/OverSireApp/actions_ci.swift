@@ -3,18 +3,20 @@ import OverSireAI
 import OverSireCore
 import OverSireAssistant
 
-// The CI read actions for agents (ci.json). They read the keeper docs, and the vendor only when they must.
+// The CI actions for agents (ci.json). The reads use the keeper docs, and the vendor only when they must. The writes go through CIOps.
 struct CIActions {
     let link: ActionLink
     let jobs: @Sendable () async -> CIJobsKeeper?
     let reader: any CIDetailReading
+    let ops: CIOps
     let tracked: @Sendable () -> [String]
 
-    init(link: ActionLink, jobs: @escaping @Sendable () async -> CIJobsKeeper?, reader: any CIDetailReading,
+    init(link: ActionLink, jobs: @escaping @Sendable () async -> CIJobsKeeper?, reader: any CIDetailReading, ops: CIOps,
          tracked: @escaping @Sendable () -> [String] = { REPOS }) {
         self.link = link
         self.jobs = jobs
         self.reader = reader
+        self.ops = ops
         self.tracked = tracked
     }
 
@@ -35,7 +37,82 @@ struct CIActions {
     }
 
     var specs: [ActionSpec] {
-        [log, jobsSpec, workflows, refresh, explainSpec(id: "ci.explain"), explainSpec(id: "run.explain")]
+        [log, jobsSpec, workflows, refresh, explainSpec(id: "ci.explain"), explainSpec(id: "run.explain"), rerun, rerunJob, cancel, dispatch, approve]
+    }
+
+    // MARK: Writes
+
+    /// A refusal or a bad input is `notAllowed`. A vendor error is `failed`. A noop is ok.
+    private func write(_ body: () async throws -> CIActionResult) async -> ActionResult {
+        do {
+            let r = try await body()
+            return data(r.summary, r)
+        } catch CIOpError.vendor(let m) {
+            return .failed(m)
+        } catch let e as CIOpError {
+            return .notAllowed(e.text)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private static let run = ("string", "The run id.")
+
+    private var rerun: ActionSpec {
+        ActionSpec(id: "ci.rerun", title: "Rerun CI run", help: "Runs a CI run again. `failedOnly` runs only the failed jobs. A run that runs now gives noop.", kind: .change,
+                   input: ActionSpec.args(["repo": Self.repo, "run": Self.run, "failedOnly": ("boolean", "Only the failed jobs.")], required: ["repo", "run"]),
+                   capability: .rerun) { a in
+            guard let repo = a.string("repo"), let run = a.string("run") else { return .notAllowed("Give the repo and the run id.") }
+            return await write { try await ops.rerun(repo: repo, run: run, failedOnly: a.bool("failedOnly") == true, by: a.caller.actor) }
+        }
+    }
+
+    private var rerunJob: ActionSpec {
+        ActionSpec(id: "ci.rerunJob", title: "Rerun CI job", help: "Runs one job of a CI run again.", kind: .change,
+                   input: ActionSpec.args(["repo": Self.repo, "run": Self.run, "job": ("string", "The job id.")], required: ["repo", "run", "job"]),
+                   capability: .rerunJob) { a in
+            guard let repo = a.string("repo"), let run = a.string("run"), let job = a.string("job") else { return .notAllowed("Give the repo, the run id and the job id.") }
+            return await write { try await ops.rerunJob(repo: repo, run: run, job: job, by: a.caller.actor) }
+        }
+    }
+
+    private var cancel: ActionSpec {
+        ActionSpec(id: "ci.cancel", title: "Cancel CI run", help: "Cancels a CI run that runs now.", kind: .change,
+                   input: ActionSpec.args(["repo": Self.repo, "run": Self.run], required: ["repo", "run"]), capability: .cancel) { a in
+            guard let repo = a.string("repo"), let run = a.string("run") else { return .notAllowed("Give the repo and the run id.") }
+            return await write { try await ops.cancel(repo: repo, run: run, by: a.caller.actor) }
+        }
+    }
+
+    private var dispatch: ActionSpec {
+        ActionSpec(id: "ci.dispatch", title: "Start workflow", help: "Starts a workflow by hand on a ref. `workflow` is its id, name or file name.", kind: .outward,
+                   input: ActionSpec.args(["repo": Self.repo, "workflow": ("string", "The workflow id, name or file name."),
+                                           "ref": ("string", "The branch or tag."), "inputs": ("object", "The inputs of the workflow, as strings.")],
+                                          required: ["repo", "workflow", "ref"]), capability: .dispatch) { a in
+            guard let repo = a.string("repo"), let workflow = a.string("workflow"), let ref = a.string("ref") else {
+                return .notAllowed("Give the repo, the workflow and the ref.")
+            }
+            var inputs: [String: String] = [:]
+            for (k, v) in a["inputs"]?.object ?? [:] {
+                switch v {
+                case .string(let s): inputs[k] = s
+                case .int(let i): inputs[k] = String(i)
+                case .double(let d): inputs[k] = String(d)
+                case .bool(let b): inputs[k] = String(b)
+                default: return .notAllowed("The input \(k) must be a string.")
+                }
+            }
+            return await write { try await ops.dispatch(repo: repo, workflow: workflow, ref: ref, inputs: inputs, by: a.caller.actor) }
+        }
+    }
+
+    private var approve: ActionSpec {
+        ActionSpec(id: "ci.approve", title: "Approve deployment", help: "Approves the deployments that wait for a review on a run. `environments` limits it.", kind: .outward,
+                   input: ActionSpec.args(["repo": Self.repo, "run": Self.run, "environments": ("array", "The environment names. Default all that wait."),
+                                           "comment": ("string", "The review comment.")], required: ["repo", "run"]), capability: .gates) { a in
+            guard let repo = a.string("repo"), let run = a.string("run") else { return .notAllowed("Give the repo and the run id.") }
+            return await write { try await ops.approve(repo: repo, run: run, environments: a.list("environments"), comment: a.string("comment"), by: a.caller.actor) }
+        }
     }
 
     private var log: ActionSpec {

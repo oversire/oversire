@@ -2,6 +2,7 @@ import XCTest
 import OverSireCore
 import OverSireAI
 import OverSireAssistant
+import OverSireTestKit
 @testable import OverSireApp
 
 final class ActionCatalogTests: XCTestCase {
@@ -358,6 +359,26 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(rows.first?.item, rig.epic.eventKey)
     }
 
+    /// The run.* writes go through CIOps, so the agent rights and the de-dup hold for them.
+    @MainActor
+    func testRunActionsUseCIOps() async {
+        let rig = CIOpsTests.Rig()
+        rig.rights.set(AgentCIRights(cancel: false, approve: false))
+        rig.fake.put(FakeCI.run(id: "1", status: "in_progress", conclusion: nil, attempt: 1))
+        let catalog = AppActionCatalog(data: TestAppData(), ci: rig.ops)
+        let args = ActionArgs(.object(["repo": .string("fake/app"), "runId": .string("1")]), caller: .cli(agent: "codex"))
+        let r = await catalog.run("run.cancel", args)
+        guard case .notAllowed = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(rig.fake.vendorCalls, 0)
+        rig.rights.set(AgentCIRights(cancel: true, approve: false))
+        let ok = await catalog.run("run.cancel", args)
+        guard case .ok = ok else { return XCTFail("\(ok)") }
+        XCTAssertEqual(rig.fake.vendorCalls, 1)
+        let rows = await rig.rows(count: 1)
+        XCTAssertEqual(rows.first?.kind, .ciCancelled)
+        XCTAssertEqual(rows.first?.actor, "codex")
+    }
+
     /// All alerts go through AlertConfirm.
     func testNoAlertOutsideTheHelper() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
@@ -378,7 +399,7 @@ final class ActionCatalogTests: XCTestCase {
             (projectStore|store)\.(setStatus|assignMe|comment|start|reopen|closeSubItems|triage|relate|setEpic|createEpic|updateEpic|edit|create)\(|tracker\??\.(move|post)\(|\
             (projectStore|store)\.update\(itemId|queue\.(add|remove|move|start)\(|agentIndex\.(send|reveal|start)\(|\
             statusJob\.(approve|hold|markBlocked|snooze)\(|job\.(approve|hold|markBlocked|snooze)\(|questions\.(answer|dismiss)\(|\
-            cleaner\.run\(|REPO_CLIENT\.(perform|rerunJob)\(|suggestions\.(accept|dismiss)\(
+            cleaner\.run\(|REPO_CLIENT\.(perform|rerunJob)\(|ciOps\.(rerun|rerunJob|cancel|dispatch|approve)\(|suggestions\.(accept|dismiss)\(
             """#)
         var hits: [String] = []
         for f in pages {

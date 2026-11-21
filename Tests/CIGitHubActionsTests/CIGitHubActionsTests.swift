@@ -205,4 +205,71 @@ final class CIGitHubActionsTests: XCTestCase {
                                                                  values: ["repos": " a/b , ,c/d "]), env)
         XCTAssertEqual((spaced as? ActionsCI)?.repoPaths, ["a/b", "c/d"])
     }
+
+    // MARK: Dispatch and gates
+
+    func testDispatchSendsBodyOnStdin() async throws {
+        gh.on("POST", "repos/o/r/actions/workflows/ci.yml/dispatches",
+              answer("200 OK", #"{"workflow_run_id": 42, "html_url": "https://github.com/o/r/actions/runs/42"}"#))
+        let repo = ci.repoRef("o/r")
+        let started = try await ci.dispatch(repo, pipeline: "ci.yml", ref: "main", inputs: ["env": "prod"])
+        XCTAssertEqual(started?.id, "42")
+        XCTAssertEqual(started?.repo, repo)
+        let call = try XCTUnwrap(gh.calls.last)
+        XCTAssertEqual(call.args.prefix(5), ["api", "-i", "-X", "POST", "repos/o/r/actions/workflows/ci.yml/dispatches"])
+        XCTAssertTrue(call.args.suffix(2) == ["--input", "-"])
+        let body = try XCTUnwrap(gh.body())
+        XCTAssertEqual(body["ref"] as? String, "main")
+        XCTAssertEqual(body["inputs"] as? [String: String], ["env": "prod"])
+        XCTAssertEqual(body["return_run_details"] as? Bool, true)
+    }
+
+    func testDispatchNoContentGivesNil() async throws {
+        gh.on("POST", "repos/o/r/actions/workflows/ci.yml/dispatches", answer("204 No Content", ""))
+        let started = try await ci.dispatch(ci.repoRef("o/r"), pipeline: "ci.yml", ref: "main", inputs: [:])
+        XCTAssertNil(started)
+    }
+
+    func testDispatchUnknownWorkflow() async {
+        gh.on("POST", "repos/o/r/actions/workflows/nope.yml/dispatches", answer("404 Not Found", #"{"message":"Not Found"}"#))
+        do {
+            _ = try await ci.dispatch(ci.repoRef("o/r"), pipeline: "nope.yml", ref: "main", inputs: [:])
+            XCTFail("expected notFound")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .notFound)
+        }
+    }
+
+    func testGatesMapsPendingDeployments() async throws {
+        gh.on("GET", "repos/acme/app/actions/runs/77/pending_deployments", answer("200 OK", #"""
+            [{"environment":{"id":161,"name":"production","html_url":"https://github.com/acme/app/deployments/activity_log?environments_filter=production"},
+              "current_user_can_approve":true},
+             {"environment":{"id":162,"name":"staging"},"current_user_can_approve":false}]
+            """#))
+        let gates = try await ci.gates(ref)
+        XCTAssertEqual(gates.map(\.id), ["161", "162"])
+        XCTAssertEqual(gates.map(\.name), ["production", "staging"])
+        XCTAssertEqual(gates.map(\.canApprove), [true, false])
+        XCTAssertNotNil(gates[0].url)
+        XCTAssertNil(gates[1].url)
+    }
+
+    func testApprovePostsEnvironmentIds() async throws {
+        gh.on("POST", "repos/acme/app/actions/runs/77/pending_deployments", answer("200 OK", "[]"))
+        try await ci.approve(ref, gates: ["1"], comment: "c")
+        let body = try XCTUnwrap(gh.body())
+        XCTAssertEqual(body["environment_ids"] as? [Int], [1])
+        XCTAssertEqual(body["state"] as? String, "approved")
+        XCTAssertEqual(body["comment"] as? String, "c")
+    }
+
+    func testApproveForbidden() async {
+        gh.on("POST", "repos/acme/app/actions/runs/77/pending_deployments", answer("403 Forbidden", #"{"message":"Forbidden"}"#))
+        do {
+            try await ci.approve(ref, gates: ["1"], comment: "c")
+            XCTFail("expected forbidden")
+        } catch {
+            XCTAssertEqual(error as? ProviderError, .forbidden)
+        }
+    }
 }

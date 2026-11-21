@@ -25,7 +25,9 @@ public struct CIEvents: Sendable {
     public static func source(of provider: String) -> String { provider == "github" ? "gha" : provider }
 
     /// The new rows of the runs of one repo. item gives the item key of a run.
-    public mutating func drafts(repo: String, runs: [Run], machine: String, now: Date = Date(), item: (Run) -> String?) -> [EventDraft] {
+    /// actor gives the actor of a rerun (run, attempt) when this app made it. Nil keeps the GitHub login.
+    public mutating func drafts(repo: String, runs: [Run], machine: String, now: Date = Date(),
+                                actor override: (Run, Int) -> EventActor? = { _, _ in nil }, item: (Run) -> String?) -> [EventDraft] {
         var out: [EventDraft] = []
         for r in runs {
             let attempt = r.attempt ?? 1
@@ -36,18 +38,23 @@ public struct CIEvents: Sendable {
             if last == nil, let at = parseISO(r.updatedAt), now.timeIntervalSince(at) > horizon { continue }
             sent[subject] = rank
             func row(_ kind: Event.Kind, _ verb: String, at: Date?, _ summary: String, actorType: ActorType = .provider,
-                     actor: String = "github-actions", extra: [String: JSONValue] = [:]) {
+                     actor: String = "github-actions", via: String = "poll", extra: [String: JSONValue] = [:]) {
                 var p = Self.payload(r, attempt: attempt)
                 p.merge(extra) { _, b in b }
                 out.append(EventDraft(id: "\(source):\(r.id):\(attempt):\(verb)", at: at ?? now, kind: kind, item: item(r),
                                       repo: repo, machine: machine, provider: provider, actorType: actorType, actor: actor,
-                                      via: "poll", summary: summary, payload: p))
+                                      via: via, summary: summary, payload: p))
             }
             let name = "\(Self.short(repo)) \(r.workflowName ?? r.name) #\(r.number)"
             if last == nil, attempt > 1 {
                 let human = r.actorLogin.map { !$0.hasSuffix("[bot]") } ?? false
-                row(.ciRerun, "rerun", at: parseISO(r.createdAt), "\(name) attempt \(attempt)",
-                    actorType: human ? .human : .provider, actor: human ? r.actorLogin! : "github-actions")
+                if let a = override(r, attempt) {
+                    row(.ciRerun, "rerun", at: parseISO(r.createdAt), "\(name) attempt \(attempt)", actorType: a.type,
+                        actor: a.name ?? a.type.rawValue, via: a.via ?? "app@\(machine)")
+                } else {
+                    row(.ciRerun, "rerun", at: parseISO(r.createdAt), "\(name) attempt \(attempt)",
+                        actorType: human ? .human : .provider, actor: human ? r.actorLogin! : "github-actions")
+                }
             }
             if rank == 0 { row(.ciQueued, "queued", at: parseISO(r.createdAt), "\(name) queued on \(r.headBranch)") }
             if rank >= 1, (last ?? -1) < 1, rank == 1 || r.startedAt != nil {
@@ -64,6 +71,38 @@ public struct CIEvents: Sendable {
             }
         }
         return out
+    }
+
+    /// A row for a CI write of the app: ci.cancelled, ci.dispatched, ci.approved.
+    /// `verb` ends the id: "cancelled", or "approved:<gate ids>". A dispatch row has no verb in its id.
+    public func acted(_ kind: Event.Kind, verb: String, repo: String, run: Run?, attempt: Int, actor: EventActor,
+                      machine: String, now: Date, extra: [String: JSONValue]) -> EventDraft {
+        let ms = Int64(now.timeIntervalSince1970 * 1000)
+        let workflow = extra["workflow"]?.string ?? run?.workflowName ?? run?.name ?? ""
+        let name = run.map { "\(Self.short(repo)) \($0.workflowName ?? $0.name) #\($0.number)" } ?? "\(Self.short(repo)) \(workflow)"
+        var p: [String: JSONValue]
+        var id: String
+        var summary: String
+        if kind == .ciDispatched {
+            p = extra
+            if let run {
+                p["run"] = .int(run.number)
+                p["attempt"] = .int(attempt)
+                p["url"] = .string(run.url)
+            }
+            id = run.map { "\(source):dispatch:\($0.id)" } ?? "\(source):dispatch:\(repo):\(workflow):\(ms)"
+            summary = "\(name) dispatched on \(extra["ref"]?.string ?? "")"
+        } else {
+            p = run.map { Self.payload($0, attempt: attempt) } ?? [:]
+            p.merge(extra) { _, b in b }
+            id = run.map { "\(source):\($0.id):\(attempt):\(verb)" } ?? "\(source):\(repo):\(verb):\(ms)"
+            summary = "\(name) \(kind == .ciCancelled ? "cancelled" : "approved")"
+            if kind == .ciApproved, case .array(let envs)? = extra["environments"] {
+                summary += " for " + envs.compactMap(\.string).joined(separator: ", ")
+            }
+        }
+        return EventDraft(id: id, at: now, kind: kind, item: nil, repo: repo, machine: machine, provider: provider, actorType: actor.type,
+                          actor: actor.name ?? actor.type.rawValue, via: actor.via ?? "app@\(machine)", summary: EventDraft.clip(summary), payload: p)
     }
 
     /// A ci.completed row with the first failed jobs and steps.

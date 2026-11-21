@@ -6,6 +6,9 @@ import OverSireCore
 // The source app runs the action as the member, sends the data to the mirror, and then posts the result (OVERSIRE-528).
 
 struct MemberCalls {
+    /// The name of this Mac in the machine group.
+    var machine: @Sendable () -> String = { EVENTS.machine() }
+
     /// Actions that run on the Mac where you click. A client never sends them.
     /// They change this Mac, read the mirror that this Mac holds, or read the daemons directly.
     static let local: Set<String> = [
@@ -19,7 +22,12 @@ struct MemberCalls {
         if Self.local.contains(c.action) {
             return AppCallResult(id: c.id, status: .notAllowed, summary: "\(c.action) runs only on the Mac where you click it.")
         }
-        let caller = ActionCaller.member(machine: c.from.machine, name: c.from.name)
+        let caller: ActionCaller
+        if let cli = c.cli {
+            caller = c.from.machine == machine() ? .cli(agent: cli.agent) : .remoteCLI(machine: c.from.machine, agent: cli.agent)
+        } else {
+            caller = .member(machine: c.from.machine, name: c.from.name)
+        }
         let r = await actions.run(c.action, ActionArgs(c.args, caller: caller))
         let out: AppCallResult
         switch r {

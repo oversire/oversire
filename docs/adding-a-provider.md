@@ -154,6 +154,7 @@ Vendor map:
 - `pipelines`, `runs` (newest first), `run`, `jobs`, `failures`.
 - `perform(_:on:)` runs a rerun or a cancel. Throw `.unsupported(.rerun)` or `.unsupported(.cancel)` for an action that you do not support.
 - To re-run one job, add `.rerunJob` and conform to `JobRerunning`. On the wire, this is the RunAction `rerun` on a `job` subject.
+- To start a pipeline by hand, add `.dispatch` and conform to `Dispatching`. To approve a deployment gate that holds a run, add `.gates` and conform to `GateApproving`.
 
 ## 5. Add the capabilities that you support
 
@@ -170,6 +171,8 @@ A capability is an optional feature. Some capabilities need a second protocol:
 | `.webhooks` | `WebhookManaging` |
 | `.logs` | `LogReading` |
 | `.rerunJob` | `JobRerunning` |
+| `.dispatch` | `Dispatching` |
+| `.gates` | `GateApproving` |
 | `.sessionInput`, `.sessionTail` | `SessionIO` |
 | `.reveal` | `Revealing` |
 | `.sessionHistory` | `SessionHistoryReading` |

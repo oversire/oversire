@@ -115,7 +115,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     let workstreams = WorkstreamIndex()
     let cleaner = Cleaner()
     lazy var queue = WorkQueue(writes: STORE_WRITES, store: projectStore, agents: agentIndex)
-    lazy var actions = AppActionCatalog(data: self)
+    lazy var ciOps = CIOps(accounts: ENV, rights: { AGENTS.ci }, tracked: { Set(REPOS) }, desk: { EVENTS },
+                           refresh: { [weak self] repo in
+                               await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                                   DispatchQueue.main.async {
+                                       guard let self else { c.resume(); return }
+                                       self.ciRefresh(repo) { _ in c.resume() }
+                                   }
+                               }
+                           })
+    lazy var actions = AppActionCatalog(data: self, ci: ciOps)
     private var madePublisher: MirrorPublisher?
     /// Sends the provider data to the mirror of home. It runs only on the app that holds the automations lease.
     /// Made at the first start, when the group and the machine name are known.

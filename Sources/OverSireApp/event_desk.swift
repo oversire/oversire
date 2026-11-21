@@ -25,6 +25,8 @@ final class EventDesk: @unchecked Sendable {
     private var prs: [String: ChangeEvents] = [:]
     private var viewed: [String: Date] = [:]
     private var held: [String: String] = [:]
+    private var rerunBy: [String: (actor: EventActor, at: Date)] = [:]
+    static let rerunKept: TimeInterval = 3600
 
     /// This Mac in the machine group.
     var machine: () -> String = { EventDesk.hostName }
@@ -57,7 +59,8 @@ final class EventDesk: @unchecked Sendable {
         for (repo, runs) in res {
             let p = provider(repo)
             var m = ci[p] ?? CIEvents(source: CIEvents.source(of: p), provider: p)
-            out += m.drafts(repo: repo, runs: runs, machine: machine(), now: at) { [runItem] r in runItem(repo, r) }
+            out += m.drafts(repo: repo, runs: runs, machine: machine(), now: at, actor: { [self] r, attempt in rerunActor(repo, r.id, attempt) },
+                            item: { [runItem] r in runItem(repo, r) })
             ci[p] = m
         }
         // A fresh failure gets its failed steps first. That costs two calls, so an old failure goes without them.
@@ -119,6 +122,36 @@ final class EventDesk: @unchecked Sendable {
     func epics(old: ProjectSnapshot?, new snap: ProjectSnapshot, actors: [String: EventActor]) {
         let p = snap.summary.ref.account.provider.rawValue
         send(EpicEvents.drafts(old: old, new: snap, provider: p, machine: machine(), actors: actors, me: snap.me))
+    }
+
+    // MARK: CI writes
+
+    private func rerunKey(_ repo: String, _ run: String, _ attempt: Int) -> String { "\(repo)|\(run)|\(attempt)" }
+
+    private func named(_ a: EventActor) -> EventActor {
+        var a = a
+        if a.type == .human, a.name == nil { a.name = actor }
+        return a
+    }
+
+    private func rerunActor(_ repo: String, _ run: String, _ attempt: Int) -> EventActor? {
+        let at = now()
+        rerunBy = rerunBy.filter { at.timeIntervalSince($0.value.at) < Self.rerunKept }
+        return rerunBy[rerunKey(repo, run, attempt)]?.actor
+    }
+
+    /// The app started attempt `attempt` of a run. The next poll names `actor` in the ci.rerun row.
+    func ciRerunBy(repo: String, run: String, attempt: Int, actor: EventActor) {
+        rerunBy[rerunKey(repo, run, attempt)] = (named(actor), now())
+    }
+
+    /// A row of a CI write of the app: ci.cancelled, ci.dispatched or ci.approved. The poll gives no such rows.
+    func ciActed(_ kind: Event.Kind, verb: String, repo: String, run: Run?, attempt: Int, actor: EventActor, extra: [String: JSONValue]) {
+        let p = provider(repo)
+        var d = CIEvents(source: CIEvents.source(of: p), provider: p)
+            .acted(kind, verb: verb, repo: repo, run: run, attempt: attempt, actor: named(actor), machine: machine(), now: now(), extra: extra)
+        d.item = run.flatMap { runItem(repo, $0) }
+        send([d])
     }
 
     // MARK: Your actions

@@ -3,13 +3,13 @@ import GitHubKit
 import OverSireCore
 
 /// The GitHub Actions runs of one owner. `repos` limits the poll.
-public final class ActionsCI: CIProvider, LogReading, JobRerunning, RateReporting, @unchecked Sendable {
+public final class ActionsCI: CIProvider, LogReading, JobRerunning, RateReporting, Dispatching, GateApproving, @unchecked Sendable {
     public static let tailBytes = 16_000
 
     public let id: ProviderID = .githubActions
     public let account: AccountID
     public let repoPaths: [String]
-    public var capabilities: Set<Capability> { [.rerun, .rerunJob, .cancel, .logs, .annotations] }
+    public var capabilities: Set<Capability> { [.rerun, .rerunJob, .cancel, .logs, .annotations, .dispatch, .gates] }
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(10), requestsPerHour: 5000) }
 
     let client: GitHubClient
@@ -114,6 +114,30 @@ public final class ActionsCI: CIProvider, LogReading, JobRerunning, RateReportin
 
     public func rerun(_ j: JobRef) async throws {
         _ = try await client.api("POST", "repos/\(try path(j.run))/actions/jobs/\(j.id)/rerun")
+    }
+
+    // MARK: Dispatching
+
+    public func dispatch(_ repo: RepoRef, pipeline: String, ref: String, inputs: [String: String]) async throws -> RunRef? {
+        let body: [String: Any] = ["ref": ref, "inputs": inputs, "return_run_details": true]
+        let o = try await client.json("POST", "repos/\(repo.path)/actions/workflows/\(pipeline)/dispatches", body: body) as? [String: Any]
+        guard let id = (o?["workflow_run_id"] as? NSNumber)?.stringValue else { return nil }
+        return runRef(repo.path, id: id)
+    }
+
+    // MARK: GateApproving
+
+    public func gates(_ r: RunRef) async throws -> [Gate] {
+        let list = try await client.json("GET", "repos/\(try path(r))/actions/runs/\(r.id)/pending_deployments") as? [[String: Any]] ?? []
+        return list.compactMap { d in
+            guard let env = d["environment"] as? [String: Any], let id = env["id"] as? NSNumber, let name = env["name"] as? String else { return nil }
+            return Gate(id: id.stringValue, name: name, canApprove: d["current_user_can_approve"] as? Bool ?? false, url: env["html_url"] as? String)
+        }
+    }
+
+    public func approve(_ r: RunRef, gates: [String], comment: String) async throws {
+        let body: [String: Any] = ["environment_ids": gates.compactMap(Int.init), "state": "approved", "comment": comment]
+        _ = try await client.json("POST", "repos/\(try path(r))/actions/runs/\(r.id)/pending_deployments", body: body)
     }
 
     // MARK: LogReading

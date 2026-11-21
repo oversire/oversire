@@ -17,6 +17,13 @@ final class HomeSettingsTests: XCTestCase {
         GENERAL = general
     }
 
+    func testAgentsConfigWithoutCIDecodesDefaults() throws {
+        let c = try JSONDecoder().decode(AgentsConfig.self, from: Data("{}".utf8))
+        XCTAssertEqual(c.ci, AgentCIRights(cancel: true, approve: false))
+        let off = try JSONDecoder().decode(AgentsConfig.self, from: Data(#"{"ci":{"approve":true}}"#.utf8))
+        XCTAssertEqual(off.ci, AgentCIRights(cancel: true, approve: true))
+    }
+
     func testHasNoSecrets() throws {
         var c = AppConfig(repos: ["o/r"])
         c.accounts = [AccountConfig(account: AccountID(provider: "plane", id: "ocral"), values: ["token": "sk-secret-token"], secretKeys: ["token"])]

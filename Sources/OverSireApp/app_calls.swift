@@ -4,6 +4,7 @@ import OverSireAssistant
 
 // The `oversire` commands that the app runs (app-call.json). The local daemon sends each call on its WebSocket.
 // The app runs only the actions of `allowed`, with no confirm. The event rows name the agent as the actor.
+// Some of them leave the Mac (ci.dispatch, ci.approve). The agent rights of CIOps guard them.
 final class AppCalls: @unchecked Sendable {
     static let allowed: Set<String> = [
         "item.get", "item.list", "item.markdown", "item.setEpic", "epic.list", "epic.show", "epic.plan", "epic.create", "epic.update", "epic.close", "epic.addItems", "epic.removeItems",
@@ -11,6 +12,7 @@ final class AppCalls: @unchecked Sendable {
         "item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start", "item.reopen",
         "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
         "ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain",
+        "ci.rerun", "ci.rerunJob", "ci.cancel", "ci.dispatch", "ci.approve",
     ]
 
     private let catalog: any ActionCatalog

@@ -5,7 +5,7 @@ enum SettingsAnchor: String, CaseIterable {
     case appearance, menubar, runs, capture, startup, shortcuts
     case services, live
     case projects, refresh, repos, linking, writeback
-    case sessions, queue, worktrees, planner, runbooks
+    case sessions, queue, worktrees, agentCI = "agent-ci", planner, runbooks
     case mode, thisMac = "this-mac", joinOnly = "join-only", found, machines, runtimes, hooks, daemon
     case engine, localCLI = "local-cli", apiKey = "api-key", use, assistant, cloudAI = "cloud-ai"
     case ci, tracker, mentions, oversire, overrides
@@ -29,6 +29,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .sessions: return "New sessions"
         case .queue: return "Queue"
         case .worktrees: return "Worktrees"
+        case .agentCI: return "CI"
         case .planner: return "Intake and planner"
         case .runbooks: return "Runbooks"
         case .mode: return "Mode"
@@ -61,7 +62,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .appearance, .menubar, .runs, .capture, .startup, .shortcuts: return .general
         case .services, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
-        case .sessions, .queue, .worktrees, .planner, .runbooks: return .agents
+        case .sessions, .queue, .worktrees, .agentCI, .planner, .runbooks: return .agents
         case .mode, .thisMac, .joinOnly, .found, .machines, .runtimes, .hooks, .daemon: return .machines
         case .engine, .localCLI, .apiKey, .use, .assistant, .cloudAI: return .ai
         case .ci, .tracker, .mentions, .oversire, .overrides: return .notifications
@@ -153,6 +154,8 @@ struct SettingsIndex {
         Entry("Wait after the item is finished", .worktrees, "cleanup delay"),
         Entry("Only worktrees that OverSire started", .worktrees, "cleanup orca"),
         Entry("Run the repo archive hooks", .worktrees, "cleanup orca run-hooks"),
+        Entry("Agents can cancel runs", .agentCI, "ci cancel agent workflow"),
+        Entry("Agents can approve deployments", .agentCI, "ci approve deployment environment agent"),
         Entry("Agents", .sessions, "agent command model effort duplicate command line start"),
         Entry("Snap basket prompt", .sessions, "template screenshot"),
         Entry("New session prompt", .sessions, "template intake files paths"),

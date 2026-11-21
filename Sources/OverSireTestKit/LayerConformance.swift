@@ -238,8 +238,8 @@ public enum CodeHostConformance {
 }
 
 public enum CIConformance {
-    /// Runs each RunAction on the newest run of `repo`.
-    public static func run(repo: RepoRef, make: @Sendable () async throws -> any CIProvider) async -> ConformanceReport {
+    /// Runs each RunAction on the newest run of `repo`. A dispatch starts a real run, so it runs only when `dispatch` is set.
+    public static func run(repo: RepoRef, dispatch: (pipeline: String, ref: String)? = nil, make: @Sendable () async throws -> any CIProvider) async -> ConformanceReport {
         var r = ConformanceReport()
         guard let ci = await r.step("make", make) else { return r }
         _ = await r.step("pipelines", { try await ci.pipelines(repo) })
@@ -249,7 +249,7 @@ public enum CIConformance {
         let provider = ci.account.provider.rawValue
         var events = CIEvents(source: CIEvents.source(of: provider), provider: provider)
         events.horizon = .infinity
-        r.expectEvents(events.drafts(repo: repo.path, runs: runs, machine: "conformance") { _ in nil }, "CI")
+        r.expectEvents(events.drafts(repo: repo.path, runs: runs, machine: "conformance", item: { _ in nil }), "CI")
         guard let newest = runs.first else {
             r.expect(false, "no run in \(repo.path)")
             return r
@@ -268,6 +268,17 @@ public enum CIConformance {
         }
         if let jr = ci as? any JobRerunning, ci.capabilities.contains(.rerunJob), let job = jobs.first {
             _ = await r.step("rerun job", { try await jr.rerun(JobRef(run: ref, id: job.id)) })
+        }
+        if let gating = ci as? any GateApproving, ci.capabilities.contains(.gates) {
+            for run in runs {
+                let gates = await r.step("gates", { try await gating.gates(RunRef(account: ci.account, repo: repo, id: run.id, attempt: run.attempt ?? 1)) }) ?? []
+                r.expect(gates.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty }, "a gate of run \(run.id) has no id or no name")
+            }
+        }
+        if let d = dispatch, let dispatching = ci as? any Dispatching, ci.capabilities.contains(.dispatch) {
+            if let started = await r.step("dispatch", { try await dispatching.dispatch(repo, pipeline: d.pipeline, ref: d.ref, inputs: [:]) }) {
+                r.expect(started == nil || started?.repo == repo, "dispatch gave a run of another repo")
+            }
         }
         for a in RunAction.allCases {
             let need: Capability = a == .cancel ? .cancel : .rerun

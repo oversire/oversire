@@ -1,5 +1,6 @@
 import XCTest
 import OverSireCore
+import OverSireTestKit
 
 /// The contract fixture Contract/fixtures/<type>/<name>.json.
 private func fixture(_ type: String, _ name: String, file: String = #filePath) throws -> Data {
@@ -22,6 +23,13 @@ final class CIViewTests: XCTestCase {
         let back = try dec.decode(CIStateDoc.self, from: enc.encode(doc))
         XCTAssertEqual(back, doc)
         XCTAssertEqual(back.budget?.resetAt, budget.resetAt)
+    }
+
+    func testRunViewFromRun() {
+        let r = FakeCI.run(id: "5", status: "in_progress", conclusion: nil, attempt: 1)
+        let v = CIRunView(r)
+        XCTAssertEqual(v.id, "5")
+        XCTAssertEqual(v.attempt, 1)
     }
 
     func testFailureViewFromFailure() {

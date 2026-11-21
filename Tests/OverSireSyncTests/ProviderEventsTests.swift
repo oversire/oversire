@@ -15,7 +15,43 @@ final class ProviderEventsTests: XCTestCase {
     }
 
     func ci(_ m: inout CIEvents, _ runs: [Run]) -> [EventDraft] {
-        m.drafts(repo: "oversire/cli", runs: runs, machine: "mba", now: now) { $0.headBranch.hasPrefix("oversire-374") ? "OVERSIRE-374" : nil }
+        m.drafts(repo: "oversire/cli", runs: runs, machine: "mba", now: now, item: { $0.headBranch.hasPrefix("oversire-374") ? "OVERSIRE-374" : nil })
+    }
+
+    func testRerunDraftUsesActorOverride() {
+        var m = CIEvents(source: "gha", provider: "github")
+        let rows = m.drafts(repo: "oversire/cli", runs: [run("queued", attempt: 2, started: nil, updated: "2026-10-29T15:40:00Z")], machine: "mba", now: now,
+                            actor: { r, attempt in attempt == 2 ? EventActor(type: .agent, name: "codex") : nil }, item: { _ in nil })
+        let rerun = rows.filter { $0.kind == .ciRerun }
+        XCTAssertEqual(rerun.map(\.id), ["gha:812:2:rerun"])
+        XCTAssertEqual(rerun[0].actorType, .agent)
+        XCTAssertEqual(rerun[0].actor, "codex")
+        XCTAssertEqual(EventCatalog.repo.problems(rerun[0]), [])
+    }
+
+    func testActedIds() {
+        let m = CIEvents(source: "gha", provider: "github")
+        let r = run("completed", "failure", attempt: 2)
+        let agent = EventActor(type: .agent, name: "codex", via: "cli@mba")
+        let cancel = m.acted(.ciCancelled, verb: "cancelled", repo: "oversire/cli", run: r, attempt: 2, actor: agent, machine: "mba", now: now, extra: [:])
+        XCTAssertEqual(cancel.id, "gha:812:2:cancelled")
+        XCTAssertEqual(cancel.actorType, .agent)
+        XCTAssertEqual(cancel.via, "cli@mba")
+        XCTAssertEqual(cancel.payload?["run"], .int(2243))
+        let approve = m.acted(.ciApproved, verb: "approved:1,2", repo: "oversire/cli", run: r, attempt: 2, actor: agent, machine: "mba", now: now,
+                              extra: ["environments": .array([.string("prod"), .string("stage")])])
+        XCTAssertEqual(approve.id, "gha:812:2:approved:1,2")
+        XCTAssertEqual(approve.payload?["environments"], .array([.string("prod"), .string("stage")]))
+        let extra: [String: JSONValue] = ["workflow": .string("test"), "ref": .string("main"), "inputKeys": .array([.string("env")])]
+        let withRun = m.acted(.ciDispatched, verb: "dispatched", repo: "oversire/cli", run: r, attempt: 1, actor: agent, machine: "mba", now: now, extra: extra)
+        XCTAssertEqual(withRun.id, "gha:dispatch:812")
+        XCTAssertEqual(withRun.payload?["inputKeys"], .array([.string("env")]))
+        XCTAssertNil(withRun.payload?["inputs"])
+        XCTAssertNil(withRun.payload?["branch"], "a dispatch payload has no branch")
+        let bare = m.acted(.ciDispatched, verb: "dispatched", repo: "oversire/cli", run: nil, attempt: 1, actor: agent, machine: "mba", now: now, extra: extra)
+        XCTAssertEqual(bare.id, "gha:dispatch:oversire/cli:test:\(Int64(now.timeIntervalSince1970 * 1000))")
+        XCTAssertNil(bare.payload?["run"])
+        for d in [cancel, approve, withRun, bare] { XCTAssertEqual(EventCatalog.repo.problems(d), [], d.id) }
     }
 
     func testFailThenRerunPasses() {

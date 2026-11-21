@@ -92,6 +92,39 @@ final class EventDeskTests: XCTestCase {
         XCTAssertEqual(EventCatalog.repo.problems(r[0]), [])
     }
 
+    /// Close in time to the fake runs, so the horizon of the poll keeps them.
+    let pollAt = Date(timeIntervalSince1970: 1_790_849_160)
+
+    func ciRuns(attempt: Int) -> [Run] {
+        [FakeCI.run(id: "9", status: "completed", conclusion: "success", attempt: attempt)]
+    }
+
+    func testRerunByAgentNamesAgentOnPoll() async {
+        let o = Outlet()
+        let d = desk(o) { self.pollAt }
+        d.runs([("o/r", ciRuns(attempt: 1))])
+        d.ciRerunBy(repo: "o/r", run: "9", attempt: 2, actor: EventActor(type: .agent, name: "codex", via: "cli@mba"))
+        d.runs([("o/r", ciRuns(attempt: 2))])
+        let r = await rows(o, count: 5).filter { $0.kind == .ciRerun }
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r.first?.actorType, .agent)
+        XCTAssertEqual(r.first?.actor, "codex")
+        XCTAssertEqual(r.first?.via, "cli@mba")
+    }
+
+    func testRerunActorExpires() async {
+        let o = Outlet()
+        let clock = CIOpsTests.Box(pollAt)
+        let d = desk(o) { clock.get() }
+        d.runs([("o/r", ciRuns(attempt: 1))])
+        d.ciRerunBy(repo: "o/r", run: "9", attempt: 2, actor: EventActor(type: .agent, name: "codex", via: "cli@mba"))
+        clock.set(pollAt.addingTimeInterval(EventDesk.rerunKept + 1))
+        d.runs([("o/r", ciRuns(attempt: 2))])
+        let r = await rows(o, count: 5).filter { $0.kind == .ciRerun }
+        XCTAssertEqual(r.count, 1)
+        XCTAssertNotEqual(r.first?.actorType, .agent)
+    }
+
     func testViewedAtMostOnceEachTenMinutes() async {
         let o = Outlet()
         var t = start

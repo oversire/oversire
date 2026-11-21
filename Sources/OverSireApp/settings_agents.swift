@@ -16,6 +16,7 @@ extension SettingsPage {
         newSessions(b)
         queue(b)
         worktrees(b)
+        ci(b)
         intakeAndPlanner(b)
     }
 
@@ -145,6 +146,16 @@ extension SettingsPage {
                 AGENTS.cleanup.runHooks = $0
             },
             safe,
+        ]))
+    }
+
+    private func ci(_ b: NSStackView) {
+        let help = NSStackView(v: [NSTextField.text("An agent can rerun and start workflows. These switches add cancel and approve.", size: 12, color: Palette.mut, lines: 2)], spacing: 4)
+        help.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        b.addFull(section(.agentCI, [
+            SwitchRow("Agents can cancel runs", note: "On by default.", on: AGENTS.ci.cancel) { AGENTS.ci.cancel = $0 },
+            SwitchRow("Agents can approve deployments", note: "Off by default. An approval lets a run deploy.", on: AGENTS.ci.approve) { AGENTS.ci.approve = $0 },
+            help,
         ]))
     }
 

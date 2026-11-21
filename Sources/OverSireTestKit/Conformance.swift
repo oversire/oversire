@@ -60,6 +60,8 @@ public enum ProviderConformance {
         (.logs, "LogReading", { $0 is any LogReading }),
         (.deleteBranch, "BranchDeleting", { $0 is any BranchDeleting }),
         (.rerunJob, "JobRerunning", { $0 is any JobRerunning }),
+        (.dispatch, "Dispatching", { $0 is any Dispatching }),
+        (.gates, "GateApproving", { $0 is any GateApproving }),
         (.sessionInput, "SessionIO", { $0 is any SessionIO }),
         (.sessionTail, "SessionIO", { $0 is any SessionIO }),
         (.reveal, "Revealing", { $0 is any Revealing }),
