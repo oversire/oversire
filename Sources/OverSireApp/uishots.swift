@@ -1837,7 +1837,7 @@ extension MachinesSnapshot {
 
 extension UIShots {
     /// clicks:<frame>: the clicks of a client of mbp (OVERSIRE-528). Frames: busy, toast-done, toast-closed, toast-timeout,
-    /// toast-busy, toast-offline, failed, loading, event. The data stays in memory. A hung or failed call replaces the source app.
+    /// toast-busy, toast-offline, failed, loading, event, projects, projects-refreshing. The data stays in memory. A hung or failed call replaces the source app.
     func clicksScene(_ frame: String, in w: AppWindow) {
         ClientWords.source = { "mbp" }
         actions.sourceName = { "mbp" }
@@ -1875,6 +1875,19 @@ extension UIShots {
                 throw ProviderError.vendor(code: "member-call", message: "mbp did not answer. Try again.")
             }
             w.router.go(.item("FRITZ-17", .activity))
+        case "projects", "projects-refreshing":
+            let ref = { (n: Int) in ProjectRef(account: AccountID(provider: "plane", id: "big-time-data"), id: "p\(n)", key: "P\(n)") }
+            let list = [(1, "Big Timer"), (2, "Website"), (3, "Billing")].map {
+                ProjectSummary(ref: ref($0.0), identifier: ["BTD", "WEB", "BILL"][$0.0 - 1], title: $0.1, url: "", closed: false)
+            }
+            projectCatalog.mirrored = ClientCatalog(projects: [], capabilities: [:], trackers: ["big-time-data"],
+                                                    workspaces: [CatalogWorkspace(id: "big-time-data", projects: list, fetchedAt: Date())])
+            projectCatalog.forwardRefresh = { _, _ in }
+            MODE = .client
+            Disclosure.expand("track-project")
+            w.router.go(.settings(.general))   // a fresh page
+            w.router.go(.settings(.projects))
+            if frame == "projects-refreshing" { projectCatalog.refresh("big-time-data", force: true) }
         case "event":
             let e = Event(seq: 1, seenAt: Date(), draft: EventDraft(
                 id: "app:status-1", at: Date().addingTimeInterval(-300), kind: .itemStateChanged, item: "OVERSIRE-490", project: "OVERSIRE",
@@ -1911,6 +1924,9 @@ extension UIShots {
         ClientWords.source = nil
         actions.forward = nil
         projectStore.remote = nil
+        projectCatalog.mirrored = nil
+        projectCatalog.forwardRefresh = nil
+        MODE = .full
         clientLink = UIShots.clientSeed
     }
 

@@ -127,7 +127,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         MainActor.assumeIsolated {
             let docs = AppMirrorDocs(store: projectStore, runs: { [weak self] in self?.grouped ?? [] }, prs: { [weak self] in self?.prGrouped ?? [] },
                                      projects: { [weak self] in self?.projectCatalog.resolve(PROJECTS_CFG) ?? [] },
-                                     layers: { ENV.capabilities($0) }, trackers: { ENV.trackerIds })
+                                     layers: { ENV.capabilities($0) }, trackers: { ENV.trackerIds },
+                                     workspaces: { [weak self] in self?.projectCatalog.mirrorWorkspaces() ?? [] })
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
             let name = relay.group?.selfName ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
             return MirrorPublisher(home: { [weak self] in
@@ -474,7 +475,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self.bus.post(DataChange(.relations, origin: .event))
         }
         NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: projectCatalog, queue: .main) { [weak self] _ in
-            guard let self = self, !self.projectCatalog.refreshing else { return }
+            guard let self = self, MODE == .full, !self.projectCatalog.refreshing else { return }
             self.projectStore.track(self.projectCatalog.resolve(PROJECTS_CFG), live: self.liveProjectKeys())
             self.touchMirror(.catalog, nil)
             self.syncPlaneWorkspaces()
@@ -1154,6 +1155,18 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         settings.sent = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
         actions.forwarded = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
         ClientWords.source = { [weak self] in self?.clientName }
+        projectCatalog.forwardRefresh = { [weak self] workspace, done in
+            guard let self else { return }
+            Task {
+                let r = await self.actions.run("project.catalogRefresh", ActionArgs(.object(workspace.map { ["workspace": .string($0)] } ?? [:])))
+                await MainActor.run {
+                    switch r {
+                    case .ok: done(nil)
+                    case .failed(let m), .notAllowed(let m): done(m)
+                    }
+                }
+            }
+        }
         projectStore.remote = { [weak self] what, args in
             guard let self else { throw ProviderError.notFound }
             var values = args.object ?? [:]

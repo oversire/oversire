@@ -41,6 +41,22 @@ final class MemberCallsTests: XCTestCase {
         XCTAssertEqual(lines, [])
     }
 
+    // OVERSIRE-534
+    func testCatalogRefreshRefreshesTheWorkspace() async throws {
+        let rig = try await EpicRig(tracking: false)
+        let ws = rig.fake.account.id
+        let r = await rig.d.actions.run("project.catalogRefresh", ActionArgs(.object(["workspace": .string(ws)])))
+        guard case .ok = r else { return XCTFail("\(r)") }
+        XCTAssertEqual(rig.fake.projectCalls, 1)
+        XCTAssertEqual(rig.d.projectCatalog.projects(of: ws).count, 1)
+        let all = await rig.d.actions.run("project.catalogRefresh", ActionArgs(.object([:])))
+        guard case .ok = all else { return XCTFail("\(all)") }
+        XCTAssertEqual(rig.fake.projectCalls, 2)
+        let bad = await rig.d.actions.run("project.catalogRefresh", ActionArgs(.object(["workspace": .string("nope")])))
+        XCTAssertEqual(bad, .notAllowed("No workspace nope."))
+        XCTAssertEqual(rig.fake.projectCalls, 2)
+    }
+
     func testFlushesBeforeResult() async {
         let log = Log()
         let spec = ActionSpec(id: "item.comment", title: "Comment", help: "", kind: .change) { _ in

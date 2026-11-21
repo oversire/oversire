@@ -63,7 +63,11 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     public func probe() async throws -> Identity { try await base.probe() }
     public func poll(since: Cursor?) async throws -> EventPage { try await base.poll(since: since) }
 
-    public func projects() async throws -> [ProjectSummary] { try base.locked { projectList } }
+    private var projectCount = 0
+    /// The number of `projects()` calls.
+    public var projectCalls: Int { base.lockedValue { projectCount } }
+
+    public func projects() async throws -> [ProjectSummary] { try base.locked { projectCount += 1; return projectList } }
 
     public func statuses(_ p: ProjectRef) async throws -> [StatusOption] {
         try base.locked {

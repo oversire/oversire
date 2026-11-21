@@ -325,7 +325,7 @@ final class MirrorPublisherTests: XCTestCase {
              commentCount: 0, lastComment: nil, mentionsMe: false)
     }
 
-    private func appDocs(caps: Set<Capability> = [.links, .priority]) throws -> (AppMirrorDocs, ProjectStore, ProjectSummary) {
+    private func appDocs(caps: Set<Capability> = [.links, .priority], catalog: ProjectCatalog? = nil) throws -> (AppMirrorDocs, ProjectStore, ProjectSummary) {
         let t = FakeTracker(account: "ws", capabilities: caps)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-docs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -334,7 +334,8 @@ final class MirrorPublisherTests: XCTestCase {
         let summary = ProjectSummary(ref: t.project, identifier: "FAKE", title: "Fake", url: "https://x/FAKE", closed: false)
         store.track([summary], live: [])
         let docs = AppMirrorDocs(store: store, runs: { [("o/r", [])] }, prs: { [] }, projects: { [summary] },
-                                 layers: { $0 == .tracker ? caps : $0 == .ci ? [.rerun] : [] }, trackers: { ["ws"] })
+                                 layers: { $0 == .tracker ? caps : $0 == .ci ? [.rerun] : [] }, trackers: { ["ws"] },
+                                 workspaces: { catalog?.mirrorWorkspaces() ?? [] })
         return (docs, store, summary)
     }
 
@@ -402,6 +403,23 @@ final class MirrorPublisherTests: XCTestCase {
         XCTAssertEqual(c.capabilities["ci"], [.rerun])
         XCTAssertEqual(c.capabilities["codeHost"], [])
         XCTAssertEqual(c.trackers, ["ws"])
+    }
+
+    // OVERSIRE-534
+    func testCatalogDocHasWorkspaceProjects() throws {
+        let ref = ProjectRef(account: AccountID(provider: "plane", id: "w1"), id: "p1", key: "ONE")
+        let open = ProjectSummary(ref: ref, identifier: "ONE", title: "One", url: "", closed: false)
+        let closed = ProjectSummary(ref: ProjectRef(account: ref.account, id: "p2", key: "TWO"), identifier: "TWO", title: "Two", url: "", closed: true)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("plane-cache-\(UUID().uuidString).json").path
+        let fetched = Date(timeIntervalSince1970: 1_000_000)
+        ProjectCatalogCache(workspaces: [.init(slug: "w1", projects: [open, closed], fetchedAt: fetched)]).write(atPath: path)
+        let catalog = ProjectCatalog(trackers: Trackers(FakeTracker(account: "w1")), path: path)
+        let (docs, _, _) = try appDocs(catalog: catalog)
+        let c: ClientCatalog = try MirrorCodec.value(from: try XCTUnwrap(docs.catalogDoc().body))
+        XCTAssertEqual(c.workspaces?.map(\.id), ["w1"])
+        XCTAssertEqual(c.workspaces?.first?.projects.map(\.identifier), ["ONE"], "only the open projects")
+        XCTAssertEqual(c.workspaces?.first?.fetchedAt?.timeIntervalSince1970 ?? 0, 1_000_000, accuracy: 1)
+        XCTAssertNil(c.workspaces?.first?.error)
     }
 
     func testTouchedSettingsSendsOnlyTheSettingsDoc() async throws {

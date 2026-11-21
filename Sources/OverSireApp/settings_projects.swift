@@ -28,13 +28,19 @@ final class ProjectListView: NSStackView {
         let card = ListCard()
         let tracked = catalog.resolve(PROJECTS_CFG)
         if catalog.workspaces.isEmpty {
-            card.add(Padded(EmptyNote("Add a tracker account in Accounts and sync.", symbol: "tray")))
+            card.add(Padded(EmptyNote(emptyText(), symbol: "tray")))
         } else if tracked.isEmpty {
             card.add(Padded(EmptyNote(catalog.refreshing ? "Loading projects…" : "No project is tracked.", symbol: "tray")))
         }
         tracked.forEach { card.add(row($0)) }
         if !catalog.workspaces.isEmpty { card.add(picker()) }
         addFull(card)
+    }
+
+    private func emptyText() -> String {
+        guard MODE == .client, let home = ClientWords.source?() else { return "Add a tracker account in Accounts and sync." }
+        guard let mirrored = catalog.mirrored else { return "Waiting for \(home)." }
+        return mirrored.workspaces == nil ? "Update OverSire on \(home) to track projects here." : "\(home) has no tracker account. Add one on \(home)."
     }
 
     private func row(_ p: ProjectSummary) -> NSView {
@@ -115,17 +121,24 @@ final class ProjectListView: NSStackView {
 
     @objc private func toggleProject(_ sender: NSButton) {
         guard let key = sender.identifier?.rawValue else { return }
-        let slug = key.split(separator: "/").first.map(String.init) ?? key
-        if PROJECTS_CFG.allOf.contains(slug) {
-            PROJECTS_CFG.allOf.removeAll { $0 == slug }
-            PROJECTS_CFG.picked = PROJECTS_CFG.picked.filter { !$0.hasPrefix(slug + "/") }
-                + catalog.projects(of: slug).filter { !$0.closed && $0.ref.storeKey != key }.map(\.ref.storeKey)
-        } else if sender.state == .on {
-            if !PROJECTS_CFG.picked.contains(key) { PROJECTS_CFG.picked.append(key) }
-        } else {
-            PROJECTS_CFG.picked.removeAll { $0 == key }
-        }
+        PROJECTS_CFG = Self.toggled(PROJECTS_CFG, key: key, on: sender.state == .on, catalog: catalog)
         save()
+    }
+
+    /// The config after a check box change. A project of a workspace that is picked as a whole turns the others to single picks.
+    static func toggled(_ cfg: ProjectsConfig, key: String, on: Bool, catalog: ProjectCatalog) -> ProjectsConfig {
+        var cfg = cfg
+        let slug = key.split(separator: "/").first.map(String.init) ?? key
+        if cfg.allOf.contains(slug) {
+            cfg.allOf.removeAll { $0 == slug }
+            cfg.picked = cfg.picked.filter { !$0.hasPrefix(slug + "/") }
+                + catalog.projects(of: slug).filter { !$0.closed && $0.ref.storeKey != key }.map(\.ref.storeKey)
+        } else if on {
+            if !cfg.picked.contains(key) { cfg.picked.append(key) }
+        } else {
+            cfg.picked.removeAll { $0 == key }
+        }
+        return cfg
     }
 
     // Saves at once, and applies the picks once after a burst of clicks.
@@ -137,7 +150,8 @@ final class ProjectListView: NSStackView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.applyQueued = false
             (NSApp.delegate as? GHActionsBar)?.applyProjectSelection()
-            self?.catalog.refreshAll()
+            // The home refreshes after it applies the picks.
+            if MODE == .full { self?.catalog.refreshAll() }
         }
     }
 }

@@ -19,6 +19,11 @@ enum OwnerFetch {
     case idle
     case loading
     case failed(String)
+
+    var isIdle: Bool {
+        if case .idle = self { return true }
+        return false
+    }
 }
 
 func repoOwner(_ repo: String) -> String {

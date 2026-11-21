@@ -187,11 +187,30 @@ public struct ClientCatalog: Codable, Hashable, Sendable {
     public var capabilities: [String: [Capability]]
     /// The ids of the tracker accounts of the home.
     public var trackers: [String]
+    /// The open projects of each tracker workspace of the home, for the picker of a client. Nil from an old home.
+    public var workspaces: [CatalogWorkspace]?
 
-    public init(projects: [CatalogProject], capabilities: [String: [Capability]], trackers: [String]) {
+    public init(projects: [CatalogProject], capabilities: [String: [Capability]], trackers: [String], workspaces: [CatalogWorkspace]? = nil) {
         self.projects = projects
         self.capabilities = capabilities
         self.trackers = trackers
+        self.workspaces = workspaces
+    }
+}
+
+/// One tracker workspace of the home, with its open projects and the state of the last fetch.
+public struct CatalogWorkspace: Codable, Hashable, Sendable {
+    public var id: String
+    public var projects: [ProjectSummary]
+    public var fetchedAt: Date?
+    /// The error of the last fetch, or nil.
+    public var error: String?
+
+    public init(id: String, projects: [ProjectSummary], fetchedAt: Date? = nil, error: String? = nil) {
+        self.id = id
+        self.projects = projects
+        self.fetchedAt = fetchedAt
+        self.error = error
     }
 }
 

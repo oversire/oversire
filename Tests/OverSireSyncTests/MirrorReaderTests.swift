@@ -166,5 +166,18 @@ final class MirrorReaderTests: XCTestCase {
         XCTAssertEqual(d.catalog?.projects.first?.summary.identifier, "ONE")
         XCTAssertEqual(d.catalog?.projects.first?.capabilities, [.links])
         XCTAssertEqual(d.catalog?.trackers, ["ws"])
+        XCTAssertNil(d.catalog?.workspaces, "an old home sends no workspaces")
+    }
+
+    // OVERSIRE-534
+    func testCatalogWithWorkspacesDecodes() async throws {
+        let feed = Feed()
+        let summary = ProjectSummary(ref: ref, identifier: "ONE", title: "One", url: "", closed: false)
+        let fetched = Date(timeIntervalSince1970: 1_000_000)
+        let ws = CatalogWorkspace(id: "ws", projects: [summary], fetchedAt: fetched, error: "Plane is down")
+        let catalog = ClientCatalog(projects: [], capabilities: [:], trackers: ["ws"], workspaces: [ws])
+        feed.add(doc(.catalog, MirrorCodec.catalogID, catalog))
+        let d = try await MirrorReader(fetch: feed, cache: cache()).pull()
+        XCTAssertEqual(d.catalog?.workspaces, [ws])
     }
 }

@@ -26,7 +26,10 @@ final class ProjectCatalog {
     private let trackers: TrackerDirectory
     private let path: String
     /// The projects of the home, on a client. A client has no tracker account.
-    var mirrored: ClientCatalog?
+    var mirrored: ClientCatalog? { didSet { notify() } }
+    /// Set on a client. It asks the home to fetch the projects of a workspace, or of all (nil). `done` gets the failure text or nil, on the main thread.
+    var forwardRefresh: ((_ workspace: String?, _ done: @escaping (String?) -> Void) -> Void)?
+    private var isClient: Bool { mirrored != nil || forwardRefresh != nil }
 
     init(trackers: TrackerDirectory, path: String) {
         self.trackers = trackers
@@ -38,14 +41,30 @@ final class ProjectCatalog {
         }
     }
 
-    var workspaces: [String] { trackers.trackerIds }
+    var workspaces: [String] { isClient ? mirrored?.workspaces?.map(\.id) ?? [] : trackers.trackerIds }
     var refreshing: Bool { status.values.contains { if case .loading = $0 { return true }; return false } }
     var isStale: Bool {
         workspaces.contains { fetchedAt[$0].map { -$0.timeIntervalSinceNow > ProjectCatalog.maxAge } ?? true }
     }
 
-    func projects(of slug: String) -> [ProjectSummary] { bySlug[slug] ?? [] }
-    func fetch(_ slug: String) -> OwnerFetch { status[slug] ?? .idle }
+    func projects(of slug: String) -> [ProjectSummary] {
+        isClient ? mirrored?.workspaces?.first { $0.id == slug }?.projects ?? [] : bySlug[slug] ?? []
+    }
+
+    func fetch(_ slug: String) -> OwnerFetch {
+        guard isClient else { return status[slug] ?? .idle }
+        if let s = status[slug], !s.isIdle { return s }
+        return mirrored?.workspaces?.first { $0.id == slug }?.error.map(OwnerFetch.failed) ?? .idle
+    }
+
+    /// The open projects of each workspace, for the mirror. The home sends them to a client.
+    func mirrorWorkspaces() -> [CatalogWorkspace] {
+        workspaces.map { w in
+            var error: String?
+            if case .failed(let m) = fetch(w) { error = m }
+            return CatalogWorkspace(id: w, projects: projects(of: w).filter { !$0.closed }, fetchedAt: fetchedAt[w], error: error)
+        }
+    }
 
     // Explicit picks plus every open project of the workspaces picked as a whole.
     func resolve(_ cfg: ProjectsConfig) -> [ProjectSummary] {
@@ -58,7 +77,7 @@ final class ProjectCatalog {
         return cfg.sorted(out)
     }
 
-    func refreshIfStale() { if mirrored == nil, isStale { refreshAll() } }
+    func refreshIfStale() { if !isClient, isStale { refreshAll() } }
 
     /// The open project with this key ("MCPQ") in any workspace.
     func project(key: String) -> ProjectSummary? {
@@ -68,13 +87,13 @@ final class ProjectCatalog {
     /// Refreshes all workspaces once for a key that OverSire does not track. A new Plane project then shows with no wait for the cache.
     /// False when the key was looked up before.
     func lookUp(_ key: String) -> Bool {
-        guard mirrored == nil, lookedUp.insert(key.uppercased()).inserted else { return false }
+        guard lookedUp.insert(key.uppercased()).inserted else { return false }
         refreshAll(force: true)
         return true
     }
 
     func refreshAll(force: Bool = false) {
-        guard mirrored == nil else { return }
+        guard !isClient else { return forward(nil) }
         for w in workspaces { refresh(w, force: force) }
         let known = Set(workspaces)
         if bySlug.keys.contains(where: { !known.contains($0) }) {
@@ -87,6 +106,7 @@ final class ProjectCatalog {
     // A click on Refresh starts a new request even if the last one still runs.
     func refresh(_ slug: String, force: Bool = false) {
         if !force, case .loading = fetch(slug) { return }
+        guard !isClient else { return forward(slug) }
         guard let client = trackers.tracker(slug) else {
             status[slug] = .failed(ProjectStore.noToken)
             notify()
@@ -111,6 +131,24 @@ final class ProjectCatalog {
                 }
                 self.notify()
             }
+        }
+    }
+
+    // The home fetches. A client shows the new list when the catalog doc comes.
+    private func forward(_ slug: String?) {
+        guard let forwardRefresh else { return }
+        let targets = slug.map { [$0] } ?? workspaces
+        let tickets = Dictionary(uniqueKeysWithValues: targets.map { w -> (String, Int) in
+            let n = (ticket[w] ?? 0) + 1
+            ticket[w] = n
+            status[w] = .loading
+            return (w, n)
+        })
+        notify()
+        forwardRefresh(slug) { [weak self] failure in
+            guard let self else { return }
+            for (w, n) in tickets where self.ticket[w] == n { self.status[w] = failure.map(OwnerFetch.failed) ?? .idle }
+            self.notify()
         }
     }
 

@@ -1251,6 +1251,9 @@ final class Disclosure: NSStackView {
 
     var isOpen: Bool { Disclosure.open.contains(id) }
 
+    /// Opens the disclosure with this id the next time a page builds it. For the shots.
+    static func expand(_ id: String) { open.insert(id) }
+
     init(_ title: String, id: String) {
         self.id = id
         self.title = title

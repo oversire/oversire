@@ -38,7 +38,7 @@ final class TestAppData: AppData {
     lazy var updater = Updater()
     lazy var cloudSetup = CloudSetup()
     lazy var repoCatalog = RepoCatalog(path: tmp + "/repo-cache.json")
-    lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: tmp + "/plane-cache.json")
+    lazy var projectCatalog = ProjectCatalog(trackers: trackers ?? ENV, path: tmp + "/plane-cache.json")
     lazy var agentCatalog: AgentCatalog = {
         let c = AgentCatalog(writes: writes)
         c.record = { _, _ in }

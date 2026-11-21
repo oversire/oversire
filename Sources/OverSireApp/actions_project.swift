@@ -91,6 +91,33 @@ struct ProjectActions {
                     done(.ok(summary: "The north star of \(ident) is set."))
                 }
             },
+            ActionSpec(id: "project.catalogRefresh", title: "Refresh the project list",
+                       help: "Fetches the projects of a tracker workspace again. A client app uses it for the picker of Track a project.", kind: .change,
+                       input: ActionSpec.args(["workspace": ("string", "The tracker account id. Leave out to fetch all workspaces.")])) { a in
+                await link.run { d, done in
+                    let catalog = d.projectCatalog
+                    let workspace = a.string("workspace")
+                    if let workspace, !catalog.workspaces.contains(workspace) { done(.notAllowed("No workspace \(workspace).")); return }
+                    let targets = workspace.map { [$0] } ?? catalog.workspaces
+                    final class Token { var observer: Any? }
+                    let token = Token()
+                    token.observer = NotificationCenter.default.addObserver(forName: ProjectCatalog.changed, object: catalog, queue: .main) { _ in
+                        var loading = false, failure: String?
+                        for w in targets {
+                            switch catalog.fetch(w) {
+                            case .loading: loading = true
+                            case .failed(let m): failure = failure ?? m
+                            case .idle: break
+                            }
+                        }
+                        guard !loading else { return }
+                        token.observer.map(NotificationCenter.default.removeObserver)
+                        token.observer = nil
+                        done(failure.map(ActionResult.failed) ?? .ok(summary: "Fetched \(targets.count) workspace\(targets.count == 1 ? "" : "s")."))
+                    }
+                    if let workspace { catalog.refresh(workspace, force: true) } else { catalog.refreshAll(force: true) }
+                }
+            },
         ]
     }
 }
