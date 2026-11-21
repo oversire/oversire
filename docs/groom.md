@@ -74,7 +74,8 @@ Groom needs a daemon with the capabilities `sessionKey` and `hostFiles`. With an
 
 - `/oversire groom` runs Groom in the agent session. The body is `cli/ticket/skill/groom.md`.
 - The skill uses the kinds table above and the rules of `Contract/prompts/groom.md`.
-- It writes to Plane only after a yes in the chat.
+- It reads and triages the intake with `oversire intake`.
+- It writes to the tracker only after a yes in the chat.
 - `oversire ticket groom <PROJECT>` stops when a Groom of the app runs on this machine. It sets no key.
 - The skill writes one `groom.applied` row for each item that it changes.
 - The Groom panel and **Undo last Groom** do not show the Groom of the skill.
