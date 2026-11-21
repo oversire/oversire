@@ -2,10 +2,10 @@ import Foundation
 import OverSireCore
 
 /// The Big Timer adapter. One instance for each server and token.
-public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpdating, @unchecked Sendable {
+public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpdating, TimelineReading, @unchecked Sendable {
     public let id: ProviderID = .bigtimer
     public let account: AccountID
-    public let capabilities: Set<Capability> = [.itemSearch, .subItems, .liveFeed, .epics, .epicHealth]
+    public let capabilities: Set<Capability> = [.itemSearch, .subItems, .liveFeed, .epics, .epicHealth, .timeline, .dates, .estimate]
     // The server has no general rate limit. The real load is the ProjectStore refresh.
     public let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 600)
     public let keyFormat = KeyFormat.projectDash
@@ -120,8 +120,11 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
     public func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef {
         if d.priority != nil { throw ProviderError.unsupported(.priority) }
         if !d.labels.isEmpty { throw ProviderError.unsupported(.labels) }
-        let data = try await api.send("POST", "/v1/issues", json: BTIssueCreate(project_uuid: p.id, title: d.title, details: d.bodyMarkdown,
-                                                                                  status: d.status, parent_uuid: d.parent))
+        var body = BTIssueCreate(project_uuid: p.id, title: d.title, details: d.bodyMarkdown, status: d.status, parent_uuid: d.parent)
+        body.start_date = d.startDate.flatMap { $0.isEmpty ? nil : $0 }
+        body.due_date = d.dueDate.flatMap { $0.isEmpty ? nil : $0 }
+        body.size = try d.estimate.flatMap { $0.isEmpty ? nil : try Self.size($0) }
+        let data = try await api.send("POST", "/v1/issues", json: body)
         let row = try BigTimerAPI.decode(BTIssue.self, from: data)
         remember(row)
         return ref(of: row, project: p)
@@ -131,7 +134,12 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
         if patch.priority != nil { throw ProviderError.unsupported(.priority) }
         if patch.labels != nil { throw ProviderError.unsupported(.labels) }
-        let body = BTIssuePatch(title: patch.title, details: patch.bodyMarkdown, status: patch.status, parent_uuid: patch.parent)
+        var body = BTIssuePatch(title: patch.title, details: patch.bodyMarkdown, status: patch.status, parent_uuid: patch.parent)
+        if let v = patch.startDate { if v.isEmpty { body.clear.insert("start_date") } else { body.start_date = v } }
+        if let v = patch.dueDate { if v.isEmpty { body.clear.insert("due_date") } else { body.due_date = v } }
+        if let e = patch.estimate {
+            if e.isEmpty { body.clear.insert("size") } else { body.size = try Self.size(e) }
+        }
         if !body.isEmpty { _ = try await api.send("PATCH", "/v1/issues/\(i.id)", json: body) }
         if let who = patch.assignees { _ = try await api.send("POST", "/v1/issues/\(i.id)/assign", json: BTAssign(member: who.first)) }
     }
@@ -143,6 +151,69 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
     /// The server takes "me" as a member.
     public func assignMe(_ i: ItemRef) async throws {
         _ = try await api.send("POST", "/v1/issues/\(i.id)/assign", json: BTAssign(member: "me"))
+    }
+
+    // MARK: Timeline
+
+    static let sizes = ["S", "M", "L", "XL"]
+
+    /// The size code of an estimate label.
+    static func size(_ estimate: String) throws -> String {
+        let s = estimate.trimmingCharacters(in: .whitespaces).uppercased()
+        guard sizes.contains(s) else { throw ProviderError.vendor(code: "validation", message: "Big Timer sizes: S, M, L, XL.") }
+        return s
+    }
+
+    /// The status changes, the field changes and the comments of one item, oldest first. Version 1 is the creation: it gives no field row.
+    public func timeline(_ i: ItemRef) async throws -> [ActivityEntry] {
+        let history: BTIssueHistory = try await api.get("/v1/issues/\(i.id)/history")
+        let names = await names()
+        let url = i.url.absoluteString
+        func entry(_ change: ItemChange, _ actor: String?, _ at: Date) -> ActivityEntry {
+            ActivityEntry.make(projectKey: "", itemId: i.id, change: change, actor: actor, url: url, at: at)
+        }
+        func status(_ id: String?) -> String? { id.map { id in BigTimerStatus.options.first { $0.id == id }?.name ?? id } }
+        var out = history.transitions.map {
+            entry(.status(from: status($0.from_status), to: status($0.to_status)), $0.created_by.flatMap { names[$0] }, $0.transitioned_at)
+        }
+        for r in history.changes where r.version > 1 {
+            let actor = r.actor_uuid.flatMap { names[$0] } ?? r.channel
+            let (old, new) = (Self.jsonText(r.old), Self.jsonText(r.new))
+            let change: ItemChange
+            switch r.field {
+            case "status": continue
+            case "assignee_uuid":
+                if let new { change = .assigned(names[new] ?? new) }
+                else if let old { change = .unassigned(names[old] ?? old) }
+                else { continue }
+            case "parent_uuid", "epic_uuid":
+                let name = r.field == "parent_uuid" ? "Parent" : "Epic"
+                change = .field(name: name, from: old.map(key(ofIssue:)), to: new.map(key(ofIssue:)))
+            default:
+                let name = ["title": "Title", "due_date": "Due", "start_date": "Start", "size": "Estimate"][r.field] ?? r.field
+                change = .field(name: name, from: old, to: new)
+            }
+            out.append(entry(change, actor, r.at))
+        }
+        if let list = try? await comments(i) {
+            out += list.map { entry(.comments(new: 1, last: $0), $0.author, $0.createdAt) }
+        }
+        return out.sorted { $0.at < $1.at }
+    }
+
+    /// An audit value is JSON text. A string loses its quotes, and null gives nil.
+    static func jsonText(_ raw: String?) -> String? {
+        guard let raw, let data = raw.data(using: .utf8),
+              let v = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) else { return raw }
+        switch v {
+        case is NSNull: return nil
+        case let s as String: return s
+        default: return raw
+        }
+    }
+
+    private func key(ofIssue uuid: String) -> String {
+        lock.withLock { issueKeys[uuid]?.key ?? epicKeys.first { $0.value == uuid }?.key } ?? uuid
     }
 
     // MARK: Epics
@@ -395,12 +466,14 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
     private func item(from row: BTIssue, names: [String: String]) -> Item {
         remember(row)
         var fields: [String: String] = [:]
-        if let size = row.size { fields["Size"] = size }
-        if let due = row.due_date { fields["Due"] = due }
+        if let size = row.size { fields[Item.estimateField] = size }
+        if let start = row.start_date { fields[Item.startField] = start }
+        if let due = row.due_date { fields[Item.dueField] = due }
         return Item(id: row.uuid, key: row.key, title: row.title, url: Self.url(row.key).absoluteString, statusOptionId: row.status,
                     fields: fields, assignees: row.assignee_uuid.map { [names[$0] ?? "Unknown"] } ?? [], labels: [],
                     author: row.created_by.flatMap { names[$0] }, updatedBy: row.updated_by.flatMap { names[$0] },
                     updatedAt: row.updated_at, activityAt: row.activity_at ?? row.updated_at, commentCount: row.comment_count ?? 0,
-                    lastComment: nil, mentionsMe: false, body: row.details, parentId: row.parent_uuid, epicId: epicId(of: row))
+                    lastComment: nil, mentionsMe: false, body: row.details, parentId: row.parent_uuid, epicId: epicId(of: row),
+                    createdAt: row.created_at)
     }
 }

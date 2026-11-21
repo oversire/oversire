@@ -51,11 +51,36 @@ public enum TrackerConformance {
         if let cs = await r.step("comments", { try await t.comments(ref) }) {
             r.expect(cs.contains { $0.body?.contains("Conformance comment") == true }, "comments does not list the new comment")
         }
+        if t.capabilities.contains(.dates) {
+            _ = await r.step("update dueDate", { try await t.update(ref, ItemPatch(dueDate: "2026-12-01")) })
+            if let d = await r.step("detail after dueDate", { try await t.detail(ref) }) {
+                r.expect(d.item.dueDate == "2026-12-01", "update did not set the due date: \(d.item.dueDate ?? "nil")")
+            }
+            _ = await r.step("clear dueDate", { try await t.update(ref, ItemPatch(dueDate: "")) })
+            if let d = await r.step("detail after clearing dueDate", { try await t.detail(ref) }) {
+                r.expect(d.item.dueDate == nil, "update did not remove the due date: \(d.item.dueDate ?? "nil")")
+            }
+        }
+        r.merge(await timeline(t, item: ref))
         r.merge(await settings(t, project: p))
         r.merge(await relations(t, item: ref, project: p))
         r.merge(await epics(t, item: ref, project: p))
         r.merge(await attachments(t, item: ref))
         r.merge(await intakeAndAttachments(t, project: p))
+        return r
+    }
+
+    /// Patches the title, then reads the timeline. Only with `.timeline`.
+    public static func timeline(_ t: any Tracker, item: ItemRef) async -> ConformanceReport {
+        var r = ConformanceReport()
+        guard let reader = t as? any TimelineReading, t.capabilities.contains(.timeline) else { return r }
+        let title = "Conformance timeline"
+        _ = await r.step("update title for the timeline", { try await t.update(item, ItemPatch(title: title)) })
+        if let list = await r.step("timeline", { try await reader.timeline(item) }) {
+            r.expect(list.map(\.at) == list.map(\.at).sorted(), "the timeline is not oldest first")
+            let titles = list.filter { if case .field(let name, _, let to) = $0.change { return name == "Title" && to == title }; return false }
+            r.expect(titles.count == 1, "the timeline has \(titles.count) entries for the new title, not 1")
+        }
         return r
     }
 

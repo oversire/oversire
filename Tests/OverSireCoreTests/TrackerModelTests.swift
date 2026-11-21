@@ -277,6 +277,31 @@ final class TrackerModelTests: XCTestCase {
         XCTAssertFalse(ItemPatch(status: "s1").isEmpty)
     }
 
+    func testItemPatchIsEmptyCoversNewFields() {
+        for patch in [ItemPatch(startDate: "2026-12-01"), ItemPatch(dueDate: ""), ItemPatch(estimate: "M")] {
+            XCTAssertFalse(patch.isEmpty)
+        }
+        XCTAssertTrue(ItemPatch(startDate: nil, dueDate: nil, estimate: nil).isEmpty)
+    }
+
+    func testItemDecodesWithoutCreatedAt() throws {
+        var i = item("1", status: nil)
+        XCTAssertNil(i.createdAt)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(i)) as? [String: Any])
+        XCTAssertNil(json["createdAt"])
+        json["createdAt"] = nil
+        XCTAssertNil(try JSONDecoder().decode(Item.self, from: JSONSerialization.data(withJSONObject: json)).createdAt)
+        i.createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertEqual(try JSONDecoder().decode(Item.self, from: JSONEncoder().encode(i)).createdAt, i.createdAt)
+    }
+
+    func testDateAndEstimateAccessors() {
+        let i = Item(id: "1", key: "A-1", title: "T", url: "u", statusOptionId: nil,
+                     fields: [Item.startField: "2026-12-01", Item.dueField: "2026-12-15", Item.estimateField: "M"], assignees: [], labels: [],
+                     author: nil, updatedBy: nil, updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
+        XCTAssertEqual([i.startDate, i.dueDate, i.estimate], ["2026-12-01", "2026-12-15", "M"])
+    }
+
     func testKeyInURLFindsBigTimerLinks() {
         XCTAssertEqual(ActivityEntry.key(inURL: "bigtimer://issue/acme-142"), "ACME-142")
         XCTAssertEqual(ActivityEntry.key(inURL: "https://app.plane.so/ws/browse/SLING-7/"), "SLING-7")

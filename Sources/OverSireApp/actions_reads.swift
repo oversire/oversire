@@ -9,7 +9,7 @@ struct ReadActions {
     let link: ActionLink
 
     var specs: [ActionSpec] {
-        [workContext, itemGet, itemMarkdown, itemList, prList, prGet, runList, runGet, sessionList, questionList, queueList, activityList, insightsSummary, cloudStatus]
+        [workContext, itemGet, itemMarkdown, itemHistory, itemList, prList, prGet, runList, runGet, sessionList, questionList, queueList, activityList, insightsSummary, cloudStatus]
     }
 
     private var workContext: ActionSpec {
@@ -94,18 +94,52 @@ struct ReadActions {
         return head + "\n\n_The text is cut at \(limit) bytes._\n"
     }
 
+    private var itemHistory: ActionSpec {
+        let link = link
+        return ActionSpec(id: "item.history", title: "Item history", help: "The timeline of an item: status changes, field changes and comments, oldest first.",
+                          kind: .read, input: ActionSpec.args(["key": ItemActions.key, "limit": ("integer", "At most this many entries, the newest.")], required: ["key"]),
+                          capability: .timeline) { a in
+            await link.item(a) { d, f, done in
+                guard d.projectStore.has(.timeline, in: f.snap) else { done(ActionLink.unsupported(f.snap, "timeline")); return }
+                d.projectStore.timelineRead(itemId: f.item.id) { r in
+                    switch r {
+                    case .failure(let e): done(.failed(e.message))
+                    case .success(let all):
+                        guard !all.isEmpty else { done(Self.ok("No history.", .object(["entries": .array([])]))); return }
+                        let list = all.sorted { $0.at < $1.at }.suffix(Self.limit(a, 50))
+                        let rows: [JSONValue] = list.map { e in
+                            .object(["at": JSONValue(encoding: e.at) ?? .null, "actor": e.actor.map(JSONValue.string) ?? .null, "kind": .string(e.change.kind),
+                                     "text": .string(e.text), "itemKey": .string(f.item.key)])
+                        }
+                        done(Self.ok("\(rows.count) entr\(rows.count == 1 ? "y" : "ies") for \(f.item.key).", .object(["entries": .array(rows)])))
+                    }
+                }
+            }
+        }
+    }
+
     private var itemList: ActionSpec {
         let link = link
         return ActionSpec(id: "item.list", title: "Items", help: "Lists the loaded items, active first. Filters: `project`, `group` (a list of todo, progress, review, blocked, done), "
-                   + "`assignee` (a name, or me), `label`, `text`. Returns {items, total}.", kind: .read,
+                   + "`assignee` (a name, or me), `label`, `text`, `createdSince` (a day as YYYY-MM-DD). "
+                   + "It lists loaded items only. Returns {items, total}.", kind: .read,
                    input: ActionSpec.args(["project": ItemActions.project, "group": ("string", "One or more of todo, progress, review, blocked, done. Separate with commas."),
                                            "assignee": ("string", "An assignee name or id, or me."), "label": ("string", "A label name."),
-                                           "text": ("string", "Words in the key, title or body."), "limit": ("integer", "At most this many items. Default 50, at most 200.")])) { a in
+                                           "text": ("string", "Words in the key, title or body."),
+                                           "createdSince": ("string", "Only items made on this day or later, as YYYY-MM-DD. An item with no creation time is left out."),
+                                           "limit": ("integer", "At most this many items. Default 50, at most 200.")])) { a in
             await link.run { d, done in
                 var snaps = Array(d.projectStore.snapshots.values).sorted { $0.summary.identifier < $1.summary.identifier }
                 if let p = a.string("project"), !p.isEmpty {
                     guard let s = d.projectStore.snapshot(p) else { done(.notAllowed("OverSire has no loaded project \(p).")); return }
                     snaps = [s]
+                }
+                var since: Date?
+                if let text = a.string("createdSince"), !text.isEmpty {
+                    guard ItemActions.day(text) != nil, let day = EpicActions.parseDay(text) else {
+                        done(.notAllowed("createdSince must be a date as YYYY-MM-DD.")); return
+                    }
+                    since = day
                 }
                 let groups = Set(a.list("group").map { $0.lowercased() })
                 let who = a.string("assignee")?.lowercased(), label = a.string("label")?.lowercased()
@@ -117,6 +151,7 @@ struct ReadActions {
                             guard i.assignees.contains(where: { who == "me" ? me.contains($0.lowercased()) : $0.lowercased() == who }) else { return false }
                         }
                         if let label, !label.isEmpty, !i.labels.contains(where: { $0.lowercased() == label }) { return false }
+                        if let since, !(i.createdAt.map { $0 >= since } ?? false) { return false }
                         return i.matches(a.string("text") ?? "")
                     }.map { WorkContext.itemFacts($0, snap: snap, maxBody: 0) }
                 }
@@ -433,5 +468,23 @@ struct ReadActions {
         if let k = d.workstreams.link(runId: r.id)?.key { o["key"] = .string(k) }
         if IGNORED.contains(r) { o["ignored"] = .bool(true) }
         return .object(o)
+    }
+}
+
+private extension ItemChange {
+    var kind: String {
+        switch self {
+        case .added: return "added"
+        case .removed: return "removed"
+        case .closed: return "closed"
+        case .reopened: return "reopened"
+        case .mention: return "mention"
+        case .status: return "status"
+        case .field: return "field"
+        case .assigned: return "assigned"
+        case .unassigned: return "unassigned"
+        case .comments: return "comment"
+        case .away: return "away"
+        }
     }
 }

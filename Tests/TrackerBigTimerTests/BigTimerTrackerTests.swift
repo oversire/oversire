@@ -221,11 +221,14 @@ final class BigTimerTrackerTests: XCTestCase {
 
     func testItemFields() async throws {
         let ada = fake.meUUID
-        let full = fake.addIssue(project: acme, title: "Full", assignee: ada, size: "M", due: "2026-12-01")
+        let full = fake.addIssue(project: acme, title: "Full", assignee: ada, size: "M", due: "2026-12-01", start: "2026-11-20")
         let bare = fake.addIssue(project: acme, title: "Bare")
         let items = try await tracker().items(project, since: nil, limit: 10)
         let a = try XCTUnwrap(items.first { $0.id == full })
-        XCTAssertEqual(a.fields, ["Size": "M", "Due": "2026-12-01"])
+        XCTAssertEqual(a.fields, [Item.estimateField: "M", Item.dueField: "2026-12-01", Item.startField: "2026-11-20"])
+        XCTAssertEqual([a.estimate, a.dueDate, a.startDate], ["M", "2026-12-01", "2026-11-20"])
+        XCTAssertEqual(a.createdAt, fake.issue(full)?.createdAt)
+        XCTAssertNotNil(a.createdAt)
         XCTAssertEqual(a.assignees, ["Ada Lovelace"])
         XCTAssertEqual(a.author, "Ada Lovelace")
         XCTAssertEqual(try XCTUnwrap(items.first { $0.id == bare }).fields, [:])
@@ -280,6 +283,15 @@ final class BigTimerTrackerTests: XCTestCase {
         try await t.update(r, ItemPatch(title: "Both", assignees: [who]))
         XCTAssertEqual(fake.requests.dropFirst(mark).map { "\($0.httpMethod!) \($0.url!.lastPathComponent)" }, ["PATCH \(id)", "POST assign"])
 
+        try await t.update(r, ItemPatch(startDate: "2026-11-02", dueDate: "2026-11-30", estimate: "xl"))
+        var patch = try XCTUnwrap(fake.requests.last { $0.httpMethod == "PATCH" })
+        XCTAssertEqual(fake.body(patch) as NSDictionary, ["start_date": "2026-11-02", "due_date": "2026-11-30", "size": "XL"] as NSDictionary)
+        try await t.update(r, ItemPatch(startDate: "", dueDate: "", estimate: ""))
+        patch = try XCTUnwrap(fake.requests.last { $0.httpMethod == "PATCH" })
+        XCTAssertEqual(fake.body(patch) as NSDictionary, ["start_date": NSNull(), "due_date": NSNull(), "size": NSNull()] as NSDictionary)
+        XCTAssertNil(fake.issue(id)?.due)
+        XCTAssertNil(fake.issue(id)?.size)
+
         let quiet = fake.requests.count
         try await t.update(r, ItemPatch())
         XCTAssertEqual(fake.requests.count, quiet, "an empty patch sends nothing")
@@ -287,6 +299,35 @@ final class BigTimerTrackerTests: XCTestCase {
             do { try await t.update(r, patch); XCTFail("no throw") } catch { XCTAssertEqual(error as? ProviderError, .unsupported(cap)) }
         }
         XCTAssertEqual(fake.requests.count, quiet, "a refused patch sends nothing")
+    }
+
+    func testUpdateRefusesBadSize() async throws {
+        let id = fake.addIssue(project: acme, title: "Old")
+        let t = tracker()
+        let r = try await ref(t, id)
+        let quiet = fake.requests.count
+        do { try await t.update(r, ItemPatch(estimate: "huge")); XCTFail("no throw") } catch {
+            XCTAssertEqual(error as? ProviderError, .vendor(code: "validation", message: "Big Timer sizes: S, M, L, XL."))
+        }
+        do { _ = try await t.create(ItemDraft(title: "x", estimate: "3"), in: project); XCTFail("no throw") } catch {
+            XCTAssertEqual(error as? ProviderError, .vendor(code: "validation", message: "Big Timer sizes: S, M, L, XL."))
+        }
+        XCTAssertEqual(fake.requests.count, quiet, "a bad size sends nothing")
+    }
+
+    func testCreateSendsDates() async throws {
+        let t = tracker()
+        XCTAssertTrue([Capability.dates, .estimate, .timeline].allSatisfy(t.capabilities.contains))
+        let made = try await t.create(ItemDraft(title: "Dated", startDate: "2026-11-02", dueDate: "2026-11-30", estimate: "l"), in: project)
+        let post = try XCTUnwrap(fake.requests.last { $0.httpMethod == "POST" })
+        XCTAssertEqual(fake.body(post)["start_date"] as? String, "2026-11-02")
+        XCTAssertEqual(fake.body(post)["due_date"] as? String, "2026-11-30")
+        XCTAssertEqual(fake.body(post)["size"] as? String, "L")
+        XCTAssertEqual(fake.issue(made.id)?.due, "2026-11-30")
+        _ = try await t.create(ItemDraft(title: "Plain"), in: project)
+        let plain = fake.body(try XCTUnwrap(fake.requests.last { $0.httpMethod == "POST" }))
+        XCTAssertNil(plain["start_date"])
+        XCTAssertNil(plain["size"])
     }
 
     func testCreateRefusesPriority() async throws {
@@ -551,6 +592,58 @@ final class BigTimerTrackerTests: XCTestCase {
         XCTAssertNil(feed.changes[1].record)
         XCTAssertEqual(feed.changes[2].uuid, "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6073")
         XCTAssertEqual(feed.changes[2].version, 3)
+    }
+
+    func testHistoryFixtureDecodes() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
+        let h = try BigTimerAPI.decode(BTIssueHistory.self, from: Data(contentsOf: dir.appendingPathComponent("issue_history.json")))
+        XCTAssertEqual(h.transitions.map(\.to_status), ["open", "in_progress"])
+        XCTAssertNil(h.transitions[0].from_status)
+        XCTAssertEqual(h.changes.count, 4)
+        XCTAssertEqual(h.changes.filter { $0.channel == "mcp" }.count, 1)
+        XCTAssertEqual(h.changes[0].field, "assignee_uuid")
+        XCTAssertNil(h.changes[0].old)
+        XCTAssertEqual(BigTimerTracker.jsonText(h.changes[0].new), "019a0000-0000-7000-8000-000000000002")
+        XCTAssertNil(BigTimerTracker.jsonText("null"))
+        XCTAssertEqual(BigTimerTracker.jsonText("\"2026-12-01\""), "2026-12-01")
+    }
+
+    func testTimelineMapsHistory() async throws {
+        let grace = fake.addMember(name: "Grace Hopper")
+        let id = fake.addIssue(project: acme, title: "Old")
+        let t = tracker()
+        let r = try await ref(t, id)
+        try await t.update(r, ItemPatch(title: "New", status: "in_progress", dueDate: "2026-12-01", estimate: "M"))
+        try await t.update(r, ItemPatch(assignees: [grace]))
+        try await t.update(r, ItemPatch(assignees: []))
+        try await t.update(r, ItemPatch(dueDate: ""))
+        try await t.comment(r, markdown: "Done soon")
+
+        let list = try await t.timeline(r)
+        XCTAssertEqual(list.map(\.at), list.map(\.at).sorted(), "oldest first")
+        XCTAssertTrue(fake.paths("GET").contains("/v1/issues/\(id)/history"))
+        let changes = list.map(\.change)
+        XCTAssertTrue(changes.contains(.status(from: nil, to: "Open")))
+        XCTAssertTrue(changes.contains(.status(from: "Open", to: "In progress")))
+        XCTAssertEqual(changes.filter { if case .status = $0 { return true }; return false }.count, 2, "the status audit rows are skipped")
+        XCTAssertTrue(changes.contains(.field(name: "Title", from: "Old", to: "New")))
+        XCTAssertTrue(changes.contains(.field(name: "Due", from: nil, to: "2026-12-01")))
+        XCTAssertTrue(changes.contains(.field(name: "Due", from: "2026-12-01", to: nil)))
+        XCTAssertTrue(changes.contains(.field(name: "Estimate", from: nil, to: "M")))
+        XCTAssertTrue(changes.contains(.assigned("Grace Hopper")))
+        XCTAssertTrue(changes.contains(.unassigned("Grace Hopper")))
+        XCTAssertEqual(changes.filter { if case .field(let n, _, _) = $0 { return n == "Title" }; return false }.count, 1, "the creation row is skipped")
+        let assigned = try XCTUnwrap(list.first { $0.change == .assigned("Grace Hopper") })
+        XCTAssertEqual(assigned.actor, "Ada Lovelace", "the actor is the member name")
+        guard case .comments(_, let last)? = list.last?.change else { return XCTFail("the comment is last") }
+        XCTAssertEqual(last.body, "Done soon")
+        XCTAssertEqual(list.last?.actor, "Ada Lovelace")
+    }
+
+    func testTimelineNotFound() async throws {
+        let t = tracker()
+        let r = ItemRef(project: project, id: "00000000-0000-7000-8000-999999999999", key: "ACME-9", url: URL(string: "bigtimer://issue/ACME-9")!)
+        do { _ = try await t.timeline(r); XCTFail("no throw") } catch { XCTAssertEqual(error as? ProviderError, .notFound) }
     }
 
     func testDescriptorHasVendorCLI() throws {

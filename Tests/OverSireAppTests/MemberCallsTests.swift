@@ -334,7 +334,7 @@ final class MemberCallsTests: XCTestCase {
         let kinds = try await rig.fake.relations(of: item).map(\.kind)
         XCTAssertEqual(kinds, [.blocks])
         let none = await apply(rig, "item.update", ["key": .string(item.key)])
-        XCTAssertEqual(none, .notAllowed("Give a title, a parent, a patch or relations."))
+        XCTAssertEqual(none, .notAllowed("Give a title, a parent, a start, a due day, an estimate, a patch or relations."))
     }
 
     func testAddLabelWritesTheEvent() async throws {

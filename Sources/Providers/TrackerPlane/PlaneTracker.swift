@@ -7,7 +7,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     public let id: ProviderID = .plane
     public let account: AccountID
     public let keyFormat = KeyFormat.projectDash
-    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch, .epics, .priority] }
+    public var capabilities: Set<Capability> { [.intake, .intakeCreate, .attachments, .attachmentsRead, .timeline, .labels, .links, .relations, .subItems, .assets, .webhooks, .projectSettings, .projectSettingsEdit, .itemSearch, .epics, .priority, .dates] }
     // Plane allows 60 requests a minute.
     public var pollPolicy: PollPolicy { PollPolicy(minInterval: .seconds(60), requestsPerHour: 3600) }
     public var workspace: PlaneWorkspace { api.workspace }
@@ -216,6 +216,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef {
+        if d.estimate != nil { throw ProviderError.unsupported(.estimate) }
         defer { dropIndex(p) }
         let o = try await api.send("POST", "\(ws)/projects/\(p.id)/issues/", body: d.planeFields) as? [String: Any]
         guard let o, let id = PlaneAPI.id(o["id"]) else { throw ProviderError.decoding("no id for the new item") }
@@ -224,6 +225,7 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
     }
 
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
+        if patch.estimate != nil { throw ProviderError.unsupported(.estimate) }
         defer { dropIndex(i.project) }
         _ = try await api.send("PATCH", "\(ws)/projects/\(i.project.id)/issues/\(i.id)/", body: patch.planeFields)
     }
@@ -413,8 +415,8 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
         let state = (r["state"] as? [String: Any]).flatMap { PlaneAPI.id($0["id"]) } ?? PlaneAPI.id(r["state"])
         var fields: [String: String] = [:]
         if let pr = r["priority"] as? String, pr != "none" { fields["Priority"] = pr.capitalized }
-        if let d = r["target_date"] as? String, !d.isEmpty { fields["Due"] = d }
-        if let d = r["start_date"] as? String, !d.isEmpty { fields["Start"] = d }
+        if let d = r["target_date"] as? String, !d.isEmpty { fields[Item.dueField] = d }
+        if let d = r["start_date"] as? String, !d.isEmpty { fields[Item.startField] = d }
         let labels = (r["labels"] as? [Any] ?? []).compactMap { ($0 as? [String: Any])?["name"] as? String }
         let html = r["description_html"] as? String ?? ""
         let updated = parseISO(r["updated_at"] as? String) ?? parseISO(r["last_activity_at"] as? String) ?? Date()
@@ -424,7 +426,8 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
                     updatedAt: updated, activityAt: parseISO(r["last_activity_at"] as? String) ?? updated,
                     commentCount: 0, lastComment: nil, mentionsMe: false,
                     body: PlaneMarkup.markdown(fromHTML: html) { names[$0] },
-                    parentId: PlaneAPI.id(r["parent"]) ?? PlaneAPI.id((r["parent"] as? [String: Any])?["id"]))
+                    parentId: PlaneAPI.id(r["parent"]) ?? PlaneAPI.id((r["parent"] as? [String: Any])?["id"]),
+                    createdAt: parseISO(r["created_at"] as? String))
     }
 
     // MARK: Intake
@@ -820,6 +823,8 @@ extension ItemPatch {
         if let labels { f["labels"] = labels }
         if let parent { f["parent"] = parent.isEmpty ? NSNull() : parent }
         if let bodyMarkdown { f["description_html"] = PlaneMarkup.html(fromMarkdown: bodyMarkdown) }
+        if let startDate { f["start_date"] = startDate.isEmpty ? NSNull() : startDate }
+        if let dueDate { f["target_date"] = dueDate.isEmpty ? NSNull() : dueDate }
         return f
     }
 }
@@ -832,6 +837,8 @@ extension ItemDraft {
         if let priority { f["priority"] = priority }
         if !labels.isEmpty { f["labels"] = labels }
         if let parent { f["parent"] = parent }
+        if let startDate, !startDate.isEmpty { f["start_date"] = startDate }
+        if let dueDate, !dueDate.isEmpty { f["target_date"] = dueDate }
         return f
     }
 }

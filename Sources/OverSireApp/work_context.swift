@@ -201,7 +201,8 @@ struct WorkContext {
         return WorkFacts.ItemFacts(key: item.key, title: item.title, url: item.url, project: snap.summary.identifier, status: opt?.name,
                                    group: (opt?.category ?? .todo).rawValue, priority: item.fields["Priority"], assignees: item.assignees,
                                    labels: item.labels, parent: item.parentId.flatMap { p in snap.items.first { $0.id == p }?.key },
-                                   updatedAt: item.updatedAt, body: body.isEmpty ? nil : body)
+                                   updatedAt: item.updatedAt, body: body.isEmpty ? nil : body, startDate: item.startDate,
+                                   dueDate: item.dueDate, estimate: item.estimate, createdAt: item.createdAt)
     }
 
     static func failed(_ jobs: [Job]) -> [WorkFacts.Job] {

@@ -14,6 +14,43 @@ struct ItemActions {
     static func relationKind(_ word: String) -> RelationKind? { relationKinds.first { $0.rawValue.lowercased() == word.lowercased() } }
     /// The largest file of `item.attach`, in bytes.
     static let maxAttachBytes = 10 << 20
+    static let startArg = ("string", "The start day as YYYY-MM-DD. `none` or an empty text removes it.")
+    static let dueArg = ("string", "The due day as YYYY-MM-DD. `none` or an empty text removes it.")
+    static let estimateArg = ("string", "The estimate in the units of the tracker, for example M for Big Timer. `none` or an empty text removes it.")
+
+    /// The day as YYYY-MM-DD. `none` and an empty text give an empty text, which removes the date. A bad day gives nil.
+    static func day(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty || t.lowercased() == "none" { return "" }
+        let n = t.split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
+        guard t.count == 10, n.count == 3, let date = Calendar.current.date(from: DateComponents(year: n[0], month: n[1], day: n[2])) else { return nil }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return c.year == n[0] && c.month == n[1] && c.day == n[2] ? t : nil
+    }
+
+    struct Schedule {
+        var startDate: String?
+        var dueDate: String?
+        var estimate: String?
+        var isEmpty: Bool { startDate == nil && dueDate == nil && estimate == nil }
+    }
+
+    /// The `startDate`, `dueDate` and `estimate` args. A bad value or a tracker with no support gives the refusal.
+    static func schedule(_ a: ActionArgs, _ d: AppData, _ snap: ProjectSnapshot) -> (Schedule, ActionResult?) {
+        var out = Schedule()
+        for name in ["startDate", "dueDate"] {
+            guard let text = a.string(name) else { continue }
+            guard let day = Self.day(text) else { return (out, .notAllowed("\(name) must be a date as YYYY-MM-DD.")) }
+            guard d.projectStore.has(.dates, in: snap) else { return (out, ActionLink.unsupported(snap, "dates")) }
+            if name == "startDate" { out.startDate = day } else { out.dueDate = day }
+        }
+        if let text = a.string("estimate") {
+            guard d.projectStore.has(.estimate, in: snap) else { return (out, ActionLink.unsupported(snap, "estimates")) }
+            let t = text.trimmingCharacters(in: .whitespaces)
+            out.estimate = t.lowercased() == "none" ? "" : t
+        }
+        return (out, nil)
+    }
 
     var specs: [ActionSpec] {
         let link = link
@@ -109,12 +146,18 @@ struct ItemActions {
             ActionSpec(id: "item.update", title: "Update item", help: "Changes the title, the parent or other fields of an item, then adds relations. The parent `none` removes the parent.", kind: .change,
                        input: ActionSpec.args(["key": Self.key, "title": ("string", "The new title."),
                                                "parent": ("string", "The key of the new parent item. `none` or an empty text removes the parent."),
-                                               "patch": ("object", "The change: ItemPatch. `title` and `parent` replace the same fields of it."),
+                                               "startDate": Self.startArg, "dueDate": Self.dueArg, "estimate": Self.estimateArg,
+                                               "patch": ("object", "The change: ItemPatch. `title`, `parent`, `startDate`, `dueDate` and `estimate` replace the same fields of it."),
                                                "relations": ("array", "The relations to add: [ItemRelation].")],
                                               required: ["key"], objects: ["relations"])) { a in
                 await link.item(a) { d, f, done in
                     var patch = a["patch"].flatMap { try? MirrorCodec.value(ItemPatch.self, from: $0) } ?? ItemPatch()
                     if let t = a.string("title") { patch.title = t }
+                    let (when, refusal) = Self.schedule(a, d, f.snap)
+                    if let refusal { done(refusal); return }
+                    if let v = when.startDate { patch.startDate = v }
+                    if let v = when.dueDate { patch.dueDate = v }
+                    if let v = when.estimate { patch.estimate = v }
                     if let p = a.string("parent") {
                         guard d.projectStore.has(.subItems, in: f.snap) else { done(ActionLink.unsupported(f.snap, "sub-items")); return }
                         if p.isEmpty || p.lowercased() == "none" {
@@ -125,7 +168,7 @@ struct ItemActions {
                         }
                     }
                     let relations = a["relations"].flatMap { try? MirrorCodec.value([ItemRelation].self, from: $0) } ?? []
-                    guard !patch.isEmpty || !relations.isEmpty else { done(.notAllowed("Give a title, a parent, a patch or relations.")); return }
+                    guard !patch.isEmpty || !relations.isEmpty else { done(.notAllowed("Give a title, a parent, a start, a due day, an estimate, a patch or relations.")); return }
                     let finish = { (ok: Bool) in done(ActionLink.stored(d, ok, "\(f.item.key) is updated.")) }
                     let relate = {
                         guard !relations.isEmpty else { finish(true); return }
@@ -135,12 +178,17 @@ struct ItemActions {
                     d.projectStore.update(itemId: f.item.id, patch, failure: "Could not change the item", by: a.caller.actor) { $0 ? relate() : finish(false) }
                 }
             },
-            ActionSpec(id: "item.edit", title: "Edit item", help: "Sets the title and the Markdown description of an item.", kind: .change,
-                       input: ActionSpec.args(["key": Self.key, "title": ("string", "The title. Empty keeps it."), "body": ("string", "The Markdown description.")],
-                                              required: ["key", "body"])) { a in
+            ActionSpec(id: "item.edit", title: "Edit item", help: "Sets the title, the Markdown description, the dates and the estimate of an item in one write. Only the given fields change.", kind: .change,
+                       input: ActionSpec.args(["key": Self.key, "title": ("string", "The title. Empty keeps it."), "body": ("string", "The Markdown description."),
+                                               "startDate": Self.startArg, "dueDate": Self.dueArg, "estimate": Self.estimateArg],
+                                              required: ["key"])) { a in
                 await link.item(a) { d, f, done in
-                    let title = a.string("title").flatMap { $0.isEmpty ? nil : $0 } ?? f.item.title
-                    d.projectStore.edit(itemId: f.item.id, title: title, body: a.string("body") ?? "", by: a.caller.actor) { done(ActionLink.stored(d, $0, "\(f.item.key) is edited.")) }
+                    let (when, refusal) = Self.schedule(a, d, f.snap)
+                    if let refusal { done(refusal); return }
+                    let patch = ItemPatch(title: a.string("title").flatMap { $0.isEmpty ? nil : $0 }, bodyMarkdown: a.string("body"),
+                                          startDate: when.startDate, dueDate: when.dueDate, estimate: when.estimate)
+                    guard !patch.isEmpty else { done(.notAllowed("Give a title, a body, a start, a due day or an estimate.")); return }
+                    d.projectStore.edit(itemId: f.item.id, patch, by: a.caller.actor) { done(ActionLink.stored(d, $0, "\(f.item.key) is edited.")) }
                 }
             },
             ActionSpec(id: "item.comment", title: "Comment", help: "Adds a Markdown comment to an item.", kind: .change,
@@ -224,7 +272,9 @@ struct ItemActions {
                                                "status": ("string", "A status name, id or category word."), "priority": ("string", "A priority name."),
                                                "parent": ("string", "The key of the parent item."),
                                                "labels": ("array", "Label names. See project.labels."),
-                                               "epic": ("string", "The epic id or title in the project.")], required: ["project", "title"])) { a in
+                                               "epic": ("string", "The epic id or title in the project."),
+                                               "startDate": Self.startArg, "dueDate": Self.dueArg, "estimate": Self.estimateArg],
+                                              required: ["project", "title"])) { a in
                 await link.run { d, done in
                     guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else { done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return }
                     var options: [String: String] = [:]
@@ -251,9 +301,13 @@ struct ItemActions {
                     }
                     let names = a.list("labels")
                     if !names.isEmpty, !d.projectStore.has(.labels, in: snap) { done(ActionLink.unsupported(snap, "labels")); return }
+                    let (when, refusal) = Self.schedule(a, d, snap)
+                    if let refusal { done(refusal); return }
                     let make = { (labelIds: [String]) in
                         let new = NewItem(projectKey: snap.summary.ref.storeKey, title: a.string("title") ?? "", body: a.string("body") ?? "",
-                                          fieldOptions: options, labels: labelIds, parent: parent?.id, epic: epic?.id)
+                                          fieldOptions: options, labels: labelIds, parent: parent?.id, epic: epic?.id,
+                                          startDate: when.startDate.flatMap { $0.isEmpty ? nil : $0 }, dueDate: when.dueDate.flatMap { $0.isEmpty ? nil : $0 },
+                                          estimate: when.estimate.flatMap { $0.isEmpty ? nil : $0 })
                         d.projectStore.create(new, by: a.caller.actor) { r in
                             switch r {
                             case .failure(let e): done(.failed(e.message))

@@ -335,6 +335,94 @@ final class ItemCliActionsTests: XCTestCase {
         XCTAssertNotNil(d3?["cut"], "another caller gets the 24,000 bytes limit")
     }
 
+    // MARK: History, dates and created-since
+
+    func testHistoryReturnsRows() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        _ = await run(rig, "item.update", ["key": .string(key), "title": .string("Renamed")])
+        let r = await run(rig, "item.history", ["key": .string(key)])
+        guard case .ok(_, let data, _) = r else { return XCTFail("\(r)") }
+        let rows = data?["entries"]?.array ?? []
+        XCTAssertFalse(rows.isEmpty)
+        XCTAssertEqual(rows.last?["kind"]?.string, "field")
+        XCTAssertTrue(rows.last?["text"]?.string?.contains("Renamed") ?? false)
+        XCTAssertEqual(rows.last?["itemKey"]?.string, key)
+        XCTAssertNotNil(rows.last?["at"]?.string)
+    }
+
+    func testHistoryUnsupported() async throws {
+        let rig = try await EpicRig(capabilities: [.epics])
+        let r = await run(rig, "item.history", ["key": .string(rig.items[0].key)])
+        assertNotAllowed(r, "has no timeline.")
+    }
+
+    func testHistoryItemNotLoaded() async throws {
+        let rig = try await EpicRig()
+        let r = await run(rig, "item.history", ["key": .string("FAKE-99")])
+        assertNotAllowed(r, "OverSire has no loaded item FAKE-99.")
+    }
+
+    func testUpdateDueDateLocalChange() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        let r = await run(rig, "item.update", ["key": .string(key), "dueDate": .string("2026-12-15"), "estimate": .string("M")])
+        XCTAssertEqual(r.summary, "\(key) is updated.")
+        var i = await item(rig, 0)
+        XCTAssertEqual(i?.dueDate, "2026-12-15")
+        XCTAssertEqual(i?.estimate, "M")
+        _ = await run(rig, "item.update", ["key": .string(key), "dueDate": .string("none")])
+        i = await item(rig, 0)
+        XCTAssertNil(i?.dueDate)
+        XCTAssertEqual(i?.estimate, "M")
+    }
+
+    func testCreateBadDate() async throws {
+        let rig = try await EpicRig()
+        for bad in ["tomorrow", "2026-02-30", "26-1-1"] {
+            let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("T"), "dueDate": .string(bad)])
+            assertNotAllowed(r, "dueDate must be a date as YYYY-MM-DD.")
+        }
+        let count = try await rig.fake.items(rig.fake.project, since: nil, limit: 50).count
+        XCTAssertEqual(count, 3)
+    }
+
+    func testCreateWithDates() async throws {
+        let rig = try await EpicRig()
+        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("T"), "startDate": .string("2026-12-01"), "estimate": .string("L")])
+        guard case .ok = r else { return XCTFail("\(r)") }
+        let all = try await rig.fake.items(rig.fake.project, since: nil, limit: 50)
+        let made = all.first { $0.title == "T" }
+        XCTAssertEqual(made?.startDate, "2026-12-01")
+        XCTAssertEqual(made?.estimate, "L")
+    }
+
+    func testListCreatedSince() async throws {
+        let rig = try await EpicRig()
+        let old = await run(rig, "item.list", ["project": .string("FAKE"), "createdSince": .string("2000-01-01")])
+        guard case .ok(_, let d1, _) = old else { return XCTFail("\(old)") }
+        XCTAssertEqual(d1?["total"]?.int, 3)
+        let future = await run(rig, "item.list", ["project": .string("FAKE"), "createdSince": .string("2999-01-01")])
+        guard case .ok(_, let d2, _) = future else { return XCTFail("\(future)") }
+        XCTAssertEqual(d2?["total"]?.int, 0)
+        let bad = await run(rig, "item.list", ["project": .string("FAKE"), "createdSince": .string("soon")])
+        assertNotAllowed(bad, "createdSince must be a date as YYYY-MM-DD.")
+    }
+
+    func testEditBodyAndDueOneCall() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        let r = await run(rig, "item.edit", ["key": .string(key), "body": .string("New body"), "dueDate": .string("2026-12-15")])
+        XCTAssertEqual(r.summary, "\(key) is edited.")
+        let i = await item(rig, 0)
+        XCTAssertEqual(i?.body, "New body")
+        XCTAssertEqual(i?.dueDate, "2026-12-15")
+        let dueOnly = await run(rig, "item.edit", ["key": .string(key), "dueDate": .string("none")])
+        XCTAssertEqual(dueOnly.summary, "\(key) is edited.")
+        let empty = await run(rig, "item.edit", ["key": .string(key)])
+        assertNotAllowed(empty, "Give a title, a body, a start, a due day or an estimate.")
+    }
+
     func testSearchAllProject() async throws {
         let rig = try await EpicRig()
         let all = await run(rig, "search.all", ["query": .string("Item"), "project": .string("FAKE")])

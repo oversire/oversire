@@ -228,6 +228,24 @@ final class ProjectRefreshTests: XCTestCase {
         }
     }
 
+    func testPatchedKeepsCreatedAtAndSetsDates() throws {
+        let t = SlowTracker()
+        var item = slowItem("i1")
+        item.createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let ref = t.project
+        let summary = ProjectSummary(ref: ref, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        let snap = ProjectSnapshot(summary: summary, statusOptions: [], items: [item], fetchedAt: Date(), fields: [])
+        let patch = ItemPatch(startDate: "2026-11-01", dueDate: "", estimate: "M")
+        let changes = ProjectStore.localChanges(patch, in: snap)
+        XCTAssertEqual(changes, [.field(name: Item.startField, value: "2026-11-01"), .field(name: Item.dueField, value: nil), .field(name: Item.estimateField, value: "M")])
+        let w = LocalWrite(project: ref.storeKey, at: Date(), marks: [], items: ["i1": changes], epics: [])
+        let out = ProjectStore.patched(snap, [w]).items[0]
+        XCTAssertEqual(out.createdAt, item.createdAt)
+        XCTAssertEqual(out.startDate, "2026-11-01")
+        XCTAssertNil(out.dueDate)
+        XCTAssertEqual(out.estimate, "M")
+    }
+
     func testPatchedAppliesTheChangesInOrder() throws {
         let t = SlowTracker()
         var item = slowItem("i1")

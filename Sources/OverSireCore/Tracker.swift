@@ -138,11 +138,13 @@ public struct Item: Codable, Hashable, Sendable {
     public var epicId: EpicID? = nil
     /// The other epics of an item that sits in more than one. `epicId` is the first.
     public var otherEpicIds: [EpicID]? = nil
+    /// When the tracker made the item. Nil when the tracker does not say.
+    public var createdAt: Date? = nil
 
     public init(id: String, key: String, title: String, url: String, statusOptionId: String?, fields: [String: String],
                 assignees: [String], labels: [String], author: String?, updatedBy: String?, updatedAt: Date, activityAt: Date,
                 commentCount: Int, lastComment: Comment?, mentionsMe: Bool, body: String? = nil, parentId: String? = nil,
-                epicId: EpicID? = nil, otherEpicIds: [EpicID]? = nil) {
+                epicId: EpicID? = nil, otherEpicIds: [EpicID]? = nil, createdAt: Date? = nil) {
         self.id = id
         self.key = key
         self.title = title
@@ -162,6 +164,7 @@ public struct Item: Codable, Hashable, Sendable {
         self.parentId = parentId
         self.epicId = epicId
         self.otherEpicIds = otherEpicIds
+        self.createdAt = createdAt
     }
 
     /// True when the item has activity that its comment fields do not cover yet.
@@ -202,6 +205,19 @@ public struct Item: Codable, Hashable, Sendable {
         return key.localizedCaseInsensitiveContains(q) || title.localizedCaseInsensitiveContains(q)
             || (body ?? "").localizedCaseInsensitiveContains(q)
     }
+}
+
+extension Item {
+    public static let startField = "Start"
+    public static let dueField = "Due"
+    public static let estimateField = "Estimate"
+
+    /// "YYYY-MM-DD"
+    public var startDate: String? { fields[Self.startField] }
+    /// "YYYY-MM-DD"
+    public var dueDate: String? { fields[Self.dueField] }
+    /// The label of the tracker, for example M or 5.
+    public var estimate: String? { fields[Self.estimateField] }
 }
 
 // One entry for each item of the project, also for the items that the snapshot does not load.
@@ -643,9 +659,15 @@ public struct ItemPatch: Hashable, Sendable, Codable {
     public var labels: [String]?      // label ids
     public var parent: String?        // item id. An empty string removes the parent.
     public var bodyMarkdown: String?
+    /// "YYYY-MM-DD". An empty string removes the date.
+    public var startDate: String?
+    public var dueDate: String?
+    /// The label of the tracker. An empty string removes it.
+    public var estimate: String?
 
     public init(title: String? = nil, status: String? = nil, priority: String? = nil, assignees: [String]? = nil,
-                labels: [String]? = nil, parent: String? = nil, bodyMarkdown: String? = nil) {
+                labels: [String]? = nil, parent: String? = nil, bodyMarkdown: String? = nil,
+                startDate: String? = nil, dueDate: String? = nil, estimate: String? = nil) {
         self.title = title
         self.status = status
         self.priority = priority
@@ -653,6 +675,9 @@ public struct ItemPatch: Hashable, Sendable, Codable {
         self.labels = labels
         self.parent = parent
         self.bodyMarkdown = bodyMarkdown
+        self.startDate = startDate
+        self.dueDate = dueDate
+        self.estimate = estimate
     }
 
     public var isEmpty: Bool { self == ItemPatch() }
@@ -717,15 +742,22 @@ public struct ItemDraft: Hashable, Sendable {
     public var priority: String?
     public var labels: [String]
     public var parent: String?
+    /// "YYYY-MM-DD"
+    public var startDate: String?
+    public var dueDate: String?
+    public var estimate: String?
 
     public init(title: String, bodyMarkdown: String? = nil, status: String? = nil, priority: String? = nil,
-                labels: [String] = [], parent: String? = nil) {
+                labels: [String] = [], parent: String? = nil, startDate: String? = nil, dueDate: String? = nil, estimate: String? = nil) {
         self.title = title
         self.bodyMarkdown = bodyMarkdown
         self.status = status
         self.priority = priority
         self.labels = labels
         self.parent = parent
+        self.startDate = startDate
+        self.dueDate = dueDate
+        self.estimate = estimate
     }
 }
 

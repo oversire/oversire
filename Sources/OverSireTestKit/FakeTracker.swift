@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory tracker with one project "FAKE" and four statuses.
-public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, EpicTracking, EpicUpdating, LinkManaging, LabelManaging, @unchecked Sendable {
+public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManaging, IntakeCreating, AttachmentUploading, AttachmentReading, EpicTracking, EpicUpdating, LinkManaging, LabelManaging, TimelineReading, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -40,10 +40,11 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var uploadTimes: [Date] = []
     private var uploadFailures: [String: Int] = [:]              // file name → failures left
     private var linkList: [(item: ItemRef, url: URL, title: String)] = []
+    private var timelineList: [String: [ActivityEntry]] = [:]   // item id → entries, oldest first
     private var editable: Set<ProjectSettingsField> = [.name, .description, .logo, .lead, .defaultAssignee, .visibility, .features, .labels]
 
     public init(account: String = "fake",
-                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics, .epicHealth, .priority, .links, .labels, .subItems]) {
+                capabilities: Set<Capability> = [.projectSettings, .projectSettingsEdit, .relations, .intake, .intakeCreate, .attachments, .attachmentsRead, .epics, .epicHealth, .priority, .links, .labels, .subItems, .timeline, .dates, .estimate]) {
         base = FakeProvider(id: "fake-tracker", account: account, capabilities: capabilities)
         let ref = ProjectRef(account: base.account, id: "p1", key: "FAKE")
         projectList = [ProjectSummary(ref: ref, identifier: "FAKE", title: "Fake project", url: "https://tracker.fake/FAKE", closed: false)]
@@ -106,9 +107,14 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
             let key = "\(summary.identifier)-\(n)"
             let url = "https://tracker.fake/\(key)"
             let now = base.now()
+            var fields: [String: String] = [:]
+            for (name, value) in [(Item.startField, d.startDate), (Item.dueField, d.dueDate), (Item.estimateField, d.estimate)] {
+                if let value, !value.isEmpty { fields[name] = value }
+            }
             let item = Item(id: "i\(n)", key: key, title: d.title, url: url, statusOptionId: d.status ?? statusList[p.id]?.first?.id,
-                            fields: [:], assignees: [], labels: d.labels, author: "me", updatedBy: "me", updatedAt: now, activityAt: now,
-                            commentCount: 0, lastComment: nil, mentionsMe: false, body: d.bodyMarkdown, parentId: d.parent)
+                            fields: fields, assignees: [], labels: d.labels, author: "me", updatedBy: "me", updatedAt: now, activityAt: now,
+                            commentCount: 0, lastComment: nil, mentionsMe: false, body: d.bodyMarkdown, parentId: d.parent,
+                            createdAt: now)
             itemList[p.id, default: []].append(item)
             let ref = ItemRef(project: p, id: item.id, key: key, url: URL(string: url)!)
             base.emit(.item, "created", .item(ref), title: d.title)
@@ -117,16 +123,32 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     }
 
     public func update(_ i: ItemRef, _ patch: ItemPatch) async throws {
+        let caps = capabilities   // read before the lock: the lock is not reentrant
         try base.locked {
             guard let at = itemList[i.project.id]?.firstIndex(where: { $0.id == i.id }) else { throw ProviderError.notFound }
             try failWrite(i.id)
             let o = itemList[i.project.id]![at]
             let now = base.now()
+            if patch.startDate != nil, !caps.contains(.dates) { throw ProviderError.unsupported(.dates) }
+            if patch.dueDate != nil, !caps.contains(.dates) { throw ProviderError.unsupported(.dates) }
+            if patch.estimate != nil, !caps.contains(.estimate) { throw ProviderError.unsupported(.estimate) }
+            var fields = o.fields
+            var changes: [ItemChange] = []
+            if let t = patch.title, t != o.title { changes.append(.field(name: "Title", from: o.title, to: t)) }
+            for (name, value) in [(Item.startField, patch.startDate), (Item.dueField, patch.dueDate), (Item.estimateField, patch.estimate)] {
+                guard let value else { continue }
+                if value != (fields[name] ?? "") { changes.append(.field(name: name, from: fields[name], to: value.isEmpty ? nil : value)) }
+                fields[name] = value.isEmpty ? nil : value
+            }
+            for c in changes {
+                timelineList[i.id, default: []].append(ActivityEntry.make(projectKey: "", itemId: i.id, change: c, actor: "me", url: o.url, at: now))
+            }
             itemList[i.project.id]![at] = Item(
                 id: o.id, key: o.key, title: patch.title ?? o.title, url: o.url, statusOptionId: patch.status ?? o.statusOptionId,
-                fields: o.fields, assignees: patch.assignees ?? o.assignees, labels: patch.labels ?? o.labels, author: o.author,
+                fields: fields, assignees: patch.assignees ?? o.assignees, labels: patch.labels ?? o.labels, author: o.author,
                 updatedBy: "me", updatedAt: now, activityAt: now, commentCount: o.commentCount, lastComment: o.lastComment,
-                mentionsMe: o.mentionsMe, body: patch.bodyMarkdown ?? o.body, parentId: patch.parent.map { $0.isEmpty ? nil : $0 } ?? o.parentId)
+                mentionsMe: o.mentionsMe, body: patch.bodyMarkdown ?? o.body, parentId: patch.parent.map { $0.isEmpty ? nil : $0 } ?? o.parentId,
+                epicId: o.epicId, otherEpicIds: o.otherEpicIds, createdAt: o.createdAt)
             base.emit(.item, "updated", .item(i), title: patch.title ?? o.title)
         }
     }
@@ -143,8 +165,17 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
                 id: o.id, key: o.key, title: o.title, url: o.url, statusOptionId: o.statusOptionId, fields: o.fields, assignees: o.assignees,
                 labels: o.labels, author: o.author, updatedBy: o.updatedBy, updatedAt: o.updatedAt, activityAt: c.createdAt,
                 commentCount: o.commentCount + 1, lastComment: c, mentionsMe: o.mentionsMe, body: o.body, parentId: o.parentId,
-                epicId: o.epicId, otherEpicIds: o.otherEpicIds)
+                epicId: o.epicId, otherEpicIds: o.otherEpicIds, createdAt: o.createdAt)
             base.emit(.comment, "created", .item(i))
+        }
+    }
+
+    /// The field changes that `update` made, oldest first.
+    public func timeline(_ i: ItemRef) async throws -> [ActivityEntry] {
+        guard capabilities.contains(.timeline) else { throw ProviderError.unsupported(.timeline) }
+        return try base.locked {
+            guard itemList[i.project.id]?.contains(where: { $0.id == i.id }) == true else { throw ProviderError.notFound }
+            return timelineList[i.id] ?? []
         }
     }
 

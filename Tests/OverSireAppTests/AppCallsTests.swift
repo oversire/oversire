@@ -24,7 +24,7 @@ final class AppCallsTests: XCTestCase {
     }
 
     func testAllowsItemReads() {
-        for id in ["item.get", "item.list", "item.markdown"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        for id in ["item.get", "item.list", "item.history", "item.markdown"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
     }
 
     func testAllowsItemWrites() {

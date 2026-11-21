@@ -89,7 +89,7 @@ final class FakeConformanceTests: XCTestCase {
         XCTAssertEqual(open.problems, ["probe with a refused token did not throw", "poll with a refused token did not throw"])
         // A tracker that loses the update.
         let lossy = await TrackerConformance.run { LossyTracker() }
-        XCTAssertEqual(lossy.problems, ["update did not change the title"])
+        XCTAssertEqual(lossy.problems, ["update did not change the title", "update did not set the due date: nil"])
     }
 
     func testFakeTrackerPassesTheEpicSuite() async throws {

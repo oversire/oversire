@@ -161,6 +161,35 @@ struct BTChangesPage: Decodable {
     let server_time: Date?
 }
 
+struct BTTransition: Decodable {
+    let issue_uuid: String
+    let from_status: String?
+    let to_status: String
+    let transitioned_at: Date
+    let created_by: String?
+}
+
+/// One audit row. `old` and `new` are JSON text.
+struct BTAuditRow: Decodable {
+    let seq: Int?
+    let entity: String
+    let uuid: String
+    let version: Int
+    let field: String
+    let old: String?
+    let new: String?
+    let actor_uuid: String?
+    let channel: String
+    let token_id: String?
+    let at: Date
+}
+
+/// `transitions` are oldest first. `changes` are the last 500 rows, newest first.
+struct BTIssueHistory: Decodable {
+    let transitions: [BTTransition]
+    let changes: [BTAuditRow]
+}
+
 struct BTProblem: Decodable {
     let code: String?
     let detail: String?

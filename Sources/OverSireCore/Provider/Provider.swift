@@ -73,6 +73,10 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let epics: Capability = "epics"
     /// The adapter posts epic updates with a health (`EpicUpdating`).
     public static let epicHealth: Capability = "epicHealth"
+    /// The adapter writes the start and due dates of an item (`ItemPatch.startDate`, `dueDate`).
+    public static let dates: Capability = "dates"
+    /// The adapter writes the estimate of an item (`ItemPatch.estimate`).
+    public static let estimate: Capability = "estimate"
 }
 
 /// The user of a token.

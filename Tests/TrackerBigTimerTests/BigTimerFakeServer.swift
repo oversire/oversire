@@ -45,7 +45,20 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         var version: Int
     }
 
+    struct Audit {
+        var issue: String
+        var version: Int
+        var field: String
+        var old: String?
+        var new: String?
+        var actor: String?
+        var channel: String
+        var at: Date
+    }
+
     private let lock = NSLock()
+    private var audit: [Audit] = []
+    private var transitions: [(issue: String, from: String?, to: String, by: String, at: Date)] = []
     private var sent: [URLRequest] = []
     private var memberRows: [(uuid: String, name: String, email: String, status: String)] = []
     private var projectRows: [(uuid: String, name: String, prefix: String)] = []
@@ -110,6 +123,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
                           assignee: assignee, parent: parent, kind: kind, epic: epic, start: start, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
             issues.append(i)
             log(issue: i, op: "upsert")
+            recordCreation(i)
             return id
         }
     }
@@ -199,6 +213,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
             guard let i = resolve(parts[2]) else { return problem(404, "not_found", "No issue.") }
             switch (method, parts[3]) {
             case ("POST", "assign"): return assign(i, r)
+            case ("GET", "history"): return history(i)
             case ("GET", "comments"): return ok(["items": comments.filter { $0.issue == i.uuid && !$0.deleted }.map(commentJSON)])
             case ("POST", "comments"): return addComment(i, r)
             default: break
@@ -263,6 +278,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
                       start: b["start_date"] as? String, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
         issues.append(i)
         log(issue: i, op: "upsert")
+        recordCreation(i)
         return ok(view(i), status: 201)
     }
 
@@ -272,6 +288,8 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
             return problem(400, "validation", "Unknown field.")
         }
         guard let n = issues.firstIndex(where: { $0.uuid == i.uuid }) else { return problem(404, "not_found", "No issue.") }
+        let before = issues[n]
+        defer { recordPatch(before, issues[n]) }
         if let parent = b["parent_uuid"] as? String {
             if parent.isEmpty { issues[n].parent = nil }
             else if let refusal = parentRefusal(parent, for: i.uuid, project: i.project) { return refusal }
@@ -290,6 +308,42 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         if b.keys.contains("start_date") { issues[n].start = b["start_date"] as? String }
         touch(n)
         return ok(view(issues[n]))
+    }
+
+    private func recordCreation(_ i: Issue) {
+        transitions.append((i.uuid, nil, i.status, i.createdBy, i.createdAt))
+        for (field, value) in [("title", i.title), ("status", i.status)] {
+            audit.append(Audit(issue: i.uuid, version: 1, field: field, old: nil, new: Self.json(value), actor: i.createdBy, channel: "cli", at: i.createdAt))
+        }
+    }
+
+    /// One audit row for each changed field. The version is the one that the patch makes.
+    private func recordPatch(_ a: Issue, _ b: Issue) {
+        let pairs: [(String, String?, String?)] = [
+            ("title", a.title, b.title), ("details", a.details, b.details), ("status", a.status, b.status), ("size", a.size, b.size),
+            ("due_date", a.due, b.due), ("start_date", a.start, b.start), ("parent_uuid", a.parent, b.parent), ("epic_uuid", a.epic, b.epic),
+        ]
+        let at = b.updatedAt
+        for (field, old, new) in pairs where old != new {
+            audit.append(Audit(issue: a.uuid, version: a.version + 1, field: field, old: old.map(Self.json), new: new.map(Self.json), actor: memberRows[0].uuid, channel: "cli", at: at))
+        }
+        if a.status != b.status { transitions.append((a.uuid, a.status, b.status, memberRows[0].uuid, at)) }
+    }
+
+    private func history(_ i: Issue) -> (Int, [String: String], String) {
+        let rows: [[String: Any]] = audit.filter { $0.issue == i.uuid }.reversed().enumerated().map { n, a in
+            ["id": 100 - n, "seq": 1000 - n, "entity": "issue", "uuid": a.issue, "version": a.version, "field": a.field,
+             "old": a.old as Any? ?? NSNull(), "new": a.new as Any? ?? NSNull(), "actor_uuid": a.actor as Any? ?? NSNull(),
+             "channel": a.channel, "token_id": NSNull(), "at": Self.time(a.at)]
+        }
+        let moves: [[String: Any]] = transitions.filter { $0.issue == i.uuid }.map {
+            ["issue_uuid": $0.issue, "from_status": $0.from as Any? ?? NSNull(), "to_status": $0.to, "created_by": $0.by, "transitioned_at": Self.time($0.at)]
+        }
+        return ok(["transitions": moves, "changes": rows])
+    }
+
+    private static func json(_ s: String) -> String {
+        String(decoding: (try? JSONSerialization.data(withJSONObject: s, options: .fragmentsAllowed)) ?? Data(), as: UTF8.self)
     }
 
     /// The sub-item rules of the server: one level, same project, not itself.
@@ -323,6 +377,13 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         let b = body(r)
         guard Set(b.keys) == ["member"] else { return problem(400, "validation", "Unknown field.") }
         guard let n = issues.firstIndex(where: { $0.uuid == i.uuid }) else { return problem(404, "not_found", "No issue.") }
+        let before = issues[n].assignee
+        defer {
+            if before != issues[n].assignee {
+                audit.append(Audit(issue: i.uuid, version: issues[n].version, field: "assignee_uuid", old: before.map(Self.json),
+                                   new: issues[n].assignee.map(Self.json), actor: memberRows[0].uuid, channel: "mcp", at: issues[n].updatedAt))
+            }
+        }
         switch b["member"] {
         case let m as String where m == "me": issues[n].assignee = memberRows[0].uuid
         case let m as String:

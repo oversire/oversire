@@ -340,6 +340,42 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(http.body("PATCH", "\(ws)/projects/P1/issues/i1/")?["assignees"] as? [String], ["u2", "u1"])
     }
 
+    func testParseItemCreatedAtAndDates() async throws {
+        http.on("GET", "\(ws)/projects/P1/issues/", #"{"results":[{"id":"i1","name":"One","sequence_id":1,"state":"s1","created_at":"2026-10-16T10:00:00.123456Z","start_date":"2026-11-01","target_date":"2026-11-30","updated_at":"2026-10-16T10:00:00Z"},{"id":"i2","name":"Two","sequence_id":2,"state":"s1","created_at":null,"target_date":null,"updated_at":"2026-10-16T10:00:00Z"}],"next_page_results":false}"#)
+        let items = try await plane.items(project, since: nil, limit: 50)
+        let one = try XCTUnwrap(items.first { $0.id == "i1" })
+        XCTAssertNotNil(one.createdAt)
+        XCTAssertEqual(one.startDate, "2026-11-01")
+        XCTAssertEqual(one.dueDate, "2026-11-30")
+        let two = try XCTUnwrap(items.first { $0.id == "i2" })
+        XCTAssertNil(two.createdAt)
+        XCTAssertNil(two.dueDate)
+    }
+
+    func testPatchDatesFields() async throws {
+        http.on("PATCH", "\(ws)/projects/P1/issues/i1/", "{}")
+        try await plane.update(ref, ItemPatch(startDate: "2026-11-01", dueDate: ""))
+        let body = try XCTUnwrap(http.body("PATCH", "\(ws)/projects/P1/issues/i1/"))
+        XCTAssertEqual(body["start_date"] as? String, "2026-11-01")
+        XCTAssertTrue(body["target_date"] is NSNull)
+        http.on("POST", "\(ws)/projects/P1/issues/", #"{"id":"i9","sequence_id":9}"#)
+        _ = try await plane.create(ItemDraft(title: "T", dueDate: "2026-12-01"), in: project)
+        XCTAssertEqual(http.body("POST", "\(ws)/projects/P1/issues/")?["target_date"] as? String, "2026-12-01")
+    }
+
+    func testEstimateIsUnsupported() async throws {
+        XCTAssertFalse(plane.capabilities.contains(.estimate))
+        do {
+            try await plane.update(ref, ItemPatch(estimate: "M"))
+            XCTFail("no throw")
+        } catch ProviderError.unsupported(let c) { XCTAssertEqual(c, .estimate) }
+        do {
+            _ = try await plane.create(ItemDraft(title: "T", estimate: "M"), in: project)
+            XCTFail("no throw")
+        } catch ProviderError.unsupported(let c) { XCTAssertEqual(c, .estimate) }
+        XCTAssertTrue(http.requests.filter { $0.httpMethod != "GET" }.isEmpty)
+    }
+
     // MARK: The index after an item write (OVERSIRE-540)
 
     private var list: String { "\(ws)/projects/P1/issues/" }

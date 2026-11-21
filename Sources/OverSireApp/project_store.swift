@@ -10,6 +10,9 @@ struct NewItem {
     var labels: [String] = []               // label ids
     var parent: String?                     // item id
     var epic: EpicID? = nil
+    var startDate: String? = nil            // "YYYY-MM-DD"
+    var dueDate: String? = nil
+    var estimate: String? = nil
 }
 
 /// What `create` made. `epicError` is nil when there is no epic step or the step worked.
@@ -27,6 +30,7 @@ enum LocalChange: Equatable {
     case parent(String?)       // parent item id; nil removes it
     case epic(EpicID?)
     case labels([String])      // label names as in Item.labels
+    case field(name: String, value: String?)   // fields[name]; nil removes it
 }
 
 /// One finished tracker write. It lives until a read that started after it, or until it expires.
@@ -905,9 +909,11 @@ final class ProjectStore {
         }
     }
 
-    func edit(itemId: String, title: String, body: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
-        write(itemId, by: actor, failure: nil, patch: [.title(title), .body(body)], done: done) { c, ref in
-            try await c.update(ref, ItemPatch(title: title, bodyMarkdown: body))
+    /// One write for the title, the body, the dates and the estimate of the patch.
+    func edit(itemId: String, _ patch: ItemPatch, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        let local = item(itemId).map { ProjectStore.localChanges(patch, in: $0.snap) } ?? []
+        write(itemId, by: actor, failure: nil, patch: local, done: done) { c, ref in
+            try await c.update(ref, patch)
         }
     }
 
@@ -1240,7 +1246,7 @@ final class ProjectStore {
         let draft = ItemDraft(title: new.title, bodyMarkdown: new.body.trimmingCharacters(in: .whitespacesAndNewlines),
                               status: new.fieldOptions[ProjectSnapshot.statusFieldId],
                               priority: snap.hasPriority ? new.fieldOptions[ProjectSnapshot.priorityFieldId] : nil,
-                              labels: new.labels, parent: new.parent)
+                              labels: new.labels, parent: new.parent, startDate: new.startDate, dueDate: new.dueDate, estimate: new.estimate)
         let project = snap.summary.ref
         CallPriority.task(.user) { [weak self] in
             let added = await Result(awaiting: { () async throws -> MadeItem in
@@ -2064,13 +2070,14 @@ extension ProjectStore {
                 out.epicId = e
                 out.otherEpicIds = nil
             case .labels(let l): labels = l
+            case .field(let name, let value): fields[name] = value
             }
         }
         var copy = Item(id: item.id, key: item.key, title: title, url: item.url, statusOptionId: status, fields: fields,
                         assignees: item.assignees, labels: labels, author: item.author, updatedBy: item.updatedBy,
                         updatedAt: item.updatedAt, activityAt: item.activityAt, commentCount: out.commentCount,
                         lastComment: out.lastComment, mentionsMe: out.mentionsMe, body: out.body, parentId: out.parentId,
-                        epicId: out.epicId, otherEpicIds: out.otherEpicIds)
+                        epicId: out.epicId, otherEpicIds: out.otherEpicIds, createdAt: item.createdAt)
         copy.commentsAt = out.commentsAt
         return copy
     }
@@ -2085,6 +2092,9 @@ extension ProjectStore {
             out.append(.priority(id == "none" ? nil : o.name))
         }
         if let parent = p.parent { out.append(.parent(parent.isEmpty ? nil : parent)) }
+        for (name, value) in [(Item.startField, p.startDate), (Item.dueField, p.dueDate), (Item.estimateField, p.estimate)] {
+            if let value { out.append(.field(name: name, value: value.isEmpty ? nil : value)) }
+        }
         return out
     }
 

@@ -21,9 +21,16 @@ public struct WorkFacts: Codable, Hashable, Sendable {
         public var updatedAt: Date
         /// Markdown. The facts keep the start of a long body.
         public var body: String?
+        /// "YYYY-MM-DD"
+        public var startDate: String?
+        public var dueDate: String?
+        /// The label of the tracker, for example M or 5.
+        public var estimate: String?
+        public var createdAt: Date?
 
         public init(key: String, title: String, url: String, project: String, status: String?, group: String, priority: String?,
-                    assignees: [String], labels: [String], parent: String?, updatedAt: Date, body: String?) {
+                    assignees: [String], labels: [String], parent: String?, updatedAt: Date, body: String?,
+                    startDate: String? = nil, dueDate: String? = nil, estimate: String? = nil, createdAt: Date? = nil) {
             self.key = key
             self.title = title
             self.url = url
@@ -36,6 +43,10 @@ public struct WorkFacts: Codable, Hashable, Sendable {
             self.parent = parent
             self.updatedAt = updatedAt
             self.body = body
+            self.startDate = startDate
+            self.dueDate = dueDate
+            self.estimate = estimate
+            self.createdAt = createdAt
         }
     }
 
