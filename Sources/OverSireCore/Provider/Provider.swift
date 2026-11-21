@@ -152,7 +152,7 @@ public protocol WebhookManaging: Provider {
     func unregister(_ id: String) async throws
 }
 
-public struct RateBudget: Hashable, Sendable {
+public struct RateBudget: Codable, Hashable, Sendable {
     public let limit: Int
     public let remaining: Int
     public let resetAt: Date

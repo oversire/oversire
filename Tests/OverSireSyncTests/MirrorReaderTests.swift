@@ -91,6 +91,16 @@ final class MirrorReaderTests: XCTestCase {
         XCTAssertTrue(idle.isEmpty)
     }
 
+    func testCIKindsAreIgnored() async throws {
+        let feed = Feed()
+        feed.add(doc(.ciJobs, MirrorCodec.ciJobsID(repo: "acme/web", run: "9", attempt: 1), ["repo": "acme/web"]))
+        feed.add(doc(.runs, "acme/web", MirrorRuns(runs: [run("r1")])))
+        let reader = MirrorReader(fetch: feed, cache: cache())
+        let d = try await reader.pull()
+        XCTAssertEqual(d.runs?["acme/web"]?.map(\.id), ["r1"])
+        XCTAssertNil(d.needsUpdate)
+    }
+
     func testResetWaitsForReady() async throws {
         let feed = Feed()
         feed.add(doc(.project, ref.storeKey, project("Old")))

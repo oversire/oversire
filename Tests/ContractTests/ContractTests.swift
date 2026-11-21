@@ -133,6 +133,19 @@ final class ContractTests: XCTestCase {
         "mirror-page": roundTrip(MirrorPage.self),
         "mirror-index": roundTrip(MirrorIndex.self),
         "mirror-frame": roundTrip(MirrorFrame.self),
+        "ci-runs-doc": roundTrip(MirrorRuns.self),
+        "ci-jobs-doc": roundTrip(CIJobsDoc.self),
+        "ci-checks-doc": roundTrip(CIChecksDoc.self),
+        "ci-state-doc": roundTrip(CIStateDoc.self),
+        "ci-rollup": roundTrip(CIRollup.self),
+        "ci-runs-page": roundTrip(CIRunsPage.self),
+        "ci-run-answer": roundTrip(CIRunAnswer.self),
+        "ci-failures-answer": roundTrip(CIFailuresAnswer.self),
+        "ci-log-view": roundTrip(CILogView.self),
+        "ci-workflows": roundTrip(CIWorkflows.self),
+        "ci-action-request": roundTrip(CIActionRequest.self),
+        "ci-action-result": roundTrip(CIActionResult.self),
+        "ci-watch": roundTrip(CIWatch.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.
@@ -143,7 +156,7 @@ final class ContractTests: XCTestCase {
         "store.json": storeSchemaVersion, "jobs.json": jobsSchemaVersion, "suggestion.json": suggestionSchemaVersion, "work-order.json": workOrderSchemaVersion, "memory.json": 1,
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
         "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1, "review.json": 1,
-        "event.json": 1, "event-kinds.json": 1, "app-call.json": 1, "mirror.json": 1,
+        "event.json": 1, "event-kinds.json": 1, "app-call.json": 1, "mirror.json": 1, "ci.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {
@@ -181,6 +194,15 @@ final class ContractTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(count, 10)
+    }
+
+    func testMemberCallCLI() throws {
+        let dir = Self.root.appendingPathComponent("fixtures/member-call")
+        let dec = JSONDecoder()
+        let withCLI = try dec.decode(MemberCall.self, from: Data(contentsOf: dir.appendingPathComponent("cli-agent.json")))
+        XCTAssertEqual(withCLI.cli?.agent, "claude s1")
+        let click = try dec.decode(MemberCall.self, from: Data(contentsOf: dir.appendingPathComponent("status.json")))
+        XCTAssertNil(click.cli)
     }
 
     func testSchemaFilesCarryTheVersion() throws {

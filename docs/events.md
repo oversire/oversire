@@ -46,7 +46,7 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 | agent | `session.started`, `session.ended`, `turn.started`, `turn.ended`, `turn.interrupted`, `wait.started`, `wait.ended`, `context.compacted`, `subagent.ended`, `review.ready`, `groom.applied`, `groom.undone`, `sweep.applied`, `worker.started`, `worker.answered`, `worker.nudged`, `worker.escalated`, `worker.done` |
 | human | `prompt.submitted`*, `question.answered`, `review.submitted`, `review.approved`, `review.viewed`, `review.unviewed`, `item.shipped`, `plan.started`, `item.state_changed`, `item.viewed`, `item.favorited`, `item.unfavorited`, `project.settings_changed` |
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
-| ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun` |
+| ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun`, `ci.cancelled`, `ci.dispatched`, `ci.approved` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |
 | tracker | `item.created`, `item.updated`, `comment.created`, `item.link_added`, `item.attachment_added`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed`, `epic.updated` |
 | system | `queue.picked`, `queue.held`, `runbook.step_started`, `runbook.step_ended`, `job.ran`, `automation.ran`, `item.state_changed` (actor `parent-guard`, payload `reason: open-sub-items`) |

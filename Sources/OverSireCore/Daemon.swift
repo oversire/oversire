@@ -182,7 +182,7 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
     public var update: DaemonUpdate?
-    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls
+    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls, mirror-ci, ci
     public var listen: Listen
 
     public static let launchEnv = "launch-env"
@@ -190,6 +190,8 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public static let appCalls = "app-calls"
     public static let mirror = "mirror"
     public static let memberCalls = "member-calls"
+    public static let mirrorCI = "mirror-ci"
+    public static let ci = "ci"
 
     public func has(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 
@@ -275,18 +277,29 @@ public struct MemberCallRequest: Codable, Hashable, Sendable {
     }
 }
 
+/// The `oversire` command that sent a member call (app-call.json MemberCall.cli).
+public struct MemberCLI: Codable, Hashable, Sendable {
+    /// `<harness> <session>`. Nil: a human ran the command.
+    public var agent: String?
+
+    public init(agent: String? = nil) { self.agent = agent }
+}
+
 /// One action for the source app, from a client app (app-call.json MemberCall). The home daemon sends it.
 public struct MemberCall: Codable, Hashable, Sendable {
     public var id: String
     public var action: String
     public var args: JSONValue
     public var from: MemberCaller
+    /// Set when an `oversire` command sent the call. Nil: a click of a client app.
+    public var cli: MemberCLI?
 
-    public init(id: String, action: String, args: JSONValue = .object([:]), from: MemberCaller) {
+    public init(id: String, action: String, args: JSONValue = .object([:]), from: MemberCaller, cli: MemberCLI? = nil) {
         self.id = id
         self.action = action
         self.args = args
         self.from = from
+        self.cli = cli
     }
 }
 

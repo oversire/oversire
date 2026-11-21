@@ -146,6 +146,7 @@ final class MirrorPublisher {
             pending.catalog = true
             pending.settings = true   // the account summaries follow the accounts
         case .settings: pending.settings = true
+        case .ciJobs, .ciChecks, .ciState: break
         }
         schedule(after: debounce)
     }

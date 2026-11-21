@@ -204,6 +204,8 @@ public actor MirrorReader {
             case .settings:
                 guard !gone, let body = d.body else { return }
                 settings = body
+            case .ciJobs, .ciChecks, .ciState:
+                return
             }
         }
     }

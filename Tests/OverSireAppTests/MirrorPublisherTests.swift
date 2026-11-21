@@ -132,6 +132,16 @@ final class MirrorPublisherTests: XCTestCase {
         XCTAssertNil(h.puts.last?.ready, "only the first full send sets ready")
     }
 
+    func testCIKindTouchSendsNothing() async throws {
+        let docs = FakeDocs()
+        let h = FakeMirrorHome()
+        let p = try await started(docs, h)
+        let before = h.puts.count
+        p.touched(.ciJobs, ids: nil)
+        try await p.flush()
+        XCTAssertEqual(h.puts.count, before)
+    }
+
     func testRemovedItemSendsTombstone() async throws {
         let docs = FakeDocs()
         docs.projects = [doc(.project, "ocral/p1"), doc(.item, "ocral/p1/i1"), doc(.item, "ocral/p1/i2"), doc(.project, "ocral/p2"), doc(.item, "ocral/p2/i9")]

@@ -201,6 +201,18 @@ final class DaemonSourceTests: XCTestCase {
         XCTAssertEqual(index.docs.map(\.kind), [.catalog, .item])
     }
 
+    func testMirrorIndexWithCI() async throws {
+        let canned = Canned(200, try contractFixture("mirror-index", "with-ci"))
+        let client = DaemonClient(base: URL(string: "http://mbp:7690")!, token: nil, http: canned)
+        let index = try await client.mirrorIndex(withCI: true)
+        XCTAssertEqual(index.docs.map(\.kind), [.catalog, .ciState, .ciJobs, .ciChecks])
+        let r = try XCTUnwrap(canned.requests.get().last)
+        XCTAssertEqual(r.url?.path, "/v1/mirror/index")
+        XCTAssertEqual(r.url?.query, "with=ci")
+        _ = try await client.mirrorIndex()
+        XCTAssertNil(canned.requests.get().last?.url?.query)
+    }
+
     func testMirrorNotHomeGivesStoreNotHome() async throws {
         let client = DaemonClient(base: URL(string: "http://mba:7690")!, token: nil,
                                   http: Canned(409, Data(#"{"error":"mba is home","home":"mbp"}"#.utf8)))

@@ -22,7 +22,7 @@ struct EventTag: Equatable {
         case "item.attachment_added": self.init("file", Palette.acc)
         case "question.answered": self.init("answer", Palette.intake)
         case "pr.opened", "pr.updated", "pr.merged", "pr.closed": self.init("PR", Palette.ok)
-        case "ci.queued", "ci.started", "ci.completed", "ci.rerun": self.init("CI", Palette.warn)
+        case "ci.queued", "ci.started", "ci.completed", "ci.rerun", "ci.cancelled", "ci.dispatched", "ci.approved": self.init("CI", Palette.warn)
         default:
             switch k.domain {
             case "git", "worktree", "release", "review": self.init(k.domain, Palette.ok)

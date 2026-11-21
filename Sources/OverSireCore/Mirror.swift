@@ -4,6 +4,8 @@ import Foundation
 
 public enum MirrorKind: String, Codable, Hashable, Sendable, CaseIterable {
     case project, item, runs, prs, activity, settings, catalog
+    /// The CI docs (ci.json). A daemon without `mirror-ci` refuses them.
+    case ciJobs, ciChecks, ciState
 }
 
 /// One doc of the feed. The source sets no `hash` and no `seq`: the daemon sets them.
@@ -272,6 +274,10 @@ public enum MirrorCodec {
     public static let catalogID = "home"
     /// The id of the one `settings` doc.
     public static let settingsID = "home"
+    /// The id of the one `ciState` doc.
+    public static let ciStateID = "home"
+    public static func ciJobsID(repo: String, run: String, attempt: Int) -> String { "\(repo)/\(run)/\(attempt)" }
+    public static func ciChecksID(repo: String, sha: String) -> String { "\(repo)/\(sha)" }
     public static func itemID(project: String, item: String) -> String { "\(project)/\(item)" }
 
     /// The store key of an item doc id: the text before the last "/".
@@ -346,8 +352,9 @@ extension DaemonClient {
     }
 
     /// Member route, apps only. The kind, id and hash of each live doc.
-    public func mirrorIndex() async throws -> MirrorIndex {
-        try await mirrorCall(request("/v1/mirror/index"))
+    /// `withCI` adds the `ci*` kinds. A daemon leaves them out otherwise.
+    public func mirrorIndex(withCI: Bool = false) async throws -> MirrorIndex {
+        try await mirrorCall(request("/v1/mirror/index" + (withCI ? "?with=ci" : "")))
     }
 
     /// Member route, apps only. Only the holder of the automations lease can put.
