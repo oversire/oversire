@@ -291,7 +291,7 @@ public enum TrackerEvents {
     }
 }
 
-/// The rows of epic changes: epic.created, epic.item_added, epic.item_removed and epic.closed.
+/// The rows of epic changes: epic.created, epic.item_added, epic.item_removed, epic.closed and epic.updated (health).
 public enum EpicEvents {
     /// The rows of one poll. Without an old snapshot with epics, it writes the whole history (backfill).
     /// `actors`: the item ids and epic ids that this app changed, and who changed them. A human with no name is `me`.
@@ -349,6 +349,14 @@ public enum EpicEvents {
             row(.epicCreated, "epic-\(e.id):created", at: e.createdAt ?? snap.fetchedAt, item: e.eventKey, parent: nil, by: e.id.rawValue, e.title, p)
         }
 
+        func healthChanged(_ e: Epic) {
+            let at = e.updatedAt ?? snap.fetchedAt
+            var p: [String: JSONValue] = ["epic": .string(e.id.rawValue), "title": .string(e.title), "fields": .array([.string("health")])]
+            if let h = e.health { p["health"] = .string(h.rawValue) }
+            row(.epicUpdated, "epic-\(e.id):health:\(ms(at))", at: at, item: e.eventKey, parent: nil, by: e.id.rawValue,
+                e.health.map { "\(e.title): health \($0.label)" } ?? "\(e.title): no health", p)
+        }
+
         if backfill {
             for e in epics {
                 created(e)
@@ -360,6 +368,9 @@ public enum EpicEvents {
         let known = Set((old?.epics ?? []).map(\.id))
         for e in epics where !known.contains(e.id) { created(e) }
         for e in epics where known.contains(e.id) && e.state.isClosed && old?.epic(e.id)?.state.isClosed == false { closed(e) }
+        for e in epics where actors[e.id.rawValue] == nil {
+            if let was = old?.epic(e.id), was.health != e.health { healthChanged(e) }
+        }
         let ids = Set(snap.items.map(\.id) + (snap.index ?? []).map(\.id))
         for id in ids.sorted() {
             let (was, now) = (old?.epicId(of: id), snap.epicId(of: id))

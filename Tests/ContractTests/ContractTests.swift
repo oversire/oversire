@@ -310,7 +310,7 @@ final class ContractTests: XCTestCase {
         let catalog = try EventCatalog.load(contract: Self.root)
         let dir = Self.root.appendingPathComponent("fixtures/event")
         let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }
-        let special: Set<String> = ["parent-unknown.json", "private-prompt.json", "provider-human.json", "system-reopen.json"]
+        let special: Set<String> = ["parent-unknown.json", "private-prompt.json", "provider-human.json", "system-reopen.json", "epic.updated-health-poll.json"]
         XCTAssertEqual(Set(names).subtracting(special), Set(catalog.kinds.keys.map { "\($0).json" }), "one fixture for each kind")
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601

@@ -184,10 +184,10 @@ final class ProviderEventsTests: XCTestCase {
     // MARK: Epics
 
     func epic(_ id: String, _ title: String, state: EpicState = .active, created: Date? = nil, updated: Date? = nil,
-              linked: [String: Date]? = nil) -> Epic {
+              linked: [String: Date]? = nil, health: EpicHealth? = nil) -> Epic {
         Epic(id: EpicID(rawValue: id), title: title, state: state, url: "https://plane/\(id)",
              project: ProjectRef(account: AccountID(provider: "plane", id: "ocral"), id: "p1", key: "OVERSIRE"),
-             createdAt: created, updatedAt: updated, linkedAt: linked)
+             createdAt: created, updatedAt: updated, linkedAt: linked, health: health)
     }
 
     func epicSnap(_ items: [(String, String, String?)], index: [ItemStub]? = nil, epics: [Epic]?, at: Date? = nil) -> ProjectSnapshot {
@@ -257,6 +257,52 @@ final class ProviderEventsTests: XCTestCase {
         XCTAssertEqual(rows[0].payload, ["epic": .string("ma"), "title": .string("Alpha"), "state": .string("done"), "open": .int(1)])
         XCTAssertEqual(rows[0].summary, "Alpha done")
         XCTAssertEqual(epicRows(old: closed, new: closed), [])
+    }
+
+    func healthSnaps(_ was: EpicHealth?, _ next: EpicHealth?, at: Date? = nil) -> (ProjectSnapshot, ProjectSnapshot) {
+        let items = [("i1", "OVERSIRE-1", Optional("ma"))]
+        return (epicSnap(items, epics: [epic("ma", "Alpha", health: was)]),
+                epicSnap(items, epics: [epic("ma", "Alpha", updated: at, health: next)], at: now.addingTimeInterval(600)))
+    }
+
+    func testHealthChangeWritesUpdatedRow() {
+        let at = now.addingTimeInterval(300)
+        let (old, new) = healthSnaps(.onTrack, .atRisk, at: at)
+        let rows = epicRows(old: old, new: new)
+        XCTAssertEqual(rows.map(\.kind), [.epicUpdated])
+        XCTAssertEqual(rows[0].id, "plane:epic-ma:health:\(Int64(at.timeIntervalSince1970 * 1000))")
+        XCTAssertEqual(rows[0].item, epic("ma", "Alpha").eventKey)
+        XCTAssertEqual(rows[0].actorType, .provider)
+        XCTAssertEqual(rows[0].summary, "Alpha: health At risk")
+        XCTAssertEqual(rows[0].payload, ["epic": .string("ma"), "title": .string("Alpha"), "fields": .array([.string("health")]),
+                                         "health": .string("at_risk")])
+        XCTAssertEqual(EventCatalog.repo.problems(rows[0]), [])
+        let (none, first) = healthSnaps(nil, .onTrack)
+        XCTAssertEqual(epicRows(old: none, new: first).map(\.kind), [.epicUpdated])
+    }
+
+    func testHealthToNilWritesRow() {
+        let (old, new) = healthSnaps(.offTrack, nil)
+        let rows = epicRows(old: old, new: new)
+        XCTAssertEqual(rows.map(\.kind), [.epicUpdated])
+        XCTAssertEqual(rows[0].summary, "Alpha: no health")
+        XCTAssertNil(rows[0].payload?["health"])
+        XCTAssertEqual(EventCatalog.repo.problems(rows[0]), [])
+    }
+
+    func testMarkedHealthChangeWritesNoPollRow() {
+        let (old, new) = healthSnaps(.onTrack, .atRisk)
+        XCTAssertEqual(epicRows(old: old, new: new, actors: ["ma": .user]), [])
+    }
+
+    func testBackfillWritesNoHealthRow() {
+        let (_, new) = healthSnaps(nil, .atRisk)
+        XCTAssertEqual(epicRows(old: nil, new: new).map(\.kind), [.epicCreated, .epicItemAdded])
+    }
+
+    func testSameHealthNoRow() {
+        let (old, new) = healthSnaps(.atRisk, .atRisk)
+        XCTAssertEqual(epicRows(old: old, new: new), [])
     }
 
     func testEpicRowsFollowTheCatalog() {
