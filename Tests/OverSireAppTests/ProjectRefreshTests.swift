@@ -3,6 +3,7 @@ import OverSireCore
 import OverSireSync
 import OverSireTestKit
 @testable import TrackerPlane
+import TrackerBigTimer
 @testable import OverSireApp
 
 /// Fewer Plane calls: one refresh of a project at a time, a pause after a rate limit, no detail call for gone items (OVERSIRE-429).
@@ -770,6 +771,33 @@ final class ProjectRefreshTests: XCTestCase {
         gone = await ProjectStore.gone(p, old, new)
         XCTAssertTrue(gone.isEmpty, "with no index, nothing is gone")
         XCTAssertEqual(http.count, before, "gone() makes no call")
+    }
+
+    func testGoneUsesBigTimerIndex() async throws {
+        let http = CountingPlane()
+        let row = { (n: Int) in
+            #"{"uuid":"u\#(n)","version":1,"project_uuid":"p1","number":\#(n),"key":"BT-\#(n)","title":"Item \#(n)","status":"open","#
+                + #""created_at":"2026-10-16T10:00:00Z","updated_at":"2026-10-16T1\#(n):00:00Z"}"#
+        }
+        http.on("/v1/me", #"{"member":{"uuid":"m1","name":"Ada","status":"active"},"team":{"name":"T"},"token":{"id":"t","kind":"personal","scopes":["read","write"]}}"#)
+        http.on("/v1/members", #"{"items":[{"uuid":"m1","name":"Ada","status":"active"}]}"#)
+        http.on("/v1/issues", #"{"items":[\#(row(1)),\#(row(2))],"next_cursor":null}"#)
+        let t = BigTimerTracker(server: URL(string: "https://bt.example.com")!, account: AccountID(provider: .bigtimer, id: "bt.example.com"),
+                                token: "tok", http: http)
+        let summary = ProjectSummary(ref: ProjectRef(account: t.account, id: "p1", key: "BT"), identifier: "BT", title: "BT",
+                                     url: "bigtimer://issues?project=BT", closed: false)
+        let old = try await ProjectStore.snapshot(t, summary, limit: 50, previous: nil)
+        XCTAssertEqual(old.index?.map(\.id).sorted(), ["u1", "u2"])
+        var new = ProjectSnapshot(summary: old.summary, statusOptions: old.statusOptions, items: old.items.filter { $0.id != "u2" },
+                                  fetchedAt: Date(), index: old.index)
+        let before = http.count
+        var gone = await ProjectStore.gone(t, old, new)
+        XCTAssertTrue(gone.isEmpty, "u2 is in the index: it only left the item limit")
+        new.index = new.index?.filter { $0.id != "u2" }
+        gone = await ProjectStore.gone(t, old, new)
+        XCTAssertEqual(gone, ["u2"], "u2 is not in the index: it is removed")
+        XCTAssertEqual(http.count, before, "gone() makes no call")
+        XCTAssertFalse(http.paths.contains { $0.hasPrefix("GET /v1/issues/") }, "no detail call")
     }
 
     func testFailedItemLoadKeepsTheOldItem() async throws {

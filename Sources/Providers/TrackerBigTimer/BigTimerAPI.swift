@@ -14,6 +14,13 @@ final class BigTimerAPI: @unchecked Sendable {
     private let elapsed: @Sendable () -> Duration
     private let lock = NSLock()
     private var latchedAt: Duration?
+    private var writeHook: (@Sendable () -> Void)?
+
+    /// Runs after each write to the issues, also after a failed one.
+    var onWrite: (@Sendable () -> Void)? {
+        get { lock.withLock { writeHook } }
+        set { lock.withLock { writeHook = newValue } }
+    }
 
     init(base: URL, token: String, http: any HTTPTransport, streaming: (any HTTPStreaming)?, clock: any Clock<Duration>) {
         self.base = base
@@ -32,6 +39,7 @@ final class BigTimerAPI: @unchecked Sendable {
     }
 
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [], json body: (any Encodable)? = nil) async throws -> Data {
+        defer { if method != "GET" && path.hasPrefix("/v1/issues") { onWrite?() } }
         try checkLatch()
         var req = URLRequest(url: try url(path, query), timeoutInterval: 30)
         req.httpMethod = method

@@ -19,6 +19,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
     private var commentIssues: [String: String] = [:]               // comment uuid → issue uuid
     private var epicKeys: [String: String] = [:]                    // epic key → epic uuid
     private var epicIds: Set<String> = []                           // uuids of the known epics
+    let indexCache = BigTimerIndexCache()
     static let cacheAge: Duration = .seconds(3600)
     static let pageMax = 500
 
@@ -26,6 +27,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
                 streaming: (any HTTPStreaming)? = nil, clock: any Clock<Duration> = ContinuousClock()) {
         api = BigTimerAPI(base: server, token: token, http: http, streaming: streaming ?? (http as? any HTTPStreaming), clock: clock)
         self.account = account
+        api.onWrite = { [indexCache] in indexCache.drop() }
     }
 
     // MARK: Provider
@@ -347,6 +349,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpd
         let page: BTChangesPage
         do { page = try await api.get("/v1/changes", query: Self.feed(since: seq, limit: Self.pageMax)) }
         catch ProviderError.vendor(let code, _) where code == "cursor_expired" { return try await baseline() }
+        indexCache.drop(for: page.changes)
         var refreshed = false
         var events: [ProviderEvent] = []
         for c in page.changes {
