@@ -343,13 +343,21 @@ class RunDetailView: Flipped {
             name.lineBreakMode = .byTruncatingTail; name.maximumNumberOfLines = 1
             name.frame = NSRect(x: pad + 19, y: y, width: contentW - 19 - 155, height: 15)
             addSubview(name)
-            let st = LiveLabel.make(.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
-                                    run.conclusion == "failure" ? C_FAILURE : .secondaryLabelColor) {
+            let stFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+            let stColor = run.conclusion == "failure" ? C_FAILURE : NSColor.secondaryLabelColor
+            let stText = {
                 switch run.status {
                 case "completed": return "\(run.statusText) \u{00B7} \(run.durationText)"
                 case "in_progress": return "\(fmtDuration(run.elapsed)) elapsed"
                 default: return run.statusText
                 }
+            }
+            let st: NSTextField
+            if run.status == "in_progress" {
+                st = LiveLabel.make(stFont, stColor, stText)
+            } else {
+                st = NSTextField(labelWithString: stText())
+                st.font = stFont; st.textColor = stColor; st.maximumNumberOfLines = 1
             }
             st.alignment = .right
             st.frame = NSRect(x: pad + contentW - 150, y: y, width: 150, height: 15)

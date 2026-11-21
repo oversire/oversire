@@ -258,27 +258,63 @@ extension RowList {
 
 // ─── Relative times ──────────────────────────────────────────────────────────
 
-/// Keeps the "2m ago" texts current. One timer for all labels. It changes only their strings.
-final class TimeTicker {
-    static let shared = TimeTicker()
+/// A view that a `Ticker` refreshes.
+protocol Ticking: AnyObject {
+    func refresh()
+}
 
-    private let labels = NSHashTable<RelativeTimeLabel>.weakObjects()
+/// One timer for all labels of one interval. It changes only their strings.
+/// The timer stops when no label is left.
+final class Ticker {
+    static let relative = Ticker(interval: 30, tolerance: 3)
+    static let seconds = Ticker(interval: 1, tolerance: 0)
+
+    private let interval: TimeInterval
+    private let tolerance: TimeInterval
+    private let labels = NSHashTable<AnyObject>.weakObjects()
     private var timer: Timer?
 
-    func add(_ l: RelativeTimeLabel) {
+    private init(interval: TimeInterval, tolerance: TimeInterval) {
+        self.interval = interval
+        self.tolerance = tolerance
+        // A label of a hidden window does not tick. It catches up when its window shows.
+        NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main) { [weak self] note in
+            guard let self, let w = note.object as? NSWindow, w.isVisible else { return }
+            for case let l as (NSView & Ticking) in self.labels.allObjects where l.window === w { l.refresh() }
+        }
+    }
+
+    var count: Int { labels.allObjects.count }
+    var isRunning: Bool { timer != nil }
+
+    func add(_ l: any Ticking) {
         labels.add(l)
         guard timer == nil else { return }
-        let t = Timer(timeInterval: 30, repeats: true) { [weak self] _ in self?.tick() }
-        t.tolerance = 3
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.tick() }
+        t.tolerance = tolerance
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
 
-    func tick() { labels.allObjects.forEach { $0.refresh() } }
+    func remove(_ l: any Ticking) {
+        labels.remove(l)
+        stopIfEmpty()
+    }
+
+    func tick() {
+        labels.allObjects.forEach { ($0 as? any Ticking)?.refresh() }
+        stopIfEmpty()
+    }
+
+    private func stopIfEmpty() {
+        guard timer != nil, labels.allObjects.isEmpty else { return }
+        timer?.invalidate()
+        timer = nil
+    }
 }
 
 /// A label with a text made from a date, for example "updated 2m ago". The ticker keeps it current.
-final class RelativeTimeLabel: NSTextField {
+final class RelativeTimeLabel: NSTextField, Ticking {
     var date: () -> Date? { didSet { refresh() } }
     private let format: (String) -> String
     private let text: (Date) -> String
@@ -304,7 +340,7 @@ final class RelativeTimeLabel: NSTextField {
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         if lines != 1 { preferredMaxLayoutWidth = 0 }
         refresh()
-        TimeTicker.shared.add(self)
+        Ticker.relative.add(self)
     }
     convenience init(_ date: Date?, size: CGFloat = 11.5, color: NSColor = Palette.dim, format: @escaping (String) -> String = { $0 }) {
         self.init({ date }, size: size, color: color, format: format)

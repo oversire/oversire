@@ -224,14 +224,66 @@ final class PageReconcileTests: XCTestCase {
     }
 }
 
-final class TimeTickerTests: XCTestCase {
+final class TickerTests: XCTestCase {
     func testTickRefreshesTheText() {
         var date = Date().addingTimeInterval(-120)
         let l = RelativeTimeLabel({ date }, format: { "updated " + $0 })
         XCTAssertEqual(l.stringValue, "updated " + relativeTime(date))
         date = Date().addingTimeInterval(-7200)
-        TimeTicker.shared.tick()
+        Ticker.relative.tick()
         XCTAssertEqual(l.stringValue, "updated " + relativeTime(date))
+    }
+
+    /// A label in a window. `shown` orders the window front.
+    private func labelInWindow(shown: Bool, _ text: @escaping () -> String) -> (LiveLabel, NSWindow) {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: [.titled], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        let l = LiveLabel.make(.systemFont(ofSize: 10), .labelColor, text)
+        w.contentView?.addSubview(l)
+        if shown { w.orderFrontRegardless() }
+        return (l, w)
+    }
+
+    func testALiveLabelInAShownWindowTicks() throws {
+        var n = 0
+        let (l, w) = labelInWindow(shown: true) { n += 1; return "t\(n)" }
+        defer { w.close() }
+        guard w.isVisible else { throw XCTSkip("the window does not show under swift test") }
+        let before = n
+        Ticker.seconds.tick()
+        XCTAssertGreaterThan(n, before)
+        XCTAssertEqual(l.stringValue, "t\(n)")
+    }
+
+    func testALiveLabelInAHiddenWindowDoesNotRecompute() {
+        var n = 0
+        let (l, w) = labelInWindow(shown: false) { n += 1; return "t\(n)" }
+        defer { w.close() }
+        let before = n
+        Ticker.seconds.tick()
+        XCTAssertEqual(n, before)
+        XCTAssertEqual(l.stringValue, "t\(before)")
+    }
+
+    func testTheTimerStopsWhenTheLastLabelLeaves() {
+        let (l, w) = labelInWindow(shown: false) { "x" }
+        defer { w.close() }
+        XCTAssertTrue(Ticker.seconds.isRunning)
+        XCTAssertEqual(Ticker.seconds.count, 1)
+        l.removeFromSuperview()
+        XCTAssertEqual(Ticker.seconds.count, 0)
+        XCTAssertFalse(Ticker.seconds.isRunning)
+    }
+
+    func testOcclusionChangeRefreshesTheLabelsOfThatWindow() throws {
+        var text = "a"
+        let (l, w) = labelInWindow(shown: true) { text }
+        defer { w.close() }
+        guard w.isVisible else { throw XCTSkip("the window does not show under swift test") }
+        XCTAssertEqual(l.stringValue, "a")
+        text = "b"
+        NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: w)
+        XCTAssertEqual(l.stringValue, "b")
     }
 
     func testNoDateShowsADash() {

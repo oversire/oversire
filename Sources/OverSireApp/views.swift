@@ -100,10 +100,9 @@ class EmptyRow: NSView {
 
 class Flipped: NSView { override var isFlipped: Bool { true } }
 
-// A label that recomputes its text every second while it is in a window.
-final class LiveLabel: NSTextField {
-    var text: (() -> String)? { didSet { tick() } }
-    private var timer: Timer?
+// A label that recomputes its text every second while its window shows.
+final class LiveLabel: NSTextField, Ticking {
+    var text: (() -> String)? { didSet { update() } }
 
     static func make(_ font: NSFont, _ color: NSColor, _ text: @escaping () -> String) -> LiveLabel {
         let l = LiveLabel(labelWithString: "")
@@ -112,17 +111,23 @@ final class LiveLabel: NSTextField {
         return l
     }
 
-    private func tick() { if let t = text { stringValue = t() } }
+    private func update() {
+        if let s = text?(), s != stringValue { stringValue = s }
+    }
+
+    func refresh() {
+        guard window?.isVisible == true else { return }
+        update()
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        timer?.invalidate(); timer = nil
-        guard window != nil else { return }
-        tick()
-        // The common mode keeps it ticking while the list scrolls.
-        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
+        if window != nil {
+            update()
+            Ticker.seconds.add(self)
+        } else {
+            Ticker.seconds.remove(self)
+        }
     }
 }
 
