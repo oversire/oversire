@@ -71,6 +71,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     /// The adapter polls the runs of one commit (`CommitPolling`).
     public static let commitPolling: Capability = "commitPolling"
     public static let epics: Capability = "epics"
+    /// The adapter posts epic updates with a health (`EpicUpdating`).
+    public static let epicHealth: Capability = "epicHealth"
 }
 
 /// The user of a token.

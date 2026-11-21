@@ -54,6 +54,7 @@ struct EpicActions {
                             ]
                             if let late = r.lateDays { o["lateDays"] = .int(late) }
                             if r.readyToClose { o["readyToClose"] = .bool(true) }
+                            if let h = e.health { o["health"] = .string(h.rawValue) }
                             rows.append(.object(o))
                         }
                     }
@@ -83,13 +84,26 @@ struct EpicActions {
                     }
                 }
             },
-            ActionSpec(id: "epic.update", title: "Update epic", help: "Changes the title, the goal, the state, the dates or the lead of an epic. "
+            ActionSpec(id: "epic.update", title: "Update epic", help: "Changes the title, the goal, the state, the dates or the lead of an epic, or posts an epic update with a health. "
                            + "State: planned, active, paused, done or canceled.", kind: .change,
                        input: ActionSpec.args(["project": Self.project, "epic": Self.epic, "title": ("string", "The new title."),
                                                "goal": ("string", "The new goal, in Markdown."), "state": ("string", "planned, active, paused, done or canceled."),
-                                               "targetDate": Self.day, "startDate": Self.day, "lead": ("string", "A person id. `none` removes the lead.")],
+                                               "targetDate": Self.day, "startDate": Self.day, "lead": ("string", "A person id. `none` removes the lead."),
+                                               "health": ("string", "on_track, at_risk or off_track. Posts an epic update."),
+                                               "note": ("string", "The Markdown text of the epic update.")],
                                               required: ["project", "epic"]), capability: .epics) { a in
                 await link.epic(a) { d, f, done in
+                    let note = a.string("note")
+                    var health: EpicHealth?
+                    if note != nil || a.string("health") != nil {
+                        guard d.projectStore.has(.epicHealth, in: f.snap) else { done(ActionLink.unsupported(f.snap, "epic health")); return }
+                    }
+                    if let h = a.string("health") {
+                        guard let value = EpicHealth(rawValue: h.lowercased()) else {
+                            done(.notAllowed("No health \(h). Use: \(EpicHealth.allCases.map(\.rawValue).joined(separator: ", ")).")); return
+                        }
+                        health = value
+                    }
                     var patch = EpicPatch(title: a.string("title"), goal: a.string("goal"), lead: a.string("lead"))
                     if let s = a.string("state") {
                         guard let state = EpicState(rawValue: s.lowercased()) else {
@@ -104,20 +118,31 @@ struct EpicActions {
                         guard let day = Self.parseDay(text) else { done(.notAllowed("\(name) must be a date as YYYY-MM-DD.")); return }
                         if field == .targetDate { patch.targetDate = day } else { patch.startDate = day }
                     }
-                    guard !patch.isEmpty else { done(.notAllowed("Give a field to change.")); return }
-                    d.projectStore.updateEpic(f.epic, patch, by: a.caller.actor) { ok in
-                        let title = patch.title ?? f.epic.title
+                    guard !patch.isEmpty || health != nil || note != nil else { done(.notAllowed("Give a field to change.")); return }
+                    let title = patch.title ?? f.epic.title
+                    let actor = a.caller.actor
+                    // One epic.updated row for the whole call.
+                    func finish(_ ok: Bool) {
                         if ok {
-                            let fields = ["title", "goal", "state", "targetDate", "startDate", "lead"].filter { a.string($0) != nil }
+                            let fields = ["title", "goal", "state", "targetDate", "startDate", "lead", "health", "note"].filter { a.string($0) != nil }
                             var p: [String: JSONValue] = ["epic": .string(f.epic.id.rawValue), "title": .string(title),
                                                           "fields": .array(fields.map(JSONValue.string))]
                             if let s = patch.state { p["state"] = .string(s.rawValue) }
-                            let actor = a.caller.actor
+                            if let h = health { p["health"] = .string(h.rawValue) }
                             d.projectStore.events.action(.epicUpdated, item: f.epic.eventKey, project: f.snap.summary.identifier, verb: "epic-update",
                                                          "\(title) updated: \(fields.joined(separator: ", "))", payload: p,
                                                          actorType: actor.type, actor: actor.name, via: actor.via)
                         }
                         done(ActionLink.stored(d, ok, "Epic \(title) is updated."))
+                    }
+                    func post() {
+                        guard health != nil || note != nil else { finish(true); return }
+                        let body = note ?? "Health: \(health?.label ?? "")"
+                        d.projectStore.postEpicUpdate(f.epic, health: health, note: body, by: actor) { finish($0) }
+                    }
+                    if patch.isEmpty { post(); return }
+                    d.projectStore.updateEpic(f.epic, patch, by: actor) { ok in
+                        if ok { post() } else { finish(false) }
                     }
                 }
             },

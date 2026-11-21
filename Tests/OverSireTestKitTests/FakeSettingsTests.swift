@@ -41,6 +41,7 @@ final class FakeSettingsTests: XCTestCase {
                                          "AttachmentReading needs the capability attachmentsRead",
                                          "LinkManaging needs the capability links",
                                          "LabelManaging needs the capability labels",
-                                         "EpicTracking needs the capability epics"])
+                                         "EpicTracking needs the capability epics",
+                                         "EpicUpdating needs the capability epicHealth"])
     }
 }

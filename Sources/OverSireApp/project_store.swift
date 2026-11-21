@@ -1064,6 +1064,17 @@ final class ProjectStore {
         epicCall(e.project.storeKey, actor: actor, done: { done($0.isOk) }) { t, _ in try await t.updateEpic(e, patch) }
     }
 
+    /// Posts an epic update. The result keeps the new health on the epic until the refresh.
+    func postEpicUpdate(_ e: Epic, health: EpicHealth?, note: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+        epicCall(e.project.storeKey, actor: actor, done: { done($0.isOk) }) { t, _ in
+            guard let u = t as? any EpicUpdating else { throw ProviderError.unsupported(.epicHealth) }
+            try await u.postUpdate(e, health: health, markdown: note)
+            var out = e
+            if let health { out.health = health }
+            return out
+        }
+    }
+
     /// One epic write. It answers when the tracker answers. A user refresh follows and names `actor` in the epic rows.
     /// A failure sets `lastError`.
     private func epicCall(_ key: String, actor: EventActor, done: @escaping (Result<Epic, ProviderError>) -> Void,

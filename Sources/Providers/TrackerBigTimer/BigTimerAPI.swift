@@ -125,6 +125,10 @@ final class BigTimerAPI: @unchecked Sendable {
             return .rateLimited(retryAfter: wait.map { .seconds($0) })
         case 400 where problem?.code == "validation" && problem?.errors?["parent_uuid"] != nil:
             return .vendor(code: "validation", message: parentMessage(problem?.errors?["parent_uuid"] ?? ""))
+        case 400 where problem?.code == "validation" && problem?.errors?.keys.contains(where: epicFields.contains) == true:
+            let errors = problem?.errors ?? [:]
+            let field = epicFields.first(where: { errors[$0] != nil }) ?? ""
+            return .vendor(code: "validation", message: epicMessage(field, errors[field] ?? ""))
         default:
             return .vendor(code: problem?.code ?? String(status),
                            message: problem?.detail ?? HTTPURLResponse.localizedString(forStatusCode: status))
@@ -137,7 +141,26 @@ final class BigTimerAPI: @unchecked Sendable {
         if field.contains("so it cannot be a sub-item") { return "Big Timer: an item with sub-items cannot become a sub-item." }
         if field.contains("another project") { return "Big Timer: a sub-item must be in the project of its parent." }
         if field.contains("the issue itself") { return "Big Timer: an item cannot be its own parent." }
+        if field.contains("is an epic") { return "Big Timer: an epic is not a parent. Put the item in the epic." }
+        if field.contains("epic cannot be a sub-item") { return "Big Timer: an epic cannot be a sub-item." }
         return "Big Timer: the parent is not valid (\(field))."
+    }
+
+    private static let epicFields = ["epic_uuid", "kind", "health", "epic"]
+
+    /// Simple text for a broken epic rule. An unknown server text stays in the message.
+    static func epicMessage(_ field: String, _ text: String) -> String {
+        switch field {
+        case "epic_uuid" where text.contains("sub-item uses the epic of its parent"): return "Big Timer: a sub-item uses the epic of its parent."
+        case "epic_uuid" where text.contains("epic cannot be in an epic"): return "Big Timer: an epic cannot be in an epic."
+        case "epic_uuid" where text.contains("another project"): return "Big Timer: an epic must be in the project of its items."
+        case "epic_uuid" where text.contains("is not an epic"): return "Big Timer: the item is not an epic."
+        case "kind": return "Big Timer: the kind of an item is fixed after create."
+        case "health" where text.contains("only an update on an epic"): return "Big Timer: only an update on an epic has a health."
+        case "health": return "Big Timer: the health must be on_track, at_risk or off_track."
+        case "epic": return "Big Timer: the item is not an epic."
+        default: return "Big Timer: the epic is not valid (\(text))."
+        }
     }
 
     /// The path joins the path of the base URL. Query values keep "+" and "&" safe.

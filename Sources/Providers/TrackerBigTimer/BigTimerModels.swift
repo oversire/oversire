@@ -64,6 +64,18 @@ struct BTIssue: Decodable {
     let activity_at: Date?
     let comment_count: Int?
     let last_comment_at: Date?
+    // The epic fields come with the server change of epics. An older server has no value.
+    let kind: String?
+    let epic_uuid: String?
+    let epic_key: String?
+    let start_date: String?
+    // The roll-up. The server sends 0 for an item that is not an epic.
+    let item_count: Int?
+    let items_done: Int?
+    let items_in_progress: Int?
+    let items_blocked: Int?
+    let estimate_minutes: Int?
+    let health: String?
 }
 
 struct BTIssuePage: Decodable, BTPage {
@@ -91,6 +103,9 @@ struct BTIssueRecord: Decodable {
     let created_at: Date
     let updated_at: Date
     let parent_uuid: String?
+    let kind: String?
+    let epic_uuid: String?
+    let start_date: String?
 }
 
 struct BTCommentRecord: Decodable {
@@ -160,16 +175,47 @@ struct BTIssueCreate: Encodable {
     let details: String?
     let status: String?
     let parent_uuid: String?
+    var kind: String? = nil
+    var epic: String? = nil
+    var start_date: String? = nil
+    var due_date: String? = nil
+    var size: String? = nil
 }
 
-/// A nil field is not encoded. An empty parent_uuid removes the parent.
+/// A nil field is not encoded. An empty parent_uuid removes the parent. A key in `clear` encodes as null.
 struct BTIssuePatch: Encodable {
-    let title: String?
-    let details: String?
-    let status: String?
-    let parent_uuid: String?
+    var title: String?
+    var details: String?
+    var status: String?
+    var parent_uuid: String?
+    var start_date: String? = nil
+    var due_date: String? = nil
+    var size: String? = nil
+    var epic_uuid: String? = nil
+    var clear: Set<String> = []
 
-    var isEmpty: Bool { title == nil && details == nil && status == nil && parent_uuid == nil }
+    var isEmpty: Bool {
+        title == nil && details == nil && status == nil && parent_uuid == nil && start_date == nil && due_date == nil && size == nil
+            && epic_uuid == nil && clear.isEmpty
+    }
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init(_ s: String) { stringValue = s }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        let values: [(String, String?)] = [("title", title), ("details", details), ("status", status), ("parent_uuid", parent_uuid),
+                                           ("start_date", start_date), ("due_date", due_date), ("size", size), ("epic_uuid", epic_uuid)]
+        for (name, value) in values {
+            if let value { try c.encode(value, forKey: Key(name)) }
+            else if clear.contains(name) { try c.encodeNil(forKey: Key(name)) }
+        }
+    }
 }
 
 /// A nil member encodes as null, which removes the assignee.
@@ -184,4 +230,7 @@ struct BTAssign: Encodable {
     }
 }
 
-struct BTCommentCreate: Encodable { let body: String }
+struct BTCommentCreate: Encodable {
+    let body: String
+    var health: String? = nil
+}

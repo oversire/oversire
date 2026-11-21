@@ -19,6 +19,36 @@ public enum EpicState: String, Codable, Sendable, CaseIterable {
     public var isClosed: Bool { self == .done || self == .canceled }
 }
 
+/// The health that an epic update reports.
+public enum EpicHealth: String, Sendable, Hashable, Codable, CaseIterable {
+    case onTrack = "on_track", atRisk = "at_risk", offTrack = "off_track"
+
+    public var label: String {
+        switch self {
+        case .onTrack: return "On track"
+        case .atRisk: return "At risk"
+        case .offTrack: return "Off track"
+        }
+    }
+}
+
+/// The item counts that a vendor gives for an epic. They win over the counts of the snapshot.
+public struct EpicCounts: Sendable, Hashable, Codable {
+    public var total: Int
+    public var done: Int
+    public var inProgress: Int
+    public var blocked: Int
+    public var estimateMinutes: Int?
+
+    public init(total: Int, done: Int, inProgress: Int = 0, blocked: Int = 0, estimateMinutes: Int? = nil) {
+        self.total = total
+        self.done = done
+        self.inProgress = inProgress
+        self.blocked = blocked
+        self.estimateMinutes = estimateMinutes
+    }
+}
+
 /// A field that an epic of a vendor can have. Open set, like `Capability`.
 public struct EpicField: RawRepresentable, Hashable, Sendable, ExpressibleByStringLiteral {
     public let rawValue: String
@@ -49,10 +79,15 @@ public struct Epic: Codable, Hashable, Sendable, Identifiable {
     public var updatedAt: Date?
     /// Item id → the date the item joined. Nil when the vendor does not tell.
     public var linkedAt: [String: Date]?
+    /// The health of the newest update. Nil when the vendor has no health or the epic has no target date.
+    public var health: EpicHealth? = nil
+    /// The item counts of the vendor. Nil when the vendor gives none.
+    public var counts: EpicCounts? = nil
 
     public init(id: EpicID, key: String? = nil, title: String, goal: String? = nil, state: EpicState, nativeState: String = "",
                 lead: String? = nil, startDate: Date? = nil, targetDate: Date? = nil, url: String, project: ProjectRef,
-                createdAt: Date? = nil, updatedAt: Date? = nil, linkedAt: [String: Date]? = nil) {
+                createdAt: Date? = nil, updatedAt: Date? = nil, linkedAt: [String: Date]? = nil, health: EpicHealth? = nil,
+                counts: EpicCounts? = nil) {
         self.id = id
         self.key = key
         self.title = title
@@ -67,6 +102,8 @@ public struct Epic: Codable, Hashable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.linkedAt = linkedAt
+        self.health = health
+        self.counts = counts
     }
 
     /// The `item` of the event rows of the epic. It matches the Key pattern and has at most 60 characters.
@@ -180,6 +217,12 @@ public protocol EpicTracking: Tracker {
     func setEpic(_ epic: EpicID?, for item: ItemRef) async throws
 }
 
+/// A tracker with epic updates: a note with an optional health. An update only adds to the epic, so it is not in `EpicPatch`.
+/// Errors: `ProviderError.unsupported(.epicHealth)`, `.vendor(code:message:)` for a refused value, `.notFound`.
+public protocol EpicUpdating: EpicTracking {
+    func postUpdate(_ e: Epic, health: EpicHealth?, markdown: String) async throws
+}
+
 extension ProjectSnapshot {
     public func epic(_ id: EpicID) -> Epic? { epics?.first { $0.id == id } }
 
@@ -200,17 +243,18 @@ extension ProjectSnapshot {
 
     public func rollup(_ epic: Epic, blocked: Set<String> = [], now: Date = Date()) -> EpicRollup {
         let m = members(of: epic.id)
-        let done = m.filter { isClosed($0.state) }.count
-        let started = m.filter { [.progress, .review].contains(option($0.state)?.category) }.count
-        let open = m.count - done
+        var (total, done) = (m.count, m.filter { isClosed($0.state) }.count)
+        var started = m.filter { [.progress, .review].contains(option($0.state)?.category) }.count
+        if let c = epic.counts { (total, done, started) = (c.total, c.done, c.inProgress + c.blocked) }
+        let open = total - done
         var late: Int?
         if let target = epic.targetDate, !epic.state.isClosed, open > 0 {
             let cal = Calendar.current
             let days = cal.dateComponents([.day], from: cal.startOfDay(for: target), to: cal.startOfDay(for: now)).day ?? 0
             late = days > 0 ? days : nil
         }
-        return EpicRollup(epic: epic, total: m.count, done: done, started: started, open: open, lateDays: late,
-                          readyToClose: !epic.state.isClosed && !m.isEmpty && open == 0,
+        return EpicRollup(epic: epic, total: total, done: done, started: started, open: open, lateDays: late,
+                          readyToClose: !epic.state.isClosed && total > 0 && open == 0,
                           next: nextReady(in: epic.id, blocked: blocked).map(\.id))
     }
 

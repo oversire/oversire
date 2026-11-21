@@ -146,6 +146,13 @@ public enum TrackerConformance {
         r.expect(found.title == name && !found.url.isEmpty, "the epic has the title \(found.title) and the url \(found.url)")
         guard let active = await r.step("updateEpic active", { try await et.updateEpic(found, EpicPatch(state: .active)) }) else { return r }
         r.expect(active.state == .active, "updateEpic gave the state \(active.state)")
+        if let ut = t as? any EpicUpdating, t.capabilities.contains(.epicHealth) {
+            _ = await r.step("postUpdate", { try await ut.postUpdate(active, health: .atRisk, markdown: "Conformance update") })
+            if let list = await r.step("epics after postUpdate", { try await et.epics(in: p) }), let e = list.first(where: { $0.id == found.id }) {
+                // A vendor can give a health only when the epic has a target date.
+                if e.targetDate != nil { r.expect(e.health == .atRisk, "epics gave the health \(String(describing: e.health)) after postUpdate") }
+            }
+        }
         _ = await r.step("setEpic", { try await et.setEpic(found.id, for: ref) })
         if let list = await r.step("items in the epic", { try await t.items(p, since: nil, limit: 200) }) {
             r.expect(list.first { $0.id == ref.id }?.epicId == found.id, "items does not show the epic of \(ref.key)")

@@ -78,6 +78,7 @@ public enum ProviderConformance {
         (.commitChecks, "CommitChecking", { $0 is any CommitChecking }),
         (.commitPolling, "CommitPolling", { $0 is any CommitPolling }),
         (.epics, "EpicTracking", { $0 is any EpicTracking }),
+        (.epicHealth, "EpicUpdating", { $0 is any EpicUpdating }),
     ]
 
     /// The capabilities agree with the protocols. No I/O.

@@ -43,6 +43,7 @@ extension PlanModel {
                                  "readyToClose": .bool(r.readyToClose)]),
         ]
         if let g = e.goal { o["goal"] = .string(g) }
+        if let h = e.health { o["health"] = .string(h.rawValue) }
         if let d = e.startDate { o["startDate"] = .string(isoDay(d)) }
         if let d = e.targetDate { o["targetDate"] = .string(isoDay(d)) }
         if let late = r.lateDays { o["lateDays"] = .int(late) }

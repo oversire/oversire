@@ -14,6 +14,7 @@
         "updated_by": "019a0000-0000-7000-8000-000000000002",
         "project_uuid": "019a0000-0000-7000-8000-0000000000a1",
         "number": 142,
+        "kind": "issue",
         "task_uuid": null,
         "title": "Fix the invoice export",
         "details": "The PDF has no footer.",
@@ -22,9 +23,11 @@
         "due_date": "2026-10-30",
         "completed_at": null,
         "assignee_uuid": "019a0000-0000-7000-8000-000000000002",
-        "parent_uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6070",
         "origin": "manual",
-        "recurring_issue_uuid": null
+        "recurring_issue_uuid": null,
+        "parent_uuid": null,
+        "epic_uuid": null,
+        "start_date": null
       }
     },
     {
@@ -61,10 +64,32 @@
       "op": "delete",
       "uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6073",
       "version": 3
+    },
+    {
+      "seq": 9814,
+      "entity": "issue_source",
+      "op": "upsert",
+      "record": {
+        "uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6074",
+        "version": 1,
+        "created_at": "2026-10-23T14:01:00Z",
+        "updated_at": "2026-10-23T14:01:00Z",
+        "deleted_at": null,
+        "created_by": "019a0000-0000-7000-8000-000000000001",
+        "updated_by": "019a0000-0000-7000-8000-000000000001",
+        "issue_uuid": "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6071",
+        "comment_uuid": null,
+        "provider": "github",
+        "team_id": "github.com",
+        "channel_id": "acme/billing",
+        "thread_ts": "412",
+        "message_ts": null,
+        "permalink": "https://github.com/acme/billing/issues/412"
+      }
     }
   ],
-  "next": 9813,
-  "head": 9813,
+  "next": 9814,
+  "head": 9814,
   "more": false,
   "server_time": "2026-10-23T14:02:12Z"
 }

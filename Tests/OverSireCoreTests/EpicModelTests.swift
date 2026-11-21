@@ -90,6 +90,38 @@ final class EpicModelTests: XCTestCase {
         XCTAssertFalse(r.readyToClose)
     }
 
+    func testRollupPrefersServerCounts() {
+        var e = epic("m1")
+        e.counts = EpicCounts(total: 10, done: 4, inProgress: 2, blocked: 1, estimateMinutes: 90)
+        let loaded = [item("1", "s4", epic: "m1"), item("2", "s1", epic: "m1")]
+        let r = snap(loaded, epics: [e]).rollup(e, now: now)
+        XCTAssertEqual([r.total, r.done, r.started, r.open], [10, 4, 3, 6])
+        XCTAssertEqual(r.next, ["2"], "the next items come from the snapshot")
+        XCTAssertFalse(r.readyToClose)
+        e.counts = EpicCounts(total: 3, done: 3)
+        XCTAssertTrue(snap(loaded, epics: [e]).rollup(e, now: now).readyToClose, "all counted items are done")
+        e.counts = EpicCounts(total: 0, done: 0)
+        XCTAssertFalse(snap(loaded, epics: [e]).rollup(e, now: now).readyToClose, "no items")
+        let past = Calendar.current.date(byAdding: .day, value: -2, to: now)!
+        e.counts = EpicCounts(total: 5, done: 2)
+        e.targetDate = past
+        XCTAssertEqual(snap([], epics: [e]).rollup(e, now: now).lateDays, 2, "the counts open an epic with no loaded item")
+    }
+
+    func testDecodesWithoutHealth() throws {
+        let old = #"{"id":"m1","title":"E","state":"active","nativeState":"","url":"u","project":{"account":{"provider":"plane","id":"acme"},"id":"4"}}"#
+        let e = try JSONDecoder().decode(Epic.self, from: Data(old.utf8))
+        XCTAssertNil(e.health)
+        XCTAssertNil(e.counts)
+        var full = epic("m2")
+        full.health = .offTrack
+        full.counts = EpicCounts(total: 2, done: 1, inProgress: 1, blocked: 0, estimateMinutes: 30)
+        let back = try JSONDecoder().decode(Epic.self, from: JSONEncoder().encode(full))
+        XCTAssertEqual(back, full)
+        XCTAssertEqual(EpicHealth.allCases.map(\.label), ["On track", "At risk", "Off track"])
+        XCTAssertEqual(EpicHealth.atRisk.rawValue, "at_risk")
+    }
+
     func testRollupLate() {
         let cal = Calendar.current
         let past = cal.date(byAdding: .day, value: -2, to: now)!

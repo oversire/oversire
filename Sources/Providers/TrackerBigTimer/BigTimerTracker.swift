@@ -2,10 +2,10 @@ import Foundation
 import OverSireCore
 
 /// The Big Timer adapter. One instance for each server and token.
-public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchecked Sendable {
+public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, EpicUpdating, @unchecked Sendable {
     public let id: ProviderID = .bigtimer
     public let account: AccountID
-    public let capabilities: Set<Capability> = [.itemSearch, .subItems, .liveFeed]
+    public let capabilities: Set<Capability> = [.itemSearch, .subItems, .liveFeed, .epics, .epicHealth]
     // The server has no general rate limit. The real load is the ProjectStore refresh.
     public let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 600)
     public let keyFormat = KeyFormat.projectDash
@@ -17,6 +17,8 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
     private var prefixes: [String: String] = [:]                    // project uuid → prefix
     private var issueKeys: [String: (key: String, project: String)] = [:]   // issue uuid → key, project uuid
     private var commentIssues: [String: String] = [:]               // comment uuid → issue uuid
+    private var epicKeys: [String: String] = [:]                    // epic key → epic uuid
+    private var epicIds: Set<String> = []                           // uuids of the known epics
     static let cacheAge: Duration = .seconds(3600)
     static let pageMax = 500
 
@@ -77,7 +79,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
 
     /// Each open item, then the newest `limit` items of any status. Newest activity first.
     public func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
-        var base = [URLQueryItem(name: "project", value: p.id), URLQueryItem(name: "order", value: "activity")]
+        var base = [URLQueryItem(name: "project", value: p.id), URLQueryItem(name: "kind", value: "issue"), URLQueryItem(name: "order", value: "activity")]
         if let since { base.append(URLQueryItem(name: "updated_since", value: Self.time(since))) }
         let open = try await pages(BTIssuePage.self, "/v1/issues", query: base + [
             URLQueryItem(name: "status", value: BigTimerStatus.options.map(\.id).filter(BigTimerStatus.openIDs.contains).joined(separator: ",")),
@@ -143,6 +145,106 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
         _ = try await api.send("POST", "/v1/issues/\(i.id)/assign", json: BTAssign(member: "me"))
     }
 
+    // MARK: Epics
+
+    public func epics(in p: ProjectRef) async throws -> [Epic] {
+        let rows = try await pages(BTIssuePage.self, "/v1/issues", query: [
+            URLQueryItem(name: "project", value: p.id), URLQueryItem(name: "kind", value: "epic"),
+            URLQueryItem(name: "limit", value: String(Self.pageMax)),
+        ])
+        return rows.map { epic(from: $0, project: p) }
+    }
+
+    public func createEpic(_ d: EpicDraft, in p: ProjectRef) async throws -> Epic {
+        var body = BTIssueCreate(project_uuid: p.id, title: d.title, details: d.goal, status: Self.status(d.state), parent_uuid: nil)
+        body.kind = "epic"
+        body.start_date = d.startDate.map(Self.day)
+        body.due_date = d.targetDate.map(Self.day)
+        var data = try await api.send("POST", "/v1/issues", json: body)
+        var row = try BigTimerAPI.decode(BTIssue.self, from: data)
+        if let lead = d.lead {
+            data = try await api.send("POST", "/v1/issues/\(row.uuid)/assign", json: BTAssign(member: lead))
+            row = try BigTimerAPI.decode(BTIssue.self, from: data)
+        }
+        return epic(from: row, project: p)
+    }
+
+    /// The PATCH goes first, then the lead. The two writes are not atomic.
+    public func updateEpic(_ e: Epic, _ patch: EpicPatch) async throws -> Epic {
+        var body = BTIssuePatch(title: patch.title, details: patch.goal, status: patch.state.map { Self.status($0) }, parent_uuid: nil,
+                                start_date: patch.startDate.map(Self.day), due_date: patch.targetDate.map(Self.day))
+        for f in patch.clear {
+            switch f {
+            case .goal: body.clear.insert("details")
+            case .startDate: body.clear.insert("start_date")
+            case .targetDate: body.clear.insert("due_date")
+            default: break
+            }
+        }
+        if !body.isEmpty { _ = try await api.send("PATCH", "/v1/issues/\(e.id.rawValue)", json: body) }
+        if patch.lead != nil || patch.clear.contains(.lead) {
+            _ = try await api.send("POST", "/v1/issues/\(e.id.rawValue)/assign", json: BTAssign(member: patch.clear.contains(.lead) ? nil : patch.lead))
+        }
+        let row: BTIssue = try await api.get("/v1/issues/\(e.id.rawValue)")
+        return epic(from: row, project: e.project)
+    }
+
+    /// A sub-item has the epic of its parent, so the server refuses it with a message.
+    public func setEpic(_ epic: EpicID?, for item: ItemRef) async throws {
+        var body = BTIssuePatch(title: nil, details: nil, status: nil, parent_uuid: nil, epic_uuid: epic?.rawValue)
+        if epic == nil { body.clear = ["epic_uuid"] }
+        _ = try await api.send("PATCH", "/v1/issues/\(item.id)", json: body)
+    }
+
+    public func postUpdate(_ e: Epic, health: EpicHealth?, markdown: String) async throws {
+        _ = try await api.send("POST", "/v1/issues/\(e.id.rawValue)/comments", json: BTCommentCreate(body: markdown, health: health?.rawValue))
+    }
+
+    func epic(from row: BTIssue, project: ProjectRef) -> Epic {
+        lock.withLock {
+            epicIds.insert(row.uuid)
+            epicKeys[row.key] = row.uuid
+        }
+        return Epic(id: EpicID(rawValue: row.uuid), key: row.key, title: row.title, goal: row.details, state: Self.epicState(row.status),
+                    nativeState: row.status, lead: row.assignee_uuid, startDate: row.start_date.flatMap(Self.date),
+                    targetDate: row.due_date.flatMap(Self.date), url: Self.url(row.key).absoluteString, project: project,
+                    createdAt: row.created_at, updatedAt: row.updated_at, health: row.health.flatMap(EpicHealth.init(rawValue:)),
+                    counts: EpicCounts(total: row.item_count ?? 0, done: row.items_done ?? 0, inProgress: row.items_in_progress ?? 0,
+                                       blocked: row.items_blocked ?? 0, estimateMinutes: row.estimate_minutes))
+    }
+
+    static func epicState(_ status: String) -> EpicState {
+        switch status {
+        case "in_progress", "client_reviewing": return .active
+        case "blocked": return .paused
+        case "done": return .done
+        case "cancelled": return .canceled
+        default: return .planned
+        }
+    }
+
+    static func status(_ s: EpicState) -> String {
+        switch s {
+        case .planned: return "open"
+        case .active: return "in_progress"
+        case .paused: return "blocked"
+        case .done: return "done"
+        case .canceled: return "cancelled"
+        }
+    }
+
+    /// A date with no time ("2026-11-30"), in the time zone of the user.
+    static func date(_ s: String) -> Date? {
+        let n = s.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard n.count == 3 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: n[0], month: n[1], day: n[2]))
+    }
+
+    static func day(_ d: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: d)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
     // MARK: Search
 
     public func search(_ query: String, in projects: [ProjectRef]?, limit: Int) async throws -> [Item] {
@@ -151,10 +253,12 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
         let wanted = projects.map { Set($0.map(\.id)) }
         var rows: [BTIssue] = []
         if keyFormat.keys(in: q) == [q.uppercased()] {
-            do { rows.append(try await api.get("/v1/issues/\(q.uppercased())")) }
-            catch ProviderError.notFound {}
+            do {
+                let row: BTIssue = try await api.get("/v1/issues/\(q.uppercased())")
+                if row.kind != "epic" { rows.append(row) }
+            } catch ProviderError.notFound {}
         }
-        var query = [URLQueryItem(name: "q", value: q), URLQueryItem(name: "order", value: "activity"),
+        var query = [URLQueryItem(name: "q", value: q), URLQueryItem(name: "kind", value: "issue"), URLQueryItem(name: "order", value: "activity"),
                      URLQueryItem(name: "limit", value: String(min(limit, Self.pageMax)))]
         if let only = wanted, only.count == 1, let id = only.first { query.append(URLQueryItem(name: "project", value: id)) }
         let found: BTIssuePage = try await api.get("/v1/issues", query: query)
@@ -197,6 +301,10 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
         let eid = "bigtimer-\(change.entity)-\(uuid)-v\(version)"
         switch change.record {
         case .issue(let r):
+            if r.kind == "epic" {
+                lock.withLock { epicIds.insert(r.uuid) }
+                return nil
+            }
             guard let prefix = try await prefix(of: r.project_uuid, refreshed: &refreshed) else { return nil }
             let key = "\(prefix)-\(r.number)"
             lock.withLock { issueKeys[r.uuid] = (key, r.project_uuid); prefixes[r.project_uuid] = prefix }
@@ -205,14 +313,17 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
                                  summary: EventSummary(title: r.title))
         case .comment(let r):
             lock.withLock { commentIssues[r.uuid] = r.issue_uuid }
-            guard let (key, project) = try await issueKey(r.issue_uuid) else { return nil }
+            // An update on an epic from OverSire writes epic.updated. An outside update is not tracked yet.
+            if lock.withLock({ epicIds.contains(r.issue_uuid) }) { return nil }
+            guard let (key, project) = try await issueKey(r.issue_uuid), !lock.withLock({ epicIds.contains(r.issue_uuid) }) else { return nil }
             return ProviderEvent(id: eid, provider: .bigtimer, account: account, kind: .comment, action: action,
                                  subject: .item(ref(project: project, prefix: lock.withLock { prefixes[project] }, issue: r.issue_uuid, key: key)),
                                  at: r.updated_at)
         case nil:
             // A delete has only a uuid and a version. The caches name the issue.
             let issue: String? = change.entity == "issue_comment" ? lock.withLock({ commentIssues[uuid] }) : uuid
-            guard let issue, let (key, project) = lock.withLock({ issueKeys[issue] }) else { return nil }
+            guard let issue, !lock.withLock({ epicIds.contains(issue) }),
+                  let (key, project) = lock.withLock({ issueKeys[issue] }) else { return nil }
             return ProviderEvent(id: eid, provider: .bigtimer, account: account,
                                  kind: change.entity == "issue" ? .item : .comment, action: action,
                                  subject: .item(ref(project: project, prefix: lock.withLock { prefixes[project] }, issue: issue, key: key)),
@@ -256,6 +367,7 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
     private func remember(_ row: BTIssue) {
         lock.withLock {
             issueKeys[row.uuid] = (row.key, row.project_uuid)
+            if row.kind == "epic" { epicIds.insert(row.uuid) }
             if prefixes[row.project_uuid] == nil { prefixes[row.project_uuid] = String(row.key.dropLast("-\(row.number)".count)) }
         }
     }
@@ -274,6 +386,12 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
         return f.string(from: d)
     }
 
+    /// A sub-item has no epic_uuid. It uses the epic of its parent, named by key.
+    private func epicId(of row: BTIssue) -> EpicID? {
+        if let id = row.epic_uuid { return EpicID(rawValue: id) }
+        return row.epic_key.flatMap { key in lock.withLock { epicKeys[key] } }.map { EpicID(rawValue: $0) }
+    }
+
     private func item(from row: BTIssue, names: [String: String]) -> Item {
         remember(row)
         var fields: [String: String] = [:]
@@ -283,6 +401,6 @@ public final class BigTimerTracker: Tracker, ItemSearching, LiveFeeding, @unchec
                     fields: fields, assignees: row.assignee_uuid.map { [names[$0] ?? "Unknown"] } ?? [], labels: [],
                     author: row.created_by.flatMap { names[$0] }, updatedBy: row.updated_by.flatMap { names[$0] },
                     updatedAt: row.updated_at, activityAt: row.activity_at ?? row.updated_at, commentCount: row.comment_count ?? 0,
-                    lastComment: nil, mentionsMe: false, body: row.details, parentId: row.parent_uuid)
+                    lastComment: nil, mentionsMe: false, body: row.details, parentId: row.parent_uuid, epicId: epicId(of: row))
     }
 }

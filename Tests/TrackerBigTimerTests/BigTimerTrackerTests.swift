@@ -525,19 +525,29 @@ final class BigTimerTrackerTests: XCTestCase {
     func testFixturesDecode() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
         let issues = try BigTimerAPI.decode(BTIssuePage.self, from: Data(contentsOf: dir.appendingPathComponent("issue_page.json")))
-        XCTAssertEqual(issues.items.map(\.key), ["ACME-142", "ACME-143"])
-        XCTAssertEqual(issues.items.map { $0.comment_count }, [2, 0])
+        XCTAssertEqual(issues.items.map(\.key), ["ACME-142", "ACME-143", "ACME-140"])
+        XCTAssertEqual(issues.items.map { $0.comment_count }, [2, 0, 1])
         XCTAssertNotNil(issues.items[0].last_comment_at)
         XCTAssertNil(issues.items[1].last_comment_at)
         XCTAssertNil(issues.items[0].parent_uuid)
         XCTAssertEqual(issues.items[1].parent_uuid, issues.items[0].uuid)
         XCTAssertGreaterThan(try XCTUnwrap(issues.items[0].activity_at), issues.items[0].updated_at)
+        let epic = issues.items[2]
+        XCTAssertEqual(epic.kind, "epic")
+        XCTAssertEqual(epic.health, "at_risk")
+        XCTAssertEqual(epic.item_count, 2)
+        XCTAssertEqual(epic.start_date, "2026-10-19")
+        XCTAssertEqual(issues.items[0].epic_uuid, epic.uuid)
+        XCTAssertNil(issues.items[1].epic_uuid)
+        XCTAssertEqual(issues.items[1].epic_key, "ACME-140")
         let feed = try BigTimerAPI.decode(BTChangesPage.self, from: Data(contentsOf: dir.appendingPathComponent("changes_page.json")))
-        XCTAssertEqual(feed.head, 9813)
-        XCTAssertEqual(feed.changes.map(\.entity), ["issue", "entry", "issue_comment"])
+        XCTAssertEqual(feed.head, 9814)
+        XCTAssertEqual(feed.changes.map(\.entity), ["issue", "entry", "issue_comment", "issue_source"])
         guard case .issue(let r)? = feed.changes[0].record else { return XCTFail("no issue record") }
         XCTAssertEqual(r.number, 142)
-        XCTAssertEqual(r.parent_uuid, "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6070")
+        XCTAssertNil(r.parent_uuid)
+        XCTAssertEqual(r.kind, "issue")
+        XCTAssertNil(r.epic_uuid)
         XCTAssertNil(feed.changes[1].record)
         XCTAssertEqual(feed.changes[2].uuid, "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6073")
         XCTAssertEqual(feed.changes[2].version, 3)
@@ -552,5 +562,273 @@ final class BigTimerTrackerTests: XCTestCase {
         XCTAssertNil(cli.refusal(["server", "version"]), "a command word is no flag")
         XCTAssertNotNil(cli.refusal(["issue", "list", "--token", "x"]))
         XCTAssertNotNil(cli.refusal(["sync", "stream"]))
+    }
+
+    // MARK: Epics
+
+    func epicRef(_ id: String, key: String = "ACME-1") -> Epic {
+        Epic(id: EpicID(rawValue: id), key: key, title: "E", state: .planned, url: "bigtimer://issue/\(key)", project: project)
+    }
+
+    func firstEpic(_ t: BigTimerTracker) async throws -> Epic {
+        let list = try await t.epics(in: project)
+        return try XCTUnwrap(list.first)
+    }
+
+    func health(_ t: BigTimerTracker) async throws -> EpicHealth? { try await t.epics(in: project).first?.health }
+
+    func patches() -> [URLRequest] { fake.requests.filter { $0.httpMethod == "PATCH" } }
+
+    func testItemsSkipEpics() async throws {
+        let epic = fake.addEpic(project: acme, title: "Epic")
+        let issue = fake.addIssue(project: acme, title: "Issue", epic: epic)
+        let t = tracker()
+        let items = try await t.items(project, since: nil, limit: 10)
+        XCTAssertEqual(items.map(\.id), [issue])
+        XCTAssertTrue(fake.requests.filter { $0.url?.path == "/v1/issues" }.allSatisfy { query($0)["kind"] == "issue" })
+        let found = try await t.search("Epic", in: nil, limit: 5)
+        XCTAssertTrue(found.isEmpty)
+        let byKey = try await t.search("ACME-1", in: nil, limit: 5)
+        XCTAssertTrue(byKey.isEmpty, "the exact key of an epic gives no item")
+        XCTAssertEqual(query(try XCTUnwrap(fake.requests.last))["kind"], "issue")
+    }
+
+    func testEpicsMapIssueView() async throws {
+        let ada = fake.meUUID
+        let epic = fake.addEpic(project: acme, title: "Invoicing", status: "in_progress", due: "2026-12-15", start: "2026-10-19")
+        let a = fake.addIssue(project: acme, title: "A", status: "done", size: "M", epic: epic)
+        fake.addIssue(project: acme, title: "B", status: "blocked", size: "L", epic: epic)
+        fake.addIssue(project: acme, title: "Sub", status: "in_progress", size: "S", parent: a)
+        fake.addComment(issue: epic, body: "Slow", health: "at_risk")
+        let t = tracker()
+        _ = try await t.update(try await ref(t, a), ItemPatch(assignees: [ada]))
+        let epics = try await t.epics(in: project)
+        XCTAssertEqual(epics.count, 1)
+        let e = try XCTUnwrap(epics.first)
+        XCTAssertEqual(e.id.rawValue, epic)
+        XCTAssertEqual(e.key, "ACME-1")
+        XCTAssertEqual(e.title, "Invoicing")
+        XCTAssertEqual(e.state, .active)
+        XCTAssertEqual(e.nativeState, "in_progress")
+        XCTAssertEqual(e.health, .atRisk)
+        XCTAssertEqual(e.counts, EpicCounts(total: 3, done: 1, inProgress: 1, blocked: 1, estimateMinutes: 60 + 240 + 30))
+        XCTAssertEqual(e.url, "bigtimer://issue/ACME-1")
+        XCTAssertEqual(Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(e.targetDate)), DateComponents(year: 2026, month: 12, day: 15))
+        XCTAssertEqual(Calendar.current.dateComponents([.year, .month, .day], from: try XCTUnwrap(e.startDate)), DateComponents(year: 2026, month: 10, day: 19))
+        XCTAssertNil(e.lead)
+        let r = try XCTUnwrap(fake.requests.first { query($0)["kind"] == "epic" })
+        XCTAssertEqual(query(r)["project"], acme)
+    }
+
+    func testEpicsGiveClosedEpicsAndFollowCursor() async throws {
+        for n in 1...3 { fake.addEpic(project: acme, title: "E\(n)", status: n == 3 ? "cancelled" : "done") }
+        fake.pageSize = 2
+        let epics = try await tracker().epics(in: project)
+        XCTAssertEqual(epics.count, 3)
+        XCTAssertEqual(Set(epics.map(\.state)), [.done, .canceled])
+        XCTAssertEqual(fake.paths().filter { $0 == "/v1/issues" }.count, 2)
+    }
+
+    func testItemEpicIdFromEpicUUID() async throws {
+        let epic = fake.addEpic(project: acme, title: "E")
+        let id = fake.addIssue(project: acme, title: "In", epic: epic)
+        let plain = fake.addIssue(project: acme, title: "Out")
+        let t = tracker()
+        let items = try await t.items(project, since: nil, limit: 10)
+        XCTAssertEqual(items.first { $0.id == id }?.epicId?.rawValue, epic)
+        XCTAssertNil(items.first { $0.id == plain }?.epicId)
+        XCTAssertNil(items.first { $0.id == id }?.otherEpicIds)
+        let one = try await t.item(try await ref(t, id))
+        XCTAssertEqual(one.epicId?.rawValue, epic)
+    }
+
+    func testSubItemUsesParentEpic() async throws {
+        let epic = fake.addEpic(project: acme, title: "E")
+        let parent = fake.addIssue(project: acme, title: "Parent", epic: epic)
+        let kid = fake.addIssue(project: acme, title: "Kid", parent: parent)
+        let t = tracker()
+        let before = try await t.items(project, since: nil, limit: 10)
+        XCTAssertNil(before.first { $0.id == kid }?.epicId, "the key is not known before the epics load")
+        _ = try await t.epics(in: project)
+        let items = try await t.items(project, since: nil, limit: 10)
+        XCTAssertEqual(items.first { $0.id == kid }?.epicId?.rawValue, epic)
+        XCTAssertEqual(items.first { $0.id == kid }?.parentId, parent)
+    }
+
+    func testCreateEpicSendsKind() async throws {
+        let ada = fake.meUUID
+        let t = tracker()
+        let day = { (y: Int, m: Int, d: Int) in Calendar.current.date(from: DateComponents(year: y, month: m, day: d))! }
+        let made = try await t.createEpic(EpicDraft(title: "Big", goal: "Ship it.", state: .active, lead: ada, startDate: day(2026, 11, 1), targetDate: day(2026, 12, 31)), in: project)
+        let post = try XCTUnwrap(fake.requests.first { $0.httpMethod == "POST" && $0.url?.path == "/v1/issues" })
+        let b = fake.body(post)
+        XCTAssertEqual(b["kind"] as? String, "epic")
+        XCTAssertEqual(b["title"] as? String, "Big")
+        XCTAssertEqual(b["details"] as? String, "Ship it.")
+        XCTAssertEqual(b["status"] as? String, "in_progress")
+        XCTAssertEqual(b["start_date"] as? String, "2026-11-01")
+        XCTAssertEqual(b["due_date"] as? String, "2026-12-31")
+        XCTAssertEqual(b["project_uuid"] as? String, acme)
+        XCTAssertEqual(fake.paths("POST").last, "/v1/issues/\(made.id.rawValue)/assign")
+        XCTAssertEqual(made.lead, ada)
+        XCTAssertEqual(made.state, .active)
+        XCTAssertEqual(fake.issue(made.id.rawValue)?.kind, "epic")
+        let plain = try await t.createEpic(EpicDraft(title: "Bare"), in: project)
+        let bare = fake.body(try XCTUnwrap(fake.requests.last { $0.httpMethod == "POST" }))
+        XCTAssertEqual(Set(bare.keys), ["project_uuid", "title", "kind", "status"], "no lead, no assign call")
+        XCTAssertEqual(plain.state, .planned)
+    }
+
+    func testUpdateEpicClearsDates() async throws {
+        let ada = fake.meUUID
+        let id = fake.addEpic(project: acme, title: "E", due: "2026-12-01", start: "2026-11-01")
+        let t = tracker()
+        let e = try await firstEpic(t)
+        XCTAssertEqual(e.id.rawValue, id)
+        let mark = fake.requests.count
+        let out = try await t.updateEpic(e, EpicPatch(title: "Renamed", state: .paused, lead: ada, clear: [.targetDate, .startDate, .goal]))
+        let patch = try XCTUnwrap(patches().last)
+        let b = fake.body(patch)
+        XCTAssertEqual(b["title"] as? String, "Renamed")
+        XCTAssertEqual(b["status"] as? String, "blocked")
+        XCTAssertTrue(b["due_date"] is NSNull)
+        XCTAssertTrue(b["start_date"] is NSNull)
+        XCTAssertTrue(b["details"] is NSNull)
+        XCTAssertEqual(fake.requests.dropFirst(mark).map { "\($0.httpMethod!) \($0.url!.path)" },
+                       ["PATCH /v1/issues/\(id)", "POST /v1/issues/\(id)/assign", "GET /v1/issues/\(id)"])
+        XCTAssertNil(out.targetDate)
+        XCTAssertNil(out.startDate)
+        XCTAssertEqual(out.state, .paused)
+        XCTAssertEqual(out.lead, ada)
+        _ = try await t.updateEpic(out, EpicPatch(clear: [.lead]))
+        XCTAssertTrue(fake.body(try XCTUnwrap(fake.requests.last { $0.url?.lastPathComponent == "assign" }))["member"] is NSNull)
+        XCTAssertNil(fake.issue(id)?.assignee)
+        let quiet = fake.requests.count
+        _ = try await t.updateEpic(out, EpicPatch())
+        XCTAssertEqual(fake.requests.dropFirst(quiet).map { $0.httpMethod! }, ["GET"], "an empty patch sends no write")
+    }
+
+    func testSetEpicPatchesEpicUUID() async throws {
+        let epic = fake.addEpic(project: acme, title: "E")
+        let id = fake.addIssue(project: acme, title: "Item")
+        let t = tracker()
+        let r = try await ref(t, id)
+        try await t.setEpic(EpicID(rawValue: epic), for: r)
+        XCTAssertEqual(fake.body(try XCTUnwrap(patches().last))["epic_uuid"] as? String, epic)
+        XCTAssertEqual(fake.issue(id)?.epic, epic)
+        try await t.setEpic(nil, for: r)
+        let b = fake.body(try XCTUnwrap(patches().last))
+        XCTAssertEqual(Array(b.keys), ["epic_uuid"])
+        XCTAssertTrue(b["epic_uuid"] is NSNull)
+        XCTAssertNil(fake.issue(id)?.epic)
+    }
+
+    func testSetEpicOnSubItemGivesMessage() async throws {
+        let epic = fake.addEpic(project: acme, title: "E")
+        let parent = fake.addIssue(project: acme, title: "Parent")
+        let kid = fake.addIssue(project: acme, title: "Kid", parent: parent)
+        let t = tracker()
+        do { try await t.setEpic(EpicID(rawValue: epic), for: try await ref(t, kid)); XCTFail("no throw") } catch {
+            XCTAssertEqual(error as? ProviderError, .vendor(code: "validation", message: "Big Timer: a sub-item uses the epic of its parent."))
+        }
+        let plain = fake.addIssue(project: acme, title: "Plain")
+        do { try await t.setEpic(EpicID(rawValue: plain), for: try await ref(t, parent)); XCTFail("no throw") } catch {
+            XCTAssertEqual(error as? ProviderError, .vendor(code: "validation", message: "Big Timer: the item is not an epic."))
+        }
+        XCTAssertNil(fake.issue(kid)?.epic)
+    }
+
+    func testEpicStateMapping() {
+        let pairs: [(String, EpicState)] = [("open", .planned), ("in_progress", .active), ("client_reviewing", .active), ("blocked", .paused),
+                                            ("done", .done), ("cancelled", .canceled), ("future", .planned)]
+        for (status, state) in pairs { XCTAssertEqual(BigTimerTracker.epicState(status), state, status) }
+        XCTAssertEqual(EpicState.allCases.map(BigTimerTracker.status), ["open", "in_progress", "blocked", "done", "cancelled"])
+        for s in EpicState.allCases { XCTAssertEqual(BigTimerTracker.epicState(BigTimerTracker.status(s)), s) }
+    }
+
+    func testPostUpdateSendsHealth() async throws {
+        let id = fake.addEpic(project: acme, title: "E", due: "2026-12-01")
+        let t = tracker()
+        XCTAssertTrue(t.capabilities.contains(.epicHealth))
+        let e = try await firstEpic(t)
+        try await t.postUpdate(e, health: .offTrack, markdown: "Late.")
+        let b = fake.body(try XCTUnwrap(fake.requests.last))
+        XCTAssertEqual(fake.requests.last?.url?.path, "/v1/issues/\(id)/comments")
+        XCTAssertEqual(b["body"] as? String, "Late.")
+        XCTAssertEqual(b["health"] as? String, "off_track")
+        let first = try await health(t)
+        XCTAssertEqual(first, .offTrack)
+        try await t.postUpdate(e, health: nil, markdown: "Note only.")
+        XCTAssertEqual(Array(fake.body(try XCTUnwrap(fake.requests.last)).keys), ["body"], "no health, no key")
+        let kept = try await health(t)
+        XCTAssertEqual(kept, .offTrack, "a note keeps the health of the last update")
+        let plain = fake.addIssue(project: acme, title: "Plain")
+        do { try await t.postUpdate(epicRef(plain), health: .atRisk, markdown: "x"); XCTFail("no throw") } catch {
+            XCTAssertEqual(error as? ProviderError, .vendor(code: "validation", message: "Big Timer: only an update on an epic has a health."))
+        }
+        let comments = try await t.comments(try await ref(t, plain))
+        XCTAssertTrue(comments.isEmpty)
+    }
+
+    func testHealthNilWithoutDueDate() async throws {
+        let id = fake.addEpic(project: acme, title: "E")
+        let t = tracker()
+        let e = try await firstEpic(t)
+        try await t.postUpdate(e, health: .atRisk, markdown: "Slow.")
+        let none = try await health(t)
+        XCTAssertNil(none)
+        _ = try await t.updateEpic(e, EpicPatch(targetDate: Calendar.current.date(from: DateComponents(year: 2026, month: 12, day: 1))))
+        let later = try await health(t)
+        XCTAssertEqual(later, .atRisk)
+        XCTAssertEqual(fake.issue(id)?.due, "2026-12-01")
+    }
+
+    func testChangeOfEpicGivesNoItemEvent() async throws {
+        let t = tracker()
+        let base = try await t.poll(since: nil)
+        let epic = fake.addEpic(project: acme, title: "E", due: "2026-12-01")
+        let page = try await t.poll(since: base.cursor)
+        XCTAssertTrue(page.events.isEmpty, "an epic is not an item")
+        XCTAssertEqual(page.cursor.rawValue, String(fake.head))
+        fake.addComment(issue: epic, body: "Update", health: "on_track")
+        let comment = try await t.poll(since: page.cursor)
+        XCTAssertTrue(comment.events.isEmpty, "an update on an epic gives no comment row")
+        let item = fake.addIssue(project: acme, title: "Real", epic: epic)
+        let rows = try await t.poll(since: comment.cursor)
+        XCTAssertEqual(rows.events.map(\.kind), [.item])
+        XCTAssertEqual(rows.events.first?.summary?.title, "Real")
+        _ = item
+    }
+
+    func testEpicDeleteGivesNoItemEvent() async throws {
+        let epic = fake.addEpic(project: acme, title: "E")
+        let t = tracker()
+        _ = try await t.epics(in: project)
+        let base = try await t.poll(since: nil)
+        fake.deleteIssue(epic)
+        let page = try await t.poll(since: base.cursor)
+        XCTAssertTrue(page.events.isEmpty)
+    }
+
+    func testEpicErrorMessages() {
+        XCTAssertEqual(BigTimerAPI.epicMessage("kind", "cannot change after create"), "Big Timer: the kind of an item is fixed after create.")
+        XCTAssertEqual(BigTimerAPI.epicMessage("health", "must be on_track, at_risk, or off_track"), "Big Timer: the health must be on_track, at_risk or off_track.")
+        XCTAssertEqual(BigTimerAPI.epicMessage("epic_uuid", "an epic cannot be in an epic"), "Big Timer: an epic cannot be in an epic.")
+        XCTAssertEqual(BigTimerAPI.epicMessage("epic_uuid", "belongs to another project"), "Big Timer: an epic must be in the project of its items.")
+        XCTAssertEqual(BigTimerAPI.epicMessage("epic_uuid", "odd"), "Big Timer: the epic is not valid (odd).")
+    }
+
+    func testPatchEncodesClearAsNull() throws {
+        var p = BTIssuePatch(title: nil, details: nil, status: nil, parent_uuid: nil, due_date: "2026-12-01")
+        p.clear = ["start_date", "due_date"]
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: JSONEncoder().encode(p)) as? [String: Any])
+        XCTAssertEqual(json["due_date"] as? String, "2026-12-01", "a value wins over clear")
+        XCTAssertTrue(json["start_date"] is NSNull)
+        XCTAssertEqual(json.count, 2)
+        XCTAssertFalse(p.isEmpty)
+        XCTAssertTrue(BTIssuePatch(title: nil, details: nil, status: nil, parent_uuid: nil).isEmpty)
+        var c = BTIssuePatch(title: nil, details: nil, status: nil, parent_uuid: nil)
+        c.clear = ["epic_uuid"]
+        XCTAssertFalse(c.isEmpty)
     }
 }

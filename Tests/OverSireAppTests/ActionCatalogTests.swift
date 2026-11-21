@@ -273,6 +273,87 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(missing, .notAllowed("FAKE has no loaded item FAKE-99."))
     }
 
+    func testPostEpicUpdateMarksAndRefreshes() async throws {
+        let rig = try await EpicRig()
+        let epic: Epic = rig.epic
+        _ = await rig.rows(count: 1)
+        let ok: Bool = await withCheckedContinuation { c in
+            DispatchQueue.main.async {
+                rig.d.projectStore.postEpicUpdate(epic, health: .offTrack, note: "Two items slip.", by: EventActor(type: .agent, name: "codex")) { c.resume(returning: $0) }
+            }
+        }
+        XCTAssertTrue(ok)
+        let kept = rig.fake.postedUpdates
+        XCTAssertEqual(kept.map(\.markdown), ["Two items slip."])
+        await until("the view shows the health") { await rig.snapshot()?.epic(epic.id)?.health == .offTrack }
+        await until("the mark ends") { await MainActor.run { rig.d.projectStore.writeActors.isEmpty } }
+        let missing: Bool = await withCheckedContinuation { c in
+            DispatchQueue.main.async {
+                var gone = epic
+                gone = Epic(id: "nope", title: gone.title, state: .active, url: "", project: gone.project)
+                rig.d.projectStore.postEpicUpdate(gone, health: .onTrack, note: "x") { c.resume(returning: $0) }
+            }
+        }
+        XCTAssertFalse(missing)
+        await until("the mark ends after a failure") { await MainActor.run { rig.d.projectStore.writeActors.isEmpty } }
+    }
+
+    func testUpdateHealthWritesOneRow() async throws {
+        let rig = try await EpicRig()
+        _ = await rig.rows(count: 1)
+        let secret = "Private plan text for the board."
+        let r = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk"), "state": .string("active"),
+                                                              "health": .string("at_risk"), "note": .string(secret)]))
+        XCTAssertEqual(r, .ok(summary: "Epic Review desk is updated."))
+        let found = await rig.row(.epicUpdated)
+        let row = try XCTUnwrap(found)
+        let all = await rig.rows(count: 2)
+        XCTAssertEqual(all.filter { $0.kind == .epicUpdated }.count, 1)
+        XCTAssertEqual(row.payload?["fields"], .array([.string("state"), .string("health"), .string("note")]))
+        XCTAssertEqual(row.payload?["health"], .string("at_risk"))
+        XCTAssertEqual(row.payload?["state"], .string("active"))
+        XCTAssertFalse(row.summary.contains(secret))
+        XCTAssertFalse(String(describing: row.payload).contains(secret))
+        let posted = rig.fake.postedUpdates
+        XCTAssertEqual(posted.map(\.markdown), [secret])
+        XCTAssertEqual(posted.map(\.health), [.atRisk])
+        let snap = await rig.snapshot()
+        XCTAssertEqual(snap?.epic(rig.epic.id)?.state, .active)
+        // A health with no note gives a body.
+        let bare = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk"), "health": .string("on_track")]))
+        XCTAssertEqual(bare, .ok(summary: "Epic Review desk is updated."))
+        let after = rig.fake.postedUpdates
+        XCTAssertEqual(after.last?.markdown, "Health: On track")
+        XCTAssertEqual(after.count, 2)
+        let list = await rig.d.actions.run("epic.list", args(["project": .string("FAKE")]))
+        guard case .ok(_, let rows?, _) = list else { return XCTFail("\(list)") }
+        XCTAssertEqual(rows.array?.first?["health"]?.string, "on_track")
+        let show = await rig.d.actions.run("epic.show", args(["project": .string("FAKE"), "epic": .string("Review desk")]))
+        guard case .ok(_, let data?, _) = show else { return XCTFail("\(show)") }
+        XCTAssertEqual(data["health"]?.string, "on_track")
+    }
+
+    func testUpdateHealthOnPlaneRefused() async throws {
+        let rig = try await EpicRig(capabilities: [.epics])
+        let health = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk"), "health": .string("at_risk")]))
+        XCTAssertEqual(health, .notAllowed("\(ENV.trackerName(rig.fake.account)) has no epic health."))
+        let note = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk"), "note": .string("x")]))
+        XCTAssertEqual(note, health)
+        let posted = rig.fake.postedUpdates
+        XCTAssertTrue(posted.isEmpty)
+    }
+
+    func testUpdateBadHealth() async throws {
+        let rig = try await EpicRig()
+        let bad = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk"), "health": .string("fine"),
+                                                                "state": .string("active")]))
+        XCTAssertEqual(bad, .notAllowed("No health fine. Use: on_track, at_risk, off_track."))
+        let snap = await rig.snapshot()
+        XCTAssertEqual(snap?.epic(rig.epic.id)?.state, .planned, "a bad health writes nothing")
+        let none = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk")]))
+        XCTAssertEqual(none, .notAllowed("Give a field to change."))
+    }
+
     /// An epic made by `epic.create` is usable at once, while the refresh hangs (OVERSIRE-565).
     func testEpicCreateThenAddItemsWhileTheRefreshHangs() async throws {
         let rig = try await EpicRig()

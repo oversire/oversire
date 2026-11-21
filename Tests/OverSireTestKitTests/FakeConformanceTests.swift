@@ -127,6 +127,12 @@ final class FakeConformanceTests: XCTestCase {
         } catch { XCTAssertEqual(error as? ProviderError, .notFound) }
     }
 
+    func testCapabilityNeedsEpicUpdating() {
+        let r = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.epicHealth]))
+        XCTAssertTrue(r.problems.contains("capability epicHealth needs EpicUpdating"), r.description)
+        XCTAssertTrue(ProviderConformance.capabilities(FakeTracker()).passed)
+    }
+
     func testCapabilityNeedsEpicTracking() {
         let r = ProviderConformance.capabilities(FakeCodeHost(capabilities: [.epics]))
         XCTAssertTrue(r.problems.contains("capability epics needs EpicTracking"), r.description)

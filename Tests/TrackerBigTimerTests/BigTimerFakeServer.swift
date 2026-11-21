@@ -15,6 +15,9 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         var due: String?
         var assignee: String?
         var parent: String?
+        var kind = "issue"
+        var epic: String?
+        var start: String?
         var createdBy: String
         var createdAt: Date
         var updatedAt: Date
@@ -26,6 +29,7 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         var issue: String
         var author: String
         var body: String
+        var health: String?
         var createdAt: Date
         var updatedAt: Date
         var version = 1
@@ -96,13 +100,14 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
     }
 
     @discardableResult
-    func addIssue(project: String, title: String, status: String = "open", assignee: String? = nil, size: String? = nil, due: String? = nil, parent: String? = nil) -> String {
+    func addIssue(project: String, title: String, status: String = "open", assignee: String? = nil, size: String? = nil, due: String? = nil, parent: String? = nil,
+                  kind: String = "issue", epic: String? = nil, start: String? = nil) -> String {
         lock.withLock {
             let id = nextID()
             let n = (issues.filter { $0.project == project }.map(\.number).max() ?? 0) + 1
             let t = tick()
             let i = Issue(uuid: id, project: project, number: n, title: title, details: nil, status: status, size: size, due: due,
-                          assignee: assignee, parent: parent, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
+                          assignee: assignee, parent: parent, kind: kind, epic: epic, start: start, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
             issues.append(i)
             log(issue: i, op: "upsert")
             return id
@@ -110,8 +115,22 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
     }
 
     @discardableResult
-    func addComment(issue: String, body: String) -> String {
-        lock.withLock { insertComment(issue: issue, body: body) }
+    func addEpic(project: String, title: String, status: String = "open", due: String? = nil, start: String? = nil) -> String {
+        addIssue(project: project, title: title, status: status, due: due, kind: "epic", start: start)
+    }
+
+    @discardableResult
+    func addComment(issue: String, body: String, health: String? = nil) -> String {
+        lock.withLock { insertComment(issue: issue, body: body, health: health) }
+    }
+
+    func deleteIssue(_ uuid: String) {
+        lock.withLock {
+            guard let n = issues.firstIndex(where: { $0.uuid == uuid }) else { return }
+            for k in issues.indices where issues[k].epic == uuid { issues[k].epic = nil; touch(k) }
+            let gone = issues.remove(at: n)
+            changes.append(Change(seq: changes.count + 1, entity: "issue", op: "delete", record: nil, uuid: gone.uuid, version: gone.version + 1))
+        }
     }
 
     func deleteComment(_ uuid: String) {
@@ -197,6 +216,14 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
             else if let parent = resolve(p) { rows = rows.filter { $0.parent == parent.uuid } }
             else { return problem(404, "not_found", "No issue.") }
         }
+        if let k = q["kind"] { rows = rows.filter { $0.kind == k } }
+        if let e = q["epic"] {
+            if e == "none" { rows = rows.filter { $0.kind == "issue" && $0.epic == nil && ($0.parent.flatMap(by) ?? $0).epic == nil } }
+            else if let epic = resolve(e) {
+                if epic.kind != "epic" { return problem(400, "validation", "A query value is not valid.", errors: ["epic": "is not an epic"]) }
+                rows = rows.filter { $0.epic == epic.uuid || $0.parent.flatMap(by)?.epic == epic.uuid }
+            } else { return problem(404, "not_found", "No issue.") }
+        }
         if let s = q["status"] { rows = rows.filter { s.split(separator: ",").map(String.init).contains($0.status) } }
         if let text = q["q"]?.lowercased() {
             rows = rows.filter { $0.title.lowercased().contains(text) || ($0.details ?? "").lowercased().contains(text) }
@@ -212,17 +239,28 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
 
     private func createIssue(_ r: URLRequest) -> (Int, [String: String], String) {
         let b = body(r)
-        guard Set(b.keys).isSubset(of: ["project_uuid", "title", "details", "status", "parent_uuid"]) else { return problem(400, "validation", "Unknown field.") }
+        guard Set(b.keys).isSubset(of: ["project_uuid", "title", "details", "status", "parent_uuid", "kind", "epic", "start_date", "due_date", "size"]) else {
+            return problem(400, "validation", "Unknown field.")
+        }
         guard let p = b["project_uuid"] as? String, projectRows.contains(where: { $0.uuid == p }), let title = b["title"] as? String, !title.isEmpty else {
             return problem(400, "validation", "A project and a title are required.")
         }
         let parent = b["parent_uuid"] as? String
         if let parent, let refusal = parentRefusal(parent, for: nil, project: p) { return refusal }
+        let kind = b["kind"] as? String ?? "issue"
+        guard ["issue", "epic"].contains(kind) else { return problem(400, "validation", "A field is not valid.", errors: ["kind": "must be issue or epic"]) }
+        var epic: String?
+        if let ref = b["epic"] as? String {
+            guard let e = resolve(ref) else { return problem(404, "not_found", "No issue.") }
+            epic = e.uuid
+            if let refusal = epicRefusal(epic, kind: kind, parent: parent, project: p) { return refusal }
+        }
         let id = nextID()
         let t = tick()
         let n = (issues.filter { $0.project == p }.map(\.number).max() ?? 0) + 1
         let i = Issue(uuid: id, project: p, number: n, title: title, details: b["details"] as? String, status: b["status"] as? String ?? "open",
-                      size: nil, due: nil, assignee: nil, parent: parent, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
+                      size: b["size"] as? String, due: b["due_date"] as? String, assignee: nil, parent: parent, kind: kind, epic: epic,
+                      start: b["start_date"] as? String, createdBy: memberRows[0].uuid, createdAt: t, updatedAt: t)
         issues.append(i)
         log(issue: i, op: "upsert")
         return ok(view(i), status: 201)
@@ -230,16 +268,26 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
 
     private func patchIssue(_ i: Issue, _ r: URLRequest) -> (Int, [String: String], String) {
         let b = body(r)
-        guard Set(b.keys).isSubset(of: ["title", "details", "status", "size", "due_date", "parent_uuid"]) else { return problem(400, "validation", "Unknown field.") }
+        guard Set(b.keys).isSubset(of: ["title", "details", "status", "size", "due_date", "parent_uuid", "start_date", "epic_uuid"]) else {
+            return problem(400, "validation", "Unknown field.")
+        }
         guard let n = issues.firstIndex(where: { $0.uuid == i.uuid }) else { return problem(404, "not_found", "No issue.") }
         if let parent = b["parent_uuid"] as? String {
             if parent.isEmpty { issues[n].parent = nil }
             else if let refusal = parentRefusal(parent, for: i.uuid, project: i.project) { return refusal }
-            else { issues[n].parent = parent }
+            else { issues[n].parent = parent; issues[n].epic = nil }
+        }
+        if b.keys.contains("epic_uuid") {
+            let epic = b["epic_uuid"] as? String
+            if let refusal = epicRefusal(epic, kind: issues[n].kind, parent: issues[n].parent, project: i.project) { return refusal }
+            issues[n].epic = epic
         }
         if let v = b["title"] as? String { issues[n].title = v }
-        if let v = b["details"] as? String { issues[n].details = v }
+        if b.keys.contains("details") { issues[n].details = b["details"] as? String }
         if let v = b["status"] as? String { issues[n].status = v }
+        if b.keys.contains("size") { issues[n].size = b["size"] as? String }
+        if b.keys.contains("due_date") { issues[n].due = b["due_date"] as? String }
+        if b.keys.contains("start_date") { issues[n].start = b["start_date"] as? String }
         touch(n)
         return ok(view(issues[n]))
     }
@@ -255,6 +303,20 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
             else { text = nil }
         } else { text = "does not name a live record" }
         return text.map { problem(400, "validation", "A field is not valid.", errors: ["parent_uuid": $0]) }
+    }
+
+    /// The epic rules of the server: an epic is in no epic, a sub-item has none, the epic is a live epic of the same project.
+    private func epicRefusal(_ epic: String?, kind: String, parent: String?, project: String) -> (Int, [String: String], String)? {
+        guard let epic else { return nil }
+        let text: String?
+        if kind == "epic" { text = "an epic cannot be in an epic" }
+        else if parent != nil { text = "a sub-item uses the epic of its parent" }
+        else if let e = by(epic) {
+            if e.kind != "epic" { text = "is not an epic" }
+            else if e.project != project { text = "belongs to another project" }
+            else { text = nil }
+        } else { text = "does not name a live record" }
+        return text.map { problem(400, "validation", "A field is not valid.", errors: ["epic_uuid": $0]) }
     }
 
     private func assign(_ i: Issue, _ r: URLRequest) -> (Int, [String: String], String) {
@@ -274,8 +336,17 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
 
     private func addComment(_ i: Issue, _ r: URLRequest) -> (Int, [String: String], String) {
         let b = body(r)
-        guard Set(b.keys) == ["body"], let text = b["body"] as? String else { return problem(400, "validation", "A body is required.") }
-        let id = insertComment(issue: i.uuid, body: text)
+        guard Set(b.keys).isSubset(of: ["body", "health"]), b.keys.contains("body"), let text = b["body"] as? String else {
+            return problem(400, "validation", "A body is required.")
+        }
+        let health = b["health"] as? String
+        if let health {
+            guard ["on_track", "at_risk", "off_track"].contains(health) else {
+                return problem(400, "validation", "A field is not valid.", errors: ["health": "must be on_track, at_risk, or off_track"])
+            }
+            if i.kind != "epic" { return problem(400, "validation", "A field is not valid.", errors: ["health": "only an update on an epic has a health"]) }
+        }
+        let id = insertComment(issue: i.uuid, body: text, health: health)
         return ok(commentJSON(comments.first { $0.uuid == id }!), status: 201)
     }
 
@@ -314,10 +385,10 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         log(issue: issues[n], op: "upsert")
     }
 
-    private func insertComment(issue: String, body: String) -> String {
+    private func insertComment(issue: String, body: String, health: String? = nil) -> String {
         let id = nextID()
         let t = tick()
-        let c = Comment(uuid: id, issue: issue, author: memberRows[0].uuid, body: body, createdAt: t, updatedAt: t)
+        let c = Comment(uuid: id, issue: issue, author: memberRows[0].uuid, body: body, health: health, createdAt: t, updatedAt: t)
         comments.append(c)
         changes.append(Change(seq: changes.count + 1, entity: "issue_comment", op: "upsert", record: [
             "uuid": id, "issue_uuid": issue, "version": 1, "updated_at": Self.time(t), "created_at": Self.time(t), "body": body,
@@ -329,13 +400,16 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
         changes.append(Change(seq: changes.count + 1, entity: "issue", op: op, record: [
             "uuid": i.uuid, "version": i.version, "project_uuid": i.project, "number": i.number, "title": i.title,
             "created_at": Self.time(i.createdAt), "updated_at": Self.time(i.updatedAt), "status": i.status,
-            "parent_uuid": i.parent as Any? ?? NSNull(),
+            "parent_uuid": i.parent as Any? ?? NSNull(), "kind": i.kind, "epic_uuid": i.epic as Any? ?? NSNull(),
+            "start_date": i.start as Any? ?? NSNull(),
         ], uuid: i.uuid, version: i.version))
     }
 
     private func resolve(_ ref: String) -> Issue? {
         issues.first { $0.uuid == ref || key($0).caseInsensitiveCompare(ref) == .orderedSame }
     }
+
+    private func by(_ uuid: String) -> Issue? { issues.first { $0.uuid == uuid } }
 
     private func key(_ i: Issue) -> String { "\(projectRows.first { $0.uuid == i.project }?.prefix ?? "X")-\(i.number)" }
 
@@ -376,14 +450,27 @@ final class BigTimerFakeServer: HTTPTransport, @unchecked Sendable {
             "parent_key": i.parent.flatMap { p in issues.first { $0.uuid == p }.map(key) } as Any? ?? NSNull(),
             "sub_item_count": issues.filter { $0.parent == i.uuid }.count,
             "sub_items_done": issues.filter { $0.parent == i.uuid && ["done", "cancelled"].contains($0.status) }.count,
+            "kind": i.kind, "epic_uuid": i.epic as Any? ?? NSNull(), "start_date": i.start as Any? ?? NSNull(),
         ]
+        let epicOfItem = i.epic ?? i.parent.flatMap(by)?.epic
+        o["epic_key"] = epicOfItem.flatMap(by).map(key) as Any? ?? NSNull()
+        // The roll-up counts the live issues of the epic and their sub-items. It is 0 for an issue.
+        let members = i.kind == "epic" ? issues.filter { $0.epic == i.uuid || $0.parent.flatMap(by)?.epic == i.uuid } : []
+        let sizes = ["S": 30, "M": 60, "L": 240, "XL": 480]
+        o["item_count"] = members.count
+        o["items_done"] = members.filter { ["done", "cancelled"].contains($0.status) }.count
+        o["items_in_progress"] = members.filter { ["in_progress", "client_reviewing"].contains($0.status) }.count
+        o["items_blocked"] = members.filter { $0.status == "blocked" }.count
+        o["estimate_minutes"] = members.reduce(0) { $0 + ($1.size.flatMap { sizes[$0] } ?? 0) }
+        let newest = live.filter { $0.health != nil }.max { $0.createdAt < $1.createdAt }
+        o["health"] = i.kind == "epic" && i.due != nil ? newest?.health as Any? ?? NSNull() : NSNull()
         o["last_comment_at"] = live.map(\.createdAt).max().map(Self.time) ?? NSNull()
         return o
     }
 
     private func commentJSON(_ c: Comment) -> [String: Any] {
         ["uuid": c.uuid, "issue_uuid": c.issue, "author_uuid": c.author, "body": c.body, "created_at": Self.time(c.createdAt),
-         "updated_at": Self.time(c.updatedAt)]
+         "updated_at": Self.time(c.updatedAt), "health": c.health as Any? ?? NSNull()]
     }
 
     private func ok(_ o: [String: Any], status: Int = 200) -> (Int, [String: String], String) {
