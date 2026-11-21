@@ -431,22 +431,36 @@ public final class PlaneTracker: Tracker, IntakeCreating, AttachmentUploading, A
 
     /// Pending intake items. Only v2 can filter by status.
     public func intake(_ p: ProjectRef) async throws -> [IntakeItem] {
-        let names = await memberNames()
-        let q = [URLQueryItem(name: "status", value: "-2"), URLQueryItem(name: "per_page", value: "100"),
-                 URLQueryItem(name: "fields", value: "id,name,priority,work_item_id,created_at,created_by_id,source")]
-        let obj = try await api.send("GET", "/api/v2/workspaces/\(workspace.slug)/projects/\(p.id)/intake-issues/", query: q)
-        let rows = (obj as? [String: Any])?["data"] as? [[String: Any]] ?? []
-        let found: [IntakeItem] = rows.compactMap { r in
-            guard let id = PlaneAPI.id(r["id"]), let item = PlaneAPI.id(r["work_item_id"]) else { return nil }
-            return IntakeItem(id: id, workItemId: item, name: r["name"] as? String ?? "Untitled",
-                              priority: (r["priority"] as? String).flatMap { $0 == "none" ? nil : $0.capitalized },
-                              createdAt: parseISO(r["created_at"] as? String) ?? Date(),
-                              author: PlaneAPI.id(r["created_by_id"]).map { names[$0] ?? $0 },
-                              source: r["source"] as? String)
-        }
-        lock.withLock { pendingIntake[p.id] = Set(found.map(\.workItemId)) }
-        return found
+        try await intake(p, statuses: [.pending])
     }
+
+    /// The intake items with one of the statuses. One read for each status. A pending item has no `status` in the result.
+    public func intake(_ p: ProjectRef, statuses: Set<IntakeStatus>) async throws -> [IntakeItem] {
+        let names = await memberNames()
+        var out: [IntakeItem] = []
+        for status in Self.intakeCodes.keys.sorted(by: { $0.rawValue < $1.rawValue }) where statuses.contains(status) {
+            let q = [URLQueryItem(name: "status", value: String(Self.intakeCodes[status]!)), URLQueryItem(name: "per_page", value: "100"),
+                     URLQueryItem(name: "fields", value: "id,name,priority,work_item_id,created_at,created_by_id,source,status,snoozed_till")]
+            let obj = try await api.send("GET", "/api/v2/workspaces/\(workspace.slug)/projects/\(p.id)/intake-issues/", query: q)
+            let rows = (obj as? [String: Any])?["data"] as? [[String: Any]] ?? []
+            let found: [IntakeItem] = rows.compactMap { r in
+                guard let id = PlaneAPI.id(r["id"]), let item = PlaneAPI.id(r["work_item_id"]) else { return nil }
+                return IntakeItem(id: id, workItemId: item, name: r["name"] as? String ?? "Untitled",
+                                  priority: (r["priority"] as? String).flatMap { $0 == "none" ? nil : $0.capitalized },
+                                  createdAt: parseISO(r["created_at"] as? String) ?? Date(),
+                                  author: PlaneAPI.id(r["created_by_id"]).map { names[$0] ?? $0 },
+                                  source: r["source"] as? String,
+                                  status: status == .pending ? nil : status,
+                                  snoozedUntil: status == .snoozed ? parseISO(r["snoozed_till"] as? String) : nil)
+            }
+            if status == .pending { lock.withLock { pendingIntake[p.id] = Set(found.map(\.workItemId)) } }
+            out += found
+        }
+        return out
+    }
+
+    /// The status codes of the Plane intake API.
+    private static let intakeCodes: [IntakeStatus: Int] = [.pending: -2, .snoozed: 0, .accepted: 1, .declined: -1, .duplicate: 2]
 
     // The work item endpoints do not return pending items.
     public func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail {

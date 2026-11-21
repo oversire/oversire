@@ -181,7 +181,7 @@ final class ActionCatalogTests: XCTestCase {
             ("status.approve", ["key": .string("SLING-1")], "No session result for SLING-1."),
             ("pr.deleteBranch", ["repo": .string("o/r"), "number": .int(4)], "OverSire has no loaded PR o/r#4."),
             ("plan.accept", ["id": .string("s9")], "No open plan change s9."),
-            ("intake.accept", ["project": .string("SLING"), "id": .string("w1")], "No pending intake item w1 in SLING."),
+            ("intake.accept", ["project": .string("SLING"), "id": .string("w1")], "Plane has no intake."),
             ("session.start", ["key": .string("SLING-1"), "machine": .string("far-away-mac")], "session.start runs on this Mac. Use order.start for far-away-mac."),
             ("queue.setSlots", ["project": .string("NOPE"), "slots": .int(2)], "OverSire has no loaded project NOPE."),
         ]

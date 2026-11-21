@@ -557,7 +557,26 @@ public struct ItemOptions: Codable, Sendable {
     }
 }
 
-// A pending item in the intake (triage) queue of a project.
+/// The state of an intake item in the tracker. Open set, like `RelationKind`.
+public struct IntakeStatus: RawRepresentable, Hashable, Sendable, Codable, ExpressibleByStringLiteral, CustomStringConvertible {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(stringLiteral value: String) { rawValue = value }
+    public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+    public var description: String { rawValue }
+
+    public static let pending: IntakeStatus = "pending"
+    public static let snoozed: IntakeStatus = "snoozed"
+    public static let accepted: IntakeStatus = "accepted"
+    public static let declined: IntakeStatus = "declined"
+    public static let duplicate: IntakeStatus = "duplicate"
+}
+
+// An item in the intake (triage) queue of a project. `status` and `snoozedUntil` are nil on a pending item that a plain read gives.
 public struct IntakeItem: Codable, Hashable, Sendable {
     public let id: String
     public let workItemId: String
@@ -566,8 +585,11 @@ public struct IntakeItem: Codable, Hashable, Sendable {
     public let createdAt: Date
     public let author: String?
     public let source: String?
+    public let status: IntakeStatus?
+    public let snoozedUntil: Date?
 
-    public init(id: String, workItemId: String, name: String, priority: String?, createdAt: Date, author: String?, source: String?) {
+    public init(id: String, workItemId: String, name: String, priority: String?, createdAt: Date, author: String?, source: String?,
+                status: IntakeStatus? = nil, snoozedUntil: Date? = nil) {
         self.id = id
         self.workItemId = workItemId
         self.name = name
@@ -575,6 +597,8 @@ public struct IntakeItem: Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.author = author
         self.source = source
+        self.status = status
+        self.snoozedUntil = snoozedUntil
     }
 }
 

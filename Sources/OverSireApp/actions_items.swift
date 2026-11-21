@@ -9,6 +9,9 @@ struct ItemActions {
 
     static let key = ("string", "The item key, for example OVERSIRE-12.")
     static let project = ("string", "The project identifier, for example OVERSIRE.")
+    static let relationKinds: [RelationKind] = [.blockedBy, .blocks, .relatesTo, .duplicate]
+    /// The relation kind of a word, in any case.
+    static func relationKind(_ word: String) -> RelationKind? { relationKinds.first { $0.rawValue.lowercased() == word.lowercased() } }
     /// The largest file of `item.attach`, in bytes.
     static let maxAttachBytes = 10 << 20
 
@@ -283,10 +286,9 @@ struct ItemActions {
                                                "remove": ("boolean", "True removes the relation.")], required: ["key", "kind", "other"]),
                        capability: .relations) { a in
                 await link.item(a) { d, f, done in
-                    let kinds: [RelationKind] = [.blockedBy, .blocks, .relatesTo, .duplicate]
                     let word = a.string("kind") ?? ""
-                    guard let kind = kinds.first(where: { $0.rawValue.lowercased() == word.lowercased() }) else {
-                        done(.notAllowed("No relation kind \(word). Use: \(kinds.map(\.rawValue).joined(separator: ", "))."))
+                    guard let kind = Self.relationKind(word) else {
+                        done(.notAllowed("No relation kind \(word). Use: \(Self.relationKinds.map(\.rawValue).joined(separator: ", "))."))
                         return
                     }
                     guard d.projectStore.has(.relations, in: f.snap) else { done(ActionLink.unsupported(f.snap, "relations")); return }

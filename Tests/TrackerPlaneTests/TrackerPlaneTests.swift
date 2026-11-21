@@ -455,6 +455,31 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual(rel?["issues"] as? [String], ["i7"])
     }
 
+    func testIntakeStatusesQuery() async throws {
+        let list = "/api/v2/workspaces/acme/projects/P1/intake-issues/"
+        http.on("GET", list, #"{"data":[{"id":"n2","work_item_id":"w2","name":"Later","created_at":"2026-10-16T09:00:00Z","status":0,"snoozed_till":"2026-11-25T09:00:00Z"}]}"#)
+        let items = try await plane.intake(project, statuses: [.snoozed])
+        XCTAssertEqual(items.map(\.name), ["Later"])
+        XCTAssertEqual(items[0].status, .snoozed)
+        XCTAssertEqual(items[0].snoozedUntil, parseISO("2026-11-25T09:00:00Z"))
+        let queries = http.requests.compactMap { $0.url }.filter { $0.path(percentEncoded: false).hasSuffix("/intake-issues/") }
+            .map { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems ?? [] }
+        XCTAssertEqual(queries.count, 1, "one read for the snoozed status only")
+        guard queries.count == 1 else { return }
+        XCTAssertEqual(queries[0].first { $0.name == "status" }?.value, "0")
+        XCTAssertTrue(queries[0].first { $0.name == "fields" }?.value?.contains("snoozed_till") == true)
+        let both = try await plane.intake(project, statuses: [.pending, .snoozed])
+        XCTAssertEqual(both.count, 2, "one read for each status")
+    }
+
+    /// A comment on the work item of a pending intake item uses the plain comment route. Only a recorded call from a live Plane can prove that Plane accepts it.
+    func testCommentOnAPendingIntakeItemUsesTheCommentRoute() async throws {
+        http.on("POST", "\(ws)/projects/P1/issues/w1/comments/", "{}")
+        let ref = ItemRef(project: project, id: "w1", key: "ENG-1", url: URL(string: "https://x/ENG-1")!)
+        try await plane.comment(ref, markdown: "Declined: out of scope.")
+        XCTAssertEqual(http.body("POST", "\(ws)/projects/P1/issues/w1/comments/")?["comment_html"] as? String, "<p>Declined: out of scope.</p>")
+    }
+
     // One listing gives all pending bodies, for Groom. A row with no description_html is left out.
     func testIntakeDetailsListsThePendingBodies() async throws {
         http.on("GET", "\(ws)/projects/P1/intake-issues/", #"""

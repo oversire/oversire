@@ -14,7 +14,7 @@ final class AppCalls: @unchecked Sendable {
         "ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain",
         "ci.rerun", "ci.rerunJob", "ci.cancel", "ci.dispatch", "ci.approve",
         "vendor.list", "vendor.run",
-        "item.setLabels", "item.setAreas", "project.addLabel", "project.refresh", "intake.create", "people.list", "activity.list",
+        "item.setLabels", "item.setAreas", "project.addLabel", "project.refresh", "intake.create", "intake.list", "intake.accept", "intake.decline", "intake.snooze", "intake.merge", "intake.edit", "people.list", "activity.list",
     ]
 
     private let catalog: any ActionCatalog

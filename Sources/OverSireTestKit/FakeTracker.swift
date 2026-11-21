@@ -19,6 +19,7 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
     private var patchList: [ProjectSettingsPatch] = []
     private var relationList: [String: [ItemRelation]] = [:]   // item id → relations
     private var intakeList: [String: [IntakeItem]] = [:]       // project id → pending intake items
+    private var snoozedList: [String: [IntakeItem]] = [:]      // project id → snoozed intake items
     private var declinedList: [String: Item] = [:]             // work item id → the item that decline removed
     private var epicList: [String: [Epic]] = [:]             // project id → epics
     private var epicOf: [String: [EpicID]] = [:]               // item id → epic ids, the first wins
@@ -247,6 +248,26 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
         return try base.locked { intakeList[p.id] ?? [] }
     }
 
+    /// The intake items with the given statuses. Pending items have no status, as in the Plane adapter.
+    public func intake(_ p: ProjectRef, statuses: Set<IntakeStatus>) async throws -> [IntakeItem] {
+        guard capabilities.contains(.intake) else { throw ProviderError.unsupported(.intake) }
+        return base.lockedValue {
+            (statuses.contains(.pending) ? (intakeList[p.id] ?? []) : []) + (statuses.contains(.snoozed) ? (snoozedList[p.id] ?? []) : [])
+        }
+    }
+
+    /// The sequence of each work item key in the project, as the Plane adapter reads it.
+    public func intakeSequences(_ p: ProjectRef) async throws -> [String: Int] {
+        guard capabilities.contains(.intake) else { throw ProviderError.unsupported(.intake) }
+        return base.lockedValue {
+            var out: [String: Int] = [:]
+            for i in (intakeList[p.id] ?? []) + (snoozedList[p.id] ?? []) {
+                if let n = itemList[p.id]?.first(where: { $0.id == i.workItemId }).flatMap({ Int($0.key.split(separator: "-").last ?? "") }) { out[i.workItemId] = n }
+            }
+            return out
+        }
+    }
+
     public func intakeDetail(_ i: IntakeItem, in p: ProjectRef) async throws -> IntakeDetail {
         try base.locked {
             intakeDetailCount += 1
@@ -265,6 +286,12 @@ public final class FakeTracker: Tracker, ProjectSettingsEditing, RelationManagin
         }
         try base.locked {
             intakeList[p.id]?.removeAll { $0.id == i.id }
+            snoozedList[p.id]?.removeAll { $0.id == i.id }
+            if case .snooze(let until) = a {
+                snoozedList[p.id, default: []].append(IntakeItem(
+                    id: i.id, workItemId: i.workItemId, name: i.name, priority: i.priority, createdAt: i.createdAt,
+                    author: i.author, source: i.source, status: .snoozed, snoozedUntil: until))
+            }
             if a == .pending {
                 intakeList[p.id, default: []].append(i)
                 if let o = declinedList.removeValue(forKey: i.workItemId) { itemList[p.id, default: []].append(o) }

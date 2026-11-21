@@ -234,7 +234,7 @@ extension AppEnvironment: RepoAccounts {}
 
 // ─── Optional features of the adapters ───────────────────────────────────────
 
-extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeListing, LabelIdReading, ItemReading {}
+extension PlaneTracker: MemberListing, SelfAssigning, StatusTimeline, IntakeKeying, IntakeStatusListing, IntakeListing, LabelIdReading, ItemReading {}
 
 extension BigTimerTracker: MemberListing, SelfAssigning, ItemReading, OwnerEmail {}
 

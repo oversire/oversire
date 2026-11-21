@@ -35,6 +35,13 @@ final class AppCallsTests: XCTestCase {
         for id in ["item.closeSubItems", "intake.delete", "pr.merge"] { XCTAssertFalse(AppCalls.allowed.contains(id), id) }
     }
 
+    func testAllowsIntakeActions() {
+        for id in ["intake.list", "intake.accept", "intake.decline", "intake.snooze", "intake.merge", "intake.edit"] {
+            XCTAssertTrue(AppCalls.allowed.contains(id), id)
+        }
+        XCTAssertFalse(AppCalls.allowed.contains("intake.delete"))
+    }
+
     func testRunsPeopleAndActivityLists() async throws {
         let rig = try await EpicRig()
         let posted = Posted()

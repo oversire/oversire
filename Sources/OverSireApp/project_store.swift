@@ -64,6 +64,8 @@ protocol MemberListing: Tracker { func memberNames() async -> [String: String] }
 protocol SelfAssigning: Tracker { func assignMe(_ i: ItemRef) async throws }
 protocol StatusTimeline: Tracker { func timeline(_ i: ItemRef, statuses: [StatusOption], current: String?) async throws -> [ActivityEntry] }
 protocol IntakeKeying: Tracker { func intakeSequences(_ p: ProjectRef) async throws -> [String: Int] }
+/// The intake items with a status other than pending, for example snoozed ones.
+protocol IntakeStatusListing: Tracker { func intake(_ p: ProjectRef, statuses: Set<IntakeStatus>) async throws -> [IntakeItem] }
 /// All pending intake bodies in one listing. Work item id → detail.
 protocol IntakeListing: Tracker { func intakeDetails(_ p: ProjectRef) async throws -> [String: IntakeDetail] }
 /// One item without comments and links, for a read that needs only the fields.
@@ -1403,12 +1405,115 @@ final class ProjectStore {
         }
     }
 
-    // The refresh then moves an accepted item into the list.
-    func triage(projectKey: String, item: IntakeItem, action: IntakeAction, done: @escaping (Bool) -> Void) {
+    /// The intake items of a project with one of the statuses. A pending read uses the snapshot.
+    func intakeItems(projectKey: String, statuses: Set<IntakeStatus>, done: @escaping (Result<[IntakeItem], ProviderError>) -> Void) {
+        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { done(.failure(.notFound)); return }
+        if statuses == [.pending] {
+            done(snap.intake.map { .success($0) } ?? .failure(.unsupported(.intake)))
+            return
+        }
+        let project = snap.summary.ref
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: {
+                guard let t = client as? any IntakeStatusListing else { throw ProviderError.unsupported(.intake) }
+                return try await t.intake(project, statuses: statuses)
+            })
+            DispatchQueue.main.async { done(r) }
+        }
+    }
+
+    /// The key of an intake item, such as OVERSIRE-12. Nil until the number is loaded.
+    func intakeKey(of item: IntakeItem, in snap: ProjectSnapshot) -> String? {
+        intakeKeys[item.workItemId].map { "\(snap.summary.identifier)-\($0)" }
+    }
+
+    /// Loads the numbers of the items that have none. `done` runs on the main queue.
+    func fillIntakeKeys(projectKey: String, for items: [IntakeItem], done: @escaping () -> Void) {
+        guard items.contains(where: { intakeKeys[$0.workItemId] == nil }), let snap = snapshots[projectKey],
+              let client = trackers.tracker(snap.summary.ref.workspace) as? any IntakeKeying else { done(); return }
+        let project = snap.summary.ref
+        CallPriority.task(.user) {
+            let r = await Result(awaiting: { try await client.intakeSequences(project) })
+            DispatchQueue.main.async {
+                if case .success(let found) = r { self.intakeKeys.merge(found) { $1 } }
+                done()
+            }
+        }
+    }
+
+    /// An intake item by intake id, work item id or key. It looks in the pending items, then in the other statuses.
+    /// `.notFound` when no item matches.
+    func findIntake(_ ref: String, projectKey: String, statuses: Set<IntakeStatus> = [.pending, .snoozed],
+                    done: @escaping (Result<(item: IntakeItem, key: String?), ProviderError>) -> Void) {
+        guard let snap = snapshots[projectKey], let pending = snap.intake else { done(.failure(.unsupported(.intake))); return }
+        let want = ref.trimmingCharacters(in: .whitespaces)
+        let number = Self.sequence(of: want, identifier: snap.summary.identifier)
+        func look(_ items: [IntakeItem]) -> IntakeItem? {
+            items.first { $0.id == want || $0.workItemId == want } ?? number.flatMap { n in items.first { intakeKeys[$0.workItemId] == n } }
+        }
+        func found(_ item: IntakeItem) { done(.success((item, intakeKey(of: item, in: snapshots[projectKey] ?? snap)))) }
+        let open = statuses.contains(.pending) ? pending : []
+        if let hit = look(open) { found(hit); return }
+        let others = statuses.subtracting([.pending])
+        // A key needs the numbers. An id of another status needs the tracker list.
+        fillIntakeKeys(projectKey: projectKey, for: number == nil ? [] : open) { [self] in
+            if let hit = look(open) { found(hit); return }
+            guard !others.isEmpty else { done(.failure(.notFound)); return }
+            intakeItems(projectKey: projectKey, statuses: others) { r in
+                guard case .success(let rest) = r else {
+                    if case .failure(let e) = r { done(.failure(e)) }
+                    return
+                }
+                fillIntakeKeys(projectKey: projectKey, for: number == nil ? [] : rest) {
+                    if let hit = look(rest) { found(hit) } else { done(.failure(.notFound)) }
+                }
+            }
+        }
+    }
+
+    /// The number of `OVERSIRE-12` for the identifier OVERSIRE. Nil for any other text.
+    static func sequence(of key: String, identifier: String) -> Int? {
+        let parts = key.uppercased().split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0] == identifier.uppercased() else { return nil }
+        return Int(parts[1])
+    }
+
+    /// The bodies and labels of intake items. Work item id → detail. Items that the tracker cannot read are left out.
+    func intakeDetails(projectKey: String, items: [IntakeItem], done: @escaping ([String: IntakeDetail]) -> Void) {
+        guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) as? any IntakeTriaging else { done([:]); return }
+        let project = snap.summary.ref
+        CallPriority.task(.user) {
+            var out = (try? await (client as? any IntakeListing)?.intakeDetails(project)) ?? [:]
+            for i in items.filter({ out[$0.workItemId] == nil }).prefix(50) {
+                if let d = try? await client.intakeDetail(i, in: project) { out[i.workItemId] = d }
+            }
+            DispatchQueue.main.async { done(out) }
+        }
+    }
+
+    /// A comment goes first. When it fails, the item stays as it is.
+    /// The refresh then moves an accepted item into the list. A row names the actor.
+    func triage(projectKey: String, item: IntakeItem, action: IntakeAction, comment: String? = nil, by actor: EventActor = .user,
+                done: @escaping (Bool) -> Void) {
         guard let snap = snapshots[projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else { done(false); return }
         suppressNotify.insert(item.workItemId)
         let project = snap.summary.ref
+        let key = intakeKey(of: item, in: snap)
+        let trimmed = comment?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = trimmed?.isEmpty == false ? trimmed : nil
+        let target = ItemRef(project: project, id: item.workItemId, key: key ?? "", url: URL(string: snap.summary.url) ?? URL(fileURLWithPath: "/"))
         CallPriority.task(.user) { [weak self] in
+            if let text {
+                let c = await Result(awaiting: { try await client.comment(target, markdown: text) })
+                if case .failure(let e) = c {
+                    DispatchQueue.main.async {
+                        self?.suppressNotify.remove(item.workItemId)
+                        self?.lastError = "Could not comment: " + e.message
+                        done(false)
+                    }
+                    return
+                }
+            }
             let r = await Result(awaiting: {
                 guard let t = client as? any IntakeTriaging else { throw ProviderError.unsupported(.intake) }
                 try await t.triage(item, in: project, action)
@@ -1418,13 +1523,29 @@ final class ProjectStore {
                 if case .failure(let e) = r {
                     self.suppressNotify.remove(item.workItemId)
                     self.lastError = action.failure + e.message
-                } else if case .accept = action {
-                    EVENTS.action(.intakeAccepted, item: nil, project: snap.summary.identifier, verb: "intake:\(item.id)", item.name,
-                                  payload: ["intake": .string(item.id), "title": .string(item.name)])
+                } else {
+                    self.triaged(item, action, key: key, project: snap.summary.identifier, commented: text != nil, by: actor)
                 }
                 self.refresh([projectKey], force: true, priority: .user) { done($0 && r.isOk) }
             }
         }
+    }
+
+    /// The event row of a triage that worked. A put back to pending writes none.
+    private func triaged(_ item: IntakeItem, _ action: IntakeAction, key: String?, project: String, commented: Bool, by actor: EventActor) {
+        var payload: [String: JSONValue] = ["intake": .string(item.id), "title": .string(item.name)]
+        let kind: Event.Kind
+        switch action {
+        case .accept: kind = .intakeAccepted; payload["commented"] = .bool(commented)
+        case .decline: kind = .intakeDeclined; payload["commented"] = .bool(commented)
+        case .snooze(let until): kind = .intakeSnoozed; payload["until"] = .string(isoFmt.string(from: until))
+        case .duplicate(let of): kind = .intakeDuplicated; payload["of"] = .string(of)
+        case .delete: kind = .intakeDeleted
+        case .update(let e): kind = .intakeUpdated; payload["fields"] = .array(e.fieldNames.map(JSONValue.string))
+        case .pending: return
+        }
+        events.action(kind, item: key, project: project, verb: "intake:\(item.id)", item.name, payload: payload,
+                      actorType: actor.type, actor: actor.name, via: actor.via)
     }
 
     /// The intake numbers of a project, from the tracker. The home answers a client with this.
