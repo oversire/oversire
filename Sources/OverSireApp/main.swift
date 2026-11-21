@@ -1180,6 +1180,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func applicationWillTerminate(_ note: Notification) {
+        projectStore.flush()
         guard let o = automations else { return }
         let done = DispatchSemaphore(value: 0)
         Task.detached {

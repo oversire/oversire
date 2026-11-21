@@ -510,6 +510,50 @@ final class ProjectRefreshTests: XCTestCase {
         XCTAssertTrue(gone.isEmpty)
     }
 
+    private func refreshOnce(_ store: ProjectStore, _ key: String) async {
+        await withCheckedContinuation { c in
+            DispatchQueue.main.async { store.refresh([key], force: false) { _ in c.resume() } }
+        }
+    }
+
+    func testARefreshWithTheSameDataPublishesNoProjectChange() async throws {
+        let fake = FakeTracker()
+        _ = try await fake.create(ItemDraft(title: "One"), in: fake.project)
+        let store = try store(fake)
+        let summary = try await fake.projects()[0]
+        let key = summary.ref.storeKey
+        var changes: [DataChange] = []
+        await MainActor.run { store.onChange = { changes.append($0) }; store.track([summary], live: []) }
+        await until("the first snapshot") { store.snapshots[key] != nil }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let first = await MainActor.run { changes.filter { $0.projects.contains(key) }.count }
+        XCTAssertGreaterThan(first, 0, "the first snapshot is a change")
+        await refreshOnce(store, key)
+        let after = await MainActor.run { changes.filter { $0.projects.contains(key) }.count }
+        XCTAssertEqual(after, first, "the same data names no project")
+    }
+
+    func testARefreshAfterASeedPublishesTheChange() async throws {
+        let fake = FakeTracker()
+        _ = try await fake.create(ItemDraft(title: "One"), in: fake.project)
+        let store = try store(fake)
+        let summary = try await fake.projects()[0]
+        let key = summary.ref.storeKey
+        await MainActor.run { store.track([summary], live: []) }
+        await until("the first snapshot") { store.snapshots[key] != nil }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        var changes: [DataChange] = []
+        await MainActor.run {
+            // Same comment fields as the real data, a different body: the refresh restores the kept digest.
+            let snap = store.snapshots[key]!
+            store.seed(ProjectStore.withItems(snap, snap.items.map { var i = $0; i.body = "Other"; return i }))
+            store.onChange = { changes.append($0) }
+        }
+        await refreshOnce(store, key)
+        let named = await MainActor.run { changes.contains { $0.projects.contains(key) } }
+        XCTAssertTrue(named, "the data differs from the seeded snapshot: a stale kept digest would hide it")
+    }
+
     func testGoneUsesTheIndex() async throws {
         let (p, http, summary) = plane()
         let old = try await ProjectStore.snapshot(p, summary, limit: 50, previous: nil)

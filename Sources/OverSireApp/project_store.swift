@@ -82,6 +82,13 @@ final class ProjectStore {
     private let trackers: TrackerDirectory
     private let notifier: ProjectNotifier
     private let statePath: String
+    private let saveDelay: TimeInterval
+    private let schedule: (TimeInterval, @escaping () -> Void) -> Void
+    private var saveDue = false
+    /// Owns the encode and the write of the state file. It holds no store state.
+    private let writer = DispatchQueue(label: "oversire.project-state", qos: .utility)
+    /// The digest of `snapshots[key]`. A missing entry means not known yet. Drop an entry when its snapshot changes.
+    private var digests: [String: Data] = [:]
     private let activityPath: String
     private var timer: Timer?
     private var readActivity = Set<String>() { didSet { unread = nil } }
@@ -155,11 +162,15 @@ final class ProjectStore {
 
     static let noToken = "Add a token for this account in Settings › Accounts and sync."
 
-    init(trackers: TrackerDirectory, notifier: ProjectNotifier, statePath: String, activityPath: String) {
+    /// `saveDelay`: close saves merge into one background write. `schedule` runs the merged write.
+    init(trackers: TrackerDirectory, notifier: ProjectNotifier, statePath: String, activityPath: String,
+         saveDelay: TimeInterval = 1, schedule: @escaping (TimeInterval, @escaping () -> Void) -> Void = ChangeBus.mainAfter) {
         self.trackers = trackers
         self.notifier = notifier
         self.statePath = statePath
         self.activityPath = activityPath
+        self.saveDelay = saveDelay
+        self.schedule = schedule
         load()
     }
 
@@ -470,9 +481,9 @@ final class ProjectStore {
             changed = Set(moved.map(\.key))
             let away = prior.map { now().timeIntervalSince($0.fetchedAt) > awayAfter } ?? false
             if away { snap = ProjectStore.settled(snap) }
-            let before = prior.map(ProjectStore.digest)
+            let before = digest(of: key)
             absorb(snap, gone: gone, away: away ? Set(moved.map(\.id)) : nil)
-            if before != snapshots[key].map(ProjectStore.digest) { projects.insert(key) }
+            if before != digest(of: key) { projects.insert(key) }
             save()
             queueComments(key, prior: away ? nil : prior, started: started)
         case .failed(let why):
@@ -576,11 +587,11 @@ final class ProjectStore {
     private func mergeComments(_ key: String, _ read: [String: (at: Date, comments: [Comment])]) {
         guard tracked.contains(where: { $0.ref.storeKey == key }), let cur = snapshots[key],
               let merged = ProjectStore.merged(cur, read) else { return }
-        let before = ProjectStore.digest(cur)
+        let before = digest(of: key)
         absorb(merged)
         read.keys.forEach { commentActors[$0] = nil }
         save()
-        if before != snapshots[key].map(ProjectStore.digest) { publish(DataChange(.projects, projects: [key], origin: .poll)) }
+        if before != digest(of: key) { publish(DataChange(.projects, projects: [key], origin: .poll)) }
     }
 
     /// The forced refreshes that came during the refresh of `keys`: one more run for all of them.
@@ -1052,12 +1063,14 @@ final class ProjectStore {
     /// For `--uishots`: a changed copy of a snapshot. The next refresh replaces it.
     func seed(_ snap: ProjectSnapshot) {
         snapshots[snap.summary.ref.storeKey] = snap
+        digests[snap.summary.ref.storeKey] = nil
         publish(DataChange(.projects, projects: [snap.summary.ref.storeKey]))
     }
 
     /// For `--uishots`: Plane is down and no snapshot is left. The next refresh replaces this.
     func seedDown(_ why: String) {
         snapshots = [:]
+        digests = [:]
         for p in tracked { errors[p.ref.storeKey] = why }
         lastError = why
         publish(DataChange([.projects, .intake], origin: .event))
@@ -1352,6 +1365,7 @@ final class ProjectStore {
     // Applies changed status categories to the snapshots in memory.
     func applyLocalSettings() {
         snapshots = snapshots.mapValues { ProjectStore.localized($0) }
+        digests = [:]
         publish(DataChange(.projects, origin: .user))
     }
 
@@ -1392,6 +1406,7 @@ final class ProjectStore {
         seenItems.formUnion(snap.items.map(\.id))
         let snap = ProjectStore.localized(snap)
         snapshots[key] = snap
+        digests[key] = nil
         notifyIntake(old: old, new: snap)
         commentActors = commentActors.filter { $0.value.until > now() }
         events.tracker(changes, old: old, new: snap, skipState: suppressNotify, actors: writeActors.merging(commentActors.mapValues(\.actor)) { a, _ in a })
@@ -1469,7 +1484,7 @@ final class ProjectStore {
         }
     }
 
-    private struct Disk: Codable {
+    private struct Disk: Codable, Sendable {
         var snapshots: [String: ProjectSnapshot]
         var readActivity: [String]
         var readItems: [String]
@@ -1480,6 +1495,7 @@ final class ProjectStore {
         if let data = FileManager.default.contents(atPath: statePath),
            let disk = try? JSONDecoder().decode(Disk.self, from: data) {
             snapshots = disk.snapshots.mapValues { ProjectStore.localized($0) }
+            digests = [:]
             readActivity = Set(disk.readActivity)
             readItems = Set(disk.readItems)
             seenItems = Set(disk.seenItems ?? [])
@@ -1497,12 +1513,40 @@ final class ProjectStore {
         }
     }
 
+    /// Marks the state due. Saves in the delay merge into one background write.
     private func save() {
-        let disk = Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems),
-                        seenItems: Array(seenItems))
-        guard let data = try? JSONEncoder().encode(disk) else { return }
-        try? FileManager.default.createDirectory(atPath: (statePath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try? data.write(to: URL(fileURLWithPath: statePath), options: .atomic)
+        guard !saveDue else { return }
+        saveDue = true
+        schedule(saveDelay) { [weak self] in self?.writeState() }
+    }
+
+    private func writeState() {
+        guard saveDue else { return }
+        let disk = takeDisk()
+        let path = statePath
+        writer.async { disk.write(atPath: path, makeDir: true) }
+    }
+
+    /// Writes the due state now and waits for the write in flight. For a quit.
+    func flush() {
+        guard saveDue else { writer.sync {}; return }
+        let disk = takeDisk()
+        let path = statePath
+        writer.sync { disk.write(atPath: path, makeDir: true) }
+    }
+
+    private func takeDisk() -> Disk {
+        saveDue = false
+        return Disk(snapshots: snapshots, readActivity: Array(readActivity), readItems: Array(readItems), seenItems: Array(seenItems))
+    }
+
+    /// The digest of `snapshots[key]`, kept until the snapshot changes.
+    private func digest(of key: String) -> Data? {
+        if let d = digests[key] { return d }
+        guard let s = snapshots[key] else { return nil }
+        let d = ProjectStore.digest(s)
+        digests[key] = d
+        return d
     }
 
     /// A nil change tells the store observers only. The pages get no update.
@@ -1511,13 +1555,17 @@ final class ProjectStore {
         NotificationCenter.default.post(name: ProjectStore.changed, object: self)
     }
 
-    /// The bytes of a snapshot without its fetch time, to find a fetch that changed nothing.
-    static func digest(_ s: ProjectSnapshot) -> Data {
+    private static let digestEncoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = .sortedKeys
+        return e
+    }()
+
+    /// The bytes of a snapshot without its fetch time, to find a fetch that changed nothing.
+    static func digest(_ s: ProjectSnapshot) -> Data {
         let bare = ProjectSnapshot(summary: s.summary, statusOptions: s.statusOptions, items: s.items, fetchedAt: .distantPast,
                                    fields: s.fields, me: s.me, meId: s.meId, index: s.index, intake: s.intake, epics: s.epics)
-        return (try? e.encode(bare)) ?? Data()
+        return (try? digestEncoder.encode(bare)) ?? Data()
     }
 }
 
@@ -1669,10 +1717,10 @@ extension ProjectStore {
     func mirrored(_ d: MirrorDelta) {
         var touched = Set<String>()
         if d.reset {
-            for key in snapshots.keys where d.projects[key] == nil { snapshots[key] = nil; touched.insert(key) }
+            for key in snapshots.keys where d.projects[key] == nil { snapshots[key] = nil; digests[key] = nil; touched.insert(key) }
             orphans = [:]
         }
-        for key in d.removedProjects where snapshots.removeValue(forKey: key) != nil { touched.insert(key) }
+        for key in d.removedProjects where snapshots.removeValue(forKey: key) != nil { digests[key] = nil; touched.insert(key) }
         let keys = Set(d.projects.keys).union(d.items.keys).union(d.removedItems.keys).subtracting(d.removedProjects)
         for key in keys.sorted() {
             let prior = snapshots[key]
@@ -1686,6 +1734,7 @@ extension ProjectStore {
             if let gone = d.removedItems[key].map(Set.init), !gone.isEmpty { items.removeAll { gone.contains($0.id) } }
             let snap = ProjectStore.localized(ProjectStore.withItems(base, items))
             snapshots[key] = snap
+            digests[key] = nil
             touched.insert(key)
             if let prior, now().timeIntervalSince(prior.fetchedAt) <= awayAfter { notifyMirrored(old: prior, new: snap) }
             seenItems.formUnion(items.map(\.id))
