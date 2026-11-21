@@ -60,7 +60,7 @@ A write from an `oversire` command (an app call) names the agent as the actor. T
 1. **The daemon.** `cli/capture` writes the rows of the hook calls, the session book, the questions, the reviews, the runbook steps and the queue. `cli/gitwatch` reads the reflogs and writes the git rows. A working session in a worktree makes its git rows agent rows.
 2. **The app.** `ProviderEvents` (`TrackerEvents`, `ChangeEvents`, `CIEvents`) maps each poll to rows. A poll with no change gives no row. `EventDesk` writes the rows of your actions in the app. `EventSender` keeps the rows until a daemon takes them: the local daemon first, else the home daemon.
 3. **The outbox.** A member daemon sends its rows to `POST /v1/events` of the home daemon, in `seq` order, at least once. When the home does not answer, the rows wait and the outbox tries again: 2 s, then twice as long, at most 5 min. The home drops a repeat by its id. The `at` time stays the time of the change.
-4. **The spool.** When the daemon does not answer a writer, the writer keeps the rows in `<data>/events.spool`. The daemon reads the spool at the start and each 10 s.
+4. **The spool.** When the daemon does not answer a writer, the writer keeps the rows in `<data>/events.spool`. `oversire ticket applied` is such a writer. A refusal or a server error is not spooled. The daemon reads the spool at the start and each 10 s.
 5. **The readers.** `GET /v1/items/{key}/events?tree=1&after=&kinds=&limit=` gives the rows of an item and its sub-items. A new row also goes out as an `event` frame on the daemon socket. The app adds the frame to each open item tree with no new read.
 
 When the home moves to another daemon, the new home copies all rows of the old home (`GET /v1/events/rows`).
