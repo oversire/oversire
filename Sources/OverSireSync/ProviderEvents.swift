@@ -268,9 +268,12 @@ public enum TrackerEvents {
         let known = Set(old?.intake?.map(\.id) ?? [])
         if old != nil {
             for x in snap.intake ?? [] where !known.contains(x.id) {
+                var type: ActorType = x.author == nil ? .provider : .human
+                var name = x.author ?? provider
+                if let a = actors[x.workItemId], a.type != .human { (type, name) = (a.type, a.name ?? a.type.rawValue) }
                 out.append(EventDraft(id: "\(provider)-intake:\(x.id):created", at: x.createdAt, kind: .intakeCreated, project: project,
-                                      machine: machine, provider: provider, actorType: x.author == nil ? .provider : .human,
-                                      actor: x.author ?? provider, via: "poll", summary: x.name,
+                                      machine: machine, provider: provider, actorType: type,
+                                      actor: name, via: "poll", summary: x.name,
                                       payload: ["intake": .string(x.id), "title": .string(x.name)]))
             }
         }

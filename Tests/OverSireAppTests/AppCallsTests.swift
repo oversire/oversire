@@ -29,9 +29,23 @@ final class AppCallsTests: XCTestCase {
 
     func testAllowsItemWrites() {
         let ids = ["item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start",
-                   "item.reopen", "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all"]
+                   "item.reopen", "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
+                   "item.setLabels", "item.setAreas", "project.addLabel", "project.refresh", "intake.create", "people.list", "activity.list"]
         for id in ids { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
         for id in ["item.closeSubItems", "intake.delete", "pr.merge"] { XCTAssertFalse(AppCalls.allowed.contains(id), id) }
+    }
+
+    func testRunsPeopleAndActivityLists() async throws {
+        let rig = try await EpicRig()
+        let posted = Posted()
+        let calls = AppCalls(catalog: rig.d.actions) { await posted.add($0) }
+        await calls.handle(AppCall(id: "p", action: "people.list", args: .object(["project": .string("FAKE")])))
+        await calls.handle(AppCall(id: "a", action: "activity.list", args: .object(["limit": .int(5)])))
+        await calls.handle(AppCall(id: "n", action: "people.list", args: .object(["project": .string("NOPE")])))
+        let r = await posted.results
+        XCTAssertEqual(r.map(\.status), [.ok, .ok, .notAllowed])
+        XCTAssertNotNil(r[0].data?.array)
+        XCTAssertNotNil(r[1].data?["entries"]?.array)
     }
 
     func testCIReadsAllowed() async {

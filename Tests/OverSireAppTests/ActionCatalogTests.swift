@@ -140,7 +140,7 @@ final class ActionCatalogTests: XCTestCase {
                          parentId: "i1")
         d.projectStore.seed(ProjectSnapshot(summary: snap.summary, statusOptions: snap.statusOptions, items: snap.items + [child], fetchedAt: Date()))
         let r = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Done")])))
-        XCTAssertEqual(r, .notAllowed("SLING-1 has 1 open sub-item. Close it first. Use item.closeSubItems, or set force to true."))
+        XCTAssertEqual(r, .notAllowed("SLING-1 has 1 open sub-item. Close it first. Set subItems to true (CLI: --sub-items), or set force to true."))
         let forced = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Done"), "force": .bool(true)])))
         if case .notAllowed = forced { XCTFail("force passes the check: \(forced)") }
         let open = await d.actions.run("item.setStatus", ActionArgs(.object(["key": .string("SLING-1"), "status": .string("Todo")])))

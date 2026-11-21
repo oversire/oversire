@@ -26,6 +26,7 @@ enum LocalChange: Equatable {
     case priority(String?)     // name as in fields["Priority"]; nil removes it
     case parent(String?)       // parent item id; nil removes it
     case epic(EpicID?)
+    case labels([String])      // label names as in Item.labels
 }
 
 /// One finished tracker write. It lives until a read that started after it, or until it expires.
@@ -850,9 +851,12 @@ final class ProjectStore {
         return (tracker(of: ref) as? any IntakePage)?.intakeURL(ref) ?? snap.summary.url
     }
 
-    func update(itemId: String, _ patch: ItemPatch, failure: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
+    /// `labelNames`: the names of `patch.labels`. The view shows them until the next read.
+    func update(itemId: String, _ patch: ItemPatch, failure: String, by actor: EventActor = .user, labelNames: [String]? = nil,
+                done: @escaping (Bool) -> Void) {
         if refusesClose(itemId, to: patch.status) { done(false); return }
-        let local = item(itemId).map { ProjectStore.localChanges(patch, in: $0.snap) } ?? []
+        var local = item(itemId).map { ProjectStore.localChanges(patch, in: $0.snap) } ?? []
+        if let labelNames { local.append(.labels(labelNames)) }
         write(itemId, by: actor, failure: failure, patch: local, done: done) { c, ref in
             try await c.update(ref, patch)
         }
@@ -939,7 +943,8 @@ final class ProjectStore {
     }
 
     /// Makes an intake item. The poll shows it. Home only: a client runs `intake.create`.
-    func createIntake(_ d: ItemDraft, projectKey: String, done: @escaping (Result<(item: ItemRef, intake: IntakeItem), ProviderError>) -> Void) {
+    func createIntake(_ d: ItemDraft, projectKey: String, by actor: EventActor = .user,
+                      done: @escaping (Result<(item: ItemRef, intake: IntakeItem), ProviderError>) -> Void) {
         guard let snap = snapshot(projectKey), let client = trackers.tracker(snap.summary.ref.workspace) else { done(.failure(.notFound)); return }
         let project = snap.summary.ref
         CallPriority.task(.user) {
@@ -947,7 +952,12 @@ final class ProjectStore {
                 guard let t = client as? any IntakeCreating else { throw ProviderError.unsupported(.intakeCreate) }
                 return try await t.createIntake(d, in: project)
             })
-            DispatchQueue.main.async { done(r) }
+            DispatchQueue.main.async {
+                if actor.type != .human, case .success(let made) = r {
+                    self.record(LocalWrite(project: project.storeKey, at: self.now(), marks: [made.item.id], items: [:], epics: []), by: actor)
+                }
+                done(r)
+            }
         }
     }
 
@@ -1909,7 +1919,7 @@ extension ProjectStore {
     /// A copy of the item with the changes applied in order.
     static func patched(_ item: Item, _ changes: [LocalChange]) -> Item {
         guard !changes.isEmpty else { return item }
-        var status = item.statusOptionId, title = item.title, fields = item.fields
+        var status = item.statusOptionId, title = item.title, fields = item.fields, labels = item.labels
         var out = item
         for c in changes {
             switch c {
@@ -1921,10 +1931,11 @@ extension ProjectStore {
             case .epic(let e):
                 out.epicId = e
                 out.otherEpicIds = nil
+            case .labels(let l): labels = l
             }
         }
         var copy = Item(id: item.id, key: item.key, title: title, url: item.url, statusOptionId: status, fields: fields,
-                        assignees: item.assignees, labels: item.labels, author: item.author, updatedBy: item.updatedBy,
+                        assignees: item.assignees, labels: labels, author: item.author, updatedBy: item.updatedBy,
                         updatedAt: item.updatedAt, activityAt: item.activityAt, commentCount: out.commentCount,
                         lastComment: out.lastComment, mentionsMe: out.mentionsMe, body: out.body, parentId: out.parentId,
                         epicId: out.epicId, otherEpicIds: out.otherEpicIds)

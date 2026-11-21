@@ -402,6 +402,114 @@ final class ItemCliActionsTests: XCTestCase {
         XCTAssertEqual(row?.actor, "codex s1")
     }
 
+    // MARK: Labels, areas, sub-items
+
+    func labelNames(_ rig: EpicRig) async -> [String] {
+        await MainActor.run { rig.d.projectStore.item(key: rig.items[0].key)?.item.labels ?? [] }
+    }
+
+    func testSetLabelsByNameSetAddRemove() async throws {
+        let rig = try await EpicRig()
+        _ = try await rig.fake.createLabel("ui", color: "#00FF00", in: rig.fake.project)
+        await MainActor.run { rig.d.projectStore.hold = true }
+        let key = rig.items[0].key
+        let set = await run(rig, "item.setLabels", ["key": .string(key), "labels": .array([.string("BUG")])])
+        XCTAssertEqual(set.summary, "\(key) labels: bug.")
+        guard case .ok(_, let data, _) = set else { return XCTFail("\(set)") }
+        XCTAssertEqual(data?["labels"]?.array?.compactMap(\.string), ["bug"])
+        let add = await run(rig, "item.setLabels", ["key": .string(key), "add": .array([.string("ui"), .string("bug")])])
+        XCTAssertEqual(add.summary, "\(key) labels: bug, ui.")
+        let remove = await run(rig, "item.setLabels", ["key": .string(key), "remove": .array([.string("bug")])])
+        XCTAssertEqual(remove.summary, "\(key) labels: ui.")
+        let labels = await labelNames(rig)
+        XCTAssertEqual(labels, ["ui"])
+        let none = await run(rig, "item.setLabels", ["key": .string(key), "labels": .array([])])
+        XCTAssertEqual(none.summary, "\(key) has no labels.")
+        assertNotAllowed(await run(rig, "item.setLabels", ["key": .string(key)]), "Give labels, or add and remove.")
+    }
+
+    func testSetLabelsUnknownName() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        assertNotAllowed(await run(rig, "item.setLabels", ["key": .string(key), "labels": .array([.string("nope")])]), "No label nope. Use: bug.")
+        assertNotAllowed(await run(rig, "item.setLabels", ["key": .string(key), "add": .array([.string("nope")])]), "No label nope. Use: bug.")
+        let labels = await labelNames(rig)
+        XCTAssertEqual(labels, [])
+    }
+
+    func testSetLabelsUnsupported() async throws {
+        let rig = try await EpicRig(capabilities: [.epics])
+        let r = await run(rig, "item.setLabels", ["key": .string(rig.items[0].key), "labels": .array([.string("bug")])])
+        assertNotAllowed(r, "has no labels.")
+    }
+
+    func testSetLabelsByIdStillWorks() async throws {
+        let rig = try await EpicRig()
+        await MainActor.run { rig.d.projectStore.hold = true }
+        let r = await run(rig, "item.setLabels", ["key": .string(rig.items[0].key), "labels": .array([.string("l-bug")])])
+        XCTAssertEqual(r.summary, "\(rig.items[0].key) labels: bug.")
+        let labels = await labelNames(rig)
+        XCTAssertEqual(labels, ["bug"])
+    }
+
+    /// The tracker activity row of the change takes its actor from this mark.
+    func testSetLabelsRowNamesAgent() async throws {
+        let rig = try await EpicRig()
+        await MainActor.run { rig.d.projectStore.hold = true }
+        _ = await run(rig, "item.setLabels", ["key": .string(rig.items[0].key), "add": .array([.string("bug")])])
+        let marks = await MainActor.run { rig.d.projectStore.writeActors }
+        XCTAssertEqual(marks[rig.items[0].id], agent)
+    }
+
+    func testAddLabelWritesAgentRow() async throws {
+        let rig = try await EpicRig()
+        let r = await run(rig, "project.addLabel", ["project": .string("FAKE"), "name": .string("ui"), "color": .string("#00FF00")])
+        guard case .ok(_, let data, _) = r else { return XCTFail("\(r)") }
+        XCTAssertNotNil(data?["id"]?.string)
+        let row = await rig.row(.projectSettingsChanged)
+        XCTAssertEqual(row?.actorType, .agent)
+        XCTAssertEqual(row?.actor, "codex s1")
+        XCTAssertEqual(row?.payload?["label"], .string("ui"))
+        XCTAssertEqual(row.map { EventCatalog.repo.problems($0) }, [])
+        let labels = try await rig.fake.labels(rig.fake.project)
+        XCTAssertEqual(labels.map(\.name), ["bug", "ui"])
+    }
+
+    func testSetStatusSubItemsNeedsNoForce() async throws {
+        let rig = try await EpicRig()
+        let parent = rig.items[0].key
+        let made = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("Child"), "parent": .string(parent)])
+        guard case .ok(_, let data, _) = made, let child = data?["key"]?.string else { return XCTFail("\(made)") }
+        await until("the child is loaded") { await rig.snapshot()?.items.contains { $0.key == child } == true }
+        let refused = await run(rig, "item.setStatus", ["key": .string(parent), "status": .string("done")])
+        assertNotAllowed(refused, "Set subItems to true (CLI: --sub-items), or set force to true.")
+        let ok = await run(rig, "item.setStatus", ["key": .string(parent), "status": .string("done"), "subItems": .bool(true)])
+        XCTAssertEqual(ok.summary, "\(parent) is Done.")
+        await until("the child is done") { await MainActor.run { rig.d.projectStore.item(key: child)?.item.statusOptionId } == "s-done" }
+    }
+
+    func testSetAreasWritesAgentRow() async throws {
+        let rig = try await EpicRig()
+        let key = rig.items[0].key
+        let r = await run(rig, "item.setAreas", ["key": .string(key), "areas": .array([.string("api"), .string("ui")])])
+        XCTAssertEqual(r.summary, "\(key) areas: api, ui.")
+        let row = await rig.row(.itemAreasSet)
+        XCTAssertEqual(row?.item, key)
+        XCTAssertEqual(row?.actorType, .agent)
+        XCTAssertEqual(row?.actor, "codex s1")
+        XCTAssertEqual(row?.payload, ["areas": .array([.string("api"), .string("ui")])])
+        XCTAssertEqual(row.map { EventCatalog.repo.problems($0) }, [])
+    }
+
+    func testIntakeCreateMarksTheAgent() async throws {
+        let rig = try await EpicRig()
+        await MainActor.run { rig.d.projectStore.hold = true }
+        let r = await run(rig, "intake.create", ["project": .string("FAKE"), "title": .string("From an agent")])
+        guard case .ok(_, let data, _) = r, let id = data?["id"]?.string else { return XCTFail("\(r)") }
+        let marks = await MainActor.run { rig.d.projectStore.writeActors }
+        XCTAssertEqual(marks[id], agent)
+    }
+
     func testUIWriteKeepsHuman() async throws {
         let rig = try await EpicRig()
         try await mine(rig, rig.items[0])

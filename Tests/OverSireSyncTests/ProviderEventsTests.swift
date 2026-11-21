@@ -168,6 +168,19 @@ final class ProviderEventsTests: XCTestCase {
         XCTAssertEqual(rows[2].actorType, .human, "a human mark keeps the tracker user")
     }
 
+    func testIntakeCreatedRowNamesTheMarkedAgent() {
+        let old = snap([]).withIntake([])
+        let mine = IntakeItem(id: "n1", workItemId: "w1", name: "Mine", priority: nil, createdAt: now, author: "fritz", source: nil)
+        let other = IntakeItem(id: "n2", workItemId: "w2", name: "Other", priority: nil, createdAt: now, author: "fritz", source: nil)
+        let new = snap([]).withIntake([mine, other])
+        let agent = EventActor(type: .agent, name: "codex s1")
+        let rows = TrackerEvents.drafts([], old: old, new: new, provider: "plane", machine: "mba", actors: ["w1": agent, "w2": .user])
+        XCTAssertEqual(rows.map(\.kind), [.intakeCreated, .intakeCreated])
+        XCTAssertEqual(rows.map(\.actorType), [.agent, .human])
+        XCTAssertEqual(rows.map(\.actor), ["codex s1", "fritz"])
+        for d in rows { XCTAssertEqual(EventCatalog.repo.problems(d), [], d.id) }
+    }
+
     // MARK: Epics
 
     func epic(_ id: String, _ title: String, state: EpicState = .active, created: Date? = nil, updated: Date? = nil,
@@ -319,5 +332,11 @@ final class ProviderEventsTests: XCTestCase {
         guard case .event(let e)? = DaemonFrame.parse(text) else { return XCTFail("no event frame") }
         XCTAssertEqual(e.id, "gha:2243:1:completed")
         XCTAssertEqual(e.seq, 127)
+    }
+}
+
+private extension ProjectSnapshot {
+    func withIntake(_ list: [IntakeItem]) -> ProjectSnapshot {
+        ProjectSnapshot(summary: summary, statusOptions: statusOptions, items: items, fetchedAt: fetchedAt, intake: list)
     }
 }

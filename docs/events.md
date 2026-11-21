@@ -44,7 +44,7 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 | Domain | Kinds |
 |---|---|
 | agent | `session.started`, `session.ended`, `turn.started`, `turn.ended`, `turn.interrupted`, `wait.started`, `wait.ended`, `context.compacted`, `subagent.ended`, `review.ready`, `groom.applied`, `groom.undone`, `sweep.applied`, `worker.started`, `worker.answered`, `worker.nudged`, `worker.escalated`, `worker.done` |
-| human | `prompt.submitted`*, `question.answered`, `review.submitted`, `review.approved`, `review.viewed`, `review.unviewed`, `item.shipped`, `plan.started`, `item.state_changed`, `item.viewed`, `item.favorited`, `item.unfavorited`, `project.settings_changed` |
+| human | `prompt.submitted`*, `question.answered`, `review.submitted`, `review.approved`, `review.viewed`, `review.unviewed`, `item.shipped`, `plan.started`, `item.state_changed`, `item.areas_set`, `item.viewed`, `item.favorited`, `item.unfavorited`, `project.settings_changed` |
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun`, `ci.cancelled`, `ci.dispatched`, `ci.approved` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |
@@ -57,7 +57,7 @@ The CI writes of the app (`ci.rerun`, `ci.cancel`, `ci.dispatch`, `ci.approve`) 
 
 `oversire vendor run` writes one `vendor.call` row for each run of a vendor CLI. The summary has the CLI name, the subcommand words and the exit code, never the args. The app writes no row for a refused call.
 
-A write from an `oversire` command (an app call) names the agent as the actor. This holds for `item.state_changed`, `item.link_added`, `item.attachment_added` and the poll rows `item.created`, `item.updated` and `comment.created` of that write. The app marks the item until the refresh after the write ends.
+A write from an `oversire` command (an app call) names the agent as the actor. This holds for `item.state_changed`, `item.link_added`, `item.attachment_added`, `item.areas_set` and the poll rows `item.created`, `item.updated`, `comment.created` and `intake.created` of that write. The app marks the item until the refresh after the write ends.
 
 ## The path
 

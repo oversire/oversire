@@ -41,7 +41,7 @@ struct IntakeActions {
                     guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else { done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return }
                     guard d.projectStore.has(.intakeCreate, in: snap) else { done(ActionLink.unsupported(snap, "intake")); return }
                     let draft = ItemDraft(title: a.string("title") ?? "", bodyMarkdown: a.string("body"), priority: a.string("priority"))
-                    d.projectStore.createIntake(draft, projectKey: snap.summary.ref.storeKey) { r in
+                    d.projectStore.createIntake(draft, projectKey: snap.summary.ref.storeKey, by: a.caller.actor) { r in
                         switch r {
                         case .failure(let e): done(.failed(e.message))
                         case .success(let made):

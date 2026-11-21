@@ -27,8 +27,8 @@ struct ItemActions {
                     }
                     let force = a.bool("force") ?? false
                     let n = f.snap.blockingSubItems(f.item, to: o.id)
-                    guard force || n == 0 else {
-                        done(.notAllowed(ProjectStore.openSubItemsReason(f.item.key, n) + " Use item.closeSubItems, or set force to true."))
+                    guard force || n == 0 || a.bool("subItems") == true else {
+                        done(.notAllowed(ProjectStore.openSubItemsReason(f.item.key, n) + " Set subItems to true (CLI: --sub-items), or set force to true."))
                         return
                     }
                     let finish = { (ok: Bool) in done(ActionLink.stored(d, ok, "\(f.item.key) is \(o.name).")) }
@@ -54,11 +54,52 @@ struct ItemActions {
                     }
                 }
             },
-            ActionSpec(id: "item.setLabels", title: "Set labels", help: "Sets the labels of an item. Give the label ids. An empty list removes all labels.", kind: .change,
-                       input: ActionSpec.args(["key": Self.key, "labels": ("array", "The label ids.")], required: ["key", "labels"])) { a in
+            ActionSpec(id: "item.setLabels", title: "Set labels", help: "Sets the labels of an item. Give `labels` (ids or names) to set all of them, "
+                           + "or give `add` and `remove` to change some. An empty `labels` list removes all labels.", kind: .change,
+                       input: ActionSpec.args(["key": Self.key, "labels": ("array", "The label ids or names. They replace the labels of the item."),
+                                               "add": ("array", "The label ids or names to add."), "remove": ("array", "The label ids or names to remove.")], required: ["key"]),
+                       capability: .labels) { a in
                 await link.item(a) { d, f, done in
-                    d.projectStore.update(itemId: f.item.id, ItemPatch(labels: a.list("labels")), failure: "Could not change the labels", by: a.caller.actor) {
-                        done(ActionLink.stored(d, $0, "\(f.item.key) has new labels."))
+                    guard d.projectStore.has(.labels, in: f.snap) else { done(ActionLink.unsupported(f.snap, "labels")); return }
+                    let add = a.list("add"), remove = a.list("remove")
+                    guard a["labels"] != nil || !add.isEmpty || !remove.isEmpty else { done(.notAllowed("Give labels, or add and remove.")); return }
+                    guard a["labels"] == nil || (add.isEmpty && remove.isEmpty) else { done(.notAllowed("Give labels, or add and remove, not both.")); return }
+                    d.projectStore.labels(projectKey: f.snap.summary.ref.storeKey) { r in
+                        switch r {
+                        case .failure(let e): done(.failed(e.message))
+                        case .success(let all):
+                            func ids(_ names: [String]) -> [String]? {
+                                var out: [String] = []
+                                for n in names {
+                                    guard let l = all.find(n) else { done(.notAllowed("No label \(n). Use: \(all.names).")); return nil }
+                                    if !out.contains(l.id) { out.append(l.id) }
+                                }
+                                return out
+                            }
+                            var target: [String]
+                            if a["labels"] != nil {
+                                guard let set = ids(a.list("labels")) else { return }
+                                target = set
+                            } else {
+                                guard let adding = ids(add), let removing = ids(remove) else { return }
+                                var current: [String] = []
+                                for n in f.item.labels {
+                                    guard let l = all.find(n) else {
+                                        done(.notAllowed("\(f.item.key) has the label \(n), which \(f.snap.summary.identifier) does not list. Give labels to set all."))
+                                        return
+                                    }
+                                    current.append(l.id)
+                                }
+                                target = current + adding.filter { !current.contains($0) }
+                                target.removeAll { removing.contains($0) }
+                            }
+                            let names = target.compactMap { id in all.first { $0.id == id }?.name }
+                            d.projectStore.update(itemId: f.item.id, ItemPatch(labels: target), failure: "Could not change the labels", by: a.caller.actor, labelNames: names) { ok in
+                                guard ok else { done(ActionLink.stored(d, false, "")); return }
+                                done(.ok(summary: names.isEmpty ? "\(f.item.key) has no labels." : "\(f.item.key) labels: \(names.joined(separator: ", ")).",
+                                         data: .object(["labels": .array(names.map(JSONValue.string))])))
+                            }
+                        }
                     }
                 }
             },
@@ -323,6 +364,9 @@ struct ItemActions {
                 await link.item(a) { d, f, done in
                     guard let ref = f.item.ref(in: f.snap.summary.ref) else { done(.failed("The item has no tracker ref.")); return }
                     let saved = d.areas.save(a.list("areas"), for: ref)
+                    d.projectStore.events.action(.itemAreasSet, item: f.item.key, project: f.snap.summary.identifier, verb: "areas",
+                                                 saved.isEmpty ? "No areas" : saved.joined(separator: ", "), payload: ["areas": .array(saved.map(JSONValue.string))],
+                                                 actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
                     done(.ok(summary: saved.isEmpty ? "\(f.item.key) has no areas." : "\(f.item.key) areas: \(saved.joined(separator: ", ")).", data: .array(saved.map(JSONValue.string))))
                 }
             },
