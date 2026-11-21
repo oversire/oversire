@@ -571,6 +571,12 @@ extension VendorCalls {
         return VendorOutcome(status: .ok, summary: "\(removed) `vendor run` refuses \(vendor.rawValue) until you install it again.", change: change)
     }
 
+    /// The PATH copy of a vendor binary, also when the OverSire copy wins. The remove question names it.
+    func pathCopy(_ vendor: ProviderID) async -> VendorBinary? {
+        guard let cli = world.descriptor(vendor)?.cli, let path = world.find(cli.binary) else { return nil }
+        return VendorBinary(vendor: vendor, cli: cli, path: path, version: await world.version(path, cli), source: .path)
+    }
+
     /// One vendor.installed or vendor.removed row.
     private func record(_ kind: Event.Kind, _ change: VendorChange, caller: ActionCaller, sha256: String? = nil) {
         let actor = caller.actor

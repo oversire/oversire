@@ -40,6 +40,7 @@ enum Route: Equatable {
         // The slugs of the old pages, mapped to their new home. "accounts" was once Projects. It now names its own page.
         static let redirects: [String: (SettingsPage, SettingsTab?, String?)] = [
             "providers": (.accounts, nil, nil), "live": (.accounts, nil, "live"),
+            "vendors": (.accounts, nil, "vendors"),
             "repos": (.projects, .repos, nil),
             "linking": (.projects, .linking, nil), "writeback": (.projects, .linking, "writeback"),
             "runtime": (.agents, nil, nil), "orca": (.agents, nil, nil),

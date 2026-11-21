@@ -319,9 +319,12 @@ final class ToggleChip: Chiplet {
 
 // A tone as a colored pill: symbol and word, so the state never relies on color alone.
 final class Pill: Box {
-    init(_ tone: Tone, text: String? = nil) {
+    /// `spins`: the glyph turns when the tone spins, unless Reduce motion is on.
+    init(_ tone: Tone, text: String? = nil, spins: Bool = false) {
         super.init(fill: tone.color.withAlphaComponent(0.16), border: nil, radius: 9)
-        let s = NSStackView(h: [Glyph(tone.symbol, color: tone.color, size: 10),
+        let glyph = spins && tone.spins ? Glyph(tone, size: 10) : Glyph(tone.symbol, color: tone.color, size: 10)
+        if spins { glyph.setAccessibilityElement(false) }
+        let s = NSStackView(h: [glyph,
                                 NSTextField.text(text ?? tone.word, size: 11.5, weight: .semibold, color: tone.color)], spacing: 4)
         // The pill keeps its full text. The views around it give way.
         s.arrangedSubviews.last?.setContentCompressionResistancePriority(.required, for: .horizontal)

@@ -1202,6 +1202,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.clicksScene(String(p.dropFirst(7)), in: w)
                     } else if UIShots.settingsClientScenes.contains(p) {
                         self.settingsClientScene(p, in: w)
+                    } else if UIShots.vendorScenes.contains(p) {
+                        self.vendorsScene(p, in: w)
                     } else if UIShots.clientScenes.contains(p) {
                         self.clientScene(p, in: w)
                     } else if MachinesSnapshot.scenes.contains(p) {
@@ -1217,7 +1219,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                 if p == "runbooks:assistant" { steps += Array(repeating: {}, count: 8) }
                 if UIShots.stream != nil, p.hasPrefix("chat:") || p.hasPrefix("stream:") { steps += Array(repeating: {}, count: 6) }
                 steps.append { self.capture(w, name: "\(theme.rawValue)-" + p.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "-")) }
-                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = []; if !UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed } }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; if self.clientLink == nil { self.actions.forward = nil; self.actions.linkState = { nil } }; MachinesController.shared.link = { nil } }; if UIShots.settingsClientScenes.contains(p) { MODE = .full; KEPT_ACCOUNTS = []; ClientSettings.shared.reset(); self.clientLink = UIShots.clientSeed }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
+                steps.append { w.gate.end(.scroll); w.gate.flushNow(); CommandPalette.dismiss(); ExplainPopover.dismiss(); EpicPicker.dismiss(); HoverSummary.dismiss(); self.snapPanel?.close(); self.snapPanel = nil; MachineSheets.open?.dismiss(); GroomSheet.open?.close(); if p.hasPrefix("close-guard:") || p == "machines-mode-confirm", let s = w.window?.attachedSheet { w.window?.endSheet(s) }; if p.hasPrefix("machines-") { MODE = .full; ClientMode.supported = false; KEPT_ACCOUNTS = []; if !UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed } }; if UIShots.clientScenes.contains(p) { self.clientLink = UIShots.clientSeed; if self.clientLink == nil { self.actions.forward = nil; self.actions.linkState = { nil } }; MachinesController.shared.link = { nil } }; if UIShots.settingsClientScenes.contains(p) || p == "vendors:client" { MODE = .full; KEPT_ACCOUNTS = []; ClientSettings.shared.reset(); self.clientLink = UIShots.clientSeed }; if p.hasPrefix("clicks:") { self.endClicks() }; self.basketPanel?.orderOut(nil); self.basketPanel = nil
                     self.sessionWindow?.orderOut(nil); self.sessionWindow = nil }
             }
         }
@@ -1994,6 +1996,61 @@ extension UIShots {
         ClientSettings.shared.seed(home, state: state)
         w.router.go(.settings(.general))   // a fresh page
         w.router.go(scene == "accounts-client" ? .settings(.accounts) : .settings(.agents))
+    }
+
+    /// OVERSIRE-583: Settings › Accounts and sync › Vendor CLIs. Fake closures: no scene calls the network or writes a file.
+    static let vendorScenes = ["vendors:mixed", "vendors:busy", "vendors:failed", "vendors:empty", "vendors:client"]
+
+    func vendorsScene(_ scene: String, in w: AppWindow) {
+        let own = NSHomeDirectory() + "/.config/oversire/vendors"
+        func plane(_ version: String?, source: VendorSource?, state: VendorState, path: String?, ownVersion: String? = nil, job: VendorJob? = nil) -> VendorCLIRow {
+            VendorCLIRow(provider: "plane", vendor: "Plane", binary: "plane-cli", path: path, version: version, minVersion: "0.2.0",
+                         source: source, state: state, accounts: ["plane:ocral"], projects: ["OVERSIRE"], ownVersion: ownVersion, job: job)
+        }
+        func bigtimer(_ version: String?, source: VendorSource?, state: VendorState, path: String?, ownVersion: String? = nil, job: VendorJob? = nil) -> VendorCLIRow {
+            VendorCLIRow(provider: "bigtimer", vendor: "Big Timer", binary: "big-timer-cli", path: path, version: version, minVersion: "1.0.12",
+                         source: source, state: state, accounts: ["bigtimer:bt.bigtimedata.io"], projects: [], ownVersion: ownVersion, job: job)
+        }
+        func gh(_ installed: Bool) -> VendorCLIRow {
+            VendorCLIRow(provider: "github", vendor: "GitHub", binary: "gh", path: installed ? "/opt/homebrew/bin/gh" : nil,
+                         version: installed ? "2.102.0" : nil, source: installed ? .path : nil, state: installed ? .ok : .missing,
+                         accounts: ["github:flarco"], projects: [])
+        }
+        let ownPlane = plane("0.2.2", source: .oversire, state: .ok, path: own + "/plane/0.2.2/plane-cli", ownVersion: "0.2.2")
+        let offers = ["plane": "0.2.3", "bigtimer": "1.0.12"]
+        let checked = Date().addingTimeInterval(-300)
+        var rows: [VendorCLIRow] = []
+        let c = VendorsController.shared
+        switch scene {
+        case "vendors:mixed":
+            rows = [ownPlane, bigtimer("1.0.11", source: .path, state: .old, path: "/opt/homebrew/bin/big-timer-cli"), gh(true)]
+            c.seed(rows: rows, offers: offers, checkedAt: checked)
+        case "vendors:busy":
+            rows = [ownPlane,
+                    bigtimer("1.0.12", source: .oversire, state: .ok, path: own + "/bigtimer/1.0.12/big-timer-cli", ownVersion: "1.0.12", job: .removing),
+                    gh(true)]
+            c.seed(rows: rows, offers: offers, busy: ["plane": .installing], checkedAt: checked)
+        case "vendors:failed":
+            rows = [ownPlane, bigtimer(nil, source: nil, state: .missing, path: nil), gh(false)]
+            c.seed(rows: rows, offers: ["plane": "0.2.3"],
+                   offerError: VendorInstallError.rateLimited.description,
+                   errors: ["plane": VendorsModel.Failure(job: .installing, text: VendorInstallError.badDigest(archive: "plane-cli_darwin_arm64.tar.gz").description)],
+                   checkedAt: checked)
+        default:
+            c.seed(rows: [], checkedAt: nil)
+        }
+        let fixed = rows
+        c.list = { fixed }
+        c.offer = { id in offers[id].map { .success($0) } ?? .failure(.failed(VendorInstallError.rateLimited.description)) }
+        c.installCall = { _ in VendorOutcome(status: .failed, summary: "The uishots make no install.", change: nil) }
+        c.removeCall = { _ in VendorOutcome(status: .failed, summary: "The uishots make no remove.", change: nil) }
+        c.pathCopy = { _ in nil }
+        if scene == "vendors:client" {
+            settingsClientScene("accounts-client", in: w)
+        } else {
+            w.router.go(.settings(.general))   // a fresh page
+        }
+        w.router.go(.settings(.accounts, anchor: "vendors"))
     }
 
     /// Settings › Machines with sample data, and its dialogs.

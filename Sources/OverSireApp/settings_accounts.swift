@@ -24,6 +24,7 @@ extension SettingsPage {
     func accounts(_ b: NSStackView) {
         if MODE == .client {
             clientProviders(b)
+            clientVendors(b)
             let v = NSStackView(v: [SectionTitle("Live updates")], spacing: 6)
             v.addFull(NSTextField.text("Live updates come from \(data.clientName).", size: 12, color: Palette.dim, lines: 0))
             v.identifier = SettingsAnchor.live.id
@@ -31,6 +32,7 @@ extension SettingsPage {
             return
         }
         providers(b)
+        vendors(b)
         live(b)
     }
 

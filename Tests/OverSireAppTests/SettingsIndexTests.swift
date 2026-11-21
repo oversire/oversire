@@ -44,6 +44,12 @@ final class SettingsIndexTests: XCTestCase {
         }
     }
 
+    func testVendorSearch() {
+        XCTAssertEqual(SettingsAnchor.vendors.page, .accounts)
+        XCTAssertEqual(SettingsIndex.search("plane-cli").first?.title, "Install a vendor CLI")
+        XCTAssertEqual(SettingsIndex.search("plane-cli").first?.anchor, .vendors)
+    }
+
     func testCommonSearches() {
         for (q, a) in [("webhook", SettingsAnchor.live), ("theme", .appearance), ("poll", .live), ("quiet", .queue)] {
             XCTAssertEqual(SettingsIndex.search(q).first?.anchor, a, q)

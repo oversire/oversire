@@ -3,7 +3,7 @@ import Cocoa
 // The sections of the settings pages. A route anchor and the search scroll to them.
 enum SettingsAnchor: String, CaseIterable {
     case appearance, menubar, runs, capture, startup, shortcuts
-    case services, live
+    case services, vendors, live
     case projects, refresh, repos, linking, writeback
     case sessions, queue, worktrees, agentCI = "agent-ci", planner, runbooks
     case mode, thisMac = "this-mac", joinOnly = "join-only", found, machines, runtimes, hooks, daemon
@@ -20,6 +20,7 @@ enum SettingsAnchor: String, CaseIterable {
         case .startup: return "Startup and updates"
         case .shortcuts: return "Keyboard shortcuts"
         case .services: return "Services"
+        case .vendors: return "Vendor CLIs"
         case .live: return "Live updates"
         case .projects: return "Projects"
         case .refresh: return "Refresh"
@@ -60,7 +61,7 @@ enum SettingsAnchor: String, CaseIterable {
     var page: Route.SettingsPage {
         switch self {
         case .appearance, .menubar, .runs, .capture, .startup, .shortcuts: return .general
-        case .services, .live: return .accounts
+        case .services, .vendors, .live: return .accounts
         case .projects, .refresh, .repos, .linking, .writeback: return .projects
         case .sessions, .queue, .worktrees, .agentCI, .planner, .runbooks: return .agents
         case .mode, .thisMac, .joinOnly, .found, .machines, .runtimes, .hooks, .daemon: return .machines
@@ -132,6 +133,8 @@ struct SettingsIndex {
         Entry("New session", .shortcuts, "hotkey agent"),
         Entry("Add a service", .services, "account tracker plane github orca token login"),
         Entry("GitHub login", .services, "gh auth"),
+        Entry("Install a vendor CLI", .vendors, "plane-cli big-timer-cli gh install update remove version path"),
+        Entry("Check vendor CLI updates", .vendors, "update newer release"),
         Entry("Cloud URL", .live, "server worker"),
         Entry("Pairing code", .live, "connect device"),
         Entry("Poll every", .live, "polling interval refresh"),

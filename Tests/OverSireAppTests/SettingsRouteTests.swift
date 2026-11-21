@@ -8,6 +8,7 @@ final class SettingsRouteTests: XCTestCase {
         let cases: [(String, Route)] = [
             ("providers", .settings(.accounts)),
             ("live", .settings(.accounts, anchor: "live")),
+            ("vendors", .settings(.accounts, anchor: "vendors")),
             ("repos", .settings(.projects, tab: .repos)),
             ("linking", .settings(.projects, tab: .linking)),
             ("writeback", .settings(.projects, tab: .linking, anchor: "writeback")),
