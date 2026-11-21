@@ -589,4 +589,15 @@ final class TrackerPlaneTests: XCTestCase {
         XCTAssertEqual((made as? PlaneTracker)?.workspace.host, PlaneWorkspace.cloudHost)
         XCTAssertThrowsError(try PlaneTracker.descriptor.make(AccountConfig(account: AccountID(provider: .plane, id: "x")), env))
     }
+
+    func testDescriptorHasVendorCLI() throws {
+        let cli = try XCTUnwrap(PlaneTracker.descriptor.cli)
+        XCTAssertEqual(cli.binary, "plane-cli")
+        XCTAssertEqual(cli.tokenEnv, "PLANE_API_KEY")
+        XCTAssertEqual(cli.defaultHost, PlaneWorkspace.cloudHost)
+        XCTAssertEqual(cli.managedEnv, "PLANE_MANAGED_BY")
+        XCTAssertTrue(cli.lockedFlags.contains("--api-key"))
+        XCTAssertTrue(cli.deniedCommands.contains(["auth", "login"]))
+        XCTAssertTrue(PlaneTracker.descriptor.fields.contains { $0.key == cli.hostField })
+    }
 }

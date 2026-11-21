@@ -48,12 +48,14 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun`, `ci.cancelled`, `ci.dispatched`, `ci.approved` |
 | codehost | `pr.opened`, `pr.updated`, `pr.merged`, `pr.closed`, `release.published` |
-| tracker | `item.created`, `item.updated`, `comment.created`, `item.link_added`, `item.attachment_added`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed`, `epic.updated` |
+| tracker | `item.created`, `item.updated`, `comment.created`, `item.link_added`, `item.attachment_added`, `intake.created`, `intake.accepted`, `epic.created`, `epic.item_added`, `epic.item_removed`, `epic.closed`, `epic.updated`, `vendor.call` |
 | system | `queue.picked`, `queue.held`, `runbook.step_started`, `runbook.step_ended`, `job.ran`, `automation.ran`, `item.state_changed` (actor `parent-guard`, payload `reason: open-sub-items`) |
 
 A reader keeps a row of a kind that it does not know.
 
 The CI writes of the app (`ci.rerun`, `ci.cancel`, `ci.dispatch`, `ci.approve`) go through `CIOps`. A rerun by an agent names the agent in the `ci.rerun` row of the next poll. `ci.cancelled`, `ci.dispatched` and `ci.approved` rows are written at once. The `ci.dispatched` payload has the input keys, never the values. A command from another machine of the group has `via` `cli@<machine>`.
+
+`oversire vendor run` writes one `vendor.call` row for each run of a vendor CLI. The summary has the CLI name, the subcommand words and the exit code, never the args. The app writes no row for a refused call.
 
 A write from an `oversire` command (an app call) names the agent as the actor. This holds for `item.state_changed`, `item.link_added`, `item.attachment_added` and the poll rows `item.created`, `item.updated` and `comment.created` of that write. The app marks the item until the refresh after the write ends.
 

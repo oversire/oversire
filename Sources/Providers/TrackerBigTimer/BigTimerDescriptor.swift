@@ -10,7 +10,11 @@ extension BigTimerTracker {
         id: .bigtimer, layer: .tracker, displayName: "Big Timer", symbol: "timer",
         fields: [ConfigField(key: "server", label: "Server URL", kind: .url, help: "The address of the Big Timer server."),
                  ConfigField(key: "token", label: "API token", kind: .secret, help: "A btk_ token with write scope.")],
-        auth: [.token]
+        auth: [.token],
+        cli: VendorCLI(binary: "big-timer-cli", tokenEnv: "BIGTIMER_TOKEN", hostEnv: "BIGTIMER_SERVER", hostField: "server",
+                       managedEnv: "BIGTIMER_MANAGED_BY", lockedFlags: ["--server", "-s", "--token", "-t"],
+                       deniedCommands: [["auth", "login"], ["auth", "logout"], ["auth", "join"], ["auth", "rotate"],
+                                        ["token", "create"], ["sync", "stream"]])
     ) { config, env in
         guard let raw = config.values["server"]?.trimmingCharacters(in: .whitespaces),
               let id = BigTimerTracker.account(forServer: raw),

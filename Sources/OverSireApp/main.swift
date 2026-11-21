@@ -125,6 +125,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                                }
                            })
     lazy var actions = AppActionCatalog(data: self, ci: ciOps)
+    /// One instance, so the per-account gate holds across calls.
+    lazy var vendorCalls = VendorCalls.live(self)
     private var madePublisher: MirrorPublisher?
     /// Sends the provider data to the mirror of home. It runs only on the app that holds the automations lease.
     /// Made at the first start, when the group and the machine name are known.
@@ -287,7 +289,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
         c.appCalls = { [weak self] link in
             let client = link.client(http: DaemonTransport.shared)
-            return self.map { AppCalls(catalog: $0.actions) { try await client.send($0) } }
+            return self.map { AppCalls(catalog: $0.actions, vendor: $0.vendorCalls) { try await client.send($0) } }
         }
         return c
     }()

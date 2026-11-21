@@ -542,4 +542,15 @@ final class BigTimerTrackerTests: XCTestCase {
         XCTAssertEqual(feed.changes[2].uuid, "019a1b2c-3d4e-7f80-9a1b-2c3d4e5f6073")
         XCTAssertEqual(feed.changes[2].version, 3)
     }
+
+    func testDescriptorHasVendorCLI() throws {
+        let cli = try XCTUnwrap(BigTimerTracker.descriptor.cli)
+        XCTAssertEqual(cli.binary, "big-timer-cli")
+        XCTAssertEqual(cli.tokenEnv, "BIGTIMER_TOKEN")
+        XCTAssertEqual(cli.hostEnv, "BIGTIMER_SERVER")
+        XCTAssertTrue(BigTimerTracker.descriptor.fields.contains { $0.key == cli.hostField })
+        XCTAssertNil(cli.refusal(["server", "version"]), "a command word is no flag")
+        XCTAssertNotNil(cli.refusal(["issue", "list", "--token", "x"]))
+        XCTAssertNotNil(cli.refusal(["sync", "stream"]))
+    }
 }

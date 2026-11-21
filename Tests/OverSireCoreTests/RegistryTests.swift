@@ -114,4 +114,16 @@ final class RegistryTests: XCTestCase {
         XCTAssertEqual(me.person.name, "Ada")
         XCTAssertEqual(page.cursor.rawValue, "0")
     }
+
+    func testDescriptorKeepsCLI() {
+        XCTAssertNil(descriptor("a", .tracker).cli)
+        let cli = VendorCLI(binary: "acme-cli", tokenEnv: "ACME_TOKEN")
+        let d = ProviderDescriptor(id: "acme", layer: .tracker, displayName: "Acme", symbol: "circle", fields: [], auth: [.token], cli: cli) { c, _ in
+            StubProvider(id: "acme", account: c.account, token: nil)
+        }
+        XCTAssertEqual(d.cli, cli)
+        let r = ProviderRegistry()
+        r.register(d)
+        XCTAssertEqual(r.descriptor("acme")?.cli?.binary, "acme-cli")
+    }
 }

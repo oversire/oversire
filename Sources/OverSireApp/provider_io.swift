@@ -273,6 +273,130 @@ struct ProcessRunner: CommandRunner {
     }
 }
 
+/// One run of a vendor CLI. The log shows `logWords`, never the args.
+struct VendorLaunch: Sendable {
+    let exe: String
+    let args: [String]
+    let environment: [String: String]
+    let cwd: URL?
+    let timeout: Duration
+    let maxStdout: Int
+    let maxStderr: Int
+    /// The binary name, then the subcommand words.
+    let logWords: [String]
+}
+
+struct VendorExit: Sendable, Equatable {
+    let status: Int32
+    let stdout: Data
+    let stderr: Data
+    let truncated: Bool
+    let timedOut: Bool
+    let ms: Int
+}
+
+protocol VendorProcessRunning: Sendable {
+    func run(_ launch: VendorLaunch) async throws -> VendorExit
+}
+
+/// No TTY (stdin is /dev/null), only `environment`, the working folder `cwd`, a time limit, and an output limit.
+/// The log line has no args and no stderr, so a token cannot reach the log.
+struct VendorProcess: VendorProcessRunning {
+    var log = IOLog()
+
+    /// Waits this long for the pipes after the process ends. A child of the process can keep them open.
+    static let pipeGrace: TimeInterval = 0.5
+
+    func run(_ launch: VendorLaunch) async throws -> VendorExit {
+        let child = ProcessRunner.Child()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                DispatchQueue.global(qos: .utility).async {
+                    cont.resume(with: Result { try runSync(launch, child: child) })
+                }
+            }
+        } onCancel: {
+            child.cancel()
+        }
+    }
+
+    /// Keeps the first `max` bytes of a pipe and reads on, so the child does not block.
+    private final class Capture: @unchecked Sendable {
+        private let lock = NSLock()
+        private let max: Int
+        private var data = Data()
+        private var cut = false
+        let done = DispatchSemaphore(value: 0)
+
+        init(_ pipe: Pipe, max: Int) {
+            self.max = max
+            pipe.fileHandleForReading.readabilityHandler = { [self] h in
+                let chunk = h.availableData
+                guard !chunk.isEmpty else {
+                    h.readabilityHandler = nil
+                    done.signal()
+                    return
+                }
+                lock.withLock {
+                    let room = self.max - data.count
+                    if chunk.count > room { cut = true }
+                    if room > 0 { data.append(chunk.prefix(room)) }
+                }
+            }
+        }
+
+        var result: (data: Data, cut: Bool) { lock.withLock { (data, cut) } }
+    }
+
+    private final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var on = false
+        func set() { lock.withLock { on = true } }
+        var value: Bool { lock.withLock { on } }
+    }
+
+    private func runSync(_ l: VendorLaunch, child: ProcessRunner.Child) throws -> VendorExit {
+        if child.cancelled { throw CancellationError() }
+        let t0 = Date()
+        let words = Array(l.logWords.dropFirst())
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: l.exe)
+        proc.arguments = l.args
+        proc.environment = l.environment
+        proc.currentDirectoryURL = l.cwd
+        proc.standardInput = FileHandle.nullDevice
+        let outPipe = Pipe(), errPipe = Pipe()
+        proc.standardOutput = outPipe
+        proc.standardError = errPipe
+        let out = Capture(outPipe, max: l.maxStdout), err = Capture(errPipe, max: l.maxStderr)
+        do { try proc.run() } catch {
+            outPipe.fileHandleForReading.readabilityHandler = nil
+            errPipe.fileHandleForReading.readabilityHandler = nil
+            log.command(l.exe, words, status: nil, ms: IOLog.ms(since: t0), error: error.localizedDescription)
+            throw error
+        }
+        if !child.attach(proc) { ProcessRunner.stop(proc) }
+        let timedOut = Flag()
+        let secs = Double(l.timeout.components.seconds) + Double(l.timeout.components.attoseconds) / 1e18
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + secs) {
+            guard proc.isRunning else { return }
+            timedOut.set()
+            ProcessRunner.stop(proc)
+        }
+        proc.waitUntilExit()
+        let deadline = DispatchTime.now() + Self.pipeGrace
+        let outDone = out.done.wait(timeout: deadline) == .success
+        let errDone = err.done.wait(timeout: deadline) == .success
+        if !outDone { outPipe.fileHandleForReading.readabilityHandler = nil }
+        if !errDone { errPipe.fileHandleForReading.readabilityHandler = nil }
+        if child.cancelled { throw CancellationError() }
+        let ms = IOLog.ms(since: t0)
+        log.command(l.exe, words, status: proc.terminationStatus, ms: ms)
+        let o = out.result, e = err.result
+        return VendorExit(status: proc.terminationStatus, stdout: o.data, stderr: e.data, truncated: o.cut || e.cut, timedOut: timedOut.value, ms: ms)
+    }
+}
+
 /// Plane tokens keep their old Keychain service. The secrets of other accounts share one service.
 struct KeychainSecrets: SecretReader {
     /// Tests use their own service.

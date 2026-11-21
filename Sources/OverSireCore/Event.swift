@@ -252,6 +252,7 @@ extension Event {
         public static let settingsChanged: Kind = "settings.changed"
         public static let secretSet: Kind = "secret.set"
         public static let secretResolved: Kind = "secret.resolved"
+        public static let vendorCall: Kind = "vendor.call"
     }
 
     /// The answer of GET /v1/items/{key}/events (event.json EventPage).

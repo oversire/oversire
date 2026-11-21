@@ -63,6 +63,28 @@ public static let descriptor = ProviderDescriptor(
 - `ConfigField(key:label:kind:required:help:)`: `required` is `true` by default. `help` is the hint under the input. `docsURL` is optional.
 - `make` must not do I/O. The app calls it on first use of the account.
 
+### The vendor CLI (optional)
+
+A vendor can have a command line tool. `oversire vendor run` then runs it for the agents. The app puts the token from its Keychain in an environment variable of the child process. The token never enters the shell of the agent. Set `cli:` in the descriptor, before `make`:
+
+```swift
+cli: VendorCLI(binary: "linear-cli", tokenEnv: "LINEAR_API_KEY", hostEnv: "LINEAR_HOST", hostField: "host",
+               defaultHost: "https://api.linear.app", accountEnv: "LINEAR_TEAM", projectEnv: "LINEAR_PROJECT",
+               managedEnv: "LINEAR_MANAGED_BY", lockedFlags: ["--api-key", "--host"],
+               deniedCommands: [["auth", "login"], ["listen"]])
+```
+
+- `binary` is a name, never a path. The app looks in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
+- `tokenEnv` gets the token of the account. Nil means that the CLI keeps its own login (`gh`). The app removes the token value from stdout and stderr.
+- `hostEnv` gets the value of the field `hostField`. An empty value gives `defaultHost`.
+- `accountEnv` gets the workspace, else the account id. `projectEnv` gets the project key of `--project`.
+- `managedEnv` gets `OverSire`. A CLI of ours then runs in its managed mode.
+- `passEnv` names the variables that the app copies from its own environment. The child gets no other variable.
+- `lockedFlags` are the flags that the app sets itself (the host and the token). The app refuses a call that has one of them. Only an argument that starts with `-` is compared.
+- `deniedCommands` are the leading command words that the app refuses: login, config changes, and commands that never end.
+- The app refuses args that start with a flag. The vendor command must come first.
+- The app runs one call at a time for each account, with no TTY, a time limit of 45 s and an output limit of 1 MiB. It writes one `vendor.call` event for each run, with the command words and the exit code, never the args.
+
 ## 3. Implement the base protocol
 
 The types are in `Sources/OverSireCore`:

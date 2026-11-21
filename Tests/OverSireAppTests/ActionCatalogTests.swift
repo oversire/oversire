@@ -26,6 +26,10 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(ids.count, Set(ids).count, "repeated: \(Dictionary(grouping: ids) { $0 }.filter { $1.count > 1 }.keys.sorted())")
     }
 
+    func testVendorActionsAreNotSpecs() {
+        XCTAssertTrue(TestAppData().actions.all.filter { $0.id.hasPrefix("vendor.") }.isEmpty)
+    }
+
     func testSchemasAreValid() {
         let types: Set<String> = ["string", "integer", "number", "boolean", "array", "object"]
         for s in TestAppData().actions.all {

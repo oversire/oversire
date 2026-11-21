@@ -250,4 +250,15 @@ final class CodeHostGitHubTests: XCTestCase {
         XCTAssertEqual(first, second, "a 304 gives the cached answer")
         XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: \"s1\""])
     }
+
+    func testDescriptorHasGhCLI() throws {
+        let cli = try XCTUnwrap(GitHubCodeHost.descriptor.cli)
+        XCTAssertEqual(cli.binary, "gh")
+        XCTAssertNil(cli.tokenEnv)
+        XCTAssertEqual(Set(cli.passEnv).union(["PATH", "HOME", "LANG"]), Set(GitHubClient.environment.keys).union(cli.passEnv).union(["PATH", "HOME", "LANG"]))
+        for key in cli.passEnv { XCTAssertTrue(["SHELL", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "GNUPGHOME", "SSH_AUTH_SOCK"].contains(key)) }
+        XCTAssertNotNil(cli.refusal(["auth", "token"]))
+        XCTAssertNotNil(cli.refusal(["run", "watch", "123"]))
+        XCTAssertNil(cli.refusal(["run", "view", "123"]))
+    }
 }

@@ -13,10 +13,13 @@ public struct ProviderDescriptor: Sendable {
     public let epicFields: Set<EpicField>
     /// What the vendor calls an epic, for example "module".
     public let epicNoun: String?
+    /// The vendor CLI that `oversire vendor run` runs for an account. Nil: none.
+    public let cli: VendorCLI?
     public let make: @Sendable (AccountConfig, ProviderEnvironment) throws -> any Provider
 
     public init(id: ProviderID, layer: Layer, displayName: String, symbol: String, fields: [ConfigField], auth: [AuthKind],
                 docsURL: URL? = nil, epicFields: Set<EpicField> = [], epicNoun: String? = nil,
+                cli: VendorCLI? = nil,
                 make: @escaping @Sendable (AccountConfig, ProviderEnvironment) throws -> any Provider) {
         self.id = id
         self.layer = layer
@@ -27,6 +30,7 @@ public struct ProviderDescriptor: Sendable {
         self.docsURL = docsURL
         self.epicFields = epicFields
         self.epicNoun = epicNoun
+        self.cli = cli
         self.make = make
     }
 }

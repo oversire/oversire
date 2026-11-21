@@ -12,7 +12,12 @@ extension PlaneTracker {
                  ConfigField(key: "host", label: "Host", kind: .url, required: false, help: PlaneWorkspace.cloudHost),
                  ConfigField(key: "token", label: "API token", kind: .secret)],
         auth: [.token], docsURL: URL(string: "https://developers.plane.so/api-reference/introduction"),
-        epicFields: [.goal, .startDate, .targetDate, .lead], epicNoun: "module"
+        epicFields: [.goal, .startDate, .targetDate, .lead], epicNoun: "module",
+        cli: VendorCLI(binary: "plane-cli", tokenEnv: "PLANE_API_KEY", hostEnv: "PLANE_HOST", hostField: "host",
+                       defaultHost: PlaneWorkspace.cloudHost, accountEnv: "PLANE_WORKSPACE", projectEnv: "PLANE_PROJECT",
+                       managedEnv: "PLANE_MANAGED_BY", lockedFlags: ["--api-key", "-k", "--host"],
+                       deniedCommands: [["auth", "login"], ["auth", "logout"], ["auth", "workspace", "add"],
+                                        ["auth", "workspace", "remove"], ["config", "set"], ["listen"], ["serve"]])
     ) { config, env in
         let slug = config.values["workspace"] ?? config.account.id
         let host = config.values["host"].flatMap { $0.isEmpty ? nil : $0 } ?? PlaneWorkspace.cloudHost

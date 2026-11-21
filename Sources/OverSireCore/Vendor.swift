@@ -1,0 +1,61 @@
+import Foundation
+
+// The wire types of the app calls vendor.run and vendor.list (app-call.json).
+
+/// The args of vendor.run. Set `project` or `account`.
+public struct VendorRunArgs: Codable, Hashable, Sendable {
+    public var project: String?
+    public var account: String?
+    public var args: [String]
+    public var cwd: String?
+
+    public init(project: String? = nil, account: String? = nil, args: [String], cwd: String? = nil) {
+        self.project = project
+        self.account = account
+        self.args = args
+        self.cwd = cwd
+    }
+}
+
+/// The data of a vendor.run result.
+public struct VendorRunOutput: Codable, Hashable, Sendable {
+    public var vendor: String
+    public var account: String
+    public var exit: Int
+    public var stdout: String
+    public var stderr: String
+    public var truncated: Bool?
+    public var timedOut: Bool?
+    public var ms: Int
+
+    public init(vendor: String, account: String, exit: Int, stdout: String, stderr: String,
+                truncated: Bool? = nil, timedOut: Bool? = nil, ms: Int) {
+        self.vendor = vendor
+        self.account = account
+        self.exit = exit
+        self.stdout = stdout
+        self.stderr = stderr
+        self.truncated = truncated
+        self.timedOut = timedOut
+        self.ms = ms
+    }
+}
+
+/// One row of the data of vendor.list.
+public struct VendorCLIRow: Codable, Hashable, Sendable {
+    public var provider: String
+    public var vendor: String
+    public var binary: String
+    public var path: String?
+    public var accounts: [String]
+    public var projects: [String]
+
+    public init(provider: String, vendor: String, binary: String, path: String? = nil, accounts: [String], projects: [String]) {
+        self.provider = provider
+        self.vendor = vendor
+        self.binary = binary
+        self.path = path
+        self.accounts = accounts
+        self.projects = projects
+    }
+}

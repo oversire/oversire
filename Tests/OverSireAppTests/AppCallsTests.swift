@@ -131,4 +131,37 @@ final class AppCallsTests: XCTestCase {
         let r = await posted.results
         XCTAssertEqual(r.first?.status, .failed)
     }
+
+    func testAllowsVendorActions() {
+        for id in ["vendor.list", "vendor.run"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        XCTAssertEqual(VendorCalls.actions, ["vendor.list", "vendor.run"])
+    }
+
+    func testVendorActionsSkipTheCatalog() async {
+        let posted = Posted()
+        let spec = ActionSpec(id: "vendor.run", title: "Spec", help: "", kind: .change) { _ in .ok(summary: "from the catalog") }
+        let world = VendorCalls.World(isClient: { true }, accounts: { [] }, descriptor: { _ in nil }, token: { _ in nil },
+                                      projects: { [] }, find: { _ in nil }, inherited: { [:] })
+        let vendor = VendorCalls(world: world, events: EventDesk(outlet: NoOutlet()))
+        let calls = AppCalls(catalog: ActionList([spec]), vendor: vendor) { await posted.add($0) }
+        await calls.handle(AppCall(id: "v1", action: "vendor.run", args: .object(["project": .string("X"), "args": .array([.string("wi")])])))
+        let r = await posted.results
+        XCTAssertEqual(r.first?.summary, "This Mac is a client. Run the command on the home Mac.")
+    }
+
+    func testNoVendorCallsRefuses() async {
+        let posted = Posted()
+        let spec = ActionSpec(id: "vendor.run", title: "Spec", help: "", kind: .change) { _ in .ok(summary: "from the catalog") }
+        let calls = AppCalls(catalog: ActionList([spec])) { await posted.add($0) }
+        await calls.handle(AppCall(id: "v1", action: "vendor.run", args: .object([:])))
+        await calls.handle(AppCall(id: "v2", action: "vendor.list", args: .object([:])))
+        let r = await posted.results
+        XCTAssertEqual(r.map(\.status), [.notAllowed, .notAllowed])
+        XCTAssertEqual(r.first?.summary, "The app does not run vendor.run from the CLI.")
+    }
+
+    struct NoOutlet: EventOutlet {
+        func append(_ drafts: [EventDraft]) async {}
+        func link(_ links: [ItemLink]) async {}
+    }
 }
