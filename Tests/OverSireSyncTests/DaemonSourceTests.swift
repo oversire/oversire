@@ -253,6 +253,23 @@ final class DaemonSourceTests: XCTestCase {
         XCTAssertEqual(daemon.issued, 1)
     }
 
+    func testAnUnchangedGroupDoesNotWriteTheCache() async throws {
+        var g = try contract(Group.self, "group", "two-members")
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent("machines-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let daemon = FakeDaemon(machine: "mba", group: g)
+        let m = Machines(local: DaemonClient(base: loopback, token: nil, http: daemon), keychain: MemoryKeychain(), http: daemon, cache: cache)
+        await m.refresh()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
+        try FileManager.default.removeItem(at: cache)
+        await m.refresh()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.path))
+        g.members.append(GroupMember(machine: "mini", host: "mini", addrs: [], port: 7690, roles: ["serve"], joinedAt: Date()))
+        daemon.group = g
+        await m.refresh()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
+    }
+
     func testDialURLPrefersTheTailnetAddress() {
         func m(_ addrs: [String]) -> GroupMember {
             GroupMember(machine: "mbp.local", host: "mbp.local", addrs: addrs, port: 7690, roles: ["serve"], joinedAt: Date())

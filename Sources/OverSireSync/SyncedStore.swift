@@ -97,20 +97,27 @@ public actor SyncedStore: Store {
     /// Queues each record and tombstone with its own hlc.
     private func pushAll() {
         let waiting = Set(outbox.pending.map { Self.key($0.collection, $0.id) })
+        var values: [String: [String: JSONValue]] = [:]
+        var ops: [StoreOp] = []
         for (key, c) in state.clocks where !waiting.contains(key) {
             guard let slash = key.firstIndex(of: "/") else { continue }
             let collection = String(key[..<slash]), id = String(key[key.index(after: slash)...])
             guard let type = Self.byName[collection] else { continue }
             if c.deleted {
-                outbox.add(StoreOp(collection: collection, id: id, op: .delete, hlc: c.hlc, device: clock.device))
-            } else if let value = Self.stored(type, id: id, in: local) {
-                outbox.add(StoreOp(collection: collection, id: id, op: .put, record: value, hlc: c.hlc, device: clock.device))
+                ops.append(StoreOp(collection: collection, id: id, op: .delete, hlc: c.hlc, device: clock.device))
+            } else {
+                let stored = values[collection] ?? Self.storedValues(type, in: local)
+                values[collection] = stored
+                if let value = stored[id] {
+                    ops.append(StoreOp(collection: collection, id: id, op: .put, record: value, hlc: c.hlc, device: clock.device))
+                }
             }
         }
+        outbox.add(contentsOf: ops)
     }
 
-    private static func stored<R: StoreRecord>(_ type: R.Type, id: String, in local: LocalStore) -> JSONValue? {
-        local.stored(type).first { $0.id == id }.flatMap { try? JSONValue($0) }
+    private static func storedValues<R: StoreRecord>(_ type: R.Type, in local: LocalStore) -> [String: JSONValue] {
+        Dictionary(local.stored(type).compactMap { r in (try? JSONValue(r)).map { (r.id, $0) } }, uniquingKeysWith: { a, _ in a })
     }
 
     private var cursorKey: String {
@@ -309,10 +316,12 @@ public actor SyncedStore: Store {
     }
 
     private func seed<R: StoreRecord>(_ type: R.Type) async throws {
+        var ops: [StoreOp] = []
+        defer { outbox.add(contentsOf: ops) }
         for r in try await local.all(type) where state.clocks[Self.key(R.collection, r.id)] == nil {
             let hlc = clock.next()
             state.clocks[Self.key(R.collection, r.id)] = RecordClock(hlc: hlc, deleted: false)
-            outbox.add(StoreOp(collection: R.collection, id: r.id, op: .put, record: try JSONValue(r), hlc: hlc, device: clock.device))
+            ops.append(StoreOp(collection: R.collection, id: r.id, op: .put, record: try JSONValue(r), hlc: hlc, device: clock.device))
         }
     }
 

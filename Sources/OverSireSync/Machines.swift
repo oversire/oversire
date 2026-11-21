@@ -255,6 +255,7 @@ public actor Machines {
     }
 
     private func keep(_ g: Group) {
+        guard g != group else { return }
         group = g
         guard let cache else { return }
         let enc = JSONEncoder()

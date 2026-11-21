@@ -16,12 +16,24 @@ public final class Outbox: @unchecked Sendable {
 
     public var pending: [StoreOp] { lock.withLock { ops } }
 
-    public func add(_ op: StoreOp) {
+    public func add(_ op: StoreOp) { add(contentsOf: [op]) }
+
+    /// Adds the ops with one file write. A later op for a record replaces an earlier one.
+    public func add(contentsOf new: [StoreOp]) {
+        guard !new.isEmpty else { return }
         lock.withLock {
-            ops.removeAll { $0.collection == op.collection && $0.id == op.id }
-            ops.append(op)
+            let records = Set(new.map { Key(collection: $0.collection, id: $0.id) })
+            ops.removeAll { records.contains(Key(collection: $0.collection, id: $0.id)) }
+            var last: [Key: Int] = [:]
+            for (i, op) in new.enumerated() { last[Key(collection: op.collection, id: op.id)] = i }
+            ops += new.enumerated().filter { last[Key(collection: $0.element.collection, id: $0.element.id)] == $0.offset }.map(\.element)
             save()
         }
+    }
+
+    private struct Key: Hashable {
+        let collection: String
+        let id: String
     }
 
     /// Removes the sent ops. A newer op for the same record stays.

@@ -94,6 +94,28 @@ final class StoreHomeSwitchTests: XCTestCase {
         XCTAssertEqual(after, before)
     }
 
+    func testTheFullPushSendsEachRecordOnce() async throws {
+        let mbp = FakeStoreHub(), mba = FakeStoreHub()
+        let s = client(replica("member:g/mbp", mbp))
+        for i in 1...3 { try await s.put(note("note \(i)", id: "n\(i)")) }
+        try await s.put(Pin(id: "p1", subject: subject, at: Date(timeIntervalSince1970: 0)))
+        await s.sync()
+        try await s.delete(Note.self, id: "n2")
+        await s.sync()
+        let before = Dictionary(uniqueKeysWithValues: await mbp.ops().map { ("\($0.collection)/\($0.id)", $0) })
+        await s.use(replica("member:g/mba", mba))
+        await s.sync()
+        let sent = await mba.ops()
+        XCTAssertEqual(sent.map { "\($0.collection)/\($0.id)" }.sorted(), ["notes/n1", "notes/n2", "notes/n3", "pins/p1"])
+        XCTAssertEqual(sent.filter { $0.op == .delete }.map(\.id), ["n2"])
+        for op in sent {
+            let old = try XCTUnwrap(before["\(op.collection)/\(op.id)"])
+            XCTAssertEqual(op.hlc, old.hlc)
+            XCTAssertEqual(op.record, old.record)
+        }
+        XCTAssertEqual(sent.filter { $0.op == .put }.count, 3)
+    }
+
     func testAnotherAppReadsTheNewHome() async throws {
         let mba = FakeStoreHub()
         let a = client(replica("member:g/mba", mba))
