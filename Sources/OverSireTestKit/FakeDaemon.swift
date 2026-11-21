@@ -33,6 +33,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     private var _models: [String: AgentModels] = [:]
     private var _rows: [Event] = []
     private var _links: [String: String] = [:]
+    private var _watches: [CIWatch] = []
     private var _secrets: [String: (value: String, at: Date)] = [:]   // "scope/agent/key"
     private var sockets: [FakeDaemonSocket] = []
 
@@ -130,6 +131,15 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
     /// The daemon sends this after a roster change.
     public func groupChanged() { push(#"{"type":"group"}"#) }
 
+    /// Sets the CI watches. GET /v1/ci/watches answers them.
+    public func setWatches(_ w: [CIWatch]) { with { _watches = w } }
+
+    /// Sets the CI watches and pushes the {"type":"ci"} frame with the full list.
+    public func pushWatches(_ w: [CIWatch]) {
+        setWatches(w)
+        push((try? Self.encoder.encode(CIFrame(watches: w))).map { String(decoding: $0, as: UTF8.self) } ?? "")
+    }
+
     public func push(_ frame: String) { with { sockets }.forEach { $0.push(frame) } }
 
     // MARK: WebSocketConnecting
@@ -193,6 +203,7 @@ public final class FakeDaemon: HTTPTransport, WebSocketConnecting, @unchecked Se
         switch (method, parts) {
         case ("GET", ["v1", "whoami"]): return try ok(_info)
         case ("GET", ["v1", "health"]): return (200, Data(#"{"ok":true}"#.utf8))
+        case ("GET", ["v1", "ci", "watches"]): return try ok(_watches)
         case ("PUT", let p) where p.count == 5 && p[1] == "agent-secrets":
             let v = try Self.decoder.decode(AgentSecretSet.self, from: body ?? Data())
             _secrets[p[2...].joined(separator: "/")] = (v.value, Date())

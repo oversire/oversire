@@ -109,6 +109,28 @@ final class LiveSyncTests: XCTestCase {
         XCTAssertEqual(plan.projects.map { "\($0.workspace)/\($0.project ?? "*")" }, ["ws2/*", "ws/p1"])
     }
 
+    func testCIFrameFromHomeSetsWatches() async throws {
+        let ci = FakeCI()
+        let poller = InterestPoller(providers: { _ in ci }, clock: ManualClock(), degraded: { false })
+        _ = poller.events()
+        var leads = true
+        let feed = CIWatchFeed(poller: poller, tracked: { ["Acme/App"] }, leads: { leads })
+        let frame = CIFrame(watches: [CIWatch(repo: "acme/app", ref: "abc", ttl: 600, sha: "abc"),
+                                      CIWatch(repo: "other/repo", ref: "def", ttl: 600, sha: "def")])
+
+        feed.received(frame, fromHome: false)
+        leads = false
+        feed.received(frame, fromHome: true)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(ci.commitPolls.isEmpty, "a member link, or an app that does not lead, sets no watches")
+
+        leads = true
+        feed.received(frame, fromHome: true)
+        await until("one interest poll") { ci.commitPolls.count == 1 }
+        XCTAssertEqual(ci.commitPolls.first?.interest, CIInterest(repo: "Acme/App", sha: "abc"), "only tracked repos, in the spelling of the app")
+        await poller.stop()
+    }
+
     func testCommentEventsGiveHints() {
         let tracker = FakeTracker(account: "ws")
         let item = ItemRef(project: tracker.project, id: "i1", key: "FAKE-1", url: URL(string: "https://tracker.fake/FAKE-1")!)

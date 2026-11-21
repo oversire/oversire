@@ -273,6 +273,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         c.sink = self
         c.machines = machineHub
         c.unhooked = { [weak self] in self?.cloudSetup.unhookedRepos(REPOS) ?? [] }
+        c.ciDegraded = { [weak self] in MainActor.assumeIsolated { self?.ciQuota.degraded ?? false } }
         c.onMirror = { [weak self] in Task { @MainActor in self?.clientMirror?.pull() } }
         c.onMemberCall = { [weak self] call, link in
             guard let self else { return }

@@ -68,6 +68,8 @@ public struct Capability: RawRepresentable, Hashable, Sendable, Codable, Express
     public static let commitChecks: Capability = "commitChecks"
     public static let dispatch: Capability = "dispatch"
     public static let gates: Capability = "gates"
+    /// The adapter polls the runs of one commit (`CommitPolling`).
+    public static let commitPolling: Capability = "commitPolling"
     public static let epics: Capability = "epics"
 }
 

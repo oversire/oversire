@@ -60,6 +60,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case mirror(MirrorFrame)
     /// A click of a client app for the source app. Only the frame of the group home counts.
     case memberCall(MemberCall)
+    /// The watch list of the home daemon for the source app.
+    case ci(CIFrame)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -83,6 +85,9 @@ public enum DaemonFrame: Hashable, Sendable {
         case "memberCall":
             struct Frame: Decodable { let call: MemberCall }
             return (try? DaemonClient.decode(data) as Frame).map { .memberCall($0.call) }
+        case "ci":
+            guard let f = try? DaemonClient.decode(data) as CIFrame, f.event == CIFrame.watches else { return nil }
+            return .ci(f)
         case "mirror": return (try? DaemonClient.decode(data) as MirrorFrame).map(DaemonFrame.mirror)
         default: return nil
         }
@@ -90,6 +95,9 @@ public enum DaemonFrame: Hashable, Sendable {
 }
 
 extension DaemonClient {
+    /// The watches of the group (`GET /v1/ci/watches`). An old daemon answers `notFound`.
+    public func ciWatches() async throws -> [CIWatch] { try await get("/v1/ci/watches") }
+
     /// The open join requests on this daemon.
     public func joinRequests() async throws -> [JoinRequestFrame] { try await get("/v1/group/requests") }
 

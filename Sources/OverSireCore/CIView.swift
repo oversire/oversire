@@ -461,17 +461,93 @@ public struct CIExplanation: Codable, Hashable, Sendable {
     }
 }
 
-/// A request to keep the CI data of a ref fresh (P3). `ttl` is in seconds.
+/// One commit that an agent waits on (P3). `ttl` is in seconds. The daemon sets `expiresAt`.
 public struct CIWatch: Codable, Hashable, Sendable {
     public var repo: String
     public var ref: String
     public var ttl: Int
     public var expiresAt: Date?
+    /// `<repo>@<sha or ref>`.
+    public var id: String?
+    public var sha: String?
+    public var branch: String?
+    public var pr: Int?
+    public var createdAt: Date?
+    /// The machine that asked.
+    public var machine: String?
 
-    public init(repo: String, ref: String, ttl: Int, expiresAt: Date? = nil) {
+    public init(repo: String, ref: String, ttl: Int, expiresAt: Date? = nil, id: String? = nil, sha: String? = nil,
+                branch: String? = nil, pr: Int? = nil, createdAt: Date? = nil, machine: String? = nil) {
         self.repo = repo
         self.ref = ref
         self.ttl = ttl
         self.expiresAt = expiresAt
+        self.id = id
+        self.sha = sha
+        self.branch = branch
+        self.pr = pr
+        self.createdAt = createdAt
+        self.machine = machine
+    }
+}
+
+/// The agent session that gets the result of a wait. A request names `session` or `paneKey`.
+public struct CINotifyTarget: Codable, Hashable, Sendable {
+    public var session: String?
+    public var paneKey: String?
+    public var harness: String?
+    public var harnessSession: String?
+
+    public init(session: String? = nil, paneKey: String? = nil, harness: String? = nil, harnessSession: String? = nil) {
+        self.session = session
+        self.paneKey = paneKey
+        self.harness = harness
+        self.harnessSession = harnessSession
+    }
+}
+
+/// The body of POST /v1/ci/watches. `ttl` is in seconds (60 to 7200, default 1800).
+public struct CIWatchRequest: Codable, Hashable, Sendable {
+    public var repo: String
+    public var ref: String
+    public var ttl: Int?
+    public var notify: CINotifyTarget?
+
+    public init(repo: String, ref: String, ttl: Int? = nil, notify: CINotifyTarget? = nil) {
+        self.repo = repo
+        self.ref = ref
+        self.ttl = ttl
+        self.notify = notify
+    }
+}
+
+/// The answer of POST /v1/ci/watches and POST /v1/ci/notify. `done` means the rollup has ended: no watch, no message.
+public struct CIWatchAnswer: Codable, Hashable, Sendable {
+    public var watch: CIWatch?
+    public var rollup: CIRollup?
+    public var done: Bool
+    /// `queued` or `done`.
+    public var notify: String?
+
+    public init(watch: CIWatch? = nil, rollup: CIRollup? = nil, done: Bool, notify: String? = nil) {
+        self.watch = watch
+        self.rollup = rollup
+        self.done = done
+        self.notify = notify
+    }
+}
+
+/// A frame of GET /v1/connect: the full watch list for the source app. An unknown `event` is dropped.
+public struct CIFrame: Codable, Hashable, Sendable {
+    public static let watches = "watches"
+
+    public var type: String
+    public var event: String
+    public var watches: [CIWatch]
+
+    public init(type: String = "ci", event: String = CIFrame.watches, watches: [CIWatch]) {
+        self.type = type
+        self.event = event
+        self.watches = watches
     }
 }

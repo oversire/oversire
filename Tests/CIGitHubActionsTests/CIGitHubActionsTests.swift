@@ -149,6 +149,43 @@ final class CIGitHubActionsTests: XCTestCase {
         XCTAssertTrue(again.events.isEmpty, "no repeats")
     }
 
+    func testPollCommitSendsETag() async throws {
+        let path = "repos/acme/app/actions/runs?head_sha=abc&per_page=20"
+        let body = #"{"workflow_runs":["# + Self.runJSON + "]}"
+        gh.on("GET", path, answer("200 OK", body, etag: "\"c1\""), answer("304 Not Modified", "", etag: "\"c1\""))
+        let interest = CIInterest(repo: "acme/app", sha: "abc")
+        let first = try await ci.pollCommit(interest, since: nil)
+        XCTAssertFalse(gh.calls.last?.args.contains("-H") ?? true, "no ETag before the first answer")
+        XCTAssertEqual(first.events.map(\.action), ["completed"], "the first poll gives the listed runs")
+        let second = try await ci.pollCommit(interest, since: first.cursor)
+        XCTAssertEqual(gh.calls.last?.args.suffix(2), ["-H", "If-None-Match: \"c1\""])
+        XCTAssertTrue(second.events.isEmpty)
+        XCTAssertEqual(second.cursor, first.cursor)
+        XCTAssertEqual(second.budget?.remaining, 4900)
+    }
+
+    func testPollCommitIdsMatchPoll() async throws {
+        let list = "repos/acme/app/actions/runs?per_page=20"
+        func runs(_ status: String, _ updated: String) -> String {
+            #"{"workflow_runs":[{"id":77,"name":"CI","status":""# + status + #"","run_attempt":1,"updated_at":""# + updated + #""}]}"#
+        }
+        gh.on("GET", list, answer("200 OK", runs("in_progress", "2026-10-16T10:00:00Z"), etag: "\"e1\""))
+        let base = try await ci.poll(since: nil)
+        gh.on("GET", list, answer("200 OK", runs("completed", "2026-10-16T10:04:00Z"), etag: "\"e2\""))
+        let viaPoll = try await ci.poll(since: base.cursor)
+        gh.on("GET", "repos/acme/app/actions/runs?branch=main&per_page=5", answer("200 OK", runs("completed", "2026-10-16T10:04:00Z")))
+        let viaCommit = try await ci.pollCommit(CIInterest(repo: "acme/app", branch: "main"), since: nil)
+        XCTAssertEqual(viaPoll.events.map(\.id), viaCommit.events.map(\.id), "EventMerger drops the repeat")
+        XCTAssertFalse(viaCommit.busy)
+    }
+
+    func testPollCommitNeedsShaOrBranch() async {
+        do {
+            _ = try await ci.pollCommit(CIInterest(repo: "acme/app"), since: nil)
+            XCTFail("an interest with no sha and no branch must throw")
+        } catch {}
+    }
+
     func testLogTailKeepsTheTokenOnTheAPIHost() async throws {
         let http = RecordedHTTP()
         let blob = "https://results.example.net/logs/9.txt"

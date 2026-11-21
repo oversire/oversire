@@ -104,6 +104,7 @@ final class LiveSync {
         didSet {
             guard state != oldValue else { return }
             log.info("Cloud: \(String(describing: self.state), privacy: .public)")
+            updateHooked()
             sink?.relayStateChanged()
             bus.post(DataChange(.connection, origin: .event))
         }
@@ -122,6 +123,8 @@ final class LiveSync {
     var onMirror: (() -> Void)?
     /// A click of a client for this app. It comes only from the group home, and only the app that leads runs it.
     var onMemberCall: ((MemberCall, MachineLink) -> Void)?
+    /// True when the CI quota is low (`CIQuota.degraded`). Interest polling stops then.
+    var ciDegraded: () -> Bool = { false }
 
     private var merger: EventMerger?
     private var polling: PollingSource?
@@ -129,6 +132,8 @@ final class LiveSync {
     private var cloud: CloudSource?
     private var daemons: [CloudSource] = []
     private var feeds: [LiveFeedSource] = []
+    private var interest: InterestPoller?
+    private var watchFeed: CIWatchFeed?
     /// The state of the live feed of each tracker account that has one.
     private(set) var feedStates: [AccountID: LiveFeedState] = [:]
     private var healthTasks: [Task<Void, Never>] = []
@@ -215,7 +220,12 @@ final class LiveSync {
         if kinds.contains(.cloud) { cloud = makeCloud(generation: gen) } else { useCloud(nil) }
         let daemons = makeDaemons(p.links, generation: gen)
         let feeds = kinds.contains(.feeds) ? makeFeeds(p.accounts, generation: gen) : []
-        let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons + feeds, onCloudHealth: { h in
+        let interest = kinds.contains(.polling) ? makeInterestPoller() : nil
+        self.interest = interest
+        watchFeed = interest.map { poller in
+            CIWatchFeed(poller: poller, tracked: { REPOS }, leads: { [weak self] in self?.group?.owner.leads == true })
+        }
+        let merger = EventMerger(polling: polling, cloud: cloud, others: (fallback.map { [$0] } ?? []) + daemons + feeds + (interest.map { [$0] } ?? []), onCloudHealth: { h in
             DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.cloudHealth(h) } }
         })
         self.polling = polling
@@ -225,6 +235,7 @@ final class LiveSync {
         self.feeds = feeds
         self.merger = merger
         if cloud == nil { state = .off }
+        updateHooked()
         watchNetwork()
         let stream = merger.events()
         consumer = Task { @MainActor [weak self] in
@@ -268,6 +279,8 @@ final class LiveSync {
         cloud = nil
         daemons = []
         feeds = []
+        interest = nil
+        watchFeed = nil
         healthTasks.forEach { $0.cancel() }
         healthTasks = []
     }
@@ -296,6 +309,11 @@ final class LiveSync {
                     DispatchQueue.main.async { [weak self] in
                         if self?.group?.isHome(machine: machine, local: l.local) == true { self?.onMirror?() }
                     }
+                case .ci(let f)?:
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        self.watchFeed?.received(f, fromHome: self.group?.isHome(machine: machine, local: l.local) == true)
+                    }
                 case .memberCall(let c)?:
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.group?.isHome(machine: machine, local: l.local) == true, self.group?.owner.leads == true else {
@@ -318,10 +336,42 @@ final class LiveSync {
             })
             healthTasks.append(Task { [weak self] in
                 for await h in await s.healthUpdates() {
-                    await MainActor.run { if self?.generation == gen { hub.setHealth(machine, h) } }
+                    await MainActor.run {
+                        guard let self, self.generation == gen else { return }
+                        hub.setHealth(machine, h)
+                        if h == .live { self.loadWatches(l) }
+                    }
                 }
             })
             return s
+        }
+    }
+
+    /// One interest poller. A repo whose CI adapter cannot poll one commit keeps the normal poll.
+    private func makeInterestPoller() -> InterestPoller {
+        var byRepo: [String: any CommitPolling] = [:]
+        for repo in REPOS {
+            byRepo[repo.lowercased()] = ENV.pollers(repos: [repo]).lazy.compactMap { $0 as? any CommitPolling }
+                .first { $0.capabilities.contains(.commitPolling) }
+        }
+        let adapters = byRepo
+        return InterestPoller(providers: { adapters[$0.lowercased()] }, degraded: { [weak self] in
+            await MainActor.run { self?.ciDegraded() ?? false }
+        })
+    }
+
+    /// The hooked repos poll at the guard interval while the cloud is live. Else none.
+    private func updateHooked() {
+        let hooked = state == .live ? Set(plan?.polled ?? []) : []
+        if let interest { Task { await interest.setHooked(hooked) } }
+    }
+
+    /// The home daemon sent its watches while the link was down: read them again when the link is live.
+    private func loadWatches(_ l: MachineLink) {
+        guard group?.isHome(machine: l.machine, local: l.local) == true, let feed = watchFeed else { return }
+        Task {
+            guard let list = try? await l.client(http: DaemonTransport.shared).ciWatches() else { return }
+            await MainActor.run { feed.apply(list) }
         }
     }
 

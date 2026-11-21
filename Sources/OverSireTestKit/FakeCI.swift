@@ -2,7 +2,7 @@ import Foundation
 import OverSireCore
 
 /// An in-memory CI with one pipeline and one failed run in "fake/app".
-public final class FakeCI: CIProvider, LogReading, JobRerunning, Dispatching, GateApproving, @unchecked Sendable {
+public final class FakeCI: CIProvider, CommitPolling, LogReading, JobRerunning, Dispatching, GateApproving, @unchecked Sendable {
     public let base: FakeProvider
     public var id: ProviderID { base.id }
     public var account: AccountID { base.account }
@@ -11,9 +11,11 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, Dispatching, Ga
 
     public let repo: RepoRef
     private var runList: [Run] = []
+    private var commitAnswers: [Result<EventPage, ProviderError>] = []
+    private var _commitPolls: [(CIInterest, Cursor?)] = []
     private var logLines: [String] = (1...40).map { "line \($0)" } + ["error: the fake failed"]
 
-    public init(account: String = "fake", capabilities: Set<Capability> = [.rerun, .rerunJob, .cancel, .logs, .dispatch, .gates]) {
+    public init(account: String = "fake", capabilities: Set<Capability> = [.rerun, .rerunJob, .cancel, .logs, .dispatch, .gates, .commitPolling]) {
         base = FakeProvider(id: "fake-ci", account: account, capabilities: capabilities)
         repo = RepoRef(account: base.account, path: "fake/app", url: URL(string: "https://code.fake/fake/app")!)
         runList = [Self.run(id: "1", status: "completed", conclusion: "failure", attempt: 1)]
@@ -140,6 +142,22 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, Dispatching, Ga
             let o = runList[at]
             runList[at] = Self.run(id: o.id, status: "queued", conclusion: nil, attempt: o.attempt ?? 1)
         }
+    }
+
+    /// The pages (or errors) of the next `pollCommit` calls, in order. The last one repeats. With none, a quiet 304-like page.
+    public func queueCommitPages(_ answers: [Result<EventPage, ProviderError>]) { base.lockedValue { commitAnswers = answers } }
+
+    /// The interests and cursors of the `pollCommit` calls.
+    public var commitPolls: [(interest: CIInterest, since: Cursor?)] { base.lockedValue { _commitPolls } }
+
+    public func pollCommit(_ i: CIInterest, since: Cursor?) async throws -> EventPage {
+        let next: Result<EventPage, ProviderError> = base.lockedValue {
+            _commitPolls.append((i, since))
+            guard let first = commitAnswers.first else { return .success(EventPage(events: [], cursor: since ?? Cursor(rawValue: "0"))) }
+            if commitAnswers.count > 1 { commitAnswers.removeFirst() }
+            return first
+        }
+        return try next.get()
     }
 
     public func log(_ j: JobRef, lines: Int) async throws -> [String] {

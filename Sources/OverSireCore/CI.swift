@@ -275,6 +275,25 @@ public protocol GateApproving: CIProvider {
     func approve(_ run: RunRef, gates: [String], comment: String) async throws
 }
 
+/// What a CI adapter polls for one watch. `sha` wins over `branch`.
+public struct CIInterest: Hashable, Sendable {
+    public var repo: String
+    public var sha: String?
+    public var branch: String?
+
+    public init(repo: String, sha: String? = nil, branch: String? = nil) {
+        self.repo = repo
+        self.sha = sha
+        self.branch = branch
+    }
+}
+
+/// One conditional poll of the runs of one commit. The page has the budget from the rate headers.
+/// Errors: `ProviderError.rateLimited`, `ProviderError.notFound` (the repo is gone) and transport errors.
+public protocol CommitPolling: CIProvider {
+    func pollCommit(_ i: CIInterest, since: Cursor?) async throws -> EventPage
+}
+
 public protocol LogReading: CIProvider {
     /// The last lines of the job log, without time stamps and group markers.
     func log(_ j: JobRef, lines: Int) async throws -> [String]

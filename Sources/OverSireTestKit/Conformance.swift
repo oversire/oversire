@@ -76,6 +76,7 @@ public enum ProviderConformance {
         (.changeSearch, "ChangeSearching", { $0 is any ChangeSearching }),
         (.collaborators, "CollaboratorListing", { $0 is any CollaboratorListing }),
         (.commitChecks, "CommitChecking", { $0 is any CommitChecking }),
+        (.commitPolling, "CommitPolling", { $0 is any CommitPolling }),
         (.epics, "EpicTracking", { $0 is any EpicTracking }),
     ]
 

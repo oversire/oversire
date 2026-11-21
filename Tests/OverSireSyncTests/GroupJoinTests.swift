@@ -29,6 +29,15 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertEqual(m.epoch, "e7c1a9f04b2d4c58")
     }
 
+    func testParseCIFrame() throws {
+        let frame = String(decoding: try contractFixture("ci-frame", "watches"), as: UTF8.self)
+        guard case .ci(let f)? = DaemonFrame.parse(frame) else { return XCTFail("no ci frame") }
+        XCTAssertEqual(f.watches.count, 2)
+        XCTAssertEqual(f.watches.first?.pr, 86)
+        XCTAssertNil(DaemonFrame.parse(#"{"type":"ci","event":"later","watches":[]}"#))
+        XCTAssertNil(DaemonFrame.parse(#"{"type":"ci","event":"watches"}"#))
+    }
+
     func testDecodeAppCall() throws {
         let call = String(decoding: try contractFixture("app-call", "call"), as: UTF8.self)
         guard case .appCall(let c)? = DaemonFrame.parse(#"{"type":"appCall","call":"# + call + "}") else {
