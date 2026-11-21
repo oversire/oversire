@@ -1,6 +1,7 @@
 import Cocoa
 import OverSireCore
 import OverSireAI
+import OverSireAssistant
 
 // ─── Groom ───────────────────────────────────────────────────────────────────
 // One read-only session for each project (start key `groom:<PROJECT>`) reads the open items from a file on the daemon,
@@ -9,6 +10,51 @@ import OverSireAI
 
 /// The calls of a runtime that runs a Groom session.
 typealias GroomHost = EnhanceHost & HostFileWriting
+
+/// What a Groom run reads from the tracker. On the home it calls the tracker. On a client it asks the home.
+struct GroomReads {
+    var intakeDetails: ([IntakeItem], ProjectRef) async -> [String: IntakeDetail]
+    var commentCount: (Item, ProjectRef) async -> Int?
+    /// The items that changed after the last Groom of the project (store key).
+    var changed: (String) async -> [String]
+
+    static func store(_ s: ProjectStore, journal: GroomJournal) -> GroomReads {
+        func tracker(_ p: ProjectRef) async -> (any Tracker)? { await MainActor.run { s.tracker(of: p) } }
+        func remote() async -> Bool { await MainActor.run { s.remote != nil } }
+        return GroomReads(
+            intakeDetails: { intake, project in
+                if await remote() {
+                    guard let items = try? JSONValue.encoded(intake) else { return [:] }
+                    let r: Result<[String: IntakeDetail], ProviderError> = await s.remoteRows("intakeDetails", ["project": .string(project.storeKey), "intakeItems": items])
+                    return (try? r.get()) ?? [:]
+                }
+                let t = await tracker(project)
+                var out = (try? await (t as? any IntakeListing)?.intakeDetails(project)) ?? [:]
+                guard let t = t as? any IntakeTriaging else { return out }
+                for i in intake where out[i.workItemId] == nil {
+                    if let d = try? await t.intakeDetail(i, in: project) { out[i.workItemId] = d }
+                }
+                return out
+            },
+            commentCount: { item, project in
+                if await remote() {
+                    return await withCheckedContinuation { c in
+                        DispatchQueue.main.async { s.comments(key: item.key) { c.resume(returning: (try? $0.get())?.count) } }
+                    }
+                }
+                guard let t = await tracker(project), let ref = item.ref(in: project) else { return nil }
+                return (try? await t.comments(ref))?.count
+            },
+            changed: { pk in
+                if await remote() {
+                    let r: Result<[String], ProviderError> = await s.remoteRows("groomChanged", ["project": .string(pk)])
+                    return (try? r.get()) ?? []
+                }
+                guard let t = await MainActor.run(body: { s.snapshots[pk].flatMap { s.tracker(of: $0.summary.ref) } }) else { return [] }
+                return await journal.changed(pk, tracker: t)
+            })
+    }
+}
 
 final class GroomAgent {
     static let changed = Notification.Name("GroomAgentChanged")
@@ -128,7 +174,9 @@ final class GroomAgent {
     private let agents: AgentIndex
     private let queue: WorkQueue
     private let enhance: EnhanceAgent
+    private let actions: AppActionCatalog
     let journal: GroomJournal
+    let reads: GroomReads
     var host: () -> (any GroomHost)? = { ENV.runtime as? any GroomHost }
     var now: () -> Date = { Date() }
     var areas: (String) -> [String] = { _ in [] }
@@ -138,7 +186,7 @@ final class GroomAgent {
     private var outputsObserver: NSObjectProtocol?
 
     init(store: ProjectStore, memory: ProjectMemory, questions: QuestionHub, agents: AgentIndex, queue: WorkQueue, enhance: EnhanceAgent,
-         journal: GroomJournal) {
+         journal: GroomJournal, actions: AppActionCatalog, reads: GroomReads? = nil) {
         self.store = store
         self.memory = memory
         self.questions = questions
@@ -146,6 +194,8 @@ final class GroomAgent {
         self.queue = queue
         self.enhance = enhance
         self.journal = journal
+        self.actions = actions
+        self.reads = reads ?? .store(store, journal: journal)
         let nc = NotificationCenter.default
         observers = [nc.addObserver(forName: AgentIndex.changed, object: agents, queue: nil) { [weak self] _ in self?.sync() },
                      nc.addObserver(forName: QuestionHub.changed, object: questions, queue: nil) { [weak self] _ in self?.sync() },
@@ -239,15 +289,15 @@ final class GroomAgent {
         if let old = held.removeValue(forKey: projectKey) { stop(old) }
         outputs?.remove(.groomReview, projectKey)
         set(projectKey, .starting("Reading \(plan.count) items…"))
-        let tracker = store.tracker(of: snap.summary.ref)
+        let reads = reads
         let keys = store.intakeKeys
         let vision = memory.vision(of: snap.summary.ref)?.text
         let template = AGENTS.groomPrompt
         let areas = areas
         Task {
             do {
-                let details = await Self.intakeDetails(plan.intake, tracker: tracker, project: snap.summary.ref)
-                let counts = await Self.commentCounts(plan.backlog, tracker: tracker, project: snap.summary.ref)
+                let details = await Self.intakeDetails(plan.intake, reads: reads, project: snap.summary.ref)
+                let counts = await Self.commentCounts(plan.backlog, reads: reads, project: snap.summary.ref)
                 let (items, intake) = Self.items(plan, snap: snap, intakeKeys: keys, details: details, comments: counts, areas: areas)
                 let data = try GroomInput.jsonLines(items)
                 let name = "groom-\(snap.summary.identifier.lowercased()).jsonl"
@@ -281,24 +331,17 @@ final class GroomAgent {
     }
 
     /// The bodies of the intake items: one listing, else one call for each item.
-    static func intakeDetails(_ intake: [IntakeItem], tracker: (any Tracker)?, project: ProjectRef) async -> [String: IntakeDetail] {
+    static func intakeDetails(_ intake: [IntakeItem], reads: GroomReads, project: ProjectRef) async -> [String: IntakeDetail] {
         guard !intake.isEmpty else { return [:] }
-        var out = (try? await (tracker as? any IntakeListing)?.intakeDetails(project)) ?? [:]
-        guard let t = tracker as? any IntakeTriaging else { return out }
-        for i in intake where out[i.workItemId] == nil {
-            if let d = try? await t.intakeDetail(i, in: project) { out[i.workItemId] = d }
-        }
-        return out
+        return await reads.intakeDetails(intake, project)
     }
 
     /// The comment count of the due items: those with activity that the list does not cover. Newest first, at most `cap`.
     /// The other items already have their current count.
-    static func commentCounts(_ items: [Item], tracker: (any Tracker)?, project: ProjectRef, cap: Int = 30) async -> [String: Int] {
-        guard let tracker else { return [:] }
+    static func commentCounts(_ items: [Item], reads: GroomReads, project: ProjectRef, cap: Int = 30) async -> [String: Int] {
         var out: [String: Int] = [:]
         for i in items.filter(\.commentsDue).sorted(by: { $0.activityAt > $1.activityAt }).prefix(cap) {
-            guard let ref = i.ref(in: project), let list = try? await tracker.comments(ref) else { continue }
-            out[i.id] = list.count
+            if let n = await reads.commentCount(i, project) { out[i.id] = n }
         }
         return out
     }
@@ -510,12 +553,10 @@ final class GroomAgent {
     }
 
     /// The items of the project as apply targets. An intake item gets its intake page as the link.
-    func targets(_ pk: String, _ review: Review) -> [String: GroomApplier.Target] {
-        guard let snap = store.snapshots[pk] else { return [:] }
+    static func targets(_ snap: ProjectSnapshot, intake: [String: IntakeItem], url: String) -> [String: GroomApplier.Target] {
         var out: [String: GroomApplier.Target] = [:]
         for item in snap.items { if let r = item.ref(in: snap.summary.ref) { out[item.key.uppercased()] = .init(ref: r) } }
-        let url = (store.tracker(of: snap.summary.ref) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
-        for (key, i) in review.intake {
+        for (key, i) in intake {
             out[key] = .init(ref: ItemRef(project: snap.summary.ref, id: i.workItemId, key: key, url: URL(string: url) ?? URL(fileURLWithPath: "/")), intake: i)
         }
         return out
@@ -523,6 +564,7 @@ final class GroomAgent {
 
     /// Writes the checked lines. With `enhance`, the vague items then wait for an Enhance slot.
     /// `only` writes again the failed lines of the last Apply ("Try again").
+    /// The write is the catalog action `groom.apply`: on a client it runs on the home, with the journal.
     func apply(_ pk: String, enhance withEnhance: Bool = false, only: Set<String>? = nil) {
         let review: Review
         var before = GroomOutcome()
@@ -531,34 +573,39 @@ final class GroomAgent {
         case .applied(let r, let o) where only != nil: review = r; before = o
         default: return
         }
-        guard let snap = store.snapshots[pk], let tracker = store.tracker(of: snap.summary.ref) else {
+        guard let snap = store.snapshots[pk] else {
             set(pk, .failed("The project is not loaded.", kept: nil))
             return
         }
         let ids = only ?? selected[pk] ?? []
         let lines = review.changes.filter { ids.contains($0.id) }
         let vague = withEnhance ? review.vague : []
-        if only == nil, let run = held.removeValue(forKey: pk) ?? states[pk]?.run { stop(run) }
-        outputs?.remove(.groomReview, pk)
+        guard let sent = try? JSONValue.encoded(lines + vague), let intake = try? MirrorCodec.body(review.intake) else {
+            set(pk, .failed("OverSire cannot send the lines.", kept: nil))
+            return
+        }
+        let run = only == nil ? (held[pk] ?? states[pk]?.run) : nil
         set(pk, .applying(review, done: 0, of: lines.count))
-        let applier = GroomApplier(tracker: tracker, snapshot: snap, targets: targets(pk, review), journal: journal, projectKey: pk)
+        let args: [String: JSONValue] = ["project": .string(pk), "lines": sent, "intake": intake, "begin": .bool(only == nil)]
         Task { [before] in
-            if only == nil { await self.journal.begin(pk, project: snap.summary.ref, at: self.now()) }
-            let out = await applier.apply(lines + vague) { n, of in
-                DispatchQueue.main.async {
-                    if case .applying = self.states[pk] { self.set(pk, .applying(review, done: min(n, lines.count), of: lines.count)) }
-                }
-            }
-            let undo = await self.journal.last(pk) != nil
+            let r = await self.actions.run("groom.apply", ActionArgs(.object(args)))
             await MainActor.run {
+                guard case .ok(_, let data?, _) = r, let raw = data["outcome"], let out = try? MirrorCodec.value(GroomOutcome.self, from: raw) else {
+                    // The review stays in the book: a later change of the book shows it again.
+                    var why = ""
+                    if case .failed(let m) = r { why = m } else if case .notAllowed(let m) = r { why = m }
+                    self.set(pk, .failed(why.isEmpty ? "The home gave no result." : why, kept: nil))
+                    return
+                }
+                if let run { self.held[pk] = nil; self.stop(run) }
+                if only == nil { self.outputs?.remove(.groomReview, pk) }
                 var total = before
                 total.written += out.written
                 for id in out.written { total.failed[id] = nil }
                 total.failed.merge(out.failed) { _, b in b }
                 total.vague += out.vague.filter { !total.vague.contains($0) }
-                if undo { self.undoable.insert(pk) }
+                if data["undoable"]?.bool == true { self.undoable.insert(pk) }
                 self.set(pk, .applied(review, total))
-                self.store.refresh([pk], force: true) { _ in }
                 if withEnhance { self.queueEnhance(pk, keys: out.vague, merged: Set(lines.flatMap(\.merged).map { $0.uppercased() })) }
             }
         }
@@ -593,21 +640,26 @@ final class GroomAgent {
 
     /// The items that changed after the last Groom. Undo leaves them as they are.
     func undoCheck(_ pk: String, done: @escaping ([String]) -> Void) {
-        guard let snap = store.snapshots[pk], let tracker = store.tracker(of: snap.summary.ref) else { done([]); return }
         Task {
-            let changed = await journal.changed(pk, tracker: tracker)
+            let changed = await reads.changed(pk)
             await MainActor.run { done(changed) }
         }
     }
 
     func undo(_ pk: String, done: @escaping (GroomJournal.UndoOutcome) -> Void) {
-        guard let snap = store.snapshots[pk], let tracker = store.tracker(of: snap.summary.ref) else { done(.init()); return }
         Task {
-            let out = await journal.undo(pk, tracker: tracker)
+            let r = await actions.run("groom.undo", ActionArgs(.object(["project": .string(pk)])))
             await MainActor.run {
-                self.undoable.remove(pk)
-                if self.states[pk]?.isApplied == true { self.drop(pk) }
-                self.store.refresh([pk], force: true) { _ in }
+                var out = GroomJournal.UndoOutcome()
+                switch r {
+                case .ok(_, let data?, _): out = (try? MirrorCodec.value(GroomJournal.UndoOutcome.self, from: data)) ?? out
+                case .failed(let m), .notAllowed(let m): out.failed[pk] = m
+                default: break
+                }
+                if out.failed[pk] == nil {
+                    self.undoable.remove(pk)
+                    if self.states[pk]?.isApplied == true { self.drop(pk) }
+                }
                 done(out)
             }
         }

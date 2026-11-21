@@ -218,10 +218,13 @@ public struct CatalogProject: Codable, Hashable, Sendable {
     public var summary: ProjectSummary
     /// The capabilities of the tracker of the project, as `ProjectStore.has` reads them.
     public var capabilities: [Capability]
+    /// The web page of the intake of the project. Nil when the tracker has none, or from an old home.
+    public var intakeURL: String?
 
-    public init(summary: ProjectSummary, capabilities: [Capability]) {
+    public init(summary: ProjectSummary, capabilities: [Capability], intakeURL: String? = nil) {
         self.summary = summary
         self.capabilities = capabilities
+        self.intakeURL = intakeURL
     }
 }
 

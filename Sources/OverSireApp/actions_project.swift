@@ -127,6 +127,36 @@ struct ProjectActions {
                     }
                 }
             },
+            ActionSpec(id: "project.addLabel", title: "Add label", help: "Makes a label in the tracker project. Returns {id}.", kind: .change,
+                       input: ActionSpec.args(["project": EpicActions.project, "name": ("string", "The label name."), "color": ("string", "The color, for example #3B82F6.")],
+                                              required: ["project", "name", "color"]),
+                       capability: .labels) { a in
+                await link.run { d, done in
+                    let store = d.projectStore
+                    guard let snap = store.snapshot(a.string("project") ?? "") else {
+                        done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return
+                    }
+                    guard let name = a.string("name")?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { done(.notAllowed("Give a name.")); return }
+                    let ref = snap.summary.ref
+                    guard let t = store.tracker(of: ref) as? any LabelManaging, store.has(.labels, in: snap) else { done(ActionLink.unsupported(snap, "labels")); return }
+                    let color = a.string("color") ?? "#3B82F6"
+                    CallPriority.task(.user) {
+                        let r = await Result(awaiting: { try await t.createLabel(name, color: color, in: ref) })
+                        DispatchQueue.main.async {
+                            switch r {
+                            case .failure(let e): done(.failed(e.message))
+                            case .success(let id):
+                                let ident = snap.summary.identifier
+                                store.events.action(.projectSettingsChanged, item: nil, project: ident, verb: "settings",
+                                                    "Settings of \(ident) changed: labels",
+                                                    payload: ["project": .string(ident), "fields": .array([.string("labels")]), "label": .string(name)],
+                                                    actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
+                                done(.ok(summary: "Label \(name) is in \(ident).", data: .object(["id": .string(id)])))
+                            }
+                        }
+                    }
+                }
+            },
             ActionSpec(id: "project.catalogRefresh", title: "Refresh the project list",
                        help: "Fetches the projects of a tracker workspace again. A client app uses it for the picker of Track a project.", kind: .change,
                        input: ActionSpec.args(["workspace": ("string", "The tracker account id. Leave out to fetch all workspaces.")])) { a in

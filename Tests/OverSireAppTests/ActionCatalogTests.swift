@@ -157,7 +157,15 @@ final class ActionCatalogTests: XCTestCase {
         }
         XCTAssertEqual(ChangeAction.merge(.rebase).action(repo: "o/r", number: 3).args["method"], .string("rebase"))
         XCTAssertEqual(IntakeAction.update(IntakeEdit(patch: ItemPatch(priority: "low"))).action(project: "k", id: "w1")?.args["priority"], .string("low"))
-        XCTAssertNil(IntakeAction.update(IntakeEdit(patch: ItemPatch(title: "x"))).action(project: "k", id: "w1"), "only the AI worker writes other fields")
+        let wide = IntakeAction.update(IntakeEdit(patch: ItemPatch(title: "x"))).action(project: "k", id: "w1")
+        XCTAssertEqual(wide?.id, "intake.edit")
+        XCTAssertEqual(wide?.args["patch"]?["title"], .string("x"))
+        let other = ItemRef(project: ProjectRef(workspace: "w", id: "p"), id: "i2", key: "K-2", url: URL(string: "https://x/K-2")!)
+        let related = IntakeAction.update(IntakeEdit(patch: ItemPatch(priority: "low"), relations: [ItemRelation(kind: .blocks, item: other)])).action(project: "k", id: "w1")
+        XCTAssertEqual(related?.id, "intake.edit")
+        XCTAssertEqual(related?.args["patch"]?["priority"], .string("low"))
+        XCTAssertEqual(related?.args["relations"]?.array?.count, 1)
+        XCTAssertNil(related?.args["priority"], "an edit with relations sends one patch")
     }
 
     func testDomainActionsRefuseUnknownTargets() async {
@@ -448,16 +456,13 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(hits, [])
     }
 
-    /// A client path reads a tracker through the home. The gap files below read it directly until the named item fixes them.
+    /// A client path reads a tracker through the home.
     func testClientPathsDoNotReadTheTrackerDirectly() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
         // The home runs these, or they hold the home branch.
         let home: Set<String> = ["project_store.swift", "project_catalog.swift", "mirror_docs.swift", "main.swift", "AppEnvironment.swift", "plane_writeback.swift"]
-        let gaps: Set<String> = [
-            "enhance_agent.swift", "groom_agent.swift", "intake_page.swift",                                     // OVERSIRE-537 Enhance and Groom
-        ]
         let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter {
-            $0.hasSuffix(".swift") && !$0.hasPrefix("actions_") && !home.contains($0) && !gaps.contains($0)
+            $0.hasSuffix(".swift") && !$0.hasPrefix("actions_") && !home.contains($0)
         }
         XCTAssertGreaterThan(files.count, 50)
         let direct = try NSRegularExpression(pattern: #"(ENV|trackers)\.tracker\(|[sS]tore\??\.tracker\(of:"#)

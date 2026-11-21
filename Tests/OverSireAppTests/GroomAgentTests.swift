@@ -26,6 +26,8 @@ final class GroomAgentTests: XCTestCase {
         let pk: String
         let hub: QuestionHub
         let snap: ProjectSnapshot
+        let data: TestAppData
+        let journal: GroomJournal
     }
 
     private var saved: (Bool, String?)!
@@ -59,8 +61,8 @@ final class GroomAgentTests: XCTestCase {
         AI_CFG.intakeAgent = true
         PROJECTS_CFG.orca.roots[pk] = "/Users/ada/Projects/fake"
         return await MainActor.run {
-            let store = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(post: { _, _, _, _ in }),
-                                     statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+            let data = TestAppData(trackers: Trackers(fake))
+            let store = data.projectStore
             store.seed(snap)
             let agents = AgentIndex(writes: nil)
             agents.runtime = { host }
@@ -69,13 +71,17 @@ final class GroomAgentTests: XCTestCase {
             hub.tellAfter = { nil }
             let memory = ProjectMemory(writes: writes)
             let queue = WorkQueue(writes: writes, store: store, agents: agents)
-            let enhance = EnhanceAgent(store: store, memory: memory, questions: hub, agents: agents)
+            let enhance = EnhanceAgent(store: store, memory: memory, questions: hub, agents: agents, actions: data.actions)
             enhance.host = { host }
+            let journal = GroomJournal(store: writes.store)
             let agent = GroomAgent(store: store, memory: memory, questions: hub, agents: agents, queue: queue, enhance: enhance,
-                                   journal: GroomJournal(store: writes.store))
+                                   journal: journal, actions: data.actions)
             agent.host = { host }
             agent.outputs = AIOutputBook(writes: writes)
-            return Rig(agent: agent, enhance: enhance, daemon: daemon, host: host, agents: agents, queue: queue, fake: fake, pk: pk, hub: hub, snap: snap)
+            data.enhanceAgent = enhance
+            data.groomAgent = agent
+            return Rig(agent: agent, enhance: enhance, daemon: daemon, host: host, agents: agents, queue: queue, fake: fake, pk: pk, hub: hub, snap: snap,
+                       data: data, journal: journal)
         }
     }
 
@@ -151,7 +157,10 @@ final class GroomAgentTests: XCTestCase {
         let c = item("c", activity: at + 50, read: at, count: 3)
         t.setComments("a", (1...5).map { Comment(id: "c\($0)", author: nil, createdAt: at, url: "") })
         let project = FakeTracker().project
-        let counts = await GroomAgent.commentCounts([c, b, a], tracker: t, project: project, cap: 1)
+        let reads = GroomReads(intakeDetails: { _, _ in [:] },
+                               commentCount: { i, p in try? await t.comments(i.ref(in: p)!).count },
+                               changed: { _ in [] })
+        let counts = await GroomAgent.commentCounts([c, b, a], reads: reads, project: project, cap: 1)
         XCTAssertEqual(counts, ["a": 5])
         XCTAssertEqual(t.read, ["a"], "one call, for the newest due item")
 
@@ -235,6 +244,63 @@ final class GroomAgentTests: XCTestCase {
         _ = await Wait.until(timeout: .seconds(2)) { r.daemon.sessions.contains(where: { $0.key == "enhance:FAKE-7" }) }
         XCTAssertTrue(r.daemon.sessions.contains { $0.key == "enhance:FAKE-7" }, "\(r.daemon.sessions.map(\.key))")
         XCTAssertNil(r.agent.outputs?.all(.groomReview, as: GroomAgent.Review.self).first, "the review goes after Apply")
+    }
+
+    private final class Calls: @unchecked Sendable { var list: [MemberCallRequest] = [] }
+
+    /// Turns the app of the rig into a client. The reads and the writes go to a fake home.
+    private func asClient(_ r: Rig, _ calls: Calls, answer: AppCallResult? = nil) async throws {
+        let details = try MirrorCodec.body(MirrorRows(rows: Dictionary(uniqueKeysWithValues: r.snap.intake!.enumerated().map { ($1.workItemId, IntakeDetail(sequence: 6 + $0, body: "Remote note", labels: [])) })))
+        let none = try MirrorCodec.body(MirrorRows(rows: [Comment]()))
+        let summary = r.snap.summary
+        await MainActor.run {
+            let store = r.data.projectStore
+            store.client = true
+            store.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.intake, .priority, .labels])], capabilities: [:], trackers: [])
+            store.remote = { what, _ in what == "intakeDetails" ? details : none }
+        }
+        r.data.actions.forward = { req in
+            calls.list.append(req)
+            return answer ?? AppCallResult(id: "m-1", status: .ok, summary: "ok")
+        }
+    }
+
+    // OVERSIRE-537
+    func testStartOnClientReadsThroughGroomReads() async throws {
+        let r = try await make()
+        try await asClient(r, Calls())
+        await start(r)
+        let file = try XCTUnwrap(r.daemon.runtime.files.first?.first)
+        let text = String(decoding: file.data, as: UTF8.self)
+        XCTAssertTrue(text.contains("Remote note"), text)
+        XCTAssertFalse(text.contains("A note"), "the client does not read the tracker")
+    }
+
+    // OVERSIRE-537
+    func testApplyOnClientForwardsGroomApply() async throws {
+        let r = try await make()
+        await start(r)
+        try await absorb(r)
+        end(r, block)
+        try await absorb(r)
+        await wait(r) { if case .ready = $0 { return true } else { return false } }
+        guard case .ready(let review, _) = r.agent.states[r.pk] else { return XCTFail() }
+        let line = review.changes[0].id
+        let calls = Calls()
+        let outcome = try MirrorCodec.body(GroomOutcome(written: [line]))
+        try await asClient(r, calls, answer: AppCallResult(id: "m-1", status: .ok, summary: "ok", data: .object(["outcome": outcome, "undoable": .bool(true)])))
+        await MainActor.run { r.agent.apply(r.pk) }
+        await wait(r) { $0?.isApplied == true }
+        guard case .applied(_, let out) = r.agent.states[r.pk] else { return XCTFail("\(String(describing: r.agent.states[r.pk]))") }
+        XCTAssertEqual(out.written, [line])
+        XCTAssertTrue(r.agent.undoable.contains(r.pk))
+        XCTAssertEqual(calls.list.map(\.action), ["groom.apply"])
+        XCTAssertEqual(calls.list.first?.args["project"], .string(r.pk))
+        XCTAssertEqual(calls.list.first?.args["lines"]?.array?.count, 1)
+        XCTAssertEqual(calls.list.first?.args["begin"], .bool(true))
+        XCTAssertTrue(r.fake.triages.isEmpty, "the client writes nothing to the tracker")
+        let two = try await r.fake.items(r.fake.project, since: nil, limit: 50).first { $0.key == "FAKE-2" }
+        XCTAssertNotEqual(two?.statusOptionId, "s-cancel")
     }
 
     func testAskAgainSendsATurnAndWaitsForANewResult() async throws {

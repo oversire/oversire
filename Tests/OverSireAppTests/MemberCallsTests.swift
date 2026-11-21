@@ -1,3 +1,4 @@
+import OverSireAI
 import OverSireAssistant
 import OverSireCore
 import OverSireTestKit
@@ -255,5 +256,113 @@ final class MemberCallsTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 50_000_000)
         let rows = await rig.outlet.rows.filter { $0.kind == .itemStateChanged }
         XCTAssertEqual(rows.first?.via, "app@mba")
+    }
+
+    // OVERSIRE-537
+    private func apply(_ rig: EpicRig, _ id: String, _ args: [String: JSONValue], as caller: ActionCaller = .member(machine: "mba", name: "Fritz")) async -> ActionResult {
+        await rig.d.actions.run(id, ActionArgs(.object(args), caller: caller))
+    }
+
+    func testIntakeEditWithPatchAndRelations() async throws {
+        let rig = try await EpicRig()
+        let made = try await rig.fake.createIntake(ItemDraft(title: "Idea"), in: rig.fake.project)
+        await rig.reload()
+        let relation = ItemRelation(kind: .blocks, item: rig.items[0])
+        let patch = try MirrorCodec.body(ItemPatch(title: "Better", labels: ["l-bug"]))
+        let r = await apply(rig, "intake.edit", ["project": .string("FAKE"), "id": .string(made.intake.id), "patch": patch,
+                                                 "relations": try JSONValue.encoded([relation])])
+        guard case .ok = r else { return XCTFail("\(r)") }
+        let edit = try XCTUnwrap(rig.fake.intakeEdits.first)
+        XCTAssertEqual(rig.fake.intakeEdits.count, 1)
+        XCTAssertEqual(edit.patch.title, "Better")
+        XCTAssertEqual(edit.patch.labels, ["l-bug"])
+        XCTAssertEqual(edit.relations, [relation])
+    }
+
+    func testItemUpdateWithPatch() async throws {
+        let rig = try await EpicRig()
+        let item = rig.items[0]
+        let patch = try MirrorCodec.body(ItemPatch(priority: "high", labels: ["l-bug"]))
+        let r = await apply(rig, "item.update", ["key": .string(item.key), "patch": patch])
+        guard case .ok = r else { return XCTFail("\(r)") }
+        let got = try await rig.fake.detail(item).item
+        XCTAssertEqual(got.labels, ["l-bug"])
+        let other = rig.items[1]
+        let relation = ItemRelation(kind: .blocks, item: other)
+        let both = await apply(rig, "item.update", ["key": .string(item.key), "relations": try JSONValue.encoded([relation])])
+        guard case .ok = both else { return XCTFail("\(both)") }
+        let kinds = try await rig.fake.relations(of: item).map(\.kind)
+        XCTAssertEqual(kinds, [.blocks])
+        let none = await apply(rig, "item.update", ["key": .string(item.key)])
+        XCTAssertEqual(none, .notAllowed("Give a title, a parent, a patch or relations."))
+    }
+
+    func testAddLabelWritesTheEvent() async throws {
+        let rig = try await EpicRig()
+        let r = await apply(rig, "project.addLabel", ["project": .string("FAKE"), "name": .string("groomed"), "color": .string("#3B82F6")])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let id = try XCTUnwrap(data["id"]?.string)
+        let labels = try await rig.fake.settings(rig.fake.project).labels
+        XCTAssertTrue(labels.contains { $0.id == id && $0.name == "groomed" })
+        let row = await rig.row(.projectSettingsChanged)
+        XCTAssertEqual(row?.payload?["label"], .string("groomed"))
+        XCTAssertEqual(row?.via, "app@mba")
+        let bad = await apply(rig, "project.addLabel", ["project": .string("FAKE"), "name": .string(" "), "color": .string("#fff")])
+        XCTAssertEqual(bad, .notAllowed("Give a name."))
+    }
+
+    func testGroomApplyWritesGroomAppliedRows() async throws {
+        let rig = try await EpicRig()
+        let lines = [GroomResult.Proposal(kind: .done, keys: [rig.items[0].key], reason: "Shipped."),
+                     GroomResult.Proposal(kind: .done, keys: [rig.items[1].key], reason: "Also shipped.")]
+        let r = await apply(rig, "groom.apply", ["project": .string("FAKE"), "lines": try JSONValue.encoded(lines)])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let out = try MirrorCodec.value(GroomOutcome.self, from: try XCTUnwrap(data["outcome"]))
+        XCTAssertEqual(out.written, lines.map(\.id))
+        XCTAssertEqual(data["undoable"], .bool(true))
+        let status = try await rig.fake.detail(rig.items[0]).item.statusOptionId
+        XCTAssertEqual(status, "s-done")
+        _ = await rig.rows(count: 3)
+        let rows = await rig.outlet.rows.filter { $0.kind == .groomApplied }
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.map(\.item), rig.items.prefix(2).map(\.key))
+        XCTAssertEqual(Set(rows.map(\.via)), ["app@mba"])
+        XCTAssertEqual(Set(rows.map(\.actorType)), [.agent])
+        let journal = await rig.d.groomAgent.journal.last(rig.fake.project.storeKey)
+        XCTAssertNotNil(journal)
+        let none = await apply(rig, "groom.apply", ["project": .string("NOPE"), "lines": .array([])])
+        XCTAssertEqual(none, .notAllowed("OverSire has no loaded project NOPE."))
+    }
+
+    func testGroomUndoWritesGroomUndone() async throws {
+        let rig = try await EpicRig()
+        let none = await apply(rig, "groom.undo", ["project": .string("FAKE")])
+        XCTAssertEqual(none, .notAllowed("No Groom to undo in FAKE."))
+        let line = GroomResult.Proposal(kind: .done, keys: [rig.items[0].key], reason: "Shipped.")
+        _ = await apply(rig, "groom.apply", ["project": .string("FAKE"), "lines": try JSONValue.encoded([line])])
+        let r = await apply(rig, "groom.undo", ["project": .string("FAKE")])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let out = try MirrorCodec.value(GroomJournal.UndoOutcome.self, from: data)
+        XCTAssertEqual(out.undone.count, 1)
+        let status = try await rig.fake.detail(rig.items[0]).item.statusOptionId
+        XCTAssertNotEqual(status, "s-done")
+        let row = await rig.row(.groomUndone)
+        XCTAssertEqual(row?.via, "app@mba")
+        XCTAssertEqual(row?.payload?["undone"], .int(1))
+    }
+
+    func testMirrorReadGivesIntakeDetailsAndGroomChanged() async throws {
+        let rig = try await EpicRig()
+        let made = try await rig.fake.createIntake(ItemDraft(title: "Idea", bodyMarkdown: "Text."), in: rig.fake.project)
+        await rig.reload()
+        let r = await read(rig.d, ["what": .string("intakeDetails"), "project": .string("FAKE"), "intakeItems": try JSONValue.encoded([made.intake])])
+        guard case .ok(_, let data?, _) = r else { return XCTFail("\(r)") }
+        let rows = try MirrorCodec.value(MirrorRows<[String: IntakeDetail]>.self, from: data).rows
+        XCTAssertEqual(rows[made.intake.workItemId]?.body, "Text.")
+        let c = await read(rig.d, ["what": .string("groomChanged"), "project": .string("FAKE")])
+        guard case .ok(_, let changed?, _) = c else { return XCTFail("\(c)") }
+        XCTAssertEqual(try MirrorCodec.value(MirrorRows<[String]>.self, from: changed).rows, [])
+        let bad = await read(rig.d, ["what": .string("groomChanged"), "project": .string("NOPE")])
+        XCTAssertEqual(bad, .notAllowed("OverSire has no loaded project NOPE."))
     }
 }

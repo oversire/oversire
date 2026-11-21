@@ -189,6 +189,7 @@ extension Event {
         public static let subagentEnded: Kind = "subagent.ended"
         public static let reviewReady: Kind = "review.ready"
         public static let groomApplied: Kind = "groom.applied"
+        public static let groomUndone: Kind = "groom.undone"
         public static let sweepApplied: Kind = "sweep.applied"
         public static let workerStarted: Kind = "worker.started"
         public static let workerAnswered: Kind = "worker.answered"

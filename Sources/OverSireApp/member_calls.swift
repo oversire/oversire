@@ -54,14 +54,16 @@ struct MemberActions {
         let link = link
         return [
             ActionSpec(id: "mirror.read", title: "Read from the tracker",
-                       help: "Reads comments, the timeline, options, intake details, labels, links, project settings, attachments, intake keys or images of the tracker, for a client app.",
+                       help: "Reads comments, the timeline, options, intake details, labels, links, project settings, attachments, intake keys, images or the Groom changes of the tracker, for a client app.",
                        kind: .read,
-                       input: ActionSpec.args(["what": ("string", "comments, timeline, options, intakeDetail, labels, links, projectSettings, attachments, attachmentLink, intakeKeys or images."),
+                       input: ActionSpec.args(["what": ("string", "comments, timeline, options, intakeDetail, intakeDetails, labels, links, projectSettings, attachments, attachmentLink, intakeKeys, images or groomChanged."),
                                                "project": ("string", "The store key of the project."), "item": ("string", "The key or id of the item."),
                                                "intake": ("object", "The intake item, for intakeDetail."),
+                                               "intakeItems": ("array", "The intake items, for intakeDetails."),
                                                "ref": ("object", "The item ref, for attachments and attachmentLink."),
                                                "attachment": ("object", "The file, for attachmentLink."),
-                                               "markdown": ("string", "The text with asset ids, for images.")], required: ["what"])) { a in
+                                               "markdown": ("string", "The text with asset ids, for images.")], required: ["what"],
+                                              objects: ["intakeItems"])) { a in
                 await link.main(.failed("The app is closing.")) { d, done in Self.read(a, d, done) }
             },
             ActionSpec(id: "app.refresh", title: "Refresh the app", help: "Loads all data again from the providers, for a client app.", kind: .change) { _ in
@@ -97,6 +99,21 @@ struct MemberActions {
         case "intakeDetail":
             guard let v = a["intake"], let i = try? MirrorCodec.value(IntakeItem.self, from: v) else { done(.notAllowed("Give the intake item.")); return }
             store.intakeDetail(projectKey: project, item: i) { rows($0, done) }
+        case "intakeDetails":
+            guard let snap = store.snapshot(project) else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
+            guard let v = a["intakeItems"], let items = try? MirrorCodec.value([IntakeItem].self, from: v) else { done(.notAllowed("Give the intake items.")); return }
+            let reads = d.groomAgent.reads, ref = snap.summary.ref
+            Task {
+                let out = await reads.intakeDetails(items, ref)
+                await MainActor.run { rows(.success(out), done) }
+            }
+        case "groomChanged":
+            guard store.snapshot(project) != nil else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
+            let reads = d.groomAgent.reads
+            Task {
+                let out = await reads.changed(project)
+                await MainActor.run { rows(.success(out), done) }
+            }
         case "projectSettings":
             guard store.snapshot(project) != nil else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
             store.projectSettings(projectKey: project) { rows($0, done) }

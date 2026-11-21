@@ -32,7 +32,7 @@ actor GroomJournal {
         var entries: [Entry]
     }
 
-    struct UndoOutcome: Equatable, Sendable {
+    struct UndoOutcome: Equatable, Sendable, Codable {
         var undone: [String] = []
         var left: [String] = []           // changed after Groom
         var failed: [String: String] = [:]

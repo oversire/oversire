@@ -18,6 +18,7 @@ final class EnhanceAgentTests: XCTestCase {
         let daemon: FakeDaemon
         let host: LocalMachineRuntime
         let agents: AgentIndex
+        let data: TestAppData
     }
 
     private func make(_ daemon: FakeDaemon = FakeDaemon()) async throws -> Rig {
@@ -32,12 +33,11 @@ final class EnhanceAgentTests: XCTestCase {
             agents.hold = true
             let hub = QuestionHub(agents: agents, writes: writes)
             hub.tellAfter = { nil }
-            let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
-                                     statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
-            let agent = EnhanceAgent(store: store, memory: ProjectMemory(writes: writes), questions: hub, agents: agents)
+            let data = TestAppData()
+            let agent = EnhanceAgent(store: data.projectStore, memory: ProjectMemory(writes: writes), questions: hub, agents: agents, actions: data.actions)
             agent.host = { host }
             agent.now = { self.t0 }
-            return Rig(agent: agent, hub: hub, daemon: daemon, host: host, agents: agents)
+            return Rig(agent: agent, hub: hub, daemon: daemon, host: host, agents: agents, data: data)
         }
     }
 
@@ -163,6 +163,47 @@ final class EnhanceAgentTests: XCTestCase {
         XCTAssertEqual(r.agent.pill(.intake(item))?.text, "Enhanced · High")
         XCTAssertNil(r.hub.key(q), "the session is no longer tracked")
         XCTAssertTrue(r.daemon.runtime.orders.contains { if case .history = $0.order { return true } else { return false } })
+    }
+
+    private final class Calls: @unchecked Sendable { var list: [MemberCallRequest] = [] }
+
+    /// A client store with no tracker. The reads and the writes go to a fake home.
+    private func asClient(_ r: Rig, _ calls: Calls) async throws {
+        let summary = ProjectSummary(ref: project, identifier: "OVERSIRE", title: "OverSire", url: "https://plane.example/p1", closed: false)
+        let detail = try MirrorCodec.body(MirrorRows(rows: IntakeDetail(sequence: 9, body: "label sync is broken", labels: [])))
+        let labels = try MirrorCodec.body(MirrorRows(rows: [StatusOption(id: "l-bug", name: "bug", color: "#EF4444")]))
+        await MainActor.run {
+            let store = r.data.projectStore
+            store.client = true
+            store.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.intake, .priority, .labels])], capabilities: [:], trackers: [])
+            store.remote = { what, _ in what == "labels" ? labels : detail }
+            store.seed(ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date(), intake: [self.item]))
+        }
+        r.data.actions.forward = { req in
+            calls.list.append(req)
+            return AppCallResult(id: "m-1", status: .ok, summary: "ok")
+        }
+    }
+
+    // OVERSIRE-537
+    func testApplyOnClientRunsCatalogActions() async throws {
+        let r = try await make()
+        let calls = Calls()
+        try await asClient(r, calls)
+        try await launch(r)
+        end(r, message: "clipped", history: block)
+        try await absorb(r)
+        await wait(r) { $0?.isReady == true }
+        let key = project.storeKey
+        let applied = expectation(description: "apply")
+        var err: String? = "unset"
+        await MainActor.run { r.agent.apply(projectKey: key, item: item, accept: true) { err = $0; applied.fulfill() } }
+        await fulfillment(of: [applied], timeout: 5)
+        XCTAssertNil(err)
+        XCTAssertEqual(calls.list.map(\.action), ["intake.edit", "intake.accept"])
+        XCTAssertEqual(calls.list.first?.args["project"], .string(key))
+        XCTAssertEqual(calls.list.first?.args["patch"]?["labels"], .array([.string("l-bug")]))
+        XCTAssertEqual(r.agent.states[item.id], .applied(accepted: true))
     }
 
     func testNoResultFailsAndKeepsTheText() async throws {
@@ -336,11 +377,11 @@ final class AcceptAndQueueTests: XCTestCase {
     }
 
     func testOnlyCheckedRelationsAndNoCycle() throws {
-        let agent = EnhanceAgent(store: ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
-                                                    statePath: NSTemporaryDirectory() + "/q-\(UUID()).json", activityPath: NSTemporaryDirectory() + "/q-\(UUID()).jsonl"),
+        let data = TestAppData()
+        let agent = EnhanceAgent(store: data.projectStore,
                                 memory: ProjectMemory(writes: StoreWrites(store: LocalStore(dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))),
                                 questions: QuestionHub(agents: AgentIndex(writes: nil), writes: StoreWrites(store: LocalStore(dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))),
-                                agents: AgentIndex(writes: nil))
+                                agents: AgentIndex(writes: nil), actions: data.actions)
         let res = EnhanceResult(verdict: .clear, description: "", relations: [
             .init(kind: "blocked_by", key: "OVERSIRE-3", reason: ""), .init(kind: "blocks", key: "OVERSIRE-4", reason: ""),
             .init(kind: "relates_to", key: "OVERSIRE-5", reason: "")])
@@ -375,6 +416,69 @@ final class EnhanceTicketTests: XCTestCase {
         func tracker(_ id: String) -> (any Tracker)? { id == fake.account.id ? fake : nil }
     }
 
+    // OVERSIRE-537
+    func testApplyTicketOnClientRunsItemUpdate() async throws {
+        final class Calls: @unchecked Sendable { var list: [MemberCallRequest] = [] }
+        let fake = FakeTracker()
+        let ticket = try await fake.create(ItemDraft(title: "Labels drop", bodyMarkdown: "label sync is broken"), in: fake.project)
+        let blocker = try await fake.create(ItemDraft(title: "Label API"), in: fake.project)
+        let summary = try await fake.projects()[0]
+        let items = try await fake.items(fake.project, since: nil, limit: 50)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let writes = StoreWrites(store: LocalStore(dir: dir))
+        let daemon = FakeDaemon()
+        let host = LocalMachineRuntime(machine: "mba", client: DaemonClient(base: DaemonClient.loopback, token: nil, http: daemon), pause: { _ in })
+        _ = try await host.refresh()
+        let calls = Calls()
+        let labels = try MirrorCodec.body(MirrorRows(rows: [StatusOption]()))
+        let data = TestAppData()
+        let agents = AgentIndex(writes: nil)
+        let agent = await MainActor.run { () -> EnhanceAgent in
+            let store = data.projectStore
+            store.client = true
+            store.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [])], capabilities: [:], trackers: [])
+            store.remote = { _, _ in labels }
+            store.seed(ProjectSnapshot(summary: summary, statusOptions: [], items: items, fetchedAt: Date(), me: "me"))
+            agents.runtime = { host }
+            agents.hold = true
+            let a = EnhanceAgent(store: store, memory: ProjectMemory(writes: writes), questions: QuestionHub(agents: agents, writes: writes), agents: agents,
+                                 actions: data.actions)
+            a.host = { host }
+            return a
+        }
+        data.actions.forward = { req in
+            calls.list.append(req)
+            return AppCallResult(id: "m-1", status: .ok, summary: "ok")
+        }
+        let target = EnhanceTarget.item(ticket)
+        let began = expectation(forNotification: EnhanceAgent.changed, object: agent) { _ in agent.state(target)?.run != nil }
+        let spec = EnhanceAgent.Spec(kind: .ticket, ref: ticket, title: "Labels drop", url: ticket.url.absoluteString, body: "label sync is broken")
+        await MainActor.run { agent.launch(target, spec, root: "/tmp") }
+        await fulfillment(of: [began], timeout: 5)
+        let result = ###"{"verdict":"vague","description":"## Problem\nThe sync drops labels.","relations":[{"kind":"blocked_by","key":"\###(blocker.key)"}]}"###
+        var all = daemon.sessions
+        all[0].state = .done
+        all[0].stateSince = try XCTUnwrap(all[0].startedAt).addingTimeInterval(600)
+        all[0].lastMessage = "```oversire-result\n" + result + "\n```"
+        daemon.sessions = all
+        let ready = expectation(forNotification: EnhanceAgent.changed, object: agent) { _ in agent.state(target)?.isReady == true }
+        let cards = try await host.workspaces()
+        await MainActor.run { agents.absorb(cards) }
+        await fulfillment(of: [ready], timeout: 5)
+
+        let applied = expectation(description: "apply")
+        var err: String? = "unset"
+        await MainActor.run { agent.apply(ticket: ticket) { err = $0; applied.fulfill() } }
+        await fulfillment(of: [applied], timeout: 5)
+        XCTAssertNil(err)
+        XCTAssertEqual(calls.list.map(\.action), ["item.update"])
+        XCTAssertEqual(calls.list.first?.args["key"], .string(ticket.key))
+        XCTAssertEqual(calls.list.first?.args["patch"]?["bodyMarkdown"]?.string?.hasPrefix("## Problem"), true)
+        XCTAssertEqual(calls.list.first?.args["relations"]?.array?.count, 1)
+        XCTAssertEqual(agent.state(target), .applied(accepted: false))
+    }
+
     func testApplyWritesTheTicketAndItsRelations() async throws {
         let fake = FakeTracker()
         let ticket = try await fake.create(ItemDraft(title: "Labels drop", bodyMarkdown: "label sync is broken"), in: fake.project)
@@ -384,9 +488,8 @@ final class EnhanceTicketTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let writes = StoreWrites(store: LocalStore(dir: dir))
-        let trackers = Trackers(fake)
-        let store = ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, _ in }),
-                                 statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+        let data = TestAppData(trackers: Trackers(fake))
+        let store = data.projectStore
         let items = try await fake.items(fake.project, since: nil, limit: 50)
         await MainActor.run {
             store.seed(ProjectSnapshot(summary: summary, statusOptions: [], items: items, fetchedAt: Date(), me: "me"))
@@ -398,7 +501,8 @@ final class EnhanceTicketTests: XCTestCase {
             let agents = AgentIndex(writes: nil)
             agents.runtime = { host }
             agents.hold = true
-            let a = EnhanceAgent(store: store, memory: ProjectMemory(writes: writes), questions: QuestionHub(agents: agents, writes: writes), agents: agents)
+            let a = EnhanceAgent(store: store, memory: ProjectMemory(writes: writes), questions: QuestionHub(agents: agents, writes: writes), agents: agents,
+                                 actions: data.actions)
             a.host = { host }
             a.outputs = AIOutputBook(writes: writes)
             return (a, agents)

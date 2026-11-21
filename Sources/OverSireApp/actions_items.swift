@@ -62,12 +62,15 @@ struct ItemActions {
                     }
                 }
             },
-            ActionSpec(id: "item.update", title: "Update item", help: "Changes the title or the parent of an item. The parent `none` removes the parent.", kind: .change,
+            ActionSpec(id: "item.update", title: "Update item", help: "Changes the title, the parent or other fields of an item, then adds relations. The parent `none` removes the parent.", kind: .change,
                        input: ActionSpec.args(["key": Self.key, "title": ("string", "The new title."),
-                                               "parent": ("string", "The key of the new parent item. `none` or an empty text removes the parent.")],
-                                              required: ["key"])) { a in
+                                               "parent": ("string", "The key of the new parent item. `none` or an empty text removes the parent."),
+                                               "patch": ("object", "The change: ItemPatch. `title` and `parent` replace the same fields of it."),
+                                               "relations": ("array", "The relations to add: [ItemRelation].")],
+                                              required: ["key"], objects: ["relations"])) { a in
                 await link.item(a) { d, f, done in
-                    var patch = ItemPatch(title: a.string("title"))
+                    var patch = a["patch"].flatMap { try? MirrorCodec.value(ItemPatch.self, from: $0) } ?? ItemPatch()
+                    if let t = a.string("title") { patch.title = t }
                     if let p = a.string("parent") {
                         guard d.projectStore.has(.subItems, in: f.snap) else { done(ActionLink.unsupported(f.snap, "sub-items")); return }
                         if p.isEmpty || p.lowercased() == "none" {
@@ -77,8 +80,15 @@ struct ItemActions {
                             patch.parent = parent.item.id
                         }
                     }
-                    guard !patch.isEmpty else { done(.notAllowed("Give a title or a parent.")); return }
-                    d.projectStore.update(itemId: f.item.id, patch, failure: "Could not change the item", by: a.caller.actor) { done(ActionLink.stored(d, $0, "\(f.item.key) is updated.")) }
+                    let relations = a["relations"].flatMap { try? MirrorCodec.value([ItemRelation].self, from: $0) } ?? []
+                    guard !patch.isEmpty || !relations.isEmpty else { done(.notAllowed("Give a title, a parent, a patch or relations.")); return }
+                    let finish = { (ok: Bool) in done(ActionLink.stored(d, ok, "\(f.item.key) is updated.")) }
+                    let relate = {
+                        guard !relations.isEmpty else { finish(true); return }
+                        d.projectStore.relate(itemId: f.item.id, RelationPatch(add: relations), by: a.caller.actor, done: finish)
+                    }
+                    guard !patch.isEmpty else { relate(); return }
+                    d.projectStore.update(itemId: f.item.id, patch, failure: "Could not change the item", by: a.caller.actor) { $0 ? relate() : finish(false) }
                 }
             },
             ActionSpec(id: "item.edit", title: "Edit item", help: "Sets the title and the Markdown description of an item.", kind: .change,

@@ -49,9 +49,9 @@ final class TestAppData: AppData {
     lazy var areas = ItemAreaBook(writes: writes)
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
-    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
+    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, actions: actions)
     lazy var groomAgent = GroomAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, queue: queue,
-                                     enhance: enhanceAgent, journal: GroomJournal(store: writes.store))
+                                     enhance: enhanceAgent, journal: GroomJournal(store: writes.store), actions: actions)
     lazy var attachments = MainActor.assumeIsolated { AttachmentBook(store: projectStore) }
     lazy var sessions = SessionNotes(path: tmp + "/sessions.json", agents: agentIndex, store: projectStore,
                                      writeBack: PlaneWriteBack(path: tmp + "/wb.json", store: projectStore, trackers: ENV))

@@ -198,10 +198,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         g.onError = { log.error("\($0)") }
         return g
     }()
-    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex)
+    lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, actions: actions)
     lazy var groomAgent: GroomAgent = {
         let g = GroomAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, queue: queue, enhance: enhanceAgent,
-                           journal: GroomJournal(store: STORE_WRITES.files ?? STORE_WRITES.store))
+                           journal: GroomJournal(store: STORE_WRITES.files ?? STORE_WRITES.store), actions: actions)
         g.areas = { [unowned self] in self.areas.areas(key: $0) }
         return g
     }()

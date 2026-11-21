@@ -1,6 +1,7 @@
 import Cocoa
 import OverSireCore
 import OverSireAI
+import OverSireAssistant
 
 // ─── Enhance ─────────────────────────────────────────────────────────────────
 // A read-only session on the sessions machine reads the code for an intake item or a ticket, asks the user what the code cannot
@@ -98,6 +99,7 @@ final class EnhanceAgent {
     private let memory: ProjectMemory
     private let questions: QuestionHub
     private let agents: AgentIndex
+    private let actions: AppActionCatalog
     var host: () -> (any EnhanceHost)? = { ENV.runtime as? any EnhanceHost }
     var now: () -> Date = { Date() }
     /// False when another app owns the automations (AutomationOwner).
@@ -111,11 +113,12 @@ final class EnhanceAgent {
 
     private struct Written: Codable { var accepted: Bool }
 
-    init(store: ProjectStore, memory: ProjectMemory, questions: QuestionHub, agents: AgentIndex) {
+    init(store: ProjectStore, memory: ProjectMemory, questions: QuestionHub, agents: AgentIndex, actions: AppActionCatalog) {
         self.store = store
         self.memory = memory
         self.questions = questions
         self.agents = agents
+        self.actions = actions
         let nc = NotificationCenter.default
         observers = [nc.addObserver(forName: AgentIndex.changed, object: agents, queue: nil) { [weak self] _ in self?.sync() },
                      nc.addObserver(forName: QuestionHub.changed, object: questions, queue: nil) { [weak self] _ in self?.sync() }]
@@ -214,7 +217,7 @@ final class EnhanceAgent {
         guard let snap = store.snapshots[projectKey] else { done(nil); return }
         switch target {
         case .intake(let item):
-            let url = (ENV.tracker(snap.summary.ref.workspace) as? any IntakePage)?.intakeURL(snap.summary.ref) ?? snap.summary.url
+            let url = store.intakeURL(of: snap)
             store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
                 guard let self else { return }
                 let detail = try? r.get()
@@ -461,47 +464,71 @@ final class EnhanceAgent {
 
     // Writes the checked properties. With `accept`, also accepts the item, or marks it as a duplicate when that is checked.
     // With `queue`, also adds the start label, so the item joins the lane of its project. It needs no Enhance run.
+    // The writes are catalog actions: on a client they run on the home.
     func apply(projectKey: String, item: IntakeItem, accept: Bool, queue: Bool = false, done: @escaping (_ error: String?) -> Void) {
         let target = EnhanceTarget.intake(item)
         var ready: (EnhanceResult, Run)?
         if case .ready(let result, let run) = states[item.id] { ready = (result, run) }
-        guard ready != nil || queue, let snap = store.snapshots[projectKey],
-              let tracker = ENV.tracker(snap.summary.ref.workspace) else { done("The project is not loaded."); return }
+        guard ready != nil || queue, let snap = store.snapshots[projectKey], store.has(.intake, in: snap) else { done("The project is not loaded."); return }
         let known = Self.known(snap)
         let graph = BlockGraph(store.relations.byKey)
         let startLabel = AGENTS.startLabel
         store.intakeDetail(projectKey: projectKey, item: item) { [weak self] r in
             guard let self else { return }
-            CallPriority.task(.user) {
-                let labeler = tracker as? any LabelManaging
-                var labels = (try? await labeler?.labels(snap.summary.ref)) ?? []
+            self.store.labels(projectKey: projectKey) { [weak self] found in
+                guard let self else { return }
+                var labels = (try? found.get()) ?? []
                 let keep = (try? r.get())?.labels.compactMap { n in labels.first { $0.name == n }?.id } ?? []
-                var edit = ready.map { self.edit(target, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph, hasPriority: snap.hasPriority) } ?? IntakeEdit()
+                let edit = ready.map { self.edit(target, $0.0, run: $0.1, labels: labels, keep: keep, items: known, graph: graph, hasPriority: snap.hasPriority) } ?? IntakeEdit()
                 let dup = ready.flatMap { self.duplicate(target, $0.0, items: known) }
-                if queue, dup == nil, !startLabel.isEmpty {
-                    var id = labels.first { $0.name.caseInsensitiveCompare(startLabel) == .orderedSame }?.id
-                    if id == nil, let made = try? await labeler?.createLabel(startLabel, color: "#3B82F6", in: snap.summary.ref) {
-                        id = made
-                        labels.append(StatusOption(id: made, name: startLabel, color: "#3B82F6"))
-                    }
-                    guard let id else {
-                        await MainActor.run { done("Could not find or make the label \"\(startLabel)\" in the project.") }
-                        return
-                    }
-                    edit = Self.queued(edit, label: id, keep: keep)
-                }
-                await MainActor.run {
-                    let failed = { (what: String) in done(self.store.lastError ?? "\(ENV.trackerName(snap.summary.ref.account)) did not take \(what).") }
-                    let after: (Bool) -> Void = { ok in
-                        guard ok else { failed("the changes"); return }
+                let send = { (edit: IntakeEdit) in
+                    let after: (String?) -> Void = { error in
+                        if let error { done(error); return }
                         if let run = ready?.1 { self.stop(run) }
                         guard accept else { self.written(item.id, accepted: false); done(nil); return }
-                        self.store.triage(projectKey: projectKey, item: item, action: dup.map { .duplicate(of: $0.id) } ?? .accept) { ok in
-                            if ready != nil { self.written(item.id, accepted: ok) }
-                            ok ? done(nil) : failed("the accept")
+                        self.triage(.accept, dup: dup, projectKey: projectKey, item: item) { error in
+                            if ready != nil { self.written(item.id, accepted: error == nil) }
+                            done(error)
                         }
                     }
-                    if edit.isEmpty { after(true) } else { self.store.triage(projectKey: projectKey, item: item, action: .update(edit), done: after) }
+                    if edit.isEmpty { after(nil) } else { self.triage(.update(edit), projectKey: projectKey, item: item, done: after) }
+                }
+                guard queue, dup == nil, !startLabel.isEmpty else { send(edit); return }
+                if let id = labels.first(where: { $0.name.caseInsensitiveCompare(startLabel) == .orderedSame })?.id {
+                    send(Self.queued(edit, label: id, keep: keep))
+                    return
+                }
+                let args: [String: JSONValue] = ["project": .string(projectKey), "name": .string(startLabel), "color": .string("#3B82F6")]
+                Task {
+                    let made = await self.actions.run("project.addLabel", ActionArgs(.object(args)))
+                    await MainActor.run {
+                        guard case .ok(_, let data, _) = made, let id = data?["id"]?.string else {
+                            done("Could not find or make the label \"\(startLabel)\" in the project.")
+                            return
+                        }
+                        labels.append(StatusOption(id: id, name: startLabel, color: "#3B82F6"))
+                        send(Self.queued(edit, label: id, keep: keep))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Runs one triage as a catalog action. `dup` turns an accept into a duplicate mark.
+    private func triage(_ action: IntakeAction, dup: ItemRef? = nil, projectKey: String, item: IntakeItem, done: @escaping (String?) -> Void) {
+        let act = dup.map { IntakeAction.duplicate(of: $0.id) } ?? action
+        guard let (id, args) = act.action(project: projectKey, id: item.id) else { done("OverSire cannot write this change."); return }
+        run(id, args, done: done)
+    }
+
+    /// Runs a catalog action. `done` gets nil, or the reason of a refusal. It runs on the main thread.
+    private func run(_ id: String, _ args: [String: JSONValue], done: @escaping (String?) -> Void) {
+        Task {
+            let r = await actions.run(id, ActionArgs(.object(args)))
+            await MainActor.run {
+                switch r {
+                case .ok: done(nil)
+                case .failed(let m), .notAllowed(let m): done(m)
                 }
             }
         }
@@ -510,35 +537,29 @@ final class EnhanceAgent {
     /// Writes the checked properties to a ticket at once: one update, then the relations.
     func apply(ticket ref: ItemRef, done: @escaping (_ error: String?) -> Void) {
         let target = EnhanceTarget.item(ref)
-        guard case .ready(let result, let run) = states[target.id], let (_, snap, item) = store.item(key: ref.key),
-              let tracker = store.tracker(of: snap.summary.ref) else { done("The item is not loaded."); return }
+        guard case .ready(let result, let run) = states[target.id], let (_, snap, item) = store.item(key: ref.key) else { done("The item is not loaded."); return }
         let known = Self.known(snap)
         let graph = BlockGraph(store.relations.byKey)
-        CallPriority.task(.user) {
-            let labels = (try? await (tracker as? any LabelManaging)?.labels(snap.summary.ref)) ?? []
+        store.labels(projectKey: snap.summary.ref.storeKey) { [weak self] found in
+            guard let self else { return }
+            let labels = (try? found.get()) ?? []
             let keep = item.labels.compactMap { n in labels.first { $0.name == n }?.id }
             let edit = self.edit(target, result, run: run, labels: labels, keep: keep, items: known, graph: graph, hasPriority: snap.hasPriority)
-            await MainActor.run { self.write(edit, to: item.id, target: target, run: run, done: done) }
+            self.write(edit, to: item.key, target: target, run: run, done: done)
         }
     }
 
-    private func write(_ edit: IntakeEdit, to id: String, target: EnhanceTarget, run: Run, done: @escaping (String?) -> Void) {
-        let name = store.item(id).map { ENV.trackerName($0.snap.summary.ref.account) } ?? ENV.trackerNames()
+    private func write(_ edit: IntakeEdit, to key: String, target: EnhanceTarget, run: Run, done: @escaping (String?) -> Void) {
         let ended = {
             self.stop(run)
             self.written(target.id, accepted: false)
             done(nil)
         }
-        let relate = {
-            guard !edit.relations.isEmpty else { ended(); return }
-            self.store.relate(itemId: id, RelationPatch(add: edit.relations)) { ok in
-                ok ? ended() : done(self.store.lastError ?? "\(name) did not take the relations.")
-            }
-        }
-        guard edit.patch != ItemPatch() else { relate(); return }
-        store.update(itemId: id, edit.patch, failure: "Could not write the changes") { ok in
-            ok ? relate() : done(self.store.lastError ?? "\(name) did not take the changes.")
-        }
+        guard !edit.isEmpty else { ended(); return }
+        var args: [String: JSONValue] = ["key": .string(key)]
+        if !edit.patch.isEmpty, let v = try? MirrorCodec.body(edit.patch) { args["patch"] = v }
+        if !edit.relations.isEmpty, let v = try? JSONValue.encoded(edit.relations) { args["relations"] = v }
+        self.run("item.update", args) { $0.map(done) ?? ended() }
     }
 
     private static func known(_ snap: ProjectSnapshot) -> [String: ItemRef] {

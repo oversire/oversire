@@ -70,8 +70,8 @@ final class ProjectStore {
     /// The catalog of the home. A client reads the capabilities of a project from it.
     var catalog: ClientCatalog?
     /// Set on a client. It asks the source app for the reads that need a live tracker. `what` is "comments", "timeline",
-    /// "options", "intakeDetail", "labels", "links", "projectSettings", "attachments", "attachmentLink", "intakeKeys"
-    /// or "images". It gives the `data` of the answer.
+    /// "options", "intakeDetail", "labels", "links", "projectSettings", "attachments", "attachmentLink", "intakeKeys",
+    /// "images", "intakeDetails" or "groomChanged". It gives the `data` of the answer.
     var remote: ((_ what: String, _ args: JSONValue) async throws -> JSONValue)?
     /// Items that came before their project doc, by store key.
     private var orphans: [String: [Item]] = [:]
@@ -801,6 +801,15 @@ final class ProjectStore {
     }
 
     func tracker(of p: ProjectRef) -> (any Tracker)? { trackers.tracker(p.workspace) }
+
+    /// The web page of the intake of a project. A client reads it from the catalog. The page of the project is the fallback.
+    func intakeURL(of snap: ProjectSnapshot) -> String {
+        let ref = snap.summary.ref
+        if let catalog {
+            return catalog.projects.first { $0.summary.ref.storeKey == ref.storeKey }?.intakeURL ?? snap.summary.url
+        }
+        return (tracker(of: ref) as? any IntakePage)?.intakeURL(ref) ?? snap.summary.url
+    }
 
     func update(itemId: String, _ patch: ItemPatch, failure: String, by actor: EventActor = .user, done: @escaping (Bool) -> Void) {
         if refusesClose(itemId, to: patch.status) { done(false); return }

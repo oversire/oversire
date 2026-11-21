@@ -87,7 +87,9 @@ final class AppMirrorDocs: MirrorDocSource {
 
     func catalogDoc() -> MirrorDoc {
         let list = projects().map { p in
-            CatalogProject(summary: p, capabilities: Self.sorted(store.tracker(of: p.ref)?.capabilities ?? []))
+            let tracker = store.tracker(of: p.ref)
+            return CatalogProject(summary: p, capabilities: Self.sorted(tracker?.capabilities ?? []),
+                                  intakeURL: (tracker as? any IntakePage)?.intakeURL(p.ref))
         }
         let caps = Dictionary(uniqueKeysWithValues: [Layer.tracker, .codeHost, .ci].map { ($0.rawValue, Self.sorted(layers($0))) })
         let catalog = ClientCatalog(projects: list, capabilities: caps, trackers: trackers(), workspaces: workspaces())

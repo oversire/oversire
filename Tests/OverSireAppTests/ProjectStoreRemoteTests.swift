@@ -81,6 +81,17 @@ final class ProjectStoreRemoteTests: XCTestCase {
         XCTAssertEqual(seen.calls.first?.args["project"], .string(ref.storeKey))
     }
 
+    func testIntakeURLOnClientComesFromTheCatalog() throws {
+        let s = try clientStore()
+        let summary = ProjectSummary(ref: ref, identifier: "ONE", title: "One", url: "https://plane.example/one", closed: false)
+        let snap = ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date())
+        s.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.intake])], capabilities: [:], trackers: [])
+        XCTAssertEqual(s.intakeURL(of: snap), "https://plane.example/one", "an old home gives the page of the project")
+        s.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.intake], intakeURL: "https://plane.example/one/intake")],
+                                  capabilities: [:], trackers: [])
+        XCTAssertEqual(s.intakeURL(of: snap), "https://plane.example/one/intake")
+    }
+
     func testRemoteImagesOnClient() async throws {
         let seen = Seen()
         let s = try clientStore()

@@ -22,9 +22,16 @@ struct IntakeActions {
                 nil
             },
             triage("intake.delete", "Delete", "Deletes an intake item and its work item. This cannot be undone.", .outward) { _ in .delete },
-            triage("intake.edit", "Edit", "Writes the description or the priority of an intake item. The item stays in the intake.", .change,
-                   extra: ["body": ("string", "The new description, in Markdown."), "priority": ("string", "The priority: urgent, high, medium, low or none.")]) { a in
-                .update(IntakeEdit(patch: ItemPatch(priority: a.string("priority"), bodyMarkdown: a.string("body"))))
+            triage("intake.edit", "Edit", "Writes the description, the priority, other fields or relations of an intake item. The item stays in the intake.", .change,
+                   extra: ["body": ("string", "The new description, in Markdown."), "priority": ("string", "The priority: urgent, high, medium, low or none."),
+                           "patch": ("object", "The change: ItemPatch. `body` and `priority` replace the same fields of it."),
+                           "relations": ("array", "The relations to add: [ItemRelation].")],
+                   objects: ["relations"]) { a in
+                var patch = a["patch"].flatMap { try? MirrorCodec.value(ItemPatch.self, from: $0) } ?? ItemPatch()
+                if let b = a.string("body") { patch.bodyMarkdown = b }
+                if let p = a.string("priority") { patch.priority = p }
+                let relations = a["relations"].flatMap { try? MirrorCodec.value([ItemRelation].self, from: $0) } ?? []
+                return .update(IntakeEdit(patch: patch, relations: relations))
             },
             ActionSpec(id: "intake.create", title: "New intake item", help: "Makes an intake item in a project. Returns the key, the work item id, the url and the intake item.", kind: .change,
                        input: ActionSpec.args(["project": ItemActions.project, "title": ("string", "The title."), "body": ("string", "The Markdown description."),
@@ -61,12 +68,12 @@ struct IntakeActions {
 
     /// `action` gives nil when the action needs a lookup in the snapshot (intake.merge).
     private func triage(_ id: String, _ title: String, _ help: String, _ kind: ActionKind, extra: [String: (String, String)] = [:],
-                        required: [String] = [], _ action: @escaping (ActionArgs) -> IntakeAction?) -> ActionSpec {
+                        required: [String] = [], objects: [String] = [], _ action: @escaping (ActionArgs) -> IntakeAction?) -> ActionSpec {
         let link = link
         var props = extra
         props["project"] = ItemActions.project
         props["id"] = ("string", "The intake item id.")
-        return ActionSpec(id: id, title: title, help: help, kind: kind, input: ActionSpec.args(props, required: ["project", "id"] + required), capability: .intake) { a in
+        return ActionSpec(id: id, title: title, help: help, kind: kind, input: ActionSpec.args(props, required: ["project", "id"] + required, objects: objects), capability: .intake) { a in
             await link.run { d, done in
                 guard let snap = d.projectStore.snapshot(a.string("project") ?? ""),
                       let item = snap.intake?.first(where: { $0.id == a.string("id") || $0.workItemId == a.string("id") }) else {
@@ -87,7 +94,8 @@ struct IntakeActions {
 }
 
 extension IntakeAction {
-    /// The catalog action of a triage. nil for an edit with relations or other fields: only Enhance writes one.
+    /// The catalog action of a triage. nil for `.pending`: only the undo of Groom uses it.
+    /// A simple edit keeps `body` and `priority`. Other edits send `patch` and `relations`.
     func action(project: String, id: String) -> (id: String, args: [String: JSONValue])? {
         var args: [String: JSONValue] = ["project": .string(project), "id": .string(id)]
         switch self {
@@ -98,10 +106,22 @@ extension IntakeAction {
         case .snooze(let t): args["until"] = .string(isoFmt.string(from: t)); return ("intake.snooze", args)
         case .duplicate(let of): args["of"] = .string(of); return ("intake.merge", args)
         case .update(let e):
-            guard e.relations.isEmpty, e.patch == ItemPatch(priority: e.patch.priority, bodyMarkdown: e.patch.bodyMarkdown) else { return nil }
-            if let b = e.patch.bodyMarkdown { args["body"] = .string(b) }
-            if let p = e.patch.priority { args["priority"] = .string(p) }
+            let p = e.patch
+            if e.relations.isEmpty, p == ItemPatch(priority: p.priority, bodyMarkdown: p.bodyMarkdown) {
+                if let b = p.bodyMarkdown { args["body"] = .string(b) }
+                if let x = p.priority { args["priority"] = .string(x) }
+            } else {
+                if !p.isEmpty, let v = try? MirrorCodec.body(p) { args["patch"] = v }
+                if !e.relations.isEmpty, let v = try? JSONValue.encoded(e.relations) { args["relations"] = v }
+            }
             return ("intake.edit", args)
         }
+    }
+}
+
+extension JSONValue {
+    /// Any value as JSON, also an array. `MirrorCodec.body` takes objects only.
+    static func encoded<T: Encodable>(_ value: T) throws -> JSONValue {
+        JSONValue(any: try JSONSerialization.jsonObject(with: MirrorCodec.encoder().encode(value)))
     }
 }

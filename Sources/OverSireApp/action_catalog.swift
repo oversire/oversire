@@ -18,7 +18,7 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         self.link = link
         self.people = people
         all = ItemActions(link: link).specs + SessionActions(link: link).specs + QueueActions(link: link).specs + RunbookActions(link: link).specs
-            + RepoActions(link: link).specs + IntakeActions(link: link).specs + MachineActions(link: link).specs
+            + RepoActions(link: link).specs + IntakeActions(link: link).specs + GroomActions(link: link).specs + MachineActions(link: link).specs
             + EpicActions(link: link).specs + ProjectActions(link: link).specs
             + MemberActions(link: link).specs + SettingsActions(link: link).specs + ReadActions(link: link).specs + PageActions(link: link).specs + PeopleActions(link: link, people: people).specs + extra
         byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -274,6 +274,20 @@ final class ActionLink: @unchecked Sendable {
     /// The result of a ProjectStore write.
     static func stored(_ d: AppData, _ ok: Bool, _ summary: String) -> ActionResult {
         ok ? .ok(summary: summary) : .failed(d.projectStore.lastError ?? "The tracker did not take the change.")
+    }
+}
+
+extension ActionSpec {
+    /// `args` with the arrays in `objects` holding objects in place of strings.
+    static func args(_ properties: [String: (String, String)], required: [String] = [], objects: [String]) -> JSONValue {
+        guard case .object(var schema) = args(properties, required: required), case .object(var props)? = schema["properties"] else { return .null }
+        for k in objects {
+            guard case .object(var o)? = props[k] else { continue }
+            o["items"] = .object(["type": .string("object")])
+            props[k] = .object(o)
+        }
+        schema["properties"] = .object(props)
+        return .object(schema)
     }
 }
 

@@ -391,6 +391,45 @@ final class MirrorPublisherTests: XCTestCase {
         XCTAssertTrue(docs.activityDocs(since: Date() + 60).isEmpty, "an entry older than since stays out")
     }
 
+    /// A fake tracker with an intake page, like Plane.
+    private final class PagedTracker: IntakePage {
+        let t: FakeTracker
+        init(_ t: FakeTracker) { self.t = t }
+        var id: ProviderID { t.id }
+        var account: AccountID { t.account }
+        var capabilities: Set<Capability> { t.capabilities }
+        var pollPolicy: PollPolicy { t.pollPolicy }
+        var keyFormat: KeyFormat { t.keyFormat }
+        func probe() async throws -> Identity { try await t.probe() }
+        func poll(since: Cursor?) async throws -> EventPage { try await t.poll(since: since) }
+        func projects() async throws -> [ProjectSummary] { try await t.projects() }
+        func statuses(_ p: ProjectRef) async throws -> [StatusOption] { try await t.statuses(p) }
+        func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] { try await t.items(p, since: since, limit: limit) }
+        func detail(_ i: ItemRef) async throws -> ItemDetail { try await t.detail(i) }
+        func comments(_ i: ItemRef) async throws -> [Comment] { try await t.comments(i) }
+        func create(_ d: ItemDraft, in p: ProjectRef) async throws -> ItemRef { try await t.create(d, in: p) }
+        func update(_ i: ItemRef, _ patch: ItemPatch) async throws { try await t.update(i, patch) }
+        func comment(_ i: ItemRef, markdown: String) async throws { try await t.comment(i, markdown: markdown) }
+        func intakeURL(_ p: ProjectRef) -> String { "https://plane.test/\(p.id)/intake" }
+    }
+
+    func testCatalogDocHasIntakeURL() throws {
+        let t = PagedTracker(FakeTracker(account: "ws"))
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-docs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+                                 statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
+        let summary = ProjectSummary(ref: t.t.project, identifier: "FAKE", title: "Fake", url: "https://x/FAKE", closed: false)
+        store.track([summary], live: [])
+        let docs = AppMirrorDocs(store: store, runs: { [] }, prs: { [] }, projects: { [summary] },
+                                 layers: { _ in [] }, trackers: { ["ws"] }, workspaces: { [] })
+        let c: ClientCatalog = try MirrorCodec.value(from: try XCTUnwrap(docs.catalogDoc().body))
+        XCTAssertEqual(c.projects.first?.intakeURL, "https://plane.test/\(summary.ref.id)/intake")
+        let (plain, _, _) = try appDocs()
+        let p: ClientCatalog = try MirrorCodec.value(from: try XCTUnwrap(plain.catalogDoc().body))
+        XCTAssertNil(p.projects.first?.intakeURL, "a tracker with no intake page has none")
+    }
+
     func testCatalogDocHasCapabilities() throws {
         let (docs, _, summary) = try appDocs(caps: [.links, .priority])
         let d = docs.catalogDoc()
