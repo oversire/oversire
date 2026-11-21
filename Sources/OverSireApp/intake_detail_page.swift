@@ -264,8 +264,7 @@ final class IntakeDetailPage: Page {
                 copy.toolTip = "Copy \(key)"
                 copy.setAccessibilityLabel("Copy \(key)")
                 copy.onClick = { [weak copy] in
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(key, forType: .string)
+                    RowActions.copy(key)
                     copy?.flash("Copied")
                 }
                 chips.append(copy)
@@ -286,8 +285,8 @@ final class IntakeDetailPage: Page {
         let cur = item.priority ?? "None"
         let chip = MenuChip("Priority: \(cur.capitalized)", symbol: "flag") { [weak self] in
             StatusOption.priorities.map { p in
-                let a = MenuAction(p.name) { self?.update(item, ItemPatch(priority: p.id), what: "priority") }
-                a.item.state = p.name.caseInsensitiveCompare(cur) == .orderedSame ? .on : .off
+                let a = ClosureItem(p.name) { self?.update(item, ItemPatch(priority: p.id), what: "priority") }
+                a.state = p.name.caseInsensitiveCompare(cur) == .orderedSame ? .on : .off
                 return a
             }
         }
@@ -470,11 +469,11 @@ final class IntakeDetailPage: Page {
         snooze.image = NSImage(systemSymbolName: "clock", accessibilityDescription: nil)
         let sub = NSMenu()
         for (title, days) in [("Until tomorrow", 1), ("For 3 days", 3), ("For 1 week", 7), ("For 2 weeks", 14), ("For 1 month", 30)] {
-            sub.addItem(MenuAction(title) { [weak self] in
+            sub.addItem(ClosureItem(title) { [weak self] in
                 var d = Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()
                 d = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: d) ?? d
                 self?.triage(.snooze(until: d))
-            }.item)
+            })
         }
         snooze.submenu = sub
         m.addItem(snooze)
@@ -486,14 +485,14 @@ final class IntakeDetailPage: Page {
             }),
         ]
         for (title, symbol, run) in entries {
-            let i = MenuAction(title, run).item
+            let i = ClosureItem(title, run)
             i.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             m.addItem(i)
         }
         m.addItem(.separator())
-        let del = MenuAction("Delete") { [weak self] in
+        let del = ClosureItem("Delete") { [weak self] in
             self?.confirm("Delete", "Plane deletes the item and its work item. You cannot undo this.") { self?.triage(.delete) }
-        }.item
+        }
         del.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
         del.attributedTitle = NSAttributedString(string: "Delete", attributes: [.foregroundColor: Palette.bad, .font: NSFont.menuFont(ofSize: 0)])
         m.addItem(del)
@@ -524,8 +523,7 @@ final class IntakeDetailPage: Page {
     private func copyLink(_ item: IntakeItem, snap: ProjectSnapshot) {
         let base = snap.summary.url.components(separatedBy: "/projects/")[0]
         let u = key(of: item).map { "\(base)/browse/\($0)/" } ?? intakeURL(item)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(u, forType: .string)
+        RowActions.copy(u)
     }
 
     private func confirm(_ verb: String, _ info: String, then: @escaping () -> Void) {
@@ -598,13 +596,12 @@ final class RefineCard: Card {
             guard let self, let more else { return }
             let m = NSMenu()
             m.autoenablesItems = false
-            let work = MenuAction("Show on the Work page") { [weak self] in self?.onWork?() }
-            let copy = MenuAction("Copy the folder path") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(folder, forType: .string)
+            let work = ClosureItem("Show on the Work page") { [weak self] in self?.onWork?() }
+            let copy = ClosureItem("Copy the folder path") {
+                RowActions.copy(folder)
             }
-            copy.item.isEnabled = !folder.isEmpty
-            [work, copy].forEach { m.addItem($0.item) }
+            copy.isEnabled = !folder.isEmpty
+            [work, copy].forEach { m.addItem($0) }
             self.menuActions = [work, copy]
             m.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
         }
@@ -618,7 +615,7 @@ final class RefineCard: Card {
         add(NSTextField.text("The agent asks questions and gives a plan or a preview. When you approve, it accepts \(key) (same ID), "
                              + "writes the refined description and adds sub-items. The page then becomes the item page.", size: 12, color: Palette.dim, lines: 3))
     }
-    private var menuActions: [MenuAction] = []
+    private var menuActions: [NSMenuItem] = []
     required init?(coder: NSCoder) { fatalError() }
 }
 

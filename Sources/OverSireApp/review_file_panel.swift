@@ -332,7 +332,7 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
     /// The right-click menu of a file row.
     private func menu(_ f: ReviewFile, desk: ReviewDesk) -> [NSMenuItem] {
         func item(_ title: String, _ symbol: String, key: String = "", mods: NSEvent.ModifierFlags = .command, _ run: @escaping () -> Void) -> NSMenuItem {
-            let i = MenuAction(title, run).item
+            let i = ClosureItem(title, run)
             i.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             i.keyEquivalent = key
             i.keyEquivalentModifierMask = mods

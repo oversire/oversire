@@ -106,7 +106,7 @@ final class PRsPage: Page {
             if !p.mine { actions.append(ActionButton("Approve") { [weak self] in self?.act(repo, p, .approve(nil), verb: "Approve") }.follows("pr.approve")) }
             actions.append(MenuChip("Merge", symbol: "arrow.triangle.merge") { [weak self] in
                 [("Squash and merge", MergeMethod.squash), ("Rebase and merge", .rebase), ("Merge commit", .merge)].map { t, m in
-                    MenuAction(t) { self?.act(repo, p, .merge(m), verb: t) }
+                    ClosureItem(t) { self?.act(repo, p, .merge(m), verb: t) }
                 }
             }.follows("pr.merge"))
         }

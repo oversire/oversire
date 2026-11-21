@@ -98,8 +98,8 @@ final class AssistantChats: NSView, NSSearchFieldDelegate {
         let r = Row([lines, Spacer()] + trail, height: 46, inset: 8, label: "\(t.title), \(relativeTime(t.updatedAt))") { [weak self] in self?.onOpen?(t.id) }
         r.selected = t.id == current
         r.menuItems = { [weak self] in
-            [SnapMenuItem(title: t.pinned ? "Unpin" : "Pin") { self?.onPin?(t.id, !t.pinned) },
-             SnapMenuItem(title: "Delete…") {
+            [ClosureItem(t.pinned ? "Unpin" : "Pin") { self?.onPin?(t.id, !t.pinned) },
+             ClosureItem("Delete…") {
                  AlertConfirm.ask("Delete this chat?", info: "“\(t.title)” and its files go away from this Mac.", button: "Delete", critical: true, in: self?.window) {
                      self?.onDelete?(t.id)
                  }

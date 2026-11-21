@@ -241,7 +241,7 @@ extension SettingsPage {
         let s = book.settings(pk)
         let p = projects.first { $0.ref.storeKey == pk }
         let pick = MenuChip(p?.identifier ?? pk, symbol: "folder") { [weak self] in
-            projects.map { p in MenuAction(p.title) { self?.plannerProject = p.ref.storeKey; self?.reload() } }
+            projects.map { p in ClosureItem(p.title) { self?.plannerProject = p.ref.storeKey; self?.reload() } }
         }
         pick.setAccessibilityLabel("Planner project")
         let modes: [PlannerSettings.Mode] = [.off, .hourly, .live]
@@ -279,7 +279,7 @@ extension SettingsPage {
             let rules = a.rules.map { $0.source == .user ? $0.glob : "\($0.glob) (\($0.source.rawValue))" }.joined(separator: ", ")
             let kind = MenuChip(a.kind.isCore ? "◆ Core" : "◇ Feature") {
                 [(AreaKind.core, "◆ Core"), (.feature, "◇ Feature")].map { k, t in
-                    MenuAction(t) { book.update(catalog: pk) { c in if let i = c.areas.firstIndex(where: { $0.name == a.name }) { c.areas[i].kind = k } } }
+                    ClosureItem(t) { book.update(catalog: pk) { c in if let i = c.areas.firstIndex(where: { $0.name == a.name }) { c.areas[i].kind = k } } }
                 }
             }
             kind.setAccessibilityLabel("Kind of \(a.name)")

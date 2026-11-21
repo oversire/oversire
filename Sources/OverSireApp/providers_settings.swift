@@ -199,7 +199,7 @@ extension SettingsPage {
         let remove: (AccountConfig) -> Void = { [weak self] a in self?.removeAccount(a, d) }
         func pick(_ title: String, _ run: @escaping (AccountConfig) -> Void) -> NSView {
             if list.count == 1 { return ActionButton(title) { run(list[0]) } }
-            return MenuChip(title + "…") { list.map { a in MenuAction(a.account.id) { run(a) } } }
+            return MenuChip(title + "…") { list.map { a in ClosureItem(a.account.id) { run(a) } } }
         }
         let actions: [NSView] = [
             ActionButton("Test") { [weak self] in list.forEach { self?.probe($0.account) } },

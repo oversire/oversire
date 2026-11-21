@@ -320,10 +320,10 @@ final class RunbookTab {
         let m = NSMenu()
         let verdicts: [StepDone.Verdict] = step.review != nil ? [.pass, .gaps, .blocked] : [.done, .blocked]
         for v in verdicts {
-            m.addItem(MenuAction(Self.verdictTitle(v)) { [weak self] in self?.markDone(r, step: step, v) }.item)
+            m.addItem(ClosureItem(Self.verdictTitle(v)) { [weak self] in self?.markDone(r, step: step, v) })
         }
         m.addItem(.separator())
-        m.addItem(MenuAction("Skip step") { [weak self] in self?.act("Skipping…") { try await $0.act(.skip, step: step.id, on: r.id) } }.item)
+        m.addItem(ClosureItem("Skip step") { [weak self] in self?.act("Skipping…") { try await $0.act(.skip, step: step.id, on: r.id) } })
         return m
     }
 

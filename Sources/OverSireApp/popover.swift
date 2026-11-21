@@ -445,8 +445,7 @@ class TabVC: NSViewController {
 
     @objc func scrolled(_ note: Notification) {
         for row in doc.subviews {
-            (row as? RunRow)?.syncHover()
-            (row as? PRRow)?.syncHover()
+            (row as? HoverRow)?.syncHover()
         }
         // Project rows can be inside group views.
         func projectRows(_ v: NSView) {

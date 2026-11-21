@@ -153,11 +153,11 @@ final class EpicPage: Page {
                     guard let self, let more else { return }
                     let menu = NSMenu()
                     for item in ready {
-                        let a = MenuAction("\(item.key)  \(item.title)") { [weak self, weak more] in
+                        let a = ClosureItem("\(item.key)  \(item.title)") { [weak self, weak more] in
                             guard let self, let more else { return }
                             SessionStartMenu(self.data).start(item, snap: snap, at: more)
                         }
-                        menu.addItem(a.item)
+                        menu.addItem(a)
                     }
                     menu.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 2), in: more)
                 }

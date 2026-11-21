@@ -235,7 +235,7 @@ final class RowCommander {
             switch e {
             case .separator: return .separator()
             case .action(let t, let c, let checked):
-                let i = MenuAction(t) { [weak self, weak anchor] in self?.run(c, anchor: anchor) }.item
+                let i = ClosureItem(t) { [weak self, weak anchor] in self?.run(c, anchor: anchor) }
                 i.state = checked ? .on : .off
                 if case .favorite = c { i.keyEquivalent = "d"; i.keyEquivalentModifierMask = .command }
                 return i
@@ -328,4 +328,18 @@ final class RowCommander {
             self?.data.actions.click("session.send", ["key": .string(key), "text": .string(text)], in: anchor?.window, asked: true)
         }
     }
+}
+
+/// A menu item that runs a closure.
+final class ClosureItem: NSMenuItem {
+    private let run: () -> Void
+
+    init(_ title: String, _ run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    @objc private func fire() { run() }
 }

@@ -473,7 +473,7 @@ extension SettingsPage {
             return r
         }
         let hour = MenuChip(String(format: "%02d:00", AI_CFG.digestHour), symbol: "sunrise") {
-            (5...11).map { h in MenuAction(String(format: "%02d:00", h)) { AI_CFG.digestHour = h; settingsChanged() } }
+            (5...11).map { h in ClosureItem(String(format: "%02d:00", h)) { AI_CFG.digestHour = h; settingsChanged() } }
         }
         hour.setAccessibilityLabel("Digest time")
         let v = NSStackView(v: [SectionTitle("Use AI for")], spacing: 6)

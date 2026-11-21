@@ -197,8 +197,7 @@ final class CommandPalette: NSObject, NSTableViewDataSource, NSTableViewDelegate
         }
         out.append(Entry(title: "Copy link to this page", detail: owner.router.current.url.absoluteString, symbol: "link", kind: "Action") { [weak owner] in
             guard let owner else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(owner.router.current.url.absoluteString, forType: .string)
+            RowActions.copy(owner.router.current.url.absoluteString)
         })
         return out
     }

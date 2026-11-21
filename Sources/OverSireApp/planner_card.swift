@@ -39,7 +39,7 @@ final class PlannerCard: Card {
     }
 
     static let groups: [(RelationKind, String)] = [(.blockedBy, "Blocked by"), (.blocks, "Blocks"), (.relatesTo, "Related")]
-    private var keep: [MenuAction] = []
+    private var keep: [NSMenuItem] = []
 
     /// A read with no value shows a skeleton while it is idle or busy, and a `ReadNote` when it failed.
     /// `areas` nil hides the Areas row (no cloud account).
@@ -52,9 +52,9 @@ final class PlannerCard: Card {
             guard let self, let add = addButton else { return }
             let m = NSMenu()
             self.keep = [("Blocked by…", RelationKind.blockedBy), ("Blocks…", .blocks), ("Related to…", .relatesTo)].map { t, k in
-                MenuAction(t) { actions.add(k) }
+                ClosureItem(t) { actions.add(k) }
             }
-            self.keep.forEach { m.addItem($0.item) }
+            self.keep.forEach { m.addItem($0) }
             m.popUp(positioning: nil, at: NSPoint(x: 0, y: add.bounds.height + 3), in: add)
         }
         guard let relations = read?.value else {
@@ -121,8 +121,8 @@ final class PlannerCard: Card {
         let views: [NSView] = [ring, NSTextField.text(r.item.key, size: 11.5, color: Palette.mut, mono: true), title, word, Spacer()]
         let kind = groups.first { $0.0 == r.kind }?.1 ?? r.kind.rawValue
         let row = Row(views, height: 28, inset: 4, label: "\(kind) \(r.item.key), \(found?.item.title ?? ""), \(status)") { actions.open(r.item.key) }
-        let remove = MenuAction("Remove") { actions.remove(r) }
-        row.menuItems = { [remove] in [remove.item] }
+        let remove = ClosureItem("Remove") { actions.remove(r) }
+        row.menuItems = { [remove] in [remove] }
         let x = ActionButton("", symbol: "xmark") { actions.remove(r) }
         x.isBordered = false
         x.setAccessibilityLabel("Remove \(kind.lowercased()) \(r.item.key)")

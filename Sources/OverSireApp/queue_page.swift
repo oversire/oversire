@@ -168,7 +168,7 @@ final class QueuePage: Page {
         let busy = q.busy(lane)
         let root = PROJECTS_CFG.orca.roots[lane.project].map { ($0 as NSString).lastPathComponent } ?? "no Orca workspace"
         let slotChip = MenuChip("\(busy) of \(slots) slot\(slots == 1 ? "" : "s")") { [weak self] in
-            (1...4).map { n in MenuAction("\(n) session\(n == 1 ? "" : "s") at a time") { AGENTS.slots[lane.project] = n; saveConfig(); self?.syncSlots(lane.project, n); self?.reload() } }
+            (1...4).map { n in ClosureItem("\(n) session\(n == 1 ? "" : "s") at a time") { AGENTS.slots[lane.project] = n; saveConfig(); self?.syncSlots(lane.project, n); self?.reload() } }
         }
         let ws = NSTextField.text(root, size: 11.5, color: Palette.dim, mono: true)
         ws.lineBreakMode = .byTruncatingMiddle
@@ -331,7 +331,7 @@ final class QueuePage: Page {
                      actions: entryActions(c.key, lane: lane), label: number.map { "Number \($0): \(c.key)" } ?? "\(c.key) waits") { [weak self] in
             self?.go(.item(c.key, .overview))
         }
-        (v.subviews.first as? Row)?.menuItems = { [weak self] in self?.conditionMenu(c.key).map(\.item) ?? [] }
+        (v.subviews.first as? Row)?.menuItems = { [weak self] in self?.conditionMenu(c.key) ?? [] }
         return v
     }
 
@@ -362,8 +362,8 @@ final class QueuePage: Page {
         return [up, down, start, remove]
     }
 
-    private func conditionMenu(_ key: String) -> [MenuAction] {
-        QueueEntry.Condition.allCases.map { c in MenuAction("Start: " + c.label) { [weak self] in self?.data.queue.set(c, for: key); self?.reload() } }
+    private func conditionMenu(_ key: String) -> [NSMenuItem] {
+        QueueEntry.Condition.allCases.map { c in ClosureItem("Start: " + c.label) { [weak self] in self?.data.queue.set(c, for: key); self?.reload() } }
     }
 
     // The dense list: one line per item.
@@ -514,7 +514,7 @@ final class QueuePage: Page {
     // Open items with no agent, not in the queue, by project.
     private func addMenu(_ anchor: NSView) {
         let m = NSMenu()
-        var keep: [MenuAction] = []
+        var keep: [NSMenuItem] = []
         let store = data.projectStore
         for s in store.tracked {
             guard let snap = store.snapshots[s.ref.storeKey] else { continue }
@@ -530,7 +530,7 @@ final class QueuePage: Page {
                 let choices = add.choices(i.key)
                 keep += choices
                 mi.submenu = NSMenu()
-                choices.forEach { mi.submenu?.addItem($0.item) }
+                choices.forEach { mi.submenu?.addItem($0) }
                 sub.addItem(mi)
             }
             let mi = NSMenuItem(title: "\(s.title) (\(open.count))", action: nil, keyEquivalent: "")
@@ -614,7 +614,7 @@ final class FreeSlot: Box {
 struct QueueAddMenu {
     let data: AppData
 
-    func choices(_ key: String, done: @escaping () -> Void = {}) -> [MenuAction] {
+    func choices(_ key: String, done: @escaping () -> Void = {}) -> [NSMenuItem] {
         let project = key.split(separator: "-").first.map(String.init) ?? key
         let def = PROJECTS_CFG.runbook(for: project)?.id
         let data = data
@@ -624,17 +624,17 @@ struct QueueAddMenu {
             data.actions.run("queue.add", args) { _ in done() }
         }
         let books = PROJECTS_CFG.runtime.runbooks.map { b in
-            let a = MenuAction("Run \(b.name)" + (b.id == def ? " (default)" : "")) { add(b.id) }
-            a.item.state = b.id == def ? .on : .off
+            let a = ClosureItem("Run \(b.name)" + (b.id == def ? " (default)" : "")) { add(b.id) }
+            a.state = b.id == def ? .on : .off
             return a
         }
-        return books + [MenuAction("One session") { add(nil) }]
+        return books + [ClosureItem("One session") { add(nil) }]
     }
 
     func show(_ key: String, at anchor: NSView, done: @escaping () -> Void) {
         let list = choices(key, done: done)
         let m = NSMenu()
-        list.forEach { m.addItem($0.item) }
+        list.forEach { m.addItem($0) }
         withExtendedLifetime(list) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 3), in: anchor) }
     }
 }

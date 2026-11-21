@@ -306,8 +306,8 @@ final class ReviewChangesTab {
             }
             row.stack.spacing = 8
             row.menuItems = {
-                [MenuAction("Copy Repo Name") { RowActions.copy(r.name) }.item,
-                 MenuAction("Copy Branch Name") { RowActions.copy(r.branch) }.item]
+                [ClosureItem("Copy Repo Name") { RowActions.copy(r.name) },
+                 ClosureItem("Copy Branch Name") { RowActions.copy(r.branch) }]
             }
             row.restBorder = on ? Palette.acc : nil
             row.selected = on

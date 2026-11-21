@@ -21,6 +21,9 @@ public final class TemplateTracker: Tracker {
 
     public let id: ProviderID = .trackerTemplate
     public let account: AccountID
+    // Optional protocols: IntakeTriaging, IntakeCreating, AttachmentUploading, AttachmentReading, TimelineReading, LabelManaging,
+    // LinkManaging, RelationManaging, ItemIndexing, ItemSearching, AssetResolving, ProjectSettingsReading, ProjectSettingsEditing,
+    // EpicTracking, WebhookManaging. See step 5 of docs/adding-a-provider.md.
     public let capabilities: Set<Capability> = []
     public let pollPolicy = PollPolicy(minInterval: .seconds(60), requestsPerHour: 1_000)
     public let keyFormat: KeyFormat = .projectDash

@@ -147,7 +147,7 @@ final class BasketPanel: NSPanel {
 
     /// Opens the Send menu under its button. Returns the menu, so a caller can close it.
     func popSendMenu() -> NSMenu? {
-        guard let b = state.current, let btn = UIShots.find(root, { ($0 as? NSButton)?.title == "Send ▾" }) else { return nil }
+        guard let b = state.current, let btn = root.descendant({ ($0 as? NSButton)?.title == "Send ▾" }) else { return nil }
         let m = sendMenu(b)
         DispatchQueue.main.async { m.popUp(positioning: nil, at: NSPoint(x: 0, y: btn.bounds.height + 4), in: btn) }
         return m
@@ -436,7 +436,7 @@ final class BasketPanel: NSPanel {
     func sendMenu(_ b: SnapBasket) -> NSMenu {
         let m = NSMenu()
         for mode in SnapConfig.SendMode.allCases {
-            let it = SnapMenuItem(title: mode.label) { [weak self] in self?.actions.send(b, mode) }
+            let it = ClosureItem(mode.label) { [weak self] in self?.actions.send(b, mode) }
             if mode == .agent { it.keyEquivalent = "\r"; it.keyEquivalentModifierMask = .command }
             m.addItem(it)
         }
@@ -744,17 +744,4 @@ final class SnapChip: Box {
 
     override func mouseDown(with e: NSEvent) { onClick() }
     override func accessibilityPerformPress() -> Bool { onClick(); return true }
-}
-
-final class SnapMenuItem: NSMenuItem {
-    private let run: () -> Void
-
-    init(title: String, run: @escaping () -> Void) {
-        self.run = run
-        super.init(title: title, action: #selector(fire), keyEquivalent: "")
-        target = self
-    }
-    required init(coder: NSCoder) { fatalError() }
-
-    @objc private func fire() { run() }
 }

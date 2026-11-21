@@ -1055,8 +1055,6 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         plannerSignals.scan(PROJECTS_CFG.orca.roots.filter { !$0.value.isEmpty }, force: force)
     }
 
-    func has(_ c: Capability) -> Bool { ENV.has(c) }
-
     func rerun(repo: String, runs: [Run], failedOnly: Bool) {
         guard !runs.isEmpty else { return }
         let action: RunAction = failedOnly ? .rerunFailed : .rerun

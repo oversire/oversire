@@ -151,7 +151,7 @@ enum AgentMenu {
             for a in g.agents {
                 let p = r.profile(a)
                 if let c = p.cli, !p.model.isEmpty { book.load(c) }
-                let mi = MenuAction(a) { pick(a) }.item
+                let mi = ClosureItem(a) { pick(a) }
                 let t = NSMutableAttributedString(string: a, attributes: [.font: NSFont.menuFont(ofSize: 0)])
                 t.append(NSAttributedString(string: "   " + book.detail(p), attributes: [
                     .font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor,
@@ -176,9 +176,9 @@ enum AgentMenu {
             }
         }
         menu.addItem(.separator())
-        menu.addItem(MenuAction("Edit agents…") {
+        menu.addItem(ClosureItem("Edit agents…") {
             SettingsPage.commandsOpen = true
             (NSApp.delegate as? GHActionsBar)?.open(.settings(.agents))
-        }.item)
+        })
     }
 }

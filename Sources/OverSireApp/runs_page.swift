@@ -538,8 +538,7 @@ final class RunPage: Page {
             ToggleChip("Errors only", on: errorsOnly) { [weak self] in self?.errorsOnly.toggle(); self?.reload() },
             ActionButton("Copy", symbol: "doc.on.doc") { [weak self] in
                 guard let lines = self?.log else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+                RowActions.copy(lines.joined(separator: "\n"))
             },
         ])
         if let job, job.status != "completed" {

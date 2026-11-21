@@ -141,14 +141,14 @@ final class NeedsYouCard: NSObject {
         return f
     }
 
-    private func moreButton(_ key: String, _ items: @escaping () -> [MenuAction]) -> ActionButton {
+    private func moreButton(_ key: String, _ items: @escaping () -> [NSMenuItem]) -> ActionButton {
         let more = ActionButton("", symbol: "ellipsis")
         more.setAccessibilityLabel("More actions for \(key)")
         more.onClick = { [weak more] in
             guard let more else { return }
             let m = NSMenu()
             let list = items()
-            list.forEach { m.addItem($0.item) }
+            list.forEach { m.addItem($0) }
             _ = withExtendedLifetime(list) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.height + 3), in: more) }
         }
         return more
@@ -192,15 +192,15 @@ final class NeedsYouCard: NSObject {
             buttons = [ActionButton("Approve", style: .primary, action: "status.approve", ["id": .string(st.id)]),
                        ActionButton("Hold", action: "status.hold", ["id": .string(st.id)])]
         }
-        let menu: () -> [MenuAction] = { [weak self] in
-            [MenuAction("Refresh") { job.refresh(keys: [st.key]) },
-             MenuAction("Open session") { self?.page?.go(.item(st.key, .session)) },
-             MenuAction("Free the slot") { job.release(st.id) }]
+        let menu: () -> [NSMenuItem] = { [weak self] in
+            [ClosureItem("Refresh") { job.refresh(keys: [st.key]) },
+             ClosureItem("Open session") { self?.page?.go(.item(st.key, .session)) },
+             ClosureItem("Free the slot") { job.release(st.id) }]
         }
         let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(st.key), word, titleField(st.key), checkedText(st.key), pill]
                       + buttons + [moreButton(st.key, menu)],
                       height: 34, inset: 6, label: "\(st.key): \(st.word). \(st.reply.headline)") { [weak self] in self?.toggle(st.id) }
-        row.menuItems = { menu().map(\.item) }
+        row.menuItems = { menu() }
         guard open else { return row }
         var facts = [st.read + " " + relativeAgo(st.at)]
         if let s = st.since { facts.append("screen same for \(Int(st.at.timeIntervalSince(s) / 60)) min") }
@@ -234,9 +234,9 @@ final class NeedsYouCard: NSObject {
         let reply = ActionButton("Reply") { [weak self] in
             if self?.inputDetail == nil { self?.page?.go(.item(key, .session)) } else { self?.toggle(id) }
         }
-        let menu: () -> [MenuAction] = { [weak self] in
-            [MenuAction("Open session") { self?.page?.go(.item(key, .session)) },
-             MenuAction("Show in Orca") { self?.data?.actions.click("session.reveal", ["key": .string(key)], in: NSApp.keyWindow) }]
+        let menu: () -> [NSMenuItem] = { [weak self] in
+            [ClosureItem("Open session") { self?.page?.go(.item(key, .session)) },
+             ClosureItem("Show in Orca") { self?.data?.actions.click("session.reveal", ["key": .string(key)], in: NSApp.keyWindow) }]
         }
         let row = Row([Glyph(tone.symbol, color: tone.color, size: 12).fixedWidth(16), keyField(key),
                        NSTextField.text(tone.word, size: 12.5, weight: .medium, color: tone.color), text, Spacer(), reply,
@@ -244,7 +244,7 @@ final class NeedsYouCard: NSObject {
                       height: 34, inset: 6, label: "\(key): Needs input. \(ask.prefix(140))") { [weak self] in
             if self?.inputDetail != nil { self?.toggle(id) } else { self?.page?.go(.item(key, .session)) }
         }
-        row.menuItems = { menu().map(\.item) }
+        row.menuItems = { menu() }
         guard open, let detail = inputDetail?(key, a) else { return row }
         return wrap(row, detail)
     }
@@ -300,15 +300,15 @@ final class NeedsYouCard: NSObject {
         let since = d.agentIndex.agent(e.key)?.since ?? e.at
         cells.append(NSTextField.text(AgentSession.minutes(Date().timeIntervalSince(since)).replacingOccurrences(of: "m", with: " min"), size: 11.5,
                                       color: Palette.dim))
-        let menu: () -> [MenuAction] = { [weak self] in
-            [MenuAction("Refresh") { job.refresh(keys: [e.key]) },
-             MenuAction("Open session") { self?.page?.go(.item(e.key, .session)) },
-             MenuAction("Snooze 1 day") { self?.data?.actions.click("status.snooze", ["id": .string(e.id)], in: NSApp.keyWindow) }]
+        let menu: () -> [NSMenuItem] = { [weak self] in
+            [ClosureItem("Refresh") { job.refresh(keys: [e.key]) },
+             ClosureItem("Open session") { self?.page?.go(.item(e.key, .session)) },
+             ClosureItem("Snooze 1 day") { self?.data?.actions.click("status.snooze", ["id": .string(e.id)], in: NSApp.keyWindow) }]
         }
         cells.append(moreButton(e.key, menu))
         let row = Row(cells, height: 34, inset: 6,
                       label: "\(e.key): Blocked on you. \(steps.count) steps, \(e.passed) pass.") { [weak self] in self?.toggle(e.id) }
-        row.menuItems = { menu().map(\.item) }
+        row.menuItems = { menu() }
         guard open else { return row }
         return wrap(row, needsYou(e))
     }
@@ -701,10 +701,10 @@ final class NeedsYouRow: Row {
         case .markDone(let key, let step, let review):
             let verdicts = review ? [("Mark pass", "pass"), ("Mark gaps", "gaps"), ("Mark blocked", "blocked")] : [("Mark done", "done"), ("Mark blocked", "blocked")]
             let list = verdicts.map { t, v in
-                MenuAction(t) { data.actions.click("runbook.markDone", ["key": .string(key), "step": .string(step), "verdict": .string(v)], in: NSApp.keyWindow) }
+                ClosureItem(t) { data.actions.click("runbook.markDone", ["key": .string(key), "step": .string(step), "verdict": .string(v)], in: NSApp.keyWindow) }
             }
             let m = NSMenu()
-            list.forEach { m.addItem($0.item) }
+            list.forEach { m.addItem($0) }
             let anchor = button ?? NSApp.keyWindow?.contentView
             withExtendedLifetime(list) { m.popUp(positioning: nil, at: NSPoint(x: 0, y: (anchor?.bounds.height ?? 0) + 3), in: anchor) }
         default: break

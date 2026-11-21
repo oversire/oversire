@@ -38,11 +38,10 @@ final class InsightsPage: Page {
         let insights = generateInsights(this: tw, last: lw)
 
         let filter = MenuChip(repo.map { $0.split(separator: "/").last.map(String.init) ?? $0 } ?? "All repos", symbol: "line.3.horizontal.decrease") { [weak self] in
-            [MenuAction("All repos") { self?.repo = nil; self?.reload() }] + repos.map { r in MenuAction(r) { self?.repo = r; self?.reload() } }
+            [ClosureItem("All repos") { self?.repo = nil; self?.reload() }] + repos.map { r in ClosureItem(r) { self?.repo = r; self?.reload() } }
         }
         let copy = ActionButton("Copy report for AI", symbol: "sparkles") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(buildAIReport(this: tw, last: lw, insights: insights, thisRecs: thisR), forType: .string)
+            RowActions.copy(buildAIReport(this: tw, last: lw, insights: insights, thisRecs: thisR))
         }
         col.addFull(PageHeader("Insights", caption: "Last 7 days against the 7 days before. OverSire logs each finished run it sees.", actions: [filter, copy]))
         guard !recs.isEmpty else {

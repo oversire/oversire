@@ -376,8 +376,7 @@ class CopyReportRow: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc func copyIt(_ sender: NSButton) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(markdown, forType: .string)
+        RowActions.copy(markdown)
         sender.title = "Copied ✓"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { sender.title = "Copy report for AI" }
     }

@@ -202,7 +202,7 @@ final class AssistantComposer: NSView, NSTextViewDelegate {
         guard !engines.isEmpty else { return }
         let m = NSMenu()
         for e in engines {
-            let i = SnapMenuItem(title: e.label) { [weak self] in self?.onEngine?(e.id) }
+            let i = ClosureItem(e.label) { [weak self] in self?.onEngine?(e.id) }
             i.state = e.id == engine ? .on : .off
             m.addItem(i)
         }

@@ -219,8 +219,7 @@ final class PlanSummaryView: NSStackView {
         num.widthAnchor.constraint(equalToConstant: 16).isActive = true
         let chip = Chiplet(key, mono: true)
         chip.onClick = { [weak chip] in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(key, forType: .string)
+            RowActions.copy(key)
             chip?.flash("Copied ✓")
         }
         chip.setAccessibilityRole(.button)

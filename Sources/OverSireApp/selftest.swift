@@ -813,8 +813,7 @@ func runSelfTest() {
         // Settings › Runbooks opens with the default runbooks and with none.
         func runbooksPage() -> NSView? {
             let p = SettingsPage(.settings(.agents, tab: .runbooks), data: shots, router: Router())
-            func find(_ v: NSView) -> NSView? { v.identifier == SettingsAnchor.runbooks.id ? v : v.subviews.lazy.compactMap(find).first }
-            return find(p.view)
+            return p.view.descendant { $0.identifier == SettingsAnchor.runbooks.id }
         }
         let keptRunbooks = PROJECTS_CFG.runtime.runbooks
         PROJECTS_CFG.runtime.runbooks = PROJECTS_CFG.runtime.defaultRunbooks

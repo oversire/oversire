@@ -124,8 +124,7 @@ final class PlanKeyButton: Box {
     required init?(coder: NSCoder) { fatalError() }
 
     func copyKey() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(key, forType: .string)
+        RowActions.copy(key)
         word.stringValue = "Copied ✓"
         word.textColor = Palette.ok
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in

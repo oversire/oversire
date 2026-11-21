@@ -58,7 +58,7 @@ extension UIShots {
         case "long":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                guard let root = w.window?.contentView, let t = Self.find(root, { $0 is DiffTableView }) as? DiffTableView else { return }
+                guard let root = w.window?.contentView, let t = root.descendant({ $0 is DiffTableView }) as? DiffTableView else { return }
                 t.scrollRowToVisible(t.numberOfRows - 1)
             }
         case "refresh-menu":
@@ -72,19 +72,19 @@ extension UIShots {
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 guard let root = w.window?.contentView else { return }
-                (Self.find(root) { $0 is DiffPanel } as? DiffPanel)?.showFiles()
+                (root.descendant { $0 is DiffPanel } as? DiffPanel)?.showFiles()
             }
         case "select":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 guard let root = w.window?.contentView else { return }
-                (Self.find(root) { $0 is DiffTableView } as? DiffTableView)?.show(from: (row: 2, at: 4), to: (row: 5, at: 20))
-                (Self.find(root) { $0 is PathHead } as? PathHead)?.showButton()
+                (root.descendant { $0 is DiffTableView } as? DiffTableView)?.show(from: (row: 2, at: 4), to: (row: 5, at: 20))
+                (root.descendant { $0 is PathHead } as? PathHead)?.showButton()
             }
         case "menu":
             w.router.go(.item("FRITZ-17", .changes))
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                guard let root = w.window?.contentView, let row = Self.find(root, { ($0 as? TreeRow)?.selected == true }) as? TreeRow,
+                guard let root = w.window?.contentView, let row = root.descendant({ ($0 as? TreeRow)?.selected == true }) as? TreeRow,
                       let items = row.menuItems?() else { return }
                 let menu = NSMenu()
                 items.forEach { menu.addItem($0) }
@@ -95,9 +95,9 @@ extension UIShots {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 guard let root = w.window?.contentView else { return }
                 if scene == "hover" {
-                    (Self.find(root) { $0 is DiffTableView } as? DiffTableView)?.owner?.showPlus()
+                    (root.descendant { $0 is DiffTableView } as? DiffTableView)?.owner?.showPlus()
                 } else {
-                    (Self.find(root) { ($0 as? Chiplet)?.onClick != nil && ($0.accessibilityLabel() ?? "").contains("pending") } as? Chiplet)?.onClick?()
+                    (root.descendant { ($0 as? Chiplet)?.onClick != nil && ($0.accessibilityLabel() ?? "").contains("pending") } as? Chiplet)?.onClick?()
                 }
             }
         case "plan": w.router.go(.item("OVERSIRE-349", .plan))

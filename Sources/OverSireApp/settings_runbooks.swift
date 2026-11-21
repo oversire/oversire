@@ -588,18 +588,9 @@ final class RunbookEditorView: NSStackView {
     }
 
     private func restoreFocus() {
-        guard let id = Self.focus, let w = window, let v = find(id) else { return }
+        guard let id = Self.focus, let w = window, let v = descendant({ $0.identifier?.rawValue == id }) else { return }
         Self.focus = nil
         w.makeFirstResponder(v)
-    }
-
-    private func find(_ id: String) -> NSView? {
-        func walk(_ v: NSView) -> NSView? {
-            if v.identifier?.rawValue == id { return v }
-            for s in v.subviews { if let f = walk(s) { return f } }
-            return nil
-        }
-        return walk(self)
     }
 }
 

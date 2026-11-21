@@ -22,6 +22,7 @@ public final class TemplateCodeHost: CodeHost {
 
     public let id: ProviderID = .codeHostTemplate
     public let account: AccountID
+    // Optional protocols: BranchDeleting, ChangeSearching, CollaboratorListing, WebhookManaging. See step 5 of docs/adding-a-provider.md.
     public let capabilities: Set<Capability> = []
     public let pollPolicy = PollPolicy(minInterval: .seconds(30), requestsPerHour: 1_000)
     let http: any HTTPTransport

@@ -849,8 +849,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
     }
     @objc private func copyLink() {
         guard let id = itemId, let url = store.item(id)?.item.url else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(url, forType: .string)
+        RowActions.copy(url)
     }
     @objc private func markRead() { if let id = itemId { store.markRead(itemId: id) } }
 

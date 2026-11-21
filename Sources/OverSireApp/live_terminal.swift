@@ -510,8 +510,7 @@ final class LiveTerminalCard: Card, TerminalViewDelegate, LiveSessionCard {
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 
     func clipboardCopy(source: TerminalView, content: Data) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(String(decoding: content, as: UTF8.self), forType: .string)
+        RowActions.copy(String(decoding: content, as: UTF8.self))
     }
 
     override func layout() {

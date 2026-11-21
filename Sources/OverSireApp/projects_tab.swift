@@ -5,9 +5,7 @@ import OverSireCore
 
 // Plane gives hex colors. The names are for the priority badge.
 func projectColor(_ name: String) -> NSColor {
-    if name.hasPrefix("#"), name.count == 7, let v = Int(name.dropFirst(), radix: 16) {
-        return NSColor(srgbRed: CGFloat(v >> 16 & 0xFF) / 255, green: CGFloat(v >> 8 & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: 1)
-    }
+    if name.hasPrefix("#"), let c = ProjectIconStore.color(hex: name) { return c }
     switch name.uppercased() {
     case "GREEN": return C_SUCCESS
     case "RED": return C_FAILURE
@@ -630,8 +628,7 @@ final class ProjectItemRow: NSView {
     @objc func startAgent(_ sender: Any) { onStart?(play ?? (sender as? NSView) ?? self) }
     @objc func openLink() { if let u = URL(string: urlStr) { NSWorkspace.shared.open(u) } }
     @objc func copyLink() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(urlStr, forType: .string)
+        RowActions.copy(urlStr)
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -699,8 +696,7 @@ final class ActivityLine: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     @objc func copyLink() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(urlStr, forType: .string)
+        RowActions.copy(urlStr)
     }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

@@ -63,6 +63,7 @@ extension AppData {
     var clientLink: ClientLink? { nil }
     var clientName: String { "home" }
     var clientCounts: (items: Int, repos: Int) { (0, 0) }
+    func has(_ c: Capability) -> Bool { ENV.has(c) }
 
     /// The problems for the marks. Empty when the Logs settings turn the mark off.
     var openProblems: [Problem] { LOGS_CFG.menuMark ? logs?.problems.open ?? [] : [] }
@@ -810,8 +811,7 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
     @objc func goBack(_ sender: Any?) { router.back() }
     @objc func goForward(_ sender: Any?) { router.forward() }
     @objc func copyLink() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(router.current.url.absoluteString, forType: .string)
+        RowActions.copy(router.current.url.absoluteString)
     }
     /// ⌘R: the app data and the parts of the page. An ⌥-click does everything.
     @objc func refreshNow() {
@@ -1088,18 +1088,4 @@ final class RefreshButton: NSButton {
         menu.addItem(all)
         return menu
     }
-}
-
-/// A menu item that runs a closure.
-final class ClosureItem: NSMenuItem {
-    private let run: () -> Void
-
-    init(_ title: String, _ run: @escaping () -> Void) {
-        self.run = run
-        super.init(title: title, action: #selector(fire), keyEquivalent: "")
-        target = self
-    }
-    required init(coder: NSCoder) { fatalError() }
-
-    @objc private func fire() { run() }
 }

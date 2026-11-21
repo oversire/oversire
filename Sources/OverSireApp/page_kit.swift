@@ -469,7 +469,8 @@ class Row: Box {
         guard onClick != nil, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         onClick?()
     }
-    override func menu(for event: NSEvent) -> NSMenu? {
+    override func menu(for event: NSEvent) -> NSMenu? { rowMenu() }
+    private func rowMenu() -> NSMenu? {
         guard let items = menuItems?(), !items.isEmpty else { return nil }
         let m = NSMenu()
         items.forEach { m.addItem($0) }
@@ -522,9 +523,7 @@ class Row: Box {
 
     @discardableResult
     func showMenu() -> Bool {
-        guard let items = menuItems?(), !items.isEmpty else { return false }
-        let m = NSMenu()
-        items.forEach { m.addItem($0) }
+        guard let m = rowMenu() else { return false }
         m.popUp(positioning: nil, at: NSPoint(x: 16, y: isFlipped ? bounds.height - 4 : 4), in: self)
         return true
     }
@@ -1774,16 +1773,10 @@ final class ScrollCard: Box {
     /// Scrolls the view with this identifier into sight. False when the body has no such view.
     @discardableResult
     func reveal(_ id: String) -> Bool {
-        guard let v = Self.find(id, in: doc) else { return false }
+        guard let v = doc.descendant({ $0.identifier?.rawValue == id }) else { return false }
         layoutSubtreeIfNeeded()
         v.scrollToVisible(v.bounds.insetBy(dx: 0, dy: -40))
         return true
-    }
-
-    private static func find(_ id: String, in v: NSView) -> NSView? {
-        if v.identifier?.rawValue == id { return v }
-        for sub in v.subviews { if let f = find(id, in: sub) { return f } }
-        return nil
     }
 
     private static func pin(_ v: NSView, in box: NSView) {
@@ -2024,15 +2017,15 @@ final class ColumnLayout {
     // The header menu: show or hide optional columns, reset the widths.
     func menuItems() -> [NSMenuItem] {
         var items: [NSMenuItem] = columns.filter(\.optional).map { c in
-            let i = MenuAction(c.title) { [weak self] in
+            let i = ClosureItem(c.title) { [weak self] in
                 guard let self else { return }
                 if self.hidden.contains(c.id) { self.hidden.remove(c.id) } else { self.hidden.insert(c.id) }
-            }.item
+            }
             i.state = hidden.contains(c.id) ? .off : .on
             return i
         }
         if !items.isEmpty { items.append(.separator()) }
-        items.append(MenuAction("Reset column widths") { [weak self] in self?.reset() }.item)
+        items.append(ClosureItem("Reset column widths") { [weak self] in self?.reset() })
         return items
     }
 

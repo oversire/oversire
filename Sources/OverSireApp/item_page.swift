@@ -5,15 +5,15 @@ import OverSireAssistant
 
 // A chip that opens a menu of choices, for status, priority and the like.
 final class MenuChip: Chiplet {
-    private var actions: [MenuAction] = []
+    private var actions: [NSMenuItem] = []
 
-    init(_ text: String, symbol: String? = nil, icon: NSView? = nil, color: NSColor = Palette.fg, choices: @escaping () -> [MenuAction]) {
+    init(_ text: String, symbol: String? = nil, icon: NSView? = nil, color: NSColor = Palette.fg, choices: @escaping () -> [NSMenuItem]) {
         super.init(text, symbol: symbol, icon: icon, color: color)
         onClick = { [weak self] in
             guard let self else { return }
             self.actions = choices()
             let m = NSMenu()
-            self.actions.forEach { m.addItem($0.item) }
+            self.actions.forEach { m.addItem($0) }
             m.popUp(positioning: nil, at: NSPoint(x: 0, y: self.bounds.height + 3), in: self)
         }
         setAccessibilityRole(.popUpButton)
@@ -392,8 +392,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         copy.toolTip = "Copy \(item.key)"
         copy.setAccessibilityLabel("Copy \(item.key)")
         copy.onClick = { [weak copy] in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(item.key, forType: .string)
+            RowActions.copy(item.key)
             copy?.flash("Copied")
         }
         var top: [NSView] = [copy, project, Spacer()]
@@ -460,8 +459,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         actions += [
             ActionButton("Copy link", symbol: "link") { [weak self] in
                 guard let self else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(Route.item(self.key, .overview).url.absoluteString, forType: .string)
+                RowActions.copy(Route.item(self.key, .overview).url.absoluteString)
             },
             ActionButton("Open in \(ENV.trackerName(snap.summary.ref.account))", symbol: "arrow.up.right.square") {
                 if let url = URL(string: item.url) { NSWorkspace.shared.open(url) }
@@ -492,8 +490,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let glyph = StatusGlyph.item(item, snap: snap).sized(12)
         let chip = MenuChip(name, icon: glyph) { [weak self] in
             snap.statusOptions.map { o in
-                let a = MenuAction(o.name) { self?.save("status", "item.setStatus", o.id) }
-                a.item.state = o.id == item.statusOptionId ? .on : .off
+                let a = ClosureItem(o.name) { self?.save("status", "item.setStatus", o.id) }
+                a.state = o.id == item.statusOptionId ? .on : .off
                 return a
             }
         }
@@ -590,8 +588,8 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let cur = item.fields["Priority"] ?? "None"
         return MenuChip(cur == "None" ? "No priority" : cur, symbol: "flag") { [weak self] in
             StatusOption.priorities.map { p in
-                let a = MenuAction(p.name) { self?.save("priority", "item.setPriority", p.id) }
-                a.item.state = p.name == cur ? .on : .off
+                let a = ClosureItem(p.name) { self?.save("priority", "item.setPriority", p.id) }
+                a.state = p.name == cur ? .on : .off
                 return a
             }
         }.follows("item.setPriority")
@@ -1174,8 +1172,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
             defer { self.reload() }
             guard let s else { self.note = (.bad, "OverSire could not read the session from its daemon."); return }
             let id = s.harnessSession ?? s.id
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(id, forType: .string)
+            RowActions.copy(id)
             if agents.remote {
                 self.note = (.info, "The session runs on \(s.machine.rawValue), in \(s.cwd). The \(s.harness) session id \(id) is on the clipboard.")
                 return
@@ -1212,8 +1209,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         sum.isEnabled = hasAgent && AI_CFG.enabled && AI_CFG.sessionSummary
         if busy { sum.busy("Summarizing…") }
         let copy = ActionButton("Copy hand-off", symbol: "doc.on.doc") { [weak self] in
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(notes.handoff(k), forType: .string)
+            RowActions.copy(notes.handoff(k))
             self?.note = (.ok, "The hand-off note is on the clipboard.")
             self?.reload()
         }

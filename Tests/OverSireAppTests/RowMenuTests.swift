@@ -150,4 +150,16 @@ final class RowMenuTests: XCTestCase {
         let list: [MenuEntry] = [.separator, .action("A", .copy("a")), .separator, .separator, .action("B", .copy("b")), .separator]
         XCTAssertEqual(list.tidy, [.action("A", .copy("a")), .separator, .action("B", .copy("b"))])
     }
+
+    func testShowMenuIsFalseWithNoItems() {
+        _ = NSApplication.shared
+        let event = NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        let row = Row([])
+        row.menuItems = { [] }
+        XCTAssertFalse(row.showMenu())
+        XCTAssertNil(row.menu(for: event))
+        row.menuItems = { [NSMenuItem(title: "A", action: nil, keyEquivalent: "")] }
+        XCTAssertEqual(row.menu(for: event)?.items.count, 1)
+    }
 }

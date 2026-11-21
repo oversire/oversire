@@ -22,6 +22,7 @@ public final class TemplateCI: CIProvider {
 
     public let id: ProviderID = .ciTemplate
     public let account: AccountID
+    // Optional protocols: JobRerunning, LogReading, WebhookManaging. See step 5 of docs/adding-a-provider.md.
     public let capabilities: Set<Capability> = []
     public let pollPolicy = PollPolicy(minInterval: .seconds(15), requestsPerHour: 1_000)
     let http: any HTTPTransport

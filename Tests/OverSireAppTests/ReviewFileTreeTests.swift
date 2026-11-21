@@ -146,8 +146,8 @@ final class ReviewFileTreeTests: XCTestCase {
         panel.changed = { builds += 1 }
         desk.filter.query = "nothing-like-this"
         let body = panel.body()
-        XCTAssertNotNil(UIShots.find(body) { ($0 as? NSTextField)?.stringValue == "No files match." })
-        let clear = UIShots.find(body) { ($0 as? ActionButton)?.title == "Clear the filters" } as? ActionButton
+        XCTAssertNotNil(body.descendant { ($0 as? NSTextField)?.stringValue == "No files match." })
+        let clear = body.descendant { ($0 as? ActionButton)?.title == "Clear the filters" } as? ActionButton
         clear?.onClick?()
         XCTAssertEqual(desk.filter, FileFilter())
         XCTAssertEqual(builds, 1)

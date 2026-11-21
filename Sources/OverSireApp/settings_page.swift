@@ -227,10 +227,10 @@ final class SettingsPage: Page, NSTextFieldDelegate {
     // Scrolls to the section, and flashes the row with the title.
     @discardableResult
     private func reveal(_ anchor: String, flash: String?) -> Bool {
-        guard let scroll = pane, let doc = scroll.documentView, let section = doc.find(NSUserInterfaceItemIdentifier("anchor-" + anchor)) else { return false }
-        let target = flash.flatMap { t in section.findBox { $0.accessibilityLabel() == t } }
+        guard let scroll = pane, let doc = scroll.documentView, let section = doc.descendant({ $0.identifier == NSUserInterfaceItemIdentifier("anchor-" + anchor) }) else { return false }
+        let target = flash.flatMap { t in section.descendant { ($0 as? Box).map { $0.accessibilityLabel() == t } ?? false } as? Box }
         scroll.reveal(target ?? section, top: section)
-        (target ?? (flash != nil ? section.findBox { $0 is ListCard } : nil))?.flash()
+        (target ?? (flash != nil ? section.descendant { $0 is ListCard } as? Box : nil))?.flash()
         return true
     }
 
@@ -295,7 +295,7 @@ final class SettingsPage: Page, NSTextFieldDelegate {
         guard let f = n.object as? NSTextField, f.identifier?.rawValue == "branchTest" else { return }
         branchTest = f.stringValue
         reload()
-        if let nf = view.findField("branchTest") { view.window?.makeFirstResponder(nf); nf.currentEditor()?.selectedRange = NSRange(location: nf.stringValue.count, length: 0) }
+        if let nf = view.descendant({ ($0 as? NSTextField)?.identifier?.rawValue == "branchTest" }) as? NSTextField { view.window?.makeFirstResponder(nf); nf.currentEditor()?.selectedRange = NSRange(location: nf.stringValue.count, length: 0) }
     }
 
     private func writeBack(_ b: NSStackView) {
@@ -325,24 +325,4 @@ final class ClosureTarget: NSObject {
     private let run: () -> Void
     init(_ run: @escaping () -> Void) { self.run = run }
     @objc func fire() { run() }
-}
-
-private extension NSView {
-    func find(_ id: NSUserInterfaceItemIdentifier) -> NSView? {
-        if identifier == id { return self }
-        for s in subviews { if let v = s.find(id) { return v } }
-        return nil
-    }
-
-    func findBox(_ match: (Box) -> Bool) -> Box? {
-        if let b = self as? Box, match(b) { return b }
-        for s in subviews { if let v = s.findBox(match) { return v } }
-        return nil
-    }
-
-    func findField(_ id: String) -> NSTextField? {
-        if let f = self as? NSTextField, f.identifier?.rawValue == id { return f }
-        for s in subviews { if let f = s.findField(id) { return f } }
-        return nil
-    }
 }

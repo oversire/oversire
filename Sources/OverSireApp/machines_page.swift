@@ -880,15 +880,15 @@ extension SettingsPage {
                                               : Tone(symbol: "terminal", color: Palette.dim, word: x.sessionsText))
             let more = IconButton("ellipsis.circle", label: "More for \(x.name)", tip: "Make home · Mute sessions · Remove…")
             let menu = NSMenu()
-            let home = SnapMenuItem(title: "Make home") { c.setHome(x.name) }
+            let home = ClosureItem("Make home") { c.setHome(x.name) }
             home.isEnabled = canEdit && !x.home
             menu.autoenablesItems = false
             menu.addItem(home)
-            let mute = SnapMenuItem(title: "Mute sessions") { c.setMuted(x.name, !x.muted) }
+            let mute = ClosureItem("Mute sessions") { c.setMuted(x.name, !x.muted) }
             mute.state = x.muted ? .on : .off
             menu.addItem(mute)
             menu.addItem(.separator())
-            let remove = SnapMenuItem(title: "Remove…") { [weak self] in self?.confirmRemove(x.name, group: m.groupName) }
+            let remove = ClosureItem("Remove…") { [weak self] in self?.confirmRemove(x.name, group: m.groupName) }
             remove.isEnabled = canEdit && !x.isThis
             menu.addItem(remove)
             more.menu = menu

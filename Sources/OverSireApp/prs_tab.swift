@@ -40,25 +40,12 @@ let PR_ROW_H: CGFloat = 56
 
 // ─── PR Row View ─────────────────────────────────────────────────────────────
 
-class PRRow: NSView {
-    let urlStr: String
-    let expanded: Bool
-    var onToggle: (() -> Void)?
-    var trackingArea: NSTrackingArea?
-
+final class PRRow: HoverRow {
     init(_ pr: ChangeRequest, repo: String, w: CGFloat, expanded: Bool) {
-        self.urlStr = pr.url
-        self.expanded = expanded
-        super.init(frame: NSRect(x: 0, y: 0, width: w, height: PR_ROW_H))
-        wantsLayer = true
-        layer?.backgroundColor = restingColor
+        super.init(urlStr: pr.url, expanded: expanded, frame: NSRect(x: 0, y: 0, width: w, height: PR_ROW_H))
         build(pr, repo: repo, w: w)
     }
     required init?(coder: NSCoder) { fatalError() }
-
-    var restingColor: CGColor? {
-        expanded ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.1).cgColor : nil
-    }
 
     func build(_ pr: ChangeRequest, repo: String, w: CGFloat) {
         let pad: CGFloat = 12, iconSz: CGFloat = 20
@@ -150,55 +137,7 @@ class PRRow: NSView {
         l.cell?.truncatesLastVisibleLine = true; return l
     }
 
-    @objc func openURL() { if let u = URL(string: urlStr) { NSWorkspace.shared.open(u) } }
-    @objc func copyURL() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(urlStr, forType: .string)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let t = trackingArea { removeTrackingArea(t) }
-        trackingArea = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
-        addTrackingArea(trackingArea!)
-    }
-    override func mouseEntered(with event: NSEvent) { animateHover() }
-    override func mouseExited(with event: NSEvent) { animateHover() }
-    func animateHover() {
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15; ctx.allowsImplicitAnimation = true; syncHover()
-        }
-    }
-    override func mouseDown(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.25).cgColor
-    }
-    override func mouseUp(with event: NSEvent) {
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15; ctx.allowsImplicitAnimation = true; layer?.backgroundColor = restingColor
-        }
-        let loc = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(loc) else { return }
-        for sub in subviews where sub is NSButton { if sub.frame.contains(loc) { return } }
-        onToggle?()
-    }
-
-    func syncHover() {
-        guard let win = window else { return }
-        // visibleRect can extend past the row, so intersect it with bounds.
-        let inside = bounds.intersection(visibleRect).contains(convert(win.mouseLocationOutsideOfEventStream, from: nil))
-        layer?.backgroundColor = inside ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.15).cgColor : restingColor
-    }
-
-    // Keyboard accessibility
-    override var acceptsFirstResponder: Bool { true }
-    override var focusRingType: NSFocusRingType {
-        get { .exterior }
-        set {}
-    }
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.keyCode == 49 { onToggle?() }
-        else { super.keyDown(with: event) }
-    }
+    @objc func copyURL() { RowActions.copy(urlStr) }
 }
 
 // ─── PR Detail View ──────────────────────────────────────────────────────────

@@ -61,7 +61,7 @@ struct SessionStartMenu {
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
                 for repo in sorted {
-                    let mi = MenuAction(repo.name) { done(repo.path) }.item
+                    let mi = ClosureItem(repo.name) { done(repo.path) }
                     mi.toolTip = repo.path
                     mi.image = NSImage(systemSymbolName: repo.folder ? "folder" : "arrow.triangle.branch", accessibilityDescription: nil)
                     menu.addItem(mi)
@@ -86,19 +86,19 @@ struct SessionStartMenu {
         head.isEnabled = false
         menu.addItem(head)
         menu.addItem(.separator())
-        menu.addItem(MenuAction("Try again") { [weak anchor] in
+        menu.addItem(ClosureItem("Try again") { [weak anchor] in
             agents.clearFailure(item.key)
             if let anchor { self.start(item, snap: snap, at: anchor) }
-        }.item)
+        })
         if PROJECTS_CFG.orca.roots[snap.summary.ref.storeKey]?.isEmpty == false {
-            menu.addItem(MenuAction("Choose another workspace…") { [weak anchor] in
+            menu.addItem(ClosureItem("Choose another workspace…") { [weak anchor] in
                 agents.clearFailure(item.key)
                 PROJECTS_CFG.orca.roots[snap.summary.ref.storeKey] = nil
                 saveConfig()
                 if let anchor { self.start(item, snap: snap, at: anchor) }
-            }.item)
+            })
         }
-        menu.addItem(MenuAction("Dismiss") { agents.clearFailure(item.key) }.item)
+        menu.addItem(ClosureItem("Dismiss") { agents.clearFailure(item.key) })
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 2), in: anchor)
     }
 
@@ -124,10 +124,10 @@ struct SessionStartMenu {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Run a runbook", action: nil, keyEquivalent: "").isEnabled = false
         for b in sorted {
-            let mi = MenuAction(b.id == first?.id ? "\(b.name) (default)" : b.name) { [weak anchor] in
+            let mi = ClosureItem(b.id == first?.id ? "\(b.name) (default)" : b.name) { [weak anchor] in
                 guard let anchor else { return }
                 self.runbook(b, item, snap: snap, at: anchor, started: started)
-            }.item
+            }
             mi.toolTip = b.steps.map(\.name).joined(separator: " → ")
             menu.addItem(mi)
         }
@@ -137,10 +137,10 @@ struct SessionStartMenu {
             let one = NSMenuItem(title: b.name, action: nil, keyEquivalent: "")
             let steps = NSMenu()
             for (i, st) in b.steps.enumerated() where i > 0 {
-                steps.addItem(MenuAction("\(i + 1). \(st.name)") { [weak anchor] in
+                steps.addItem(ClosureItem("\(i + 1). \(st.name)") { [weak anchor] in
                     guard let anchor else { return }
                     self.runbook(b, item, snap: snap, at: anchor, step: st.id, started: started)
-                }.item)
+                })
             }
             one.submenu = steps
             one.isEnabled = b.steps.count > 1

@@ -28,11 +28,11 @@ final class EpicsPage: Page {
     private func filters(projects: [String]) -> [NSView] {
         let f = filter
         let project = MenuChip(f.project ?? "All projects", symbol: "folder", color: f.project == nil ? Palette.mut : Palette.fg) { [weak self] in
-            let all = MenuAction("All projects") { self?.filter.project = nil; self?.reload() }
-            all.item.state = f.project == nil ? .on : .off
+            let all = ClosureItem("All projects") { self?.filter.project = nil; self?.reload() }
+            all.state = f.project == nil ? .on : .off
             return [all] + projects.map { p in
-                let a = MenuAction(p) { self?.filter.project = p; self?.reload() }
-                a.item.state = f.project?.caseInsensitiveCompare(p) == .orderedSame ? .on : .off
+                let a = ClosureItem(p) { self?.filter.project = p; self?.reload() }
+                a.state = f.project?.caseInsensitiveCompare(p) == .orderedSame ? .on : .off
                 return a
             }
         }

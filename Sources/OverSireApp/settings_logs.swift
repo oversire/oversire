@@ -216,8 +216,7 @@ extension SettingsPage {
         let actions = NSStackView(h: [
             ActionButton("Copy", symbol: "doc.on.doc") {
                 let text = LogListView.model.rows(logs?.entries ?? []).map(LogListView.text).joined(separator: "\n")
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
+                RowActions.copy(text)
             },
             ActionButton("Show in Finder", symbol: "folder") { NSWorkspace.shared.open(URL(fileURLWithPath: LOGS_DIR)) },
             ActionButton("Clear", style: .danger) { [weak self] in

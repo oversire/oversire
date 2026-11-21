@@ -129,8 +129,6 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         if UIShots.loading { RunPage.source = NeverAnswers() }
     }
 
-    func has(_ c: Capability) -> Bool { ENV.has(c) }
-
     func rerun(repo: String, runs: [Run], failedOnly: Bool) { log.info("uishots: re-run skipped") }
     func setIgnored(_ runs: [Run], ignored: Bool) { IGNORED.set(runs, ignored: ignored) }
 
@@ -857,7 +855,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         return w
     }
 
-    private static func list(in v: NSView) -> StickyListCard? { find(v) { $0 is StickyListCard } as? StickyListCard }
+    private static func list(in v: NSView) -> StickyListCard? { v.descendant { $0 is StickyListCard } as? StickyListCard }
 
     // A source that never answers.
     struct NeverAnswers: RunSource {
@@ -1023,7 +1021,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("segment:") {
                         // segment:<label>: picks the segment with that label in the first segmented control that has it.
                         let label = String(p.dropFirst(8))
-                        if let root = w.window?.contentView, let seg = UIShots.find(root, { s in
+                        if let root = w.window?.contentView, let seg = root.descendant({ s in
                             guard let s = s as? NSSegmentedControl else { return false }
                             return (0..<s.segmentCount).contains { s.label(forSegment: $0) == label }
                         }) as? NSSegmentedControl, let i = (0..<seg.segmentCount).first(where: { seg.label(forSegment: $0) == label }) {
@@ -1032,7 +1030,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         } else { print("UISHOTS no segment \(p)") }
                     } else if p.hasPrefix("toggle:") {
                         let name = String(p.dropFirst(7))
-                        if let root = w.window?.contentView, let sw = UIShots.find(root, { ($0 as? NSSwitch)?.accessibilityLabel() == name }) as? NSSwitch {
+                        if let root = w.window?.contentView, let sw = root.descendant({ ($0 as? NSSwitch)?.accessibilityLabel() == name }) as? NSSwitch {
                             sw.performClick(nil)
                         } else { print("UISHOTS no switch \(p)") }
                     } else if p.hasPrefix("type:") {
@@ -1041,7 +1039,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         var text = spec.count > 1 ? spec[1] : ""
                         if let star = text.lastIndex(of: "*"), let n = Int(text[text.index(after: star)...]) { text = String(repeating: String(text[..<star]), count: n) }
                         if let root = w.window?.contentView,
-                           let f = UIShots.find(root, { ($0 as? NSTextField)?.accessibilityLabel() == spec[0] && ($0 as? NSTextField)?.isEditable == true }) as? NSTextField {
+                           let f = root.descendant({ ($0 as? NSTextField)?.accessibilityLabel() == spec[0] && ($0 as? NSTextField)?.isEditable == true }) as? NSTextField {
                             f.stringValue = text
                             f.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: f))
                         } else { print("UISHOTS no field \(p)") }
@@ -1067,12 +1065,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.glance = g
                     } else if p.hasPrefix("explain:"), let root = w.window?.contentView {
                         // explain:loading, explain:result or explain:error, at the first run row, else at the window center.
-                        let row = UIShots.find(root) { ($0 as? Row)?.menuItems != nil && ($0.accessibilityLabel() ?? "").contains("#") } ?? root
+                        let row = root.descendant { ($0 as? Row)?.menuItems != nil && ($0.accessibilityLabel() ?? "").contains("#") } ?? root
                         ExplainPopover.sample(at: row, phase: UIShots.explainPhase(String(p.dropFirst(8))))
                     } else if p.hasPrefix("hover:"), let root = w.window?.contentView {
                         // hover:<text>: the summary of the first status pill whose label has the text.
                         let text = String(p.dropFirst(6))
-                        if let pill = UIShots.find(root, { ($0 as? StatusPill).map { text.isEmpty || $0.status.label.contains(text) } ?? false }) as? StatusPill {
+                        if let pill = root.descendant({ ($0 as? StatusPill).map { text.isEmpty || $0.status.label.contains(text) } ?? false }) as? StatusPill {
                             pill.hover?.show()
                         } else { print("UISHOTS no status pill \(p)") }
                     } else if p.hasPrefix("reveal:"), let root = w.window?.contentView {
@@ -1089,7 +1087,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                     } else if p.hasPrefix("scroll:"), let root = w.window?.contentView {
                         // scroll:<text>: the first row whose label has the text goes to the top.
                         let text = String(p.dropFirst(7))
-                        if let row = UIShots.find(root, { ($0 as? Row)?.accessibilityLabel()?.contains(text) == true }),
+                        if let row = root.descendant({ ($0 as? Row)?.accessibilityLabel()?.contains(text) == true }),
                            let clip = row.enclosingScrollView?.contentView {
                             clip.scroll(to: NSPoint(x: 0, y: clip.convert(row.bounds, from: row).minY - 60))
                             row.enclosingScrollView?.reflectScrolledClipView(clip)
@@ -1105,13 +1103,13 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.sessionWindow?.orderOut(nil)
                         self.sessionWindow = UIShots.sessionSample(String(p.dropFirst(8)), shooting: w)
                         if p == "session:agentmenu", let root = self.sessionWindow?.contentView,
-                           let chip = UIShots.find(root, { $0.accessibilityLabel()?.hasPrefix("Agent ") == true }) {
+                           let chip = root.descendant({ $0.accessibilityLabel()?.hasPrefix("Agent ") == true }) {
                             let menu = NSMenu()
                             AgentMenu.build(into: menu, picked: "claude-max", standard: "claude") { _ in }
                             self.shootMenu(menu, under: chip, name: "\(theme.rawValue)-agentmenu")
                         }
                     } else if p.hasPrefix("startmenu:"), let found = self.projectStore.item(key: String(p.dropFirst(10))),
-                              let more = w.window?.contentView.flatMap({ UIShots.find($0) { $0.accessibilityLabel() == "Start in Orca with" } }) {
+                              let more = w.window?.contentView.flatMap({ $0.descendant { $0.accessibilityLabel() == "Start in Orca with" } }) {
                         // startmenu:<KEY>: the agent list of the item page split button.
                         self.shootMenu(SessionStartMenu(self).agents(found.item, snap: found.snap, at: more), under: more, name: "\(theme.rawValue)-startmenu")
                     } else if p.hasPrefix("resize:") {
@@ -1226,30 +1224,24 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.run(steps, i + 1) }
     }
 
-    static func find(_ v: NSView, _ match: (NSView) -> Bool) -> NSView? {
-        if match(v) { return v }
-        for s in v.subviews { if let f = find(s, match) { return f } }
-        return nil
-    }
-
     // Presses the first button whose title starts with `title`, inside the first view whose
     // accessibility label contains `scope`. The title "row" presses the row itself.
     static func press(_ title: String, scope: String?, in root: NSView) -> Bool {
         var base = root
         if title == "row", let scope {
-            guard let r = find(root, { ($0 as? Row)?.onClick != nil && ($0.accessibilityLabel() ?? "").contains(scope) }) as? Row else { return false }
+            guard let r = root.descendant({ ($0 as? Row)?.onClick != nil && ($0.accessibilityLabel() ?? "").contains(scope) }) as? Row else { return false }
             r.onClick?()
             return true
         }
         if let scope {
-            guard let s = find(root, { ($0.accessibilityLabel() ?? "").contains(scope) }) else { return false }
+            guard let s = root.descendant({ ($0.accessibilityLabel() ?? "").contains(scope) }) else { return false }
             base = s
         }
-        if let c = find(base, { ($0 as? Chiplet)?.onClick != nil && $0.accessibilityLabel()?.hasPrefix(title) == true }) as? Chiplet {
+        if let c = base.descendant({ ($0 as? Chiplet)?.onClick != nil && $0.accessibilityLabel()?.hasPrefix(title) == true }) as? Chiplet {
             c.onClick?()
             return true
         }
-        guard let b = find(base, { ($0 as? NSButton)?.title.hasPrefix(title) == true }) as? NSButton else { return false }
+        guard let b = base.descendant({ ($0 as? NSButton)?.title.hasPrefix(title) == true }) as? NSButton else { return false }
         if let a = b as? ActionButton, let run = a.onClick { run() } else { b.performClick(nil) }
         return true
     }

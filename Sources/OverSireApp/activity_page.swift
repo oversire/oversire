@@ -274,11 +274,11 @@ final class ActivityPage: Page {
     private func chip(_ name: String, _ picked: Set<String>, _ values: [(key: String, value: Int)], set: @escaping (Set<String>) -> Void) -> MenuChip {
         let text = picked.isEmpty ? "Any" : picked.count == 1 ? picked.first! : "\(picked.count) picked"
         let c = MenuChip("\(name): \(text)", symbol: "chevron.down", color: picked.isEmpty ? Palette.mut : Palette.fg) {
-            let any = MenuAction("Any") { set([]) }
-            any.item.state = picked.isEmpty ? .on : .off
+            let any = ClosureItem("Any") { set([]) }
+            any.state = picked.isEmpty ? .on : .off
             return [any] + values.map { v in
-                let a = MenuAction("\(v.key)  \(v.value)") { set(picked.symmetricDifference([v.key])) }
-                a.item.state = picked.contains(v.key) ? .on : .off
+                let a = ClosureItem("\(v.key)  \(v.value)") { set(picked.symmetricDifference([v.key])) }
+                a.state = picked.contains(v.key) ? .on : .off
                 return a
             }
         }
@@ -316,21 +316,4 @@ final class ActivityPage: Page {
                                                      tracker: self.data.projectStore.trackerName(of: e.itemKey ?? e.projectKey)) }
         return r
     }
-}
-
-// A menu item that runs a closure. Keep the object alive with the item.
-final class MenuAction: NSObject {
-    private let run: () -> Void
-    let item: NSMenuItem
-
-    init(_ title: String, _ run: @escaping () -> Void) {
-        self.run = run
-        item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        super.init()
-        item.action = #selector(fire)
-        item.target = self
-        item.representedObject = self
-    }
-
-    @objc private func fire() { run() }
 }
