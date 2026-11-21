@@ -64,6 +64,12 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
         }
     }
 
+    /// An old home refuses a new action or a new read word. The client tells the user to update it.
+    private func oldHome(_ refusal: String) -> String {
+        let old = (refusal.hasPrefix("No action ") && refusal.hasSuffix(".")) || refusal.hasPrefix("mirror.read has no read ")
+        return old ? "Update OverSire on \(sourceName()) to use this." : refusal
+    }
+
     private func send(_ id: String, _ args: ActionArgs, via forward: @Sendable (MemberCallRequest) async throws -> AppCallResult) async -> ActionResult {
         do {
             let r = try await forward(MemberCallRequest(action: id, args: args.values))
@@ -72,7 +78,7 @@ final class AppActionCatalog: ActionCatalog, @unchecked Sendable {
                 forwarded?()
                 return .ok(summary: r.summary, data: r.data)
             case .failed: return .failed(r.summary)
-            case .notAllowed: return .notAllowed(r.summary)
+            case .notAllowed: return .notAllowed(oldHome(r.summary))
             }
         } catch let e as ProviderError {
             if case .transport = e { return .failed("\(sourceName()) is offline. Try again when it is back.") }

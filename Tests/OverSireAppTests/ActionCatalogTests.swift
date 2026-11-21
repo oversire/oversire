@@ -406,6 +406,53 @@ final class ActionCatalogTests: XCTestCase {
         XCTAssertEqual(c, .notAllowed("No."))
     }
 
+    // OVERSIRE-534
+    func testClientMapsAnOldHomeRefusal() async throws {
+        let d = seeded()
+        d.actions.sourceName = { "mbp" }
+        let update = "Update OverSire on mbp to use this."
+        d.actions.forward = { _ in AppCallResult(id: "m", status: .notAllowed, summary: "No action intake.create.") }
+        let a = await d.actions.run("item.comment", ActionArgs(.object([:])))
+        XCTAssertEqual(a, .notAllowed(update))
+        d.actions.forward = { _ in AppCallResult(id: "m", status: .notAllowed, summary: "mirror.read has no read projectSettings.") }
+        let b = await d.actions.run("mirror.read", ActionArgs(.object(["what": .string("projectSettings")])))
+        XCTAssertEqual(b, .notAllowed(update))
+        do {
+            _ = try await d.actions.read(["what": .string("projectSettings")])
+            XCTFail("a read of an old home must fail")
+        } catch let e as ProviderError {
+            XCTAssertEqual(e.message, update)
+        }
+        d.actions.forward = { _ in AppCallResult(id: "m", status: .notAllowed, summary: "The project is not loaded.") }
+        let c = await d.actions.run("item.comment", ActionArgs(.object([:])))
+        XCTAssertEqual(c, .notAllowed("The project is not loaded."))
+    }
+
+    /// A client path reads a tracker through the home. The gap files below read it directly until the named item fixes them.
+    func testClientPathsDoNotReadTheTrackerDirectly() throws {
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
+        // The home runs these, or they hold the home branch.
+        let home: Set<String> = ["project_store.swift", "project_catalog.swift", "mirror_docs.swift", "main.swift", "AppEnvironment.swift", "plane_writeback.swift"]
+        let gaps: Set<String> = [
+            "intake_page.swift", "attachment_strip.swift", "project_settings_page.swift", "plan_starter.swift",  // OVERSIRE-535 reads
+            "snap_controller.swift", "snap_send.swift", "session_starter.swift", "new_session_panel.swift",      // OVERSIRE-536 files
+            "enhance_agent.swift", "groom_agent.swift",                                                          // OVERSIRE-537 Enhance and Groom
+        ]
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter {
+            $0.hasSuffix(".swift") && !$0.hasPrefix("actions_") && !home.contains($0) && !gaps.contains($0)
+        }
+        XCTAssertGreaterThan(files.count, 50)
+        let direct = try NSRegularExpression(pattern: #"(ENV|trackers)\.tracker\(|[sS]tore\??\.tracker\(of:"#)
+        var hits: [String] = []
+        for f in files {
+            let lines = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8).components(separatedBy: "\n")
+            for (i, l) in lines.enumerated() where direct.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil {
+                hits.append("\(f):\(i + 1): \(l.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+        XCTAssertEqual(hits, [], hits.joined(separator: "\n"))
+    }
+
     // OVERSIRE-530
     func testOfflineRefusesChange() async {
         final class Seen: @unchecked Sendable { var n = 0 }

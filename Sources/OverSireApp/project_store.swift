@@ -734,7 +734,7 @@ final class ProjectStore {
         }
     }
 
-    private func remoteRows<T: Codable & Sendable>(_ what: String, _ args: [String: JSONValue]) async -> Result<T, ProviderError> {
+    func remoteRows<T: Codable & Sendable>(_ what: String, _ args: [String: JSONValue]) async -> Result<T, ProviderError> {
         guard let remote else { return .failure(.notFound) }
         do {
             let data = try await remote(what, .object(args))
