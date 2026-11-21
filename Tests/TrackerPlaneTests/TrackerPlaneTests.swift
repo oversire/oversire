@@ -654,6 +654,7 @@ final class TrackerPlaneTests: XCTestCase {
     func testDescriptorHasVendorCLI() throws {
         let cli = try XCTUnwrap(PlaneTracker.descriptor.cli)
         XCTAssertEqual(cli.binary, "plane-cli")
+        XCTAssertEqual(cli.minVersion, "0.2.2")
         XCTAssertEqual(cli.tokenEnv, "PLANE_API_KEY")
         XCTAssertEqual(cli.defaultHost, PlaneWorkspace.cloudHost)
         XCTAssertEqual(cli.managedEnv, "PLANE_MANAGED_BY")

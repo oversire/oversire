@@ -20,11 +20,13 @@ public struct VendorCLI: Hashable, Sendable {
     public let passEnv: [String]
     public let lockedFlags: [String]
     public let deniedCommands: [[String]]
+    /// The lowest version that the app runs. Nil: the app runs any version.
+    public let minVersion: String?
 
     public init(binary: String, tokenEnv: String? = nil, hostEnv: String? = nil, hostField: String? = nil,
                 defaultHost: String? = nil, accountEnv: String? = nil, projectEnv: String? = nil,
                 managedEnv: String? = nil, passEnv: [String] = [], lockedFlags: [String] = [],
-                deniedCommands: [[String]] = []) {
+                deniedCommands: [[String]] = [], minVersion: String? = nil) {
         self.binary = binary
         self.tokenEnv = tokenEnv
         self.hostEnv = hostEnv
@@ -36,6 +38,7 @@ public struct VendorCLI: Hashable, Sendable {
         self.passEnv = passEnv
         self.lockedFlags = lockedFlags
         self.deniedCommands = deniedCommands
+        self.minVersion = minVersion
     }
 
     /// The leading args that do not start with "-".

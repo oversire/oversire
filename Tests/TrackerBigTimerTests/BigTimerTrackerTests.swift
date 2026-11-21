@@ -649,6 +649,7 @@ final class BigTimerTrackerTests: XCTestCase {
     func testDescriptorHasVendorCLI() throws {
         let cli = try XCTUnwrap(BigTimerTracker.descriptor.cli)
         XCTAssertEqual(cli.binary, "big-timer-cli")
+        XCTAssertEqual(cli.minVersion, "1.0.12")
         XCTAssertEqual(cli.tokenEnv, "BIGTIMER_TOKEN")
         XCTAssertEqual(cli.hostEnv, "BIGTIMER_SERVER")
         XCTAssertTrue(BigTimerTracker.descriptor.fields.contains { $0.key == cli.hostField })

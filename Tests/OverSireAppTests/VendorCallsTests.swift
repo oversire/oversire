@@ -41,14 +41,17 @@ final class VendorCallsTests: XCTestCase {
     let registry = AppEnvironment().registry
 
     func world(client: Bool = false, accounts: [AccountConfig]? = nil, token: String? = "plane_api_0123456789abcdef",
-               installed: Set<String> = ["plane-cli", "gh"]) -> VendorCalls.World {
+               installed: Set<String> = ["plane-cli", "gh"],
+               versions: [String: String] = ["plane-cli": "0.2.2", "gh": "2.102.0"]) -> VendorCalls.World {
         let accounts = accounts ?? [plane, gh, actions]
         let registry = registry
         return VendorCalls.World(
             isClient: { client }, accounts: { accounts }, descriptor: { registry.descriptor($0) }, token: { _ in token },
             projects: { [(identifier: "OVERSIRE", account: AccountID(provider: "plane", id: "ocral")), (identifier: "SLING", account: AccountID(provider: "plane", id: "ocral"))] },
             find: { installed.contains($0) ? "/usr/local/bin/\($0)" : nil },
-            inherited: { ["GH_CONFIG_DIR": "/cfg", "AWS_SECRET": "no"] })
+            inherited: { ["GH_CONFIG_DIR": "/cfg", "AWS_SECRET": "no"] },
+            vendors: { VendorCalls.vendors(in: registry) },
+            version: { _, cli in versions[cli.binary].flatMap(VendorVersion.init) })
     }
 
     func rig(_ w: VendorCalls.World? = nil, _ runner: FakeRunner = FakeRunner()) -> (VendorCalls, FakeRunner, Outlet) {
@@ -192,8 +195,34 @@ final class VendorCallsTests: XCTestCase {
         let (calls, runner, _) = rig(world(installed: []))
         let r = await calls.handle(call(project: "OVERSIRE"))
         XCTAssertEqual(r.status, .notAllowed)
-        XCTAssertEqual(r.summary, "plane-cli is not in /opt/homebrew/bin, /usr/local/bin or /usr/bin.")
+        XCTAssertEqual(r.summary, "plane-cli is not installed. Run `oversire vendor install plane`.")
         XCTAssertTrue(runner.launches.isEmpty)
+    }
+
+    func testRunRefusesOldBinary() async {
+        let (calls, runner, o) = rig(world(versions: ["plane-cli": "0.2.1"]))
+        let r = await calls.handle(call(project: "OVERSIRE"))
+        XCTAssertEqual(r.status, .notAllowed)
+        XCTAssertEqual(r.summary, "plane-cli 0.2.1 is older than 0.2.2. Run `oversire vendor install plane`.")
+        XCTAssertTrue(runner.launches.isEmpty)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let n = await o.rows.count
+        XCTAssertEqual(n, 0, "a refusal writes no row")
+    }
+
+    func testRunRefusesBinaryWithNoVersion() async {
+        let (calls, runner, _) = rig(world(versions: [:]))
+        let r = await calls.handle(call(project: "OVERSIRE"))
+        XCTAssertEqual(r.status, .notAllowed)
+        XCTAssertTrue(r.summary.contains("gives no version"), r.summary)
+        XCTAssertTrue(runner.launches.isEmpty)
+    }
+
+    func testGhHasNoFloor() async {
+        let (calls, runner, _) = rig(world(versions: [:]))
+        let r = await calls.handle(call(account: "github:oversire", args: ["pr", "list"]))
+        XCTAssertEqual(r.status, .ok)
+        XCTAssertEqual(runner.launches.first?.exe, "/usr/local/bin/gh")
     }
 
     func testNoToken() async {
@@ -322,9 +351,44 @@ final class VendorCallsTests: XCTestCase {
         XCTAssertEqual(r.summary, "2 vendor CLIs.")
         let rows = try JSONValue.decode([VendorCLIRow].self, from: XCTUnwrap(r.data))
         XCTAssertEqual(rows, [
-            VendorCLIRow(provider: "github", vendor: "GitHub", binary: "gh", path: nil, accounts: ["github:oversire"], projects: []),
-            VendorCLIRow(provider: "plane", vendor: "Plane", binary: "plane-cli", path: "/usr/local/bin/plane-cli", accounts: ["plane:ocral"], projects: ["OVERSIRE", "SLING"]),
+            VendorCLIRow(provider: "github", vendor: "GitHub", binary: "gh", path: nil, state: .missing, accounts: ["github:oversire"], projects: []),
+            VendorCLIRow(provider: "plane", vendor: "Plane", binary: "plane-cli", path: "/usr/local/bin/plane-cli", version: "0.2.2",
+                         minVersion: "0.2.2", source: .path, state: .ok, accounts: ["plane:ocral"], projects: ["OVERSIRE", "SLING"]),
         ])
+        let (all, _, _) = rig()
+        let both = await all.list()
+        XCTAssertEqual(both.first { $0.provider == "github" }?.version, "2.102.0")
+        XCTAssertEqual(both.first { $0.provider == "github" }?.state, .ok)
+        XCTAssertNil(both.first { $0.provider == "github" }?.minVersion)
+    }
+
+    func testListOldAndMissing() async {
+        let (calls, _, _) = rig(world(installed: ["plane-cli"], versions: ["plane-cli": "0.2.1"]))
+        let rows = await calls.list()
+        XCTAssertEqual(rows.map(\.provider), ["github", "plane"])
+        XCTAssertEqual(rows.map(\.state), [.missing, .old])
+        XCTAssertEqual(rows.last?.version, "0.2.1")
+        XCTAssertNil(rows.first?.source)
+    }
+
+    func testBinarySeam() async throws {
+        let (calls, _, _) = rig()
+        let found = await calls.binary("plane")
+        let b = try XCTUnwrap(found)
+        XCTAssertEqual(b.path, "/usr/local/bin/plane-cli")
+        XCTAssertEqual(b.version, VendorVersion("0.2.2"))
+        XCTAssertEqual(b.source, .path)
+        XCTAssertEqual(b.state, .ok)
+        let none = await calls.binary("github-actions")
+        XCTAssertNil(none)
+    }
+
+    func testVendorNamed() {
+        let (calls, _, _) = rig()
+        XCTAssertEqual(try calls.vendor(named: "Plane").get(), "plane")
+        guard case .failure(let e) = calls.vendor(named: "linear") else { return XCTFail("linear is no vendor") }
+        XCTAssertEqual(e, .unknownVendor("linear", known: ["bigtimer", "github", "plane"]))
+        XCTAssertEqual(e.message, "OverSire has no vendor linear. Give bigtimer, github or plane.")
     }
 
     func testBadArgsAreNotAllowed() async {

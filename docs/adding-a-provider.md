@@ -71,10 +71,11 @@ A vendor can have a command line tool. `oversire vendor run` then runs it for th
 cli: VendorCLI(binary: "linear-cli", tokenEnv: "LINEAR_API_KEY", hostEnv: "LINEAR_HOST", hostField: "host",
                defaultHost: "https://api.linear.app", accountEnv: "LINEAR_TEAM", projectEnv: "LINEAR_PROJECT",
                managedEnv: "LINEAR_MANAGED_BY", lockedFlags: ["--api-key", "--host"],
-               deniedCommands: [["auth", "login"], ["listen"]])
+               deniedCommands: [["auth", "login"], ["listen"]], minVersion: "1.4.0")
 ```
 
 - `binary` is a name, never a path. The app looks in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
+- `minVersion` is the lowest version that the app runs. The app reads `<binary> --version` once for each file. `vendor run` refuses an older binary. Nil means no floor (`gh`).
 - `tokenEnv` gets the token of the account. Nil means that the CLI keeps its own login (`gh`). The app removes the token value from stdout and stderr.
 - `hostEnv` gets the value of the field `hostField`. An empty value gives `defaultHost`.
 - `accountEnv` gets the workspace, else the account id. `projectEnv` gets the project key of `--project`.

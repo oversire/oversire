@@ -41,20 +41,30 @@ public struct VendorRunOutput: Codable, Hashable, Sendable {
     }
 }
 
-/// One row of the data of vendor.list.
+/// One row of the data of vendor.list. `path` is the binary that vendor.run runs. No state: an app before OVERSIRE-580.
 public struct VendorCLIRow: Codable, Hashable, Sendable {
     public var provider: String
     public var vendor: String
     public var binary: String
     public var path: String?
+    public var version: String?
+    public var minVersion: String?
+    public var source: VendorSource?
+    public var state: VendorState?
     public var accounts: [String]
     public var projects: [String]
 
-    public init(provider: String, vendor: String, binary: String, path: String? = nil, accounts: [String], projects: [String]) {
+    public init(provider: String, vendor: String, binary: String, path: String? = nil, version: String? = nil,
+                minVersion: String? = nil, source: VendorSource? = nil, state: VendorState? = nil,
+                accounts: [String], projects: [String]) {
         self.provider = provider
         self.vendor = vendor
         self.binary = binary
         self.path = path
+        self.version = version
+        self.minVersion = minVersion
+        self.source = source
+        self.state = state
         self.accounts = accounts
         self.projects = projects
     }

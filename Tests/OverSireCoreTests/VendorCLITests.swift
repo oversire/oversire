@@ -88,4 +88,56 @@ final class VendorCLITests: XCTestCase {
         want["SSH_AUTH_SOCK"] = "/s"
         XCTAssertEqual(env, want)
     }
+
+    func testVersionParse() {
+        XCTAssertEqual(VendorVersion.find(in: "plane-cli version 0.2.2\n"), VendorVersion("0.2.2"))
+        XCTAssertEqual(VendorVersion.find(in: "gh version 2.102.0 (2026-09-30)\nhttps://github.com/cli/cli/releases/tag/v2.102.0\n")?.parts, [2, 102, 0])
+        XCTAssertEqual(VendorVersion.find(in: "\n  big-timer-cli version v1.0.12")?.parts, [1, 0, 12])
+        XCTAssertEqual(VendorVersion("v1.0.12")?.parts, [1, 0, 12])
+        XCTAssertEqual(VendorVersion("1.2.3-rc1")?.parts, [1, 2, 3])
+        XCTAssertEqual(VendorVersion("1.2.3+build.4")?.parts, [1, 2, 3])
+        XCTAssertEqual(VendorVersion.find(in: "x 1.2.3-rc1")?.parts, [1, 2, 3])
+        XCTAssertNil(VendorVersion(""))
+        XCTAssertNil(VendorVersion("dev"))
+        XCTAssertNil(VendorVersion.find(in: ""))
+        XCTAssertNil(VendorVersion.find(in: "plane-cli version dev"))
+        XCTAssertEqual(VendorVersion("2.102.0")?.description, "2.102.0")
+    }
+
+    func testVersionOrder() throws {
+        let v = { (s: String) in try XCTUnwrap(VendorVersion(s)) }
+        XCTAssertGreaterThan(try v("0.2.10"), try v("0.2.9"))
+        XCTAssertEqual(try v("1.0"), try v("1.0.0"))
+        XCTAssertEqual(Set([try v("1.0"), try v("1.0.0")]).count, 1)
+        XCTAssertLessThan(try v("1.0.11"), try v("1.0.12"))
+        XCTAssertFalse(try v("1.0") < v("1.0.0"))
+    }
+
+    func testBinaryStates() {
+        let floor = VendorCLI(binary: "plane-cli", minVersion: "0.2.2")
+        let free = VendorCLI(binary: "gh")
+        func state(_ cli: VendorCLI, _ path: String?, _ version: String?) -> VendorState {
+            VendorBinary(vendor: "plane", cli: cli, path: path, version: version.flatMap(VendorVersion.init), source: path == nil ? nil : .path).state
+        }
+        XCTAssertEqual(state(floor, nil, nil), .missing)
+        XCTAssertEqual(state(floor, "/usr/local/bin/plane-cli", "0.2.1"), .old)
+        XCTAssertEqual(state(floor, "/usr/local/bin/plane-cli", nil), .old)
+        XCTAssertEqual(state(floor, "/usr/local/bin/plane-cli", "0.2.2"), .ok)
+        XCTAssertEqual(state(floor, "/usr/local/bin/plane-cli", "0.3"), .ok)
+        XCTAssertEqual(state(free, "/opt/homebrew/bin/gh", nil), .ok)
+        XCTAssertEqual(state(free, nil, nil), .missing)
+    }
+
+    func testBinaryProblemTexts() {
+        let cli = VendorCLI(binary: "plane-cli", minVersion: "0.2.2")
+        let path = "/usr/local/bin/plane-cli"
+        XCTAssertEqual(VendorBinary(vendor: "plane", cli: cli, path: nil, version: nil, source: nil).problem,
+                       "plane-cli is not installed. Run `oversire vendor install plane`.")
+        XCTAssertEqual(VendorBinary(vendor: "plane", cli: cli, path: path, version: VendorVersion("0.2.1"), source: .path).problem,
+                       "plane-cli 0.2.1 is older than 0.2.2. Run `oversire vendor install plane`.")
+        XCTAssertEqual(VendorBinary(vendor: "plane", cli: cli, path: path, version: nil, source: .path).problem,
+                       "plane-cli at /usr/local/bin/plane-cli gives no version. OverSire needs 0.2.2 or newer. Run `oversire vendor install plane`.")
+        XCTAssertNil(VendorBinary(vendor: "plane", cli: cli, path: path, version: VendorVersion("0.2.2"), source: .path).problem)
+        XCTAssertEqual(VendorBinary(vendor: "plane", cli: cli, path: nil, version: nil, source: nil).installHint, "Run `oversire vendor install plane`.")
+    }
 }

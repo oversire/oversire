@@ -8,7 +8,8 @@ import OverSireCore
 
 enum VendorCallError: Error, Equatable {
     case client, noAccountGiven, bothGiven, unknownProject(String), unknownAccount(String), ambiguous([String]),
-         noCLI(String), notInstalled(String), noToken(String), badFolder(String), refused(VendorRefusal)
+         noCLI(String), unusable(VendorBinary), noToken(String), badFolder(String), refused(VendorRefusal),
+         unknownVendor(String, known: [String])
 
     var message: String {
         switch self {
@@ -21,12 +22,14 @@ enum VendorCallError: Error, Equatable {
             let id = names.first.map { String($0.drop { $0 != ":" }.dropFirst()) } ?? ""
             return "\(id) is \(names.joined(separator: " or ")). Give --account <provider>:<id>."
         case .noCLI(let tracker): return "\(tracker) has no vendor CLI in OverSire."
-        case .notInstalled(let binary):
-            let d = VendorCalls.searchPaths
-            return "\(binary) is not in \(d.dropLast().joined(separator: ", ")) or \(d.last ?? "")."
+        case .unusable(let b): return b.problem ?? "OverSire can run \(b.binary)."
         case .noToken(let account): return "The Keychain has no token for \(account). Add it in Settings › Providers."
         case .badFolder(let p): return "The working folder \(p) does not exist."
         case .refused(let r): return r.message
+        case .unknownVendor(let name, let known):
+            guard let last = known.last else { return "OverSire has no vendor \(name)." }
+            let list = known.count == 1 ? last : "\(known.dropLast().joined(separator: ", ")) or \(last)"
+            return "OverSire has no vendor \(name). Give \(list)."
         }
     }
 }
@@ -59,6 +62,10 @@ final class VendorCalls: @unchecked Sendable {
         /// The first executable of a binary name in `searchPaths`.
         var find: @Sendable (String) -> String?
         var inherited: @Sendable () -> [String: String]
+        /// The providers of the registry that have a `cli`.
+        var vendors: @Sendable () -> [ProviderID] = { [] }
+        /// The version that `<path> --version` gives.
+        var version: @Sendable (String, VendorCLI) async -> VendorVersion? = { _, _ in nil }
     }
 
     typealias Resolved = (config: AccountConfig, descriptor: ProviderDescriptor, cli: VendorCLI, project: String?)
@@ -76,6 +83,7 @@ final class VendorCalls: @unchecked Sendable {
 
     static func live(_ d: AppData) -> VendorCalls {
         let data = WeakData(d)
+        let versions = VendorVersions(runner: VendorProcess())
         let world = World(
             isClient: { ENV.mirrored != nil },
             accounts: { ENV.accounts },
@@ -90,8 +98,14 @@ final class VendorCalls: @unchecked Sendable {
                 guard !name.contains("/") else { return nil }
                 return searchPaths.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
             },
-            inherited: { ProcessInfo.processInfo.environment })
+            inherited: { ProcessInfo.processInfo.environment },
+            vendors: { vendors(in: ENV.registry) },
+            version: { await versions.version(of: $0, cli: $1) })
         return VendorCalls(world: world, events: EVENTS)
+    }
+
+    static func vendors(in registry: ProviderRegistry) -> [ProviderID] {
+        Layer.allCases.flatMap { registry.descriptors($0) }.filter { $0.cli != nil }.map(\.id)
     }
 
     private final class WeakData: @unchecked Sendable {
@@ -145,15 +159,37 @@ final class VendorCalls: @unchecked Sendable {
     func list() async -> [VendorCLIRow] {
         let accounts = world.accounts()
         let projects = await world.projects()
-        var rows: [VendorCLIRow] = []
-        for provider in Set(accounts.map(\.account.provider)).sorted(by: { $0.rawValue < $1.rawValue }) {
-            guard let d = world.descriptor(provider), let cli = d.cli else { continue }
-            rows.append(VendorCLIRow(
-                provider: provider.rawValue, vendor: d.displayName, binary: cli.binary, path: world.find(cli.binary),
-                accounts: accounts.filter { $0.account.provider == provider }.map { Self.name($0.account) }.sorted(),
-                projects: projects.filter { $0.account.provider == provider }.map(\.identifier).sorted()))
+        let providers = Set(accounts.map(\.account.provider)).filter { world.descriptor($0)?.cli != nil }
+        let bins = await withTaskGroup(of: VendorBinary?.self) { g in
+            for p in providers { g.addTask { await self.binary(p) } }
+            var all: [ProviderID: VendorBinary] = [:]
+            for await b in g { if let b { all[b.vendor] = b } }
+            return all
         }
-        return rows
+        return providers.sorted(by: { $0.rawValue < $1.rawValue }).compactMap { provider in
+            guard let d = world.descriptor(provider), let cli = d.cli, let b = bins[provider] else { return nil }
+            return VendorCLIRow(
+                provider: provider.rawValue, vendor: d.displayName, binary: cli.binary, path: b.path,
+                version: b.version?.description, minVersion: cli.minVersion, source: b.source, state: b.state,
+                accounts: accounts.filter { $0.account.provider == provider }.map { Self.name($0.account) }.sorted(),
+                projects: projects.filter { $0.account.provider == provider }.map(\.identifier).sorted())
+        }
+    }
+
+    /// The binary that vendor.run runs for a vendor, or nil when the vendor has no CLI.
+    func binary(_ vendor: ProviderID) async -> VendorBinary? {
+        guard let cli = world.descriptor(vendor)?.cli else { return nil }
+        let path = world.find(cli.binary)
+        var version: VendorVersion?
+        if let path { version = await world.version(path, cli) }
+        return VendorBinary(vendor: vendor, cli: cli, path: path, version: version, source: path == nil ? nil : .path)
+    }
+
+    /// A vendor id of the registry, with no case difference.
+    func vendor(named name: String) -> Result<ProviderID, VendorCallError> {
+        let all = world.vendors()
+        if let p = all.first(where: { $0.rawValue.caseInsensitiveCompare(name) == .orderedSame }) { return .success(p) }
+        return .failure(.unknownVendor(name, known: all.map(\.rawValue).sorted()))
     }
 
     static func name(_ a: AccountID) -> String { "\(a.provider.rawValue):\(a.id)" }
@@ -210,7 +246,8 @@ final class VendorCalls: @unchecked Sendable {
         }
         let cli = r.cli, name = Self.name(r.config.account)
         if let refusal = cli.refusal(a.args) { return notAllowed(.refused(refusal)) }
-        guard let exe = world.find(cli.binary) else { return notAllowed(.notInstalled(cli.binary)) }
+        guard let bin = await binary(r.config.account.provider) else { return notAllowed(.noCLI(r.descriptor.displayName)) }
+        guard bin.state == .ok, let exe = bin.path else { return notAllowed(.unusable(bin)) }
         var token: String?
         if cli.tokenEnv != nil {
             guard let t = world.token(r.config), !t.isEmpty else { return notAllowed(.noToken(name)) }

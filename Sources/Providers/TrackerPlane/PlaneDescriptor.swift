@@ -17,7 +17,8 @@ extension PlaneTracker {
                        defaultHost: PlaneWorkspace.cloudHost, accountEnv: "PLANE_WORKSPACE", projectEnv: "PLANE_PROJECT",
                        managedEnv: "PLANE_MANAGED_BY", lockedFlags: ["--api-key", "-k", "--host"],
                        deniedCommands: [["auth", "login"], ["auth", "logout"], ["auth", "workspace", "add"],
-                                        ["auth", "workspace", "remove"], ["config", "set"], ["listen"], ["serve"]])
+                                        ["auth", "workspace", "remove"], ["config", "set"], ["listen"], ["serve"]],
+                       minVersion: "0.2.2")
     ) { config, env in
         let slug = config.values["workspace"] ?? config.account.id
         let host = config.values["host"].flatMap { $0.isEmpty ? nil : $0 } ?? PlaneWorkspace.cloudHost

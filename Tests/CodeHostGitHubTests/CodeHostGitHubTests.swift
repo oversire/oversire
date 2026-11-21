@@ -254,6 +254,7 @@ final class CodeHostGitHubTests: XCTestCase {
     func testDescriptorHasGhCLI() throws {
         let cli = try XCTUnwrap(GitHubCodeHost.descriptor.cli)
         XCTAssertEqual(cli.binary, "gh")
+        XCTAssertNil(cli.minVersion, "gh has no floor")
         XCTAssertNil(cli.tokenEnv)
         XCTAssertEqual(Set(cli.passEnv).union(["PATH", "HOME", "LANG"]), Set(GitHubClient.environment.keys).union(cli.passEnv).union(["PATH", "HOME", "LANG"]))
         for key in cli.passEnv { XCTAssertTrue(["SHELL", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "GNUPGHOME", "SSH_AUTH_SOCK"].contains(key)) }
