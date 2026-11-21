@@ -13,6 +13,7 @@ final class AppMirrorDocs: MirrorDocSource {
     private let trackers: () -> [String]
     private let settings: () -> HomeSettings
     private let workspaces: () -> [CatalogWorkspace]
+    private let repos: () -> CatalogRepos?
     // An item that did not change keeps its doc, so a change of one project does not encode all items again.
     private var items: [String: (item: Item, doc: MirrorDoc)] = [:]
     private var activity: [String: MirrorDoc] = [:]
@@ -20,7 +21,7 @@ final class AppMirrorDocs: MirrorDocSource {
     init(store: ProjectStore, runs: @escaping () -> [(String, [Run])], prs: @escaping () -> [(String, [ChangeRequest])],
          projects: @escaping () -> [ProjectSummary], layers: @escaping (Layer) -> Set<Capability>, trackers: @escaping () -> [String],
          settings: @escaping () -> HomeSettings = { homeSettings(from: currentConfig(), accounts: AccountSummary.list(ENV)) },
-         workspaces: @escaping () -> [CatalogWorkspace] = { [] }) {
+         workspaces: @escaping () -> [CatalogWorkspace] = { [] }, repos: @escaping () -> CatalogRepos? = { nil }) {
         self.store = store
         self.runs = runs
         self.prs = prs
@@ -29,6 +30,7 @@ final class AppMirrorDocs: MirrorDocSource {
         self.trackers = trackers
         self.settings = settings
         self.workspaces = workspaces
+        self.repos = repos
     }
 
     func projectDocs(_ keys: [String]?) -> [MirrorDoc] {
@@ -92,7 +94,7 @@ final class AppMirrorDocs: MirrorDocSource {
                                   intakeURL: (tracker as? any IntakePage)?.intakeURL(p.ref))
         }
         let caps = Dictionary(uniqueKeysWithValues: [Layer.tracker, .codeHost, .ci].map { ($0.rawValue, Self.sorted(layers($0))) })
-        let catalog = ClientCatalog(projects: list, capabilities: caps, trackers: trackers(), workspaces: workspaces())
+        let catalog = ClientCatalog(projects: list, capabilities: caps, trackers: trackers(), workspaces: workspaces(), repos: repos())
         return MirrorDoc.make(.catalog, id: MirrorCodec.catalogID, catalog)
             ?? MirrorDoc(kind: .catalog, id: MirrorCodec.catalogID, v: MirrorCodec.version, at: Date(), body: .object([:]))
     }

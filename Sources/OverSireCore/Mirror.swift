@@ -189,12 +189,45 @@ public struct ClientCatalog: Codable, Hashable, Sendable {
     public var trackers: [String]
     /// The open projects of each tracker workspace of the home, for the picker of a client. Nil from an old home.
     public var workspaces: [CatalogWorkspace]?
+    /// The repos of the code host accounts of the home, for the repo picker of a client. Nil from an old home.
+    public var repos: CatalogRepos?
 
-    public init(projects: [CatalogProject], capabilities: [String: [Capability]], trackers: [String], workspaces: [CatalogWorkspace]? = nil) {
+    public init(projects: [CatalogProject], capabilities: [String: [Capability]], trackers: [String], workspaces: [CatalogWorkspace]? = nil,
+                repos: CatalogRepos? = nil) {
         self.projects = projects
         self.capabilities = capabilities
         self.trackers = trackers
         self.workspaces = workspaces
+        self.repos = repos
+    }
+}
+
+/// The repos that the home can list, by owner.
+public struct CatalogRepos: Codable, Hashable, Sendable {
+    /// The login of the code host user of the home. Nil when the home has no login.
+    public var user: String?
+    public var owners: [CatalogRepoOwner]
+
+    public init(user: String?, owners: [CatalogRepoOwner]) {
+        self.user = user
+        self.owners = owners
+    }
+}
+
+/// One owner (a user or an organization) with its repos and the state of the last fetch.
+public struct CatalogRepoOwner: Codable, Hashable, Sendable {
+    public var login: String
+    /// The repos as "owner/name".
+    public var repos: [String]
+    public var fetchedAt: Date?
+    /// The error of the last fetch, or nil.
+    public var error: String?
+
+    public init(login: String, repos: [String], fetchedAt: Date? = nil, error: String? = nil) {
+        self.login = login
+        self.repos = repos
+        self.fetchedAt = fetchedAt
+        self.error = error
     }
 }
 

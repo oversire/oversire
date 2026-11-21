@@ -54,16 +54,19 @@ struct MemberActions {
         let link = link
         return [
             ActionSpec(id: "mirror.read", title: "Read from the tracker",
-                       help: "Reads comments, the timeline, options, intake details, labels, links, project settings, attachments, intake keys, images or the Groom changes of the tracker, for a client app.",
+                       help: "Reads comments, the timeline, options, intake details, labels, links, project settings, attachments, intake keys, images or the Groom changes of the tracker, and the commit message, jobs, failures or job log of a run of a selected repo, for a client app.",
                        kind: .read,
-                       input: ActionSpec.args(["what": ("string", "comments, timeline, options, intakeDetail, intakeDetails, labels, links, projectSettings, attachments, attachmentLink, intakeKeys, images or groomChanged."),
+                       input: ActionSpec.args(["what": ("string", "comments, timeline, options, intakeDetail, intakeDetails, labels, links, projectSettings, attachments, attachmentLink, intakeKeys, images, groomChanged, commitMessage, jobs, failures or jobLog."),
                                                "project": ("string", "The store key of the project."), "item": ("string", "The key or id of the item."),
                                                "intake": ("object", "The intake item, for intakeDetail."),
                                                "intakeItems": ("array", "The intake items, for intakeDetails."),
                                                "ref": ("object", "The item ref, for attachments and attachmentLink."),
                                                "attachment": ("object", "The file, for attachmentLink."),
-                                               "markdown": ("string", "The text with asset ids, for images.")], required: ["what"],
-                                              objects: ["intakeItems"])) { a in
+                                               "markdown": ("string", "The text with asset ids, for images."),
+                                               "repo": ("string", "The repo, for commitMessage, jobs, failures and jobLog."), "sha": ("string", "The commit, for commitMessage."),
+                                               "runId": ("string", "The run id, for jobs and failures."), "jobId": ("string", "The job id, for jobLog."),
+                                               "jobs": ("array", "The jobs of the run, for failures.")], required: ["what"],
+                                              objects: ["intakeItems", "jobs"])) { a in
                 await link.main(.failed("The app is closing.")) { d, done in Self.read(a, d, done) }
             },
             ActionSpec(id: "app.refresh", title: "Refresh the app", help: "Loads all data again from the providers, for a client app.", kind: .change) { _ in
@@ -132,7 +135,39 @@ struct MemberActions {
         case "images":
             guard store.snapshot(project) != nil else { done(.notAllowed("OverSire has no loaded project \(project).")); return }
             store.resolveImages(a.string("markdown") ?? "", projectKey: project) { rows(.success($0), done) }
+        case "commitMessage", "jobs", "failures", "jobLog": runRead(a, done)
         default: done(.notAllowed("mirror.read has no read \(a.string("what") ?? "")."))
         }
+    }
+
+    /// The reads of a run. The home refuses a repo that it does not track.
+    private static func runRead(_ a: ActionArgs, _ done: @escaping (ActionResult) -> Void) {
+        let repo = a.string("repo") ?? "", run = a.string("runId") ?? "", what = a.string("what") ?? ""
+        guard isValidRepo(repo), REPOS.contains(where: { $0.caseInsensitiveCompare(repo) == .orderedSame }) else {
+            done(.notAllowed("\(repo) is not a repo of OverSire.")); return
+        }
+        var jobs: [Job] = []
+        if what == "failures" {
+            guard let v = a["jobs"], let list = try? MirrorCodec.value([Job].self, from: v) else { done(.notAllowed("Give the jobs.")); return }
+            jobs = list
+        }
+        Task {
+            let out: ActionResult
+            switch what {
+            case "commitMessage": out = answer(await REPO_CLIENT.commitMessage(repo, sha: a.string("sha") ?? "") ?? "", "commit message")
+            case "jobs": out = answer(await REPO_CLIENT.jobs(repo, runId: run), "jobs")
+            case "failures": out = answer(await REPO_CLIENT.failures(repo, runId: run, jobs: jobs), "failures")
+            default: out = answer(await REPO_CLIENT.rawLog(repo, jobId: a.string("jobId") ?? ""), "log")
+            }
+            await MainActor.run { done(out) }
+        }
+    }
+
+    /// A nil value is a failed read, with the last error of the code host.
+    private static func answer<T: Codable & Sendable>(_ value: T?, _ name: String) -> ActionResult {
+        guard let value else { return .failed(lastFetchError ?? "Could not read the \(name).") }
+        var out = ActionResult.failed("Could not encode the answer.")
+        rows(.success(value)) { out = $0 }
+        return out
     }
 }

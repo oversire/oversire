@@ -452,7 +452,11 @@ final class ActionCatalogTests: XCTestCase {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/OverSireApp").standardized
         let sheets = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix("_sheet.swift") }
         XCTAssertFalse(sheets.isEmpty)
-        let hits = try sheets.filter { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8).contains("tore.create(") }
+        // A sheet reads people through people.list, so a client gets the people of the home.
+        let hits = try sheets.filter {
+            let text = try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)
+            return text.contains("tore.create(") || text.contains(".people.details(for:")
+        }
         XCTAssertEqual(hits, [])
     }
 

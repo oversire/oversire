@@ -84,7 +84,8 @@ public final class FakeCI: CIProvider, LogReading, JobRerunning, @unchecked Send
 
     public func log(_ j: JobRef, lines: Int) async throws -> [String] {
         guard capabilities.contains(.logs) else { throw ProviderError.unsupported(.logs) }
-        _ = try await run(j.run)
+        // A job ref with no run id is how the app reads a log by job id.
+        if !j.run.id.isEmpty { _ = try await run(j.run) }
         return try base.locked { Array(logLines.suffix(lines)) }
     }
 }

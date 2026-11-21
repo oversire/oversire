@@ -130,7 +130,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             let docs = AppMirrorDocs(store: projectStore, runs: { [weak self] in self?.grouped ?? [] }, prs: { [weak self] in self?.prGrouped ?? [] },
                                      projects: { [weak self] in self?.projectCatalog.resolve(PROJECTS_CFG) ?? [] },
                                      layers: { ENV.capabilities($0) }, trackers: { ENV.trackerIds },
-                                     workspaces: { [weak self] in self?.projectCatalog.mirrorWorkspaces() ?? [] })
+                                     workspaces: { [weak self] in self?.projectCatalog.mirrorWorkspaces() ?? [] },
+                                     repos: { [weak self] in self?.catalog.mirrorRepos() })
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
             let name = relay.group?.selfName ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
             return MirrorPublisher(home: { [weak self] in
@@ -373,6 +374,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: RepoCatalog.changed, object: catalog, queue: .main) { [weak self] _ in
             guard let self = self, !self.catalog.refreshing else { return }
             self.applyRepoSelection()
+            if MODE == .full { self.touchMirror(.catalog, nil) }
         }
         if MODE == .full { catalog.refreshIfStale() }
         catalogTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -877,6 +879,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         if let c = d.catalog {
             projectStore.catalog = c
             projectCatalog.mirrored = c
+            catalog.mirrored = c.repos
             ENV.mirrored = c
             projectStore.track(projectCatalog.resolve(PROJECTS_CFG), live: [])
         }
@@ -1168,6 +1171,24 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     }
                 }
             }
+        }
+        catalog.forwardRefresh = { [weak self] owner, done in
+            guard let self else { return }
+            Task {
+                let r = await self.actions.run("repo.catalogRefresh", ActionArgs(.object(owner.map { ["owner": .string($0)] } ?? [:])))
+                await MainActor.run {
+                    switch r {
+                    case .ok: done(nil)
+                    case .failed(let m), .notAllowed(let m): done(m)
+                    }
+                }
+            }
+        }
+        RepoClient.home = { [weak self] what, args in
+            guard let self else { throw ProviderError.notFound }
+            var values = args
+            values["what"] = .string(what)
+            return try await self.actions.read(values)
         }
         projectStore.remote = { [weak self] what, args in
             guard let self else { throw ProviderError.notFound }

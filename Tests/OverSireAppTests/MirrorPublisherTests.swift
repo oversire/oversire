@@ -325,7 +325,7 @@ final class MirrorPublisherTests: XCTestCase {
              commentCount: 0, lastComment: nil, mentionsMe: false)
     }
 
-    private func appDocs(caps: Set<Capability> = [.links, .priority], catalog: ProjectCatalog? = nil) throws -> (AppMirrorDocs, ProjectStore, ProjectSummary) {
+    private func appDocs(caps: Set<Capability> = [.links, .priority], catalog: ProjectCatalog? = nil, repos: RepoCatalog? = nil) throws -> (AppMirrorDocs, ProjectStore, ProjectSummary) {
         let t = FakeTracker(account: "ws", capabilities: caps)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-docs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -335,7 +335,7 @@ final class MirrorPublisherTests: XCTestCase {
         store.track([summary], live: [])
         let docs = AppMirrorDocs(store: store, runs: { [("o/r", [])] }, prs: { [] }, projects: { [summary] },
                                  layers: { $0 == .tracker ? caps : $0 == .ci ? [.rerun] : [] }, trackers: { ["ws"] },
-                                 workspaces: { catalog?.mirrorWorkspaces() ?? [] })
+                                 workspaces: { catalog?.mirrorWorkspaces() ?? [] }, repos: { repos?.mirrorRepos() })
         return (docs, store, summary)
     }
 
@@ -459,6 +459,21 @@ final class MirrorPublisherTests: XCTestCase {
         XCTAssertEqual(c.workspaces?.first?.projects.map(\.identifier), ["ONE"], "only the open projects")
         XCTAssertEqual(c.workspaces?.first?.fetchedAt?.timeIntervalSince1970 ?? 0, 1_000_000, accuracy: 1)
         XCTAssertNil(c.workspaces?.first?.error)
+    }
+
+    // OVERSIRE-538
+    func testCatalogDocHasRepos() throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("repo-cache-\(UUID().uuidString).json").path
+        RepoCatalogCache(user: "me", owners: [RepoOwner(login: "me", repos: ["me/a"], fetchedAt: Date(timeIntervalSince1970: 1_000_000))],
+                         fetchedAt: Date()).write(atPath: path)
+        let (docs, _, _) = try appDocs(repos: RepoCatalog(path: path))
+        let c: ClientCatalog = try MirrorCodec.value(from: try XCTUnwrap(docs.catalogDoc().body))
+        XCTAssertEqual(c.repos?.user, "me")
+        XCTAssertEqual(c.repos?.owners.map(\.login), ["me"])
+        XCTAssertEqual(c.repos?.owners.first?.repos, ["me/a"])
+        let (plain, _, _) = try appDocs()
+        let p: ClientCatalog = try MirrorCodec.value(from: try XCTUnwrap(plain.catalogDoc().body))
+        XCTAssertNil(p.repos, "an old home or a source with no repo list sends none")
     }
 
     func testTouchedSettingsSendsOnlyTheSettingsDoc() async throws {

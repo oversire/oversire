@@ -1,4 +1,5 @@
 import Cocoa
+import OverSireAssistant
 import OverSireCore
 
 // "New epic": a sheet over epic.create. It shows only the fields that the tracker gives to an epic.
@@ -103,9 +104,10 @@ final class NewEpicSheet: NSObject, NSTextFieldDelegate {
 
     // The members of the project join the list when they arrive.
     private func loadPeople() {
-        let ref = snap.summary.ref, mine = snap.meId
+        let key = snap.summary.ref.storeKey, mine = snap.meId
         Task { [data] in
-            let list = await data.actions.people.details(for: ref)
+            let r = await data.actions.run("people.list", ActionArgs(.object(["project": .string(key)])))
+            guard case .ok(_, let rows?, _) = r, let list = try? JSONDecoder().decode([PersonDetail].self, from: JSONEncoder().encode(rows)) else { return }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 for p in list where p.id != mine && self.lead.itemArray.allSatisfy({ ($0.representedObject as? String) != p.id }) {

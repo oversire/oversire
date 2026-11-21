@@ -47,7 +47,21 @@ protocol RawLogReading: CIProvider { func rawLog(_ j: JobRef) async throws -> St
 
 /// CI and pull request calls for repos named "owner/name". A failed list call sets lastFetchError.
 struct RepoClient {
+    /// Set on a client: the details of a run come from the home through `mirror.read`, never from a local login.
+    static var home: ((_ what: String, _ args: [String: JSONValue]) async throws -> JSONValue)?
+
     let accounts: RepoAccounts
+
+    /// nil when the home fails. The words are in `MemberActions`.
+    private func readHome<T: Codable & Sendable>(_ what: String, _ args: [String: JSONValue], as type: T.Type = T.self) async -> T? {
+        guard let home = Self.home else { return nil }
+        do {
+            return try MirrorCodec.value(MirrorRows<T>.self, from: try await home(what, args)).rows
+        } catch {
+            log.warning("Read \(what, privacy: .public) from the home failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
 
     private func ci(_ repo: String) throws -> any CIProvider {
         guard let c = accounts.ci(owner: repoOwner(repo)) else { throw ProviderError.unauthorized }
@@ -92,15 +106,24 @@ struct RepoClient {
 
     func commitMessage(_ repo: String, sha: String) async -> String? {
         guard !sha.isEmpty else { return nil }
+        if Self.home != nil {
+            let text = await readHome("commitMessage", ["repo": .string(repo), "sha": .string(sha)], as: String.self)
+            return text?.isEmpty == false ? text : nil
+        }
         return try? await Result(awaiting: { let h = try host(repo); return try await h.commitMessage(Self.repoRef(h, repo), sha: sha) }).get()
     }
 
     func jobs(_ repo: String, runId: String) async -> [Job]? {
-        try? await Result(awaiting: { let c = try ci(repo); return try await c.jobs(Self.runRef(c, repo, id: runId)) }).get()
+        if Self.home != nil { return await readHome("jobs", ["repo": .string(repo), "runId": .string(runId)], as: [Job].self) }
+        return try? await Result(awaiting: { let c = try ci(repo); return try await c.jobs(Self.runRef(c, repo, id: runId)) }).get()
     }
 
     func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure] {
-        (try? await Result(awaiting: {
+        if Self.home != nil {
+            guard let list = try? JSONValue.encoded(jobs) else { return [] }
+            return await readHome("failures", ["repo": .string(repo), "runId": .string(runId), "jobs": list], as: [Failure].self) ?? []
+        }
+        return (try? await Result(awaiting: {
             let c = try ci(repo)
             let r = Self.runRef(c, repo, id: runId)
             if let k = c as? any KnownJobFailures { return try await k.failures(r, jobs: jobs) }
@@ -110,7 +133,8 @@ struct RepoClient {
 
     /// The end of the raw job log.
     func rawLog(_ repo: String, jobId: String) async -> String? {
-        try? await Result(awaiting: {
+        if Self.home != nil { return await readHome("jobLog", ["repo": .string(repo), "jobId": .string(jobId)], as: String.self) }
+        return try? await Result(awaiting: {
             let c = try ci(repo)
             let j = JobRef(run: Self.runRef(c, repo, id: ""), id: jobId)
             if let raw = c as? any RawLogReading { return try await raw.rawLog(j) }
@@ -180,7 +204,8 @@ struct RepoClient {
     }
 }
 
-let REPO_CLIENT = RepoClient(accounts: ENV)
+/// A variable so a test can give it fake accounts.
+var REPO_CLIENT = RepoClient(accounts: ENV)
 
 // ─── Run Detail Fetching ─────────────────────────────────────────────────────
 

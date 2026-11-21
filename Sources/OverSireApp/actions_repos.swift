@@ -67,6 +67,29 @@ struct RepoActions {
                     done(.ok(summary: "Cause: \(e.cause)\nFix: \(e.fix)\nConfidence: \(e.confidence)"))
                 }
             },
+            ActionSpec(id: "repo.catalogRefresh", title: "Refresh the repo list",
+                       help: "Fetches the repos of a GitHub owner again. A client app uses it for the repo picker.", kind: .change,
+                       input: ActionSpec.args(["owner": ("string", "The owner login. Leave out to fetch the owner list and all repos.")])) { a in
+                await link.run { d, done in
+                    let catalog = d.repoCatalog
+                    let owner = a.string("owner")
+                    if let owner, !catalog.owners.contains(where: { $0.login == owner }) { done(.notAllowed("No owner \(owner).")); return }
+                    final class Token { var observer: Any? }
+                    let token = Token()
+                    token.observer = NotificationCenter.default.addObserver(forName: RepoCatalog.changed, object: catalog, queue: .main) { _ in
+                        guard !catalog.refreshing else { return }
+                        token.observer.map(NotificationCenter.default.removeObserver)
+                        token.observer = nil
+                        let failed = catalog.owners.lazy.compactMap { o -> String? in
+                            guard owner == nil || o.login == owner, case .failed(let m) = catalog.fetch(o.login) else { return nil }
+                            return m
+                        }.first
+                        if owner == nil, catalog.authChecked, catalog.user == nil { done(.failed(lastFetchError ?? "The home has no GitHub login.")); return }
+                        done(failed.map(ActionResult.failed) ?? .ok(summary: "Fetched the repos of \(owner ?? "all owners")."))
+                    }
+                    if let owner { catalog.refresh(owner: owner) } else { catalog.refreshAll() }
+                }
+            },
             ActionSpec(id: "pr.approve", title: "Approve PR", help: "Approves a pull request, with an optional review comment.", kind: .outward,
                        input: ActionSpec.args(["repo": Self.repo, "number": Self.number, "body": ("string", "A review comment.")], required: ["repo", "number"]),
                        capability: .changeActions) { a in

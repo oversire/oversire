@@ -71,7 +71,7 @@ public final class FakeCodeHost: CodeHost, BranchDeleting, @unchecked Sendable {
 
     public func commitMessage(_ r: RepoRef, sha: String) async throws -> String {
         try base.locked {
-            guard repoList.contains(where: { $0.ref == r }) else { throw ProviderError.notFound }
+            guard repoList.contains(where: { $0.ref.path == r.path }) else { throw ProviderError.notFound }
             return "Commit \(sha.prefix(7))"
         }
     }
