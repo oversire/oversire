@@ -72,10 +72,12 @@ cli: VendorCLI(binary: "linear-cli", tokenEnv: "LINEAR_API_KEY", hostEnv: "LINEA
                defaultHost: "https://api.linear.app", accountEnv: "LINEAR_TEAM", projectEnv: "LINEAR_PROJECT",
                managedEnv: "LINEAR_MANAGED_BY", lockedFlags: ["--api-key", "--host"],
                deniedCommands: [["auth", "login"], ["listen"]], minVersion: "1.4.0",
-               projectFlags: ["--project", "-p"], skillCommand: ["skill"])
+               projectFlags: ["--project", "-p"], skillCommand: ["skill"],
+               release: .githubRelease(repo: "acme/linear-cli", tagPrefix: "v", asset: "linear-cli_{version}_darwin_{arch}.tar.gz"))
 ```
 
-- `binary` is a name, never a path. The app looks in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
+- `binary` is a name, never a path. The app looks in `~/.config/oversire/vendors/<vendor>/<version>/` first, then in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`. A PATH copy wins only when the OverSire copy is older than `minVersion` and the PATH copy is not.
+- `release` tells `oversire vendor install` where to get the CLI. `.trebiCatalog(entry:)` takes the newest version of the signed Trebi catalog. `.githubRelease(repo:tagPrefix:asset:)` takes the newest `<tagPrefix><version>` release that is not a draft or a prerelease, and checks the archive with its `checksums.txt`. `asset` has the slots `{version}` and `{arch}`. `.homebrew(formula:)` means that OverSire does not install it: the user runs `brew install`. Nil also means no install. The archive must hold `binary` at its top level.
 - `minVersion` is the lowest version that the app runs. The app reads `<binary> --version` once for each file. `vendor run` refuses an older binary. Nil means no floor (`gh`).
 - `tokenEnv` gets the token of the account. Nil means that the CLI keeps its own login (`gh`). The app removes the token value from stdout and stderr.
 - `hostEnv` gets the value of the field `hostField`. An empty value gives `defaultHost`.

@@ -650,6 +650,8 @@ final class BigTimerTrackerTests: XCTestCase {
         let cli = try XCTUnwrap(BigTimerTracker.descriptor.cli)
         XCTAssertEqual(cli.binary, "big-timer-cli")
         XCTAssertEqual(cli.minVersion, "1.0.12")
+        XCTAssertEqual(cli.release, .githubRelease(repo: "Big-Time-Data/big-timer-releases", tagPrefix: "cli-v",
+                                                   asset: "big-timer-cli_{version}_darwin_{arch}.tar.gz"))
         XCTAssertEqual(cli.tokenEnv, "BIGTIMER_TOKEN")
         XCTAssertEqual(cli.hostEnv, "BIGTIMER_SERVER")
         XCTAssertTrue(BigTimerTracker.descriptor.fields.contains { $0.key == cli.hostField })

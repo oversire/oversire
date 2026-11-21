@@ -18,7 +18,8 @@ extension PlaneTracker {
                        managedEnv: "PLANE_MANAGED_BY", lockedFlags: ["--api-key", "-k", "--host", "--workspace", "-w"],
                        deniedCommands: [["auth", "login"], ["auth", "logout"], ["auth", "workspace", "add"],
                                         ["auth", "workspace", "remove"], ["config", "set"], ["listen"], ["serve"]],
-                       minVersion: "0.2.2", projectFlags: ["--project", "-p"], skillCommand: ["skill"])
+                       minVersion: "0.2.2", projectFlags: ["--project", "-p"], skillCommand: ["skill"],
+                       release: .trebiCatalog(entry: "plane"))
     ) { config, env in
         let slug = config.values["workspace"] ?? config.account.id
         let host = config.values["host"].flatMap { $0.isEmpty ? nil : $0 } ?? PlaneWorkspace.cloudHost

@@ -170,4 +170,55 @@ final class VendorCLITests: XCTestCase {
         XCTAssertNil(VendorBinary(vendor: "plane", cli: cli, path: path, version: VendorVersion("0.2.2"), source: .path).problem)
         XCTAssertEqual(VendorBinary(vendor: "plane", cli: cli, path: nil, version: nil, source: nil).installHint, "Run `oversire vendor install plane`.")
     }
+
+    // MARK: prefer
+
+    let floor = VendorCLI(binary: "plane-cli", minVersion: "0.2.2", release: .trebiCatalog(entry: "plane"))
+    let ownPath = "/Users/x/.config/oversire/vendors/plane/0.2.2/plane-cli"
+
+    func own(_ v: String?) -> VendorBinary {
+        VendorBinary(vendor: "plane", cli: floor, path: v == nil ? nil : ownPath, version: v.flatMap(VendorVersion.init), source: v == nil ? nil : .oversire)
+    }
+
+    func onPath(_ v: String?) -> VendorBinary {
+        VendorBinary(vendor: "plane", cli: floor, path: v == nil ? nil : "/usr/local/bin/plane-cli", version: v.flatMap(VendorVersion.init), source: v == nil ? nil : .path)
+    }
+
+    func testPreferOwnOk() {
+        let b = VendorBinary.prefer(own: own("0.2.2"), path: onPath("0.2.3"))
+        XCTAssertEqual(b.source, .oversire)
+        XCTAssertEqual(b.path, ownPath)
+        XCTAssertEqual(b.ownVersion, VendorVersion("0.2.2"))
+        XCTAssertEqual(b.release, .trebiCatalog(entry: "plane"))
+    }
+
+    func testPathOkWinsOverOldOwn() {
+        let b = VendorBinary.prefer(own: own("0.2.1"), path: onPath("0.2.2"))
+        XCTAssertEqual(b.source, .path)
+        XCTAssertEqual(b.state, .ok)
+        XCTAssertEqual(b.ownVersion, VendorVersion("0.2.1"))
+    }
+
+    func testOldOwnBeforeOldPath() {
+        let b = VendorBinary.prefer(own: own("0.2.1"), path: onPath("0.2.0"))
+        XCTAssertEqual(b.source, .oversire)
+        XCTAssertEqual(b.state, .old)
+        XCTAssertEqual(VendorBinary.prefer(own: own(nil), path: onPath("0.2.0")).source, .path)
+        XCTAssertNil(VendorBinary.prefer(own: own(nil), path: onPath("0.2.0")).ownVersion)
+    }
+
+    func testMissing() {
+        let b = VendorBinary.prefer(own: own(nil), path: onPath(nil))
+        XCTAssertEqual(b.state, .missing)
+        XCTAssertNil(b.path)
+        XCTAssertNil(b.source)
+        XCTAssertNil(b.ownVersion)
+    }
+
+    func testHomebrewHint() {
+        let gh = VendorCLI(binary: "gh", release: .homebrew(formula: "gh"))
+        let b = VendorBinary(vendor: "github", cli: gh, path: nil, version: nil, source: nil)
+        XCTAssertEqual(b.installHint, "Install gh with Homebrew: `brew install gh`.")
+        XCTAssertEqual(b.problem, "gh is not installed. Install gh with Homebrew: `brew install gh`.")
+    }
 }

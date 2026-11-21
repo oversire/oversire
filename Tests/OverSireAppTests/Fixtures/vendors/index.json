@@ -1,0 +1,2723 @@
+{
+  "generated_at": "2026-11-21T18:23:50Z",
+  "entries": [
+    {
+      "name": "apollo",
+      "title": "Apollo",
+      "description": "Search and enrich people and companies, and manage contacts, deals, and sequences in Apollo.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:2ba9bf5bf1219d8423fcb44779bfc0cbc7b4e009515a43118415a22121072630",
+          "url": "https://catalog.trebi.ai/v1/snapshots/apollo/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:5c372e096a1b21d66210ab91706d59c853caf6189bcf456df109ad38d5b73d6f",
+          "url": "https://catalog.trebi.ai/v1/snapshots/apollo/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "axiom",
+      "title": "Axiom",
+      "description": "Query logs and traces, and manage datasets, monitors, and dashboards in Axiom. Start work when a monitor triggers or resolves.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Paste an API token",
+      "latest": "0.3.2",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:6ed3f8f6ee67fad0c4e88324758995abf9e36695dea0467eac7136899d0517c2",
+          "url": "https://catalog.trebi.ai/v1/snapshots/axiom/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:7b97bb4a33e1ad303b8ebda3d5c0d1f1e12e1ec106e0e82ed7ba3de68f9de32b",
+          "url": "https://catalog.trebi.ai/v1/snapshots/axiom/0.2.0.tar.gz",
+          "published_at": "2026-10-13T14:11:26Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.0/axiom-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:b0f20b9e9d4a7f7c934183e2c9a08cb0c6d02baca66ea705a6dd7f9bbdd7481a"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.0/axiom-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:4812f767a196ce454c17de084ba2fbc931c7e9a08431365512b52b7c088279ef"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.0/axiom-cli_linux_arm64.tar.gz",
+              "digest": "sha256:323deb0437c40536467e4973fe34c707ddd18a6e2b4815cb1e0a74b8942b6036"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.0/axiom-cli_linux_amd64.tar.gz",
+              "digest": "sha256:0dccb8d49ef24107ee816cce3b4fbf1960fae9e1153e7802331b218c324bd187"
+            }
+          ]
+        },
+        {
+          "version": "0.2.1",
+          "digest": "sha256:02f4a1f7f177c1ce111ca668573ade272d7b8be641931dad84d194c8b1390142",
+          "url": "https://catalog.trebi.ai/v1/snapshots/axiom/0.2.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.1/axiom-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:7a5e19535ef34e5f4252f9e88ba83979d51abc4aac2ca4c9809bbfebb4daf495"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.1/axiom-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:5594b9d8ca407398f1ec789dde1f441bd70a1cc12183c263acab1880be5297e5"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.1/axiom-cli_linux_arm64.tar.gz",
+              "digest": "sha256:a00de6d04529a10ce3d64de48f6c44fb09eca92ba8238cab1f980d3db8b36b94"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.2.1/axiom-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1c4f8dc85552c99e0dba57f683386bda149680cdea7517554f2684d318bee937"
+            }
+          ]
+        },
+        {
+          "version": "0.3.0",
+          "digest": "sha256:6f451b37ad15035980490350e87ec80c431b617a775b09f742917e8af37ad877",
+          "url": "https://catalog.trebi.ai/v1/snapshots/axiom/0.3.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.0/axiom-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:7a4fc78a57d606dcd76094670730126c64f659bbdbad9091049fc67ff213ae54"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.0/axiom-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:98bb42b881e8e7aa415a2b7c54b64e18b0a075a0f6112d19ef13669d9a2da21f"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.0/axiom-cli_linux_arm64.tar.gz",
+              "digest": "sha256:eea9239962c004f2af49fc68e09206eb13265cd6a208d7fd572013ec88b3e3ea"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.0/axiom-cli_linux_amd64.tar.gz",
+              "digest": "sha256:3432009ce5184f1d5d7ef4f1163bef926b0fe8fe7d32b653e2beb62da375fb85"
+            }
+          ]
+        },
+        {
+          "version": "0.3.1",
+          "digest": "sha256:2dca2a9adf86dc8a0c6f271553b3860071292b7bb08b1096872a8e0666443e54",
+          "url": "https://catalog.trebi.ai/v1/snapshots/axiom/0.3.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.1/axiom-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:72dd504478741f7ac0b0e884827cc882a91cbfb65cb31fb938e9e7d55f468af0"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.1/axiom-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:113f7628404624c511c0c7212051b8b8b416112753b9f93aa0918260700389ed"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.1/axiom-cli_linux_arm64.tar.gz",
+              "digest": "sha256:4710fab4f13167cd4899a5e21750945a09c1b419146c89f102e1bdf9235d9a9e"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.1/axiom-cli_linux_amd64.tar.gz",
+              "digest": "sha256:c3268ce3f9259b9f06d1b54e2320e7512887cb004da70254a7bc30148cb58f4b"
+            }
+          ]
+        },
+        {
+          "version": "0.3.2",
+          "digest": "sha256:2f067acc0595ab88422405a9d4f058cf6930497780d92841050dfdc5374e1648",
+          "url": "https://catalog.trebi.ai/v1/snapshots/axiom/0.3.2.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.2/axiom-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:bec61015ee2eff8c15882d5ac6850b29a80e4cf2d3155b65acb28e394e0af80d"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.2/axiom-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:380c29bd2aa478e1b715cd32ed811166ad6f02fd9c5de7e67acd85d5ab37b9e1"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.2/axiom-cli_linux_arm64.tar.gz",
+              "digest": "sha256:ceaf60c33eed359cca9bf8925ec0d98dc5e676e4ace478410c034ccbce288e3b"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/axiom/0.3.2/axiom-cli_linux_amd64.tar.gz",
+              "digest": "sha256:fa398c2c3be51f2316352663af40091980196e342d47bba4906492f7fef38652"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bing",
+      "title": "Bing Webmaster Tools",
+      "description": "Read Bing search traffic, crawl, and index data for your sites.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:7a15c16be0f817a6bfe24e835300d991f1165be9770318d6023718b8a876c7c8",
+          "url": "https://catalog.trebi.ai/v1/snapshots/bing/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:975128a0fb37febbf4ff5f10af4de459859cc4c818b88204a82ca74430c6cc51",
+          "url": "https://catalog.trebi.ai/v1/snapshots/bing/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "data-for-seo",
+      "title": "DataForSEO",
+      "description": "Get search results, keyword data, backlinks, and site audits from DataForSEO.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste the API password",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:86547cfc532b35055b92eaf2daca9a32d15d1e526618a52cf4dd21769b7dd043",
+          "url": "https://catalog.trebi.ai/v1/snapshots/data-for-seo/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:8f8d741cd1db8300c809d8c8a5db8e6530c42381e21031454b4a96fcec79719d",
+          "url": "https://catalog.trebi.ai/v1/snapshots/data-for-seo/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "dbt-cloud",
+      "title": "dbt Cloud",
+      "description": "Run and watch dbt Cloud jobs, and download their run artifacts.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste a service token",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:f81adb3a898b0406760d89d61d069d592505a0e58773930ec0566c87421e1233",
+          "url": "https://catalog.trebi.ai/v1/snapshots/dbt-cloud/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:e05e1103202a7c70fe3ba76e3583f68c46850b41cbe31fdb9d4633ed8ed38103",
+          "url": "https://catalog.trebi.ai/v1/snapshots/dbt-cloud/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "discord",
+      "title": "Discord",
+      "description": "Talk with people in Discord servers and direct messages through your bot.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events",
+        "channel"
+      ],
+      "runs": "local",
+      "login": "Paste a bot token",
+      "latest": "0.4.2",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:07139504720a5bc102e6bac7fa9053b64b8163dc6ed0f55dad668190548df3cb",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.1.0/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:0bf127b1715dfbd395a008ebf2c3969eef998ec879f3f326f5202a39c3553de9"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.1.0/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:2f79f87b980e3bf0efb6e65c47f5bc48968f665f4663dd5c55fd7470c29ca122"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.1.0/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:c5893c864ef104bbbcb802d74425b901891824ee1375e8f25ccc2b53f469c5a0"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.1.0/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:f10c68eab1954e095308d071cb7eb61574b8e0abfaf2d965511d9d83cd0b6c0a"
+            }
+          ]
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:df188b2d865b0c402494743a366626d1179a89db352a9fde487595225df025eb",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.2.0.tar.gz",
+          "published_at": "2026-10-01T13:38:52Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.2.0/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:9aca8b06f57b3d8a333ad960518ae761a9f6e0dc22bd818bfd97bb3538819d75"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.2.0/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:6c475253b1a4d094b530573db9224b8ecf070d02d79a7118ef9b2a289bf96e7a"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.2.0/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:f69a72e3cc194494845087a87d4ea39cc227cf87fa7e9577d59369f87015bbb1"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.2.0/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:c2472c719f5a1dfe65879127b4b6d406d05763af423f3c51f40316bf0aa58482"
+            }
+          ]
+        },
+        {
+          "version": "0.3.0",
+          "digest": "sha256:f98c7c327e0e721abea15a7a2f1fd404677cf881b80f5b934032ad0539f3bc19",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.3.0.tar.gz",
+          "published_at": "2026-10-01T22:40:58Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.0/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:7ac77255d8d5408087c1a88e3cac884e6c37c13d3d48f61533e787c1cb4bc7b3"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.0/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:748c9e490b9a8706b089fa437b5257e17983e73ab08f029abfa1b875941eb018"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.0/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:75c3bc086639357431229a483800eb0033ac406d7a0dd9b771c340da5cf6d4d8"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.0/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:117b78e40fff98013a8e3fba34f6948dc8adbcf63b5c27675a20ea5a352ab48f"
+            }
+          ]
+        },
+        {
+          "version": "0.3.1",
+          "digest": "sha256:ef04db91191cb14012484573ab9b67da7fac14ea27e74c6435ff0a87e434f5ad",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.3.1.tar.gz",
+          "published_at": "2026-10-09T02:17:31Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.1/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:4e1b0a2605ef1247562413ac6dcad18cd8623e9dfd5bf6371236620590f6b8b7"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.1/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:7d2068b12e6e8ed2f1a11b22651129e59728aa56a8116cbc5e958e9f092454b9"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.1/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:77d607aa6ac3d0da1c9ebf294087e0e92f8b6c2680b1ef787cfa68f9dfa2caa7"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.1/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:81921617779c7654d38038eaca8d497c7e2328dc9a8355c844652175823f8651"
+            }
+          ]
+        },
+        {
+          "version": "0.3.2",
+          "digest": "sha256:6acabe05346204057193b2bbf6fc992a4c5e1a1c4a0f1ab6147a35eb2fb1bfa9",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.3.2.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.2/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e56e3986a04dfa9af76be8673b766125dbb3d50c33cef1c66ba6d75f27b9b5b0"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.2/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:975568d267258a18d6bed1accd0f6ea22396aaa7bb985211c3548e5322e1c2ad"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.2/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:aa72491a0d795d3e1d7e3e20bc8d0b438ad9afabb3b6913caf68c312e9db6b7b"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.2/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:6ac19a3cd4e463410e0a8fbeeb11e6ab6a46d7d494fbce09e9fa31ecf8c6b5b0"
+            }
+          ]
+        },
+        {
+          "version": "0.3.3",
+          "digest": "sha256:37b0794f9c4504d00c3ccde70187d71432cc309db36163efabd55b184164d131",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.3.3.tar.gz",
+          "published_at": "2026-10-19T20:31:49Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.3/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:1d8e1f540baf43c9cda2c850668be3456a00b7660b0644fc4f33cb0587e7a176"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.3/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:616f6623b071c989124518165f347c96b7f204a78584b30a88deb5d88468080a"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.3/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:ed4248133bc2defa780a878a6e1226e79c8807f6a2b75960c9f9a372ee31079f"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.3.3/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:30fcafd869b03943766dccd4550d3a429bf9cf7f7ff35a4e4f03a2fbd2dd9605"
+            }
+          ]
+        },
+        {
+          "version": "0.4.0",
+          "digest": "sha256:669df541256f13541f29b56f30129fe56b638b2459c8627cee516a49289ec64a",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.4.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.0/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:41f4324c030baf54bafc12140a422ee5eadde8ce12fe2695885eec40dbadf9f4"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.0/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:2507003268ba6c9f49436b387477be5bd94d1a7beac0d9ae08a97aa84eb6fe3b"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.0/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:95b3d7d308313e214e3da9ffbc7e2c320e992f23a22d36c736d611684ca37174"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.0/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:7b4ff4cd3502dde8159f757f3c83ce988812cc832e98fcb96791f252b940041b"
+            }
+          ]
+        },
+        {
+          "version": "0.4.1",
+          "digest": "sha256:e70f24ea64044ea2ef6f81e7cbf584e44f6b5071ae12fc617aa55d81f82c9d35",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.4.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.1/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:8a3133696d279bfc6e50a9da7831e7bdcab4623d0bafa5bb6a9fc2b177c9c8eb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.1/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:d5a5b52f921dc682c85695addee3607ea129641da1d88b086da46fe8b2bb3152"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.1/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:1fee80c063648384f13725302a19492135ca0b073ba0911d0619ae6ad5d1ecd6"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.1/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:fadeb6a89e3e8ec4caea35d0c56dd14977d463899cf32bcfc064bfd7a4da5f89"
+            }
+          ]
+        },
+        {
+          "version": "0.4.2",
+          "digest": "sha256:77d48f14e5b444fbd24b57d3f6fbee111119be2a509c98a29108515be88dd925",
+          "url": "https://catalog.trebi.ai/v1/snapshots/discord/0.4.2.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.2/discord-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:2454f2ccec7a777cca59eb7944ca63a893e9704807cc7985c61d92994ae7f637"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.2/discord-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:601dfdb8f6f44f00f8283354674521432734a1ddc04253147d46850b394bbfb1"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.2/discord-cli_linux_arm64.tar.gz",
+              "digest": "sha256:5608eb0754a85bef3ab7111ec40f7d0ffa0555ac2bfd636dcc099287d3ac70d4"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/discord/0.4.2/discord-cli_linux_amd64.tar.gz",
+              "digest": "sha256:9bec121340ececf384e06869e872e4fa78409da685ac991728fd403467088099"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "github",
+      "title": "GitHub",
+      "description": "Do GitHub work from Trebi, and start jobs when something happens in a repository or needs you.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Use the GitHub login on this machine",
+      "latest": "0.3.5",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:5092b0d241e6072471dc69ea430a4855f2f033dc14d95a3eb524fdb4df43dd00",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.1.0.tar.gz",
+          "published_at": "2026-10-09T02:29:33Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.0/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:ee6943c78094edea6d50339c2f75e6aafd74c16c90d8ee704369813a253792fb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.0/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:f8d42fc40216f7cf3d7f8c1698bffdd5d180c5c4cc62405c75ba442a4411c0e0"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.0/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:1025fdff38835fbdffe8be70a83aed9173cabf69916682d345ae3565e756ba75"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.0/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:a9879d91687f4b98994b7d326c2bd2cfdc9b735697f891d7fb95d5e51fb81fd6"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:dbb00d23c7b3f781f37ca9a3534474547772192256ae5b81f2582f0146eb6809",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.1.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.1/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:9f9514f6e268c0125e5800f6cd8453985d31c169f1d83e8fe58ce94d6ce638dc"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.1/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:a19dd24eee28f795aa08109d2101224a5833ae4a12e531fcd4152048108e5a4f"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.1/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:96598d2e7b4180eaf96aece32b9aaff1891bf48f31862affb88594dbc580f9af"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.1.1/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1778eb49bdf05d5b96de3d760fcd848fb57c975c927ec223014262dca68fa93a"
+            }
+          ]
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:bc7d80cdb018a279e8a847442382ab6c579261ef83423c965ee2bcd0e27f5bd4",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.2.0/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:42ef297ed531d0f76afe8db74932a0f00089c753d0ea3149a8597b89472f576b"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.2.0/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:23d4e6ef9befbac174937676b7446db1fc03f4ebc7908d14fb2e69acdf35301b"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.2.0/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:136f38723dded84d1bf906c665077991ff0e294e1da9d9f72e4995e06142fccf"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.2.0/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:79937df146a2514d8fabd742571f07c242c44f06c7c71136eb9dfc2f3d7f08cc"
+            }
+          ]
+        },
+        {
+          "version": "0.3.0",
+          "digest": "sha256:28b0fe87cf4c47d1e55ed69b4ea7faad904dc2c349f3dfac20212572a4299201",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.3.0.tar.gz",
+          "published_at": "2026-10-31T11:59:11Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.0/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:7ed9e8a437ca613533326567be4a88d61f5b85f76a76edfa664a2dad4396ab07"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.0/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:7de1db48a5b45024239c0690a254386e6a1d6e3c89137c31ccc44cd69fd6f2fa"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.0/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:dc65aede50814792ae6902606d5ec9cac8ee9909711f943909757226c5727b07"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.0/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:302e94841c3b7cd13886f324ae01e2b728e173caef7a9b473e89dfbe458b222d"
+            }
+          ]
+        },
+        {
+          "version": "0.3.1",
+          "digest": "sha256:569275ea82b9459e4abbfb171d8871662176567f4ef6d47c417d2a74c965333e",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.3.1.tar.gz",
+          "published_at": "2026-10-31T12:12:46Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.1/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:61a1f92481434bf0c72f1f918d8e69eeb15aeb069d17efab6df0944416d7550d"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.1/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:e94dbee788bd1a6d71aa8c9ef196fb6da83c66b1b253eb16de83abe7ee8afe22"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.1/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:e8ac64a469ff6e43dc04eaf6d4dd71ead5fa703e7085d65f72604ae406733afe"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.1/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:f07a16ed079d7a70c8317502b42c1ae04e8b91a287f131e3af4e6ebcef6f6546"
+            }
+          ]
+        },
+        {
+          "version": "0.3.2",
+          "digest": "sha256:c8d8292c4009b784d190371995607c1046231d51a18ae595f2e07a01aabdc993",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.3.2.tar.gz",
+          "published_at": "2026-10-31T12:25:16Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.2/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:56f2474fd857853166cd42eec603b889f71bd100d96b01d58ee1c2139ddbb3ad"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.2/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:dbdcadaaba6b2cb308b7281944b9c09b10e7b59d33a25779ef5659ced5ef595c"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.2/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:05ba13934c87067ff15baf6f01e721f20105802b0be03d7e2152452d7d2d99af"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.2/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:9ed12d384d68dd9248cecdd905359de6b0b4135cd297875efea070156785b88d"
+            }
+          ]
+        },
+        {
+          "version": "0.3.3",
+          "digest": "sha256:5f194663279216344b83106aa5e74c33f23cf5f19de8b5e8d6923304a4d94a35",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.3.3.tar.gz",
+          "published_at": "2026-10-31T12:28:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.3/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:24408d7eca9031bf801e31009c881bee90958ce0a857ff156f44d16707c40640"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.3/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:3365376f0d79c010ec239770c4773dcbbab6e9ce7e136f9f5c09afb7f8730dd1"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.3/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:41d275f212e550da8589be165383d15e19ca584f566ea884333471e5066edebc"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.3/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:cff919075b5a39f5c0092318639271dc47b51efd29f4af2c249d8d5372192fce"
+            }
+          ]
+        },
+        {
+          "version": "0.3.4",
+          "digest": "sha256:e552e4ad36e8c838388ea33915f411c11703ebf8d26dca7fe8d438dd31f39408",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.3.4.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.4/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:22fa5e1e924505e2bb95974313f8022fa310349d22764d225ceb3f53076e5273"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.4/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:7cd66d394919a1e92e67767ada9bd5bbe1296d38b137a2eeff54cef725ceea11"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.4/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:58783ec11feb9ea07e1f3aaecdbd623b129133366fda85b0b8188be1704bf50a"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.4/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:caf0b9ff3ff6e8d5bca9f7ef1b44cfa1f6203a685565e959237e1be1b3d12db5"
+            }
+          ]
+        },
+        {
+          "version": "0.3.5",
+          "digest": "sha256:d8e54ccc2c41e8d8601f1fbb8a150bf8baccdf4f16f686e237192a8bc7c6ff1a",
+          "url": "https://catalog.trebi.ai/v1/snapshots/github/0.3.5.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.5/github-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:606e4ac5707a028b03e78fd6a1672e3d89a350a69a97cb4da50cccb7fd0bdcb6"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.5/github-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:de4e8397fc004e8579f1dd3fe7ac2b8a544e7869d9e39b48565dae078d7a2d33"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.5/github-cli_linux_arm64.tar.gz",
+              "digest": "sha256:f56e0e0f6c967d20ba13f4eeeeb80d4c5552d3089895b37fa5dd6a1b18a16206"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/github/0.3.5/github-cli_linux_amd64.tar.gz",
+              "digest": "sha256:d9fa54a27bf1d28e2317e25e93fecd345b9d22ef0e2bb963e14f26c000191d59"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gmail",
+      "title": "Gmail",
+      "description": "Read, answer, and sort your Gmail. Start a job when new mail comes in. Sending is off until you turn it on.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Paste an app password",
+      "latest": "0.4.1",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:bf8796eb6120a9cf48a55c9c103c4486005668b4ac820a92b1618c3d09907674",
+          "url": "https://catalog.trebi.ai/v1/snapshots/gmail/0.1.0.tar.gz",
+          "published_at": "2026-10-10T21:44:41Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.0/mailbox_darwin_arm64.tar.gz",
+              "digest": "sha256:b6ac231bcee3503c41014e0be5363fb4ea62c9bc40bb9dcfab5dc841376732ad"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.0/mailbox_darwin_amd64.tar.gz",
+              "digest": "sha256:b9003e075d95268b1d4d050b00fd8c6e1ec579d2676d6d910f373e227f2a9584"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.0/mailbox_linux_arm64.tar.gz",
+              "digest": "sha256:fdce23fec816adf9a7739aebbfcf15a6e6ddfc25075b3230b3440fa047d2b6b2"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.0/mailbox_linux_amd64.tar.gz",
+              "digest": "sha256:1c43abd7ddc0081882382df18c8cb7d1edbf123f5cd214230121168ff97bf19f"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:50f6cbcb57153bb2ba3fbf51de93247f4ce471b5fc7b730d4de9b9f7687c14dc",
+          "url": "https://catalog.trebi.ai/v1/snapshots/gmail/0.1.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.1/mailbox_darwin_arm64.tar.gz",
+              "digest": "sha256:785b3452f4dfd119243fed081fff40e820ef4e9b22324d2982feddec55b343d5"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.1/mailbox_darwin_amd64.tar.gz",
+              "digest": "sha256:e9e68d82045580fd07d2dc8e4aba2dce6a1782602f78a4578c49f103457fa25a"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.1/mailbox_linux_arm64.tar.gz",
+              "digest": "sha256:f388e00f7101e588f3b76a8b078454f5e7c0cff27c08098618b56de80526a9bd"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.1.1/mailbox_linux_amd64.tar.gz",
+              "digest": "sha256:0950b29c2f12906d452bf36a97666e795b0d06a8ac5135c0699a14f160639473"
+            }
+          ]
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:3afb67c49e9846a2c206b935efa05fc206b38027604d4aef3c427d204754df22",
+          "url": "https://catalog.trebi.ai/v1/snapshots/gmail/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.2.0/mailbox_darwin_arm64.tar.gz",
+              "digest": "sha256:a914740f9fa4b3ccddd1a2018bbbc2eb3e6d1988d9a3419b2fb614486c82f42c"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.2.0/mailbox_darwin_amd64.tar.gz",
+              "digest": "sha256:8892b36baa50c4af51026bafa265ebf43d343dbcb218f53c65fea3bdf5a17f36"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.2.0/mailbox_linux_arm64.tar.gz",
+              "digest": "sha256:4aa9db6dd5a7fff96349611d320774a2e2453c6b45d314ba5e443352c2029017"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.2.0/mailbox_linux_amd64.tar.gz",
+              "digest": "sha256:48e47127fc55e9a93c932e45e2178eb822193ea53c9a42aa135eaa9d908d7361"
+            }
+          ]
+        },
+        {
+          "version": "0.3.0",
+          "digest": "sha256:4cbbc9275efcf16a55806f9356dbbe254487bc8735ddebd7ed0a459035245501",
+          "url": "https://catalog.trebi.ai/v1/snapshots/gmail/0.3.0.tar.gz",
+          "published_at": "2026-10-22T13:05:07Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.3.0/mailbox_darwin_arm64.tar.gz",
+              "digest": "sha256:c3fd9a5f2e94ea6aa5c9978bb43c0d2803fec7e94a13b6ba56274b854016b86d"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.3.0/mailbox_darwin_amd64.tar.gz",
+              "digest": "sha256:2f73593473ba152adf395c37fe4ebda1056b8f11283c303881598fa1994c4083"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.3.0/mailbox_linux_arm64.tar.gz",
+              "digest": "sha256:f89b4ea42256516011573d1659db3cf5ea5a7ce78bf395a72e56b996430153ab"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.3.0/mailbox_linux_amd64.tar.gz",
+              "digest": "sha256:d3ef7d94bf3106baf342cff5c016afcefae7d87eef7d4b98784f5fc70647d05d"
+            }
+          ]
+        },
+        {
+          "version": "0.4.0",
+          "digest": "sha256:97e55d369088cee74ee34728afbd321e6e0cca8173fd17bafabd73716c2d61ad",
+          "url": "https://catalog.trebi.ai/v1/snapshots/gmail/0.4.0.tar.gz",
+          "published_at": "2026-10-28T21:24:08Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.0/mailbox_darwin_arm64.tar.gz",
+              "digest": "sha256:f0896953d34e507128cb8067928a9f01a1d3fb9ac478fe9fa59977912921f074"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.0/mailbox_darwin_amd64.tar.gz",
+              "digest": "sha256:8181db1761cc2170ed2cdec0c5919dd88f13c8819c75f125be1d5f917b034988"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.0/mailbox_linux_arm64.tar.gz",
+              "digest": "sha256:05ce3a67ad832a12a57147954f071816a271f85bfee00e49ffddbf2744e4cd8e"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.0/mailbox_linux_amd64.tar.gz",
+              "digest": "sha256:5b55fa2062ce430c1051f5a4f48d0fa67bfef7fd81e97b80049a08744e0a2c4d"
+            }
+          ]
+        },
+        {
+          "version": "0.4.1",
+          "digest": "sha256:bda8b7278bcdca1900b9522bd9b1dc98b3d52c791b852043552f253a7f449309",
+          "url": "https://catalog.trebi.ai/v1/snapshots/gmail/0.4.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.1/mailbox_darwin_arm64.tar.gz",
+              "digest": "sha256:9b7990d0459e04246ebc25892514e77f33943c68e814a5e48a0ec0b91067866c"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.1/mailbox_darwin_amd64.tar.gz",
+              "digest": "sha256:33c4062768576139fe764df14881249552b5896262666dce8dc08a2806df4952"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.1/mailbox_linux_arm64.tar.gz",
+              "digest": "sha256:af0864844031da3529b72dd3c5c9dcdc39a540206d39ff10388e7b9389b9b8c8"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/gmail/0.4.1/mailbox_linux_amd64.tar.gz",
+              "digest": "sha256:7537246826a3e2706544a1d921ae53f59ef575dc4d1f70c1c439885edf07f3d6"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "google",
+      "title": "Google Search Console",
+      "description": "Read Search Console traffic and index data, and run PageSpeed Insights checks.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:5e57576cd79ba32c9a5dfc19308339e2cb1ab39bced722f839aa8f5713b9a669",
+          "url": "https://catalog.trebi.ai/v1/snapshots/google/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        }
+      ]
+    },
+    {
+      "name": "granola",
+      "title": "Granola",
+      "description": "Search and read your Granola meeting notes and transcripts.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "online",
+      "login": "Log in with Granola",
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:a5c509945bae7b59a91ea38f771c999c82de7adf48e3a98e22ee1c35b995ef06",
+          "url": "https://catalog.trebi.ai/v1/snapshots/granola/0.1.0.tar.gz",
+          "published_at": "2026-10-23T16:17:24Z"
+        }
+      ]
+    },
+    {
+      "name": "hightouch",
+      "title": "Hightouch",
+      "description": "List and run Hightouch syncs, and read their run history.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:fee93696e242e2613cecaf02b7cb4743da83911eb8432f29fd1b656c14e3d65c",
+          "url": "https://catalog.trebi.ai/v1/snapshots/hightouch/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:91232cc20c7291513006efe5c2432f6a06a97c04d222a1fdca20b73cb595ff32",
+          "url": "https://catalog.trebi.ai/v1/snapshots/hightouch/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "host",
+      "title": "Linux server",
+      "description": "Watch a Linux server over SSH: CPU, memory, disk, load, the busiest processes, and failed services.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "latest": "0.1.5",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:d9ac7066fcfd2c8943fec2528f2eacd166393caaa85644e901eb63a38e5226ce",
+          "url": "https://catalog.trebi.ai/v1/snapshots/host/0.1.0.tar.gz",
+          "published_at": "2026-10-13T14:11:26Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.0/host-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:a35e65654b1293e90872e592426e7ea69dc6672c3efbfe35054e7075eb978b32"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.0/host-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:52026512e6bcebf376fc8a5694ccd491dfb689df9823ad68d758e9ad92f442b7"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.0/host-cli_linux_arm64.tar.gz",
+              "digest": "sha256:19622b7cef0ed542573e25516fed7acdb72c2f7509ebe5681cbbaeec7fcb9f6c"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.0/host-cli_linux_amd64.tar.gz",
+              "digest": "sha256:01e1a13a17beabb40381f11c3d0334ee92251435a8558b4cd26018ad759e2de1"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:5cc4b129990738b5b620b2ff8c865ee3525d544f1ee7a1f7627def288313f331",
+          "url": "https://catalog.trebi.ai/v1/snapshots/host/0.1.1.tar.gz",
+          "published_at": "2026-10-13T22:41:30Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.1/host-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:dc7e983b41180fe3c73d8ea2e8955e7e04333005ede55eacdde6520d229cb48e"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.1/host-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:7a826bb14c73ae1dfb09e8560375336f57b9be94e1c67e8b6a31528a2dda8478"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.1/host-cli_linux_arm64.tar.gz",
+              "digest": "sha256:7f95ed5de45dd43de5746a8772c8858ea59b4e0f5d854c7089a3f29c78bd8e59"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.1/host-cli_linux_amd64.tar.gz",
+              "digest": "sha256:33292012559dd3eb24ac0eb1931ba42e4e28924b96e35abf2dbaa9eccf1f21d8"
+            }
+          ]
+        },
+        {
+          "version": "0.1.2",
+          "digest": "sha256:067c990e492af60d134c3e5be3ed8d5b098b42d159296ea0682cbefefc1ee86f",
+          "url": "https://catalog.trebi.ai/v1/snapshots/host/0.1.2.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.2/host-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:b4562ab53b56ba01384bbf00c7ef9e871db88cb4325684943c2b77ff33e938c5"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.2/host-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:eff233b9985ddb73a9fdde132d7e07bb5c8fede021612b2a40407b9652d8981e"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.2/host-cli_linux_arm64.tar.gz",
+              "digest": "sha256:9023a46c2289527e634e24ddb4b427aa9c4c7e75c0b00485f45ee21b4dd9f92a"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.2/host-cli_linux_amd64.tar.gz",
+              "digest": "sha256:b063484a3164efa502be5d1ebe3581c9c5924866caa138f49b6076738caf844e"
+            }
+          ]
+        },
+        {
+          "version": "0.1.3",
+          "digest": "sha256:a730200b39e4ec07d6c3a8da59a594e0a5d4101f67204bec7e2f8f00296fe82d",
+          "url": "https://catalog.trebi.ai/v1/snapshots/host/0.1.3.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.3/host-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:44157aff6bcd0ed72cb6399581f6ae9281de39543077a0088fb3e9ef610b6797"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.3/host-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:b42c4e2639283266cd161e94ae3a78c4fa059a9ca8bf963e80591e388e080be4"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.3/host-cli_linux_arm64.tar.gz",
+              "digest": "sha256:824ad0728670d105e90c1acea0d18698ddd14c16b6ad23dfceabcc9183a27782"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.3/host-cli_linux_amd64.tar.gz",
+              "digest": "sha256:90bfce107ae6c4e13ef8756c2058b73a789b9178774937aaa1c799a3dba529e4"
+            }
+          ]
+        },
+        {
+          "version": "0.1.4",
+          "digest": "sha256:f7763613341b225f9512cee12434caaed4f6fb27aa87328965d8507011e27426",
+          "url": "https://catalog.trebi.ai/v1/snapshots/host/0.1.4.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.4/host-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:3d11c8fb9696a13384d8aa42101ad13ac0f627e57d5f9105780f5b2cd32837be"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.4/host-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:04e51ddf2d66553e4e45ae7d3d39f2d0b395da224f0d3d4e74f3d662df3e2269"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.4/host-cli_linux_arm64.tar.gz",
+              "digest": "sha256:7b8eafb5d152b9dcd128bce408982a861c9208bdf81b9ea900b3e57ea1ce68f8"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.4/host-cli_linux_amd64.tar.gz",
+              "digest": "sha256:52b1b16a711e10d35643cc926b43bb46e96a04f7bdefd0b58f19e5d8d038f61c"
+            }
+          ]
+        },
+        {
+          "version": "0.1.5",
+          "digest": "sha256:7bb4382cb69d542e8271c8933b045389fdbd6e5659db923e5429d6452fb15260",
+          "url": "https://catalog.trebi.ai/v1/snapshots/host/0.1.5.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.5/host-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:a496e4b1e3c8e2eee0e941628c34c59a74a5868d3e42e3499a8f44a0514e5853"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.5/host-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:46f22e6c1babcba7520618433a88b21f3dd194ca6df074eb0f438d0e74288ade"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.5/host-cli_linux_arm64.tar.gz",
+              "digest": "sha256:5705ca98cd25437d825c582dda23393e82c0ad6a2265196f5c1f17321565e84b"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/host/0.1.5/host-cli_linux_amd64.tar.gz",
+              "digest": "sha256:9e9428203b92abe40d1038c1a0df8332708274df79c42809e8bf1597e2f60b40"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "inbox",
+      "title": "Agentic Inbox",
+      "description": "Read, send, and organize email in a self-hosted Agentic Inbox.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste the access client secret",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:dd847f8fbc0fdb10c19033603eacb428b718e02313e97557f35445616fe128c0",
+          "url": "https://catalog.trebi.ai/v1/snapshots/inbox/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:aed9073543e32be34e8308f8c908f5c8ccf94f9990dc753204ffa0c1c8d76812",
+          "url": "https://catalog.trebi.ai/v1/snapshots/inbox/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "keywords-everywhere",
+      "title": "Keywords Everywhere",
+      "description": "Get keyword volume, cost per click, trends, and related keywords.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:dcff4440e5f7c66c996213d4ab11054d6faa1ca012a23f0414abe9fd6d8bee5f",
+          "url": "https://catalog.trebi.ai/v1/snapshots/keywords-everywhere/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:008053018129d65ff5afba9bd1f215228be3d1000e083be01fc904c02d2a389c",
+          "url": "https://catalog.trebi.ai/v1/snapshots/keywords-everywhere/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "linear",
+      "title": "Linear",
+      "description": "Start work when an issue or a comment changes in Linear, and read teams and issues.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.2",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:6640049021d9dd01e1cad35fd8affca3f5035274bd4e7a47fcc25a5e71214f87",
+          "url": "https://catalog.trebi.ai/v1/snapshots/linear/0.1.0.tar.gz",
+          "published_at": "2026-10-09T02:29:33Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.0/linear-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:b7dc8d44948cab07bee6b915ab7ce3fa245e139c0bca56d747a7dcb8f1044edb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.0/linear-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:942fb525743aa62b2331f5cd011ee895e3bc2b909b7275f551e45c2b2d6e4f68"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.0/linear-cli_linux_arm64.tar.gz",
+              "digest": "sha256:9d26ccf9383ae05295890e9a030725f9dffa910e7489442e6bdaea174c683733"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.0/linear-cli_linux_amd64.tar.gz",
+              "digest": "sha256:154f5abeb08cac490bc55b83d91c5684906bf5ab96503a2646cef251330d0b55"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:4a44bc8fb53a7edb425d26269308f46bb45d65dc8088f0a5fbb854e8bc1c7ab8",
+          "url": "https://catalog.trebi.ai/v1/snapshots/linear/0.1.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.1/linear-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:69ca389358eb82b79be7b4b24d7ce38b7565c77d356897cef6db0ebf91a02392"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.1/linear-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:e4de146ccdaef8d014079c061a7fe8d3025293aaf32d0a6f87c2c78218922d11"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.1/linear-cli_linux_arm64.tar.gz",
+              "digest": "sha256:de3bf2ad5c6047b31756680465c6755e2deb57ba7b3878aa095c17b52ce3ce4f"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.1.1/linear-cli_linux_amd64.tar.gz",
+              "digest": "sha256:0178e0a38a4bfc83bd906c94d7548c7a65c2103103aff56f5334e885814df2cc"
+            }
+          ]
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:002d9a51102a31df4d03fbf55a85fdf344ae7f01de15d498b72a7b2cfb0eefb1",
+          "url": "https://catalog.trebi.ai/v1/snapshots/linear/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.0/linear-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:663746199597559fced41b1966384a4c9e576a2a0aa5a7d70d0587167210e281"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.0/linear-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:cd8d5d5993981d38fadedb69874beee9c1e573b3daad74408e5261f0073dc798"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.0/linear-cli_linux_arm64.tar.gz",
+              "digest": "sha256:2d2651c03d4d7dfa2f19f251b974825cba6b48bbac4601aba92f4fd62116b064"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.0/linear-cli_linux_amd64.tar.gz",
+              "digest": "sha256:ee253a5ef3b6517693b4a203d612ecfcdbbe450fb8c3cbc49e48624da78d753e"
+            }
+          ]
+        },
+        {
+          "version": "0.2.1",
+          "digest": "sha256:632e9476e30067bfb1eb8829aaf50536356e1565506a94cc0bf5c6ce318b42b8",
+          "url": "https://catalog.trebi.ai/v1/snapshots/linear/0.2.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.1/linear-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:c20ab993be955a0441b67f6877e8e7754eaf1c8ffea4bf61afc12e1daa76f5cb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.1/linear-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:24ebf832b8937724e1b276709517c706098d0797b2d1b61bc9e0437f58006744"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.1/linear-cli_linux_arm64.tar.gz",
+              "digest": "sha256:56e44ae16340d92e8afd6b2f428077584ee09332e77f70b3ec4f9fbaf1091eb0"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.1/linear-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1a52687e1a49cabae1f09a365e5dc7b51e4534b32ea1e760c9986ce4b9faeb4f"
+            }
+          ]
+        },
+        {
+          "version": "0.2.2",
+          "digest": "sha256:01d29e974d8d3395d9b995ab068a1068ac9dcd49056398b75a323167aa7e2477",
+          "url": "https://catalog.trebi.ai/v1/snapshots/linear/0.2.2.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.2/linear-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:ec26e779ad14ef5e5a62786d158ae50a48639c32773f3372b6ab12eb4b030f0c"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.2/linear-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:3f586ff858b37840aafbf23d495795e98bff54bc5b6646c36ff309f55a96a771"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.2/linear-cli_linux_arm64.tar.gz",
+              "digest": "sha256:0f55a544baccc4bdf909987200a380c0567d2a9696442f93ebe5d715f27dbd85"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/linear/0.2.2/linear-cli_linux_amd64.tar.gz",
+              "digest": "sha256:469d45dd5f4c232f699fb860060b459c41ec5ae77d33a8da18908a7479b969cc"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "microsoft-todo",
+      "title": "Microsoft To Do",
+      "description": "Start work when a task changes in a Microsoft To Do list. Read and change lists, tasks, steps, links, files, and extensions.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Sign in with Microsoft",
+      "latest": "0.3.2",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "digest": "sha256:99f8193341b5fd2230f9e68f6c9f97e40c110d5fb654e7f5060767f880a4044e",
+          "url": "https://catalog.trebi.ai/v1/snapshots/microsoft-todo/0.2.0.tar.gz",
+          "published_at": "2026-10-09T12:40:22Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.0/microsoft-todo-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:f5dc9e2a3e5bba963e177e5bada56e2a1cbb0e6f77bb0ddb2d0ed53f53eec29a"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.0/microsoft-todo-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:c5899494fedf22e5f08989e5a4586f98510a991ff6d71b62b6962527ce83220b"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.0/microsoft-todo-cli_linux_arm64.tar.gz",
+              "digest": "sha256:a3f0d18a28058444004bbee1a47814c0321909164a4bde259b3c12389745e23f"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.0/microsoft-todo-cli_linux_amd64.tar.gz",
+              "digest": "sha256:5e810a213efd38e66c81bd58460ff94d3c3ba94143c6554686c2e1ccf86fa93f"
+            }
+          ]
+        },
+        {
+          "version": "0.2.1",
+          "digest": "sha256:d1215acaf386d420ab494d90848d1db9f4867ed4202c3ac241ac203fd4341e14",
+          "url": "https://catalog.trebi.ai/v1/snapshots/microsoft-todo/0.2.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.1/microsoft-todo-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e814c618eb6a74e9d01061f50fc091f2f8a911403f55b894066fd60fabf6b1d8"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.1/microsoft-todo-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:ccf1358d9188528c8fab4e240b36aa1465c85ed7a653f07d7c54ce55963c7432"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.1/microsoft-todo-cli_linux_arm64.tar.gz",
+              "digest": "sha256:830b4ce1058f4c30a1fc3627805a494bf965990d31ca2a172020ce80f7555953"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.2.1/microsoft-todo-cli_linux_amd64.tar.gz",
+              "digest": "sha256:22c23ee3a68b1cbf50a9b05745b364dc0b099da159115553e9e644aa7feb39f7"
+            }
+          ]
+        },
+        {
+          "version": "0.3.0",
+          "digest": "sha256:dd315e8461960ed9f72462efb673774cbe5943da33c720b64e848f98b01c64fb",
+          "url": "https://catalog.trebi.ai/v1/snapshots/microsoft-todo/0.3.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.0/microsoft-todo-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e8edd1efa2bd2f17e402a4504e560b4496762561b312a4ff62fe9cd1176f91d0"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.0/microsoft-todo-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:235a26c46f61b7063875dc4cec9c347a7a6621c7ffb98e4e8c49f27cb5ff02cf"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.0/microsoft-todo-cli_linux_arm64.tar.gz",
+              "digest": "sha256:d7c1cc66eb916f5d9540ef1664a14d3637f701fbfe51ef2cbd01f85225d77fd0"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.0/microsoft-todo-cli_linux_amd64.tar.gz",
+              "digest": "sha256:2460301a39a22ef22dd3f384dcdedca5a6e579a32db256bfcd43db6e5f9deac0"
+            }
+          ]
+        },
+        {
+          "version": "0.3.1",
+          "digest": "sha256:2c9f72c4363032b5db4807fa4b63abbd63402dbeb7b1bd6efdd3d3b0b0900c7f",
+          "url": "https://catalog.trebi.ai/v1/snapshots/microsoft-todo/0.3.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.1/microsoft-todo-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:4d20359bda3615a06d056815dbef8370250360a0c4a405de49389c6f56e7b056"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.1/microsoft-todo-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:9fabecdb175ee983f68f55bf7170b203076c8c80b48842258b10e48e2b1a17d1"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.1/microsoft-todo-cli_linux_arm64.tar.gz",
+              "digest": "sha256:6109b336c2c53da55add9716b0bc2c53645a496708b7bf2e5945a43e93bdc257"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.1/microsoft-todo-cli_linux_amd64.tar.gz",
+              "digest": "sha256:4835b57cf4bda7d80cabcaedc4f159e308f80f0cb63fd10c8c4fe4c08a833585"
+            }
+          ]
+        },
+        {
+          "version": "0.3.2",
+          "digest": "sha256:ceefcad75c80d7dbfca38e6203f7fd03ff172383b275f8a4eaf185f75b8cd73a",
+          "url": "https://catalog.trebi.ai/v1/snapshots/microsoft-todo/0.3.2.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.2/microsoft-todo-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:3aa7fc5f76fb9b6f3ced4d0893342569274bb092405743d374138e933e0cb3b7"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.2/microsoft-todo-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:2cf38beafbab2e3a935a3a1fa3511d8ed1d540565269e3795e6019648587381a"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.2/microsoft-todo-cli_linux_arm64.tar.gz",
+              "digest": "sha256:b89cb28981a99b7805a0f63e2d943719bbcedf0a93d5c6c0eb2bc8fee8b6cdc9"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/microsoft-todo/0.3.2/microsoft-todo-cli_linux_amd64.tar.gz",
+              "digest": "sha256:32d70bad73867319ac5d0e51be2a9c2ee738c7a58e9b5cdc0da1d91d40625ef7"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "mstodo",
+      "title": "Microsoft To Do",
+      "description": "Start work when a task changes in a Microsoft To Do list, and read lists and tasks.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "",
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:95b019a4b427fe355731f2561dca2e3e82677d5ceef2cc58280961d7d1ae946f",
+          "url": "https://catalog.trebi.ai/v1/snapshots/mstodo/0.1.0.tar.gz",
+          "published_at": "2026-10-09T02:29:33Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/mstodo/0.1.0/mstodo-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:ad469c41d8e9c5e0c56ba769c03e750d229cc1d14caddadacde033f5b8d997b0"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/mstodo/0.1.0/mstodo-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:f24382d6cb96d66d22a1a4361147d0570d00c2f78fbc7b2186c53557dedcdc4c"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/mstodo/0.1.0/mstodo-cli_linux_arm64.tar.gz",
+              "digest": "sha256:8c645f1c174f56c01a694c96360a353afda2e18666460f13dfe275817b25c846"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/mstodo/0.1.0/mstodo-cli_linux_amd64.tar.gz",
+              "digest": "sha256:957c74a6cdbe16f3f9ee855ce1bf21d1a47ba87852c1e1f2b53d4cb91eac865b"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "notion",
+      "title": "Notion",
+      "description": "Start jobs when pages and databases change in your Notion workspace, and search pages.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Paste the integration secret",
+      "latest": "0.2.3",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:9a0f9ae12f63688c6c7b3205a874323ccfff1791fc41f65e844bd27c9d529673",
+          "url": "https://catalog.trebi.ai/v1/snapshots/notion/0.1.0.tar.gz",
+          "published_at": "2026-10-09T02:29:33Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.0/notion-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e285b18f214c8ffcac76721a2161d4f617abe07cfe6a1faeca1f4ce65dfab064"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.0/notion-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:d0a6cd8bdaa2f841a9e7c54a0c241034c5da37a397bb727fb3aed9d7dd7c4d31"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.0/notion-cli_linux_arm64.tar.gz",
+              "digest": "sha256:a763b12c320568063a61ab0bcd7580c3e4555aafa6bd2873b51afe3e52ffde98"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.0/notion-cli_linux_amd64.tar.gz",
+              "digest": "sha256:6ed69a4df0b50431cceef99e293be969a35f5d0b6db2890637f56a3b24e22ec4"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:0bbdf7d5dd1a507f7853d5f5fbe952f8e0d1b598d594dd0b2ed773908cc42e54",
+          "url": "https://catalog.trebi.ai/v1/snapshots/notion/0.1.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.1/notion-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:41cda8b911a0be96f6152f7e308d55c4d6a4a9c4d4e8aa099104d593ba4a57fa"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.1/notion-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:a49a7499ad7a756785db977859ca5dd5faf8d8c980581458d0c38a3fb63d2ad7"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.1/notion-cli_linux_arm64.tar.gz",
+              "digest": "sha256:dfe972686e7c3a0df17ed99e82894fcaa671b2d9e04827f7f377e9dd5be1b6d1"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.1.1/notion-cli_linux_amd64.tar.gz",
+              "digest": "sha256:85c47abccee7bb67282513da71636bd52b10587b3b42b92c29714d8033813bf1"
+            }
+          ]
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:ba68e0634903e46a2961b161999db4aba61435ea0ef6b80558d5b1edeed3a9f5",
+          "url": "https://catalog.trebi.ai/v1/snapshots/notion/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.0/notion-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:61a24f1f5b462a5943be4f4ae9999eae22358b3d35f38b3542f79f119e16adfb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.0/notion-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:40728d7f5429c78fd33b97362f1a713a48a2bed79b6aad69072c6399c7670dd0"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.0/notion-cli_linux_arm64.tar.gz",
+              "digest": "sha256:a08742bbd7041ca0d538911b22fd9825203a2da3f90f270f10bf700250681e3e"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.0/notion-cli_linux_amd64.tar.gz",
+              "digest": "sha256:3fc552d5a02a0533fa36b6006a0e860ddd68c22daa42311b38823874ed45ac19"
+            }
+          ]
+        },
+        {
+          "version": "0.2.1",
+          "digest": "sha256:5734b3a5efff0e029c88b1940507e64dfb5e0257626a7b07e3ae80503ff32b29",
+          "url": "https://catalog.trebi.ai/v1/snapshots/notion/0.2.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.1/notion-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:4d6d9ff72d1f28aa44cc3df2e01bce4956d3b231ac83b0f919ab5791ed2fef60"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.1/notion-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:471efa0e07fb4f5c8cc6a0c7bd8728bce4d393a0a28906dadc485e7a70db197e"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.1/notion-cli_linux_arm64.tar.gz",
+              "digest": "sha256:a6ab18d617a36c26c65908a4e125f6e2b23be09469ce902897fa9ee5c35aab52"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.1/notion-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1630d5e3133c342adffedbf528e08d6def8ef0d62aaa058c25aaadf58de19b47"
+            }
+          ]
+        },
+        {
+          "version": "0.2.3",
+          "digest": "sha256:66f9ad18bb7148ce87f012abcb3501e808c32bc5e58f825d22928256bf7da20a",
+          "url": "https://catalog.trebi.ai/v1/snapshots/notion/0.2.3.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.3/notion-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:31b93f4510b9d9fdf15eaf9002dca503aa43a94f5f981188b684ef923d00865f"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.3/notion-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:d6b7b8ef700caa2267af7a4f0615414c4061df6201c7b9e998f05113e13435ae"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.3/notion-cli_linux_arm64.tar.gz",
+              "digest": "sha256:b9a2ea82793f322c460553139136ca39c5207dec391d0e36896c47f4e4a48a2a"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/notion/0.2.3/notion-cli_linux_amd64.tar.gz",
+              "digest": "sha256:86c5b64b492add967628766de110cbe00ebc71a2508504d337dfc8ef72d769be"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plane",
+      "title": "Plane",
+      "description": "Start work when a work item, a comment, or an intake item changes in Plane, and read work items.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.2",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "digest": "sha256:243590a766b99e5538bcdd1c7dad527cf0a67349a4d36cbbd8d9ef2a6d11dd05",
+          "url": "https://catalog.trebi.ai/v1/snapshots/plane/0.2.0.tar.gz",
+          "published_at": "2026-11-20T14:56:44Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.0/plane-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e261880c6f6bb95443aeb7dc175e89c0cc712ca09de42a665e5ed482c09101bc"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.0/plane-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:8b2d31b17942888f48ef4e360ef0689e042fd72f80ccfef3968704875967f633"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.0/plane-cli_linux_arm64.tar.gz",
+              "digest": "sha256:1a29fc8da33b8adda7227e28fc97f05a5aa77c08834c1823cbc8f62755ebcfdd"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.0/plane-cli_linux_amd64.tar.gz",
+              "digest": "sha256:15691b15a1bc4160c7042beb92b3b281dcbc7c7778747403aa76d60dd9a62120"
+            }
+          ]
+        },
+        {
+          "version": "0.2.1",
+          "digest": "sha256:52a8ecd491eb7d76d644461e952a2bd0dc550f3ba1a004d58e752feb9f187a66",
+          "url": "https://catalog.trebi.ai/v1/snapshots/plane/0.2.1.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.1/plane-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:7976b385506d23f57ee11b0e8d98c15d45484d59feb82ad4527938f2b3af3ac4"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.1/plane-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:81ec121e51f4a4d10383be45d68dd475dedb248a507f4ab9d3b689d05ce3bb2d"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.1/plane-cli_linux_arm64.tar.gz",
+              "digest": "sha256:49cfc5023e5ffa427bceffb1518476c8c5b6d4fd39f05e2e08a98f1434483223"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.1/plane-cli_linux_amd64.tar.gz",
+              "digest": "sha256:73608a8cc0ecd71f1c4271a39fcbe2a801d3a6397a4ba698b1ca38337da26339"
+            }
+          ]
+        },
+        {
+          "version": "0.2.2",
+          "digest": "sha256:709f83104c093478ee09d98cff812427ad62642ca0be7c1f79e9dadf51f9bfa4",
+          "url": "https://catalog.trebi.ai/v1/snapshots/plane/0.2.2.tar.gz",
+          "published_at": "2026-11-21T18:23:50Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.2/plane-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:72f72066b71fbda4e88f4cddef29f830389c1e636f8610820b0f2fea0409557f"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.2/plane-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:732b9beb610aba8b3e98389ea034c553155b7d3541463707dc9e419d8c12b140"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.2/plane-cli_linux_arm64.tar.gz",
+              "digest": "sha256:946d50fb520017cdf58efa2d1c45fd99a180c2f4c58b37651d5edceb4a2ffe7f"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/plane/0.2.2/plane-cli_linux_amd64.tar.gz",
+              "digest": "sha256:52d204e26b381a56f735410bd0f18098dd805218f7f11b5c2b65b12b55182a76"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plusvibe",
+      "title": "PlusVibe",
+      "description": "Manage cold email campaigns, leads, sending accounts, and replies in PlusVibe.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:da043eed166af4198172d786c4f4971fa9879a1c41120fc6f74743ed253a4707",
+          "url": "https://catalog.trebi.ai/v1/snapshots/plusvibe/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:a2b77d098960a5e559f9b5e0ec79a401f4633a7c8579d7da7787939fb9589fbb",
+          "url": "https://catalog.trebi.ai/v1/snapshots/plusvibe/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "postgres",
+      "title": "PostgreSQL",
+      "description": "Run read-only queries on a PostgreSQL database for reports and live data.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:cad4c5c394f94b68497fb50ed3d2cb947360a884ea059c5125cfaeb71c8b9786",
+          "url": "https://catalog.trebi.ai/v1/snapshots/postgres/0.1.0.tar.gz",
+          "published_at": "2026-10-10T21:44:41Z"
+        }
+      ]
+    },
+    {
+      "name": "slack",
+      "title": "Slack",
+      "description": "Messages, mentions, and reactions from your Slack workspaces. Search and read the history.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "login": "Use the Slack app on this computer",
+      "latest": "0.3.2",
+      "versions": [
+        {
+          "version": "0.3.0",
+          "digest": "sha256:606773d71c15bd565756f9d9d96d9f080cfbfc88a4e890e391e72c0ea1f22bef",
+          "url": "https://catalog.trebi.ai/v1/snapshots/slack/0.3.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.0/slack-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:fdbf53ec7a5fc3b3d1806fdee84ac7dbeb16c43c85a5038a95a796495e2f1e4a"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.0/slack-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:7df45d26bf3dc11d00290ed8f517052e3a2cc287bfff445bfffc0f7f67d45c45"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.0/slack-cli_linux_arm64.tar.gz",
+              "digest": "sha256:e28f969e78829312861cc59cdff6647b808ccb3b92bd3ced50d9a60ab2313068"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.0/slack-cli_linux_amd64.tar.gz",
+              "digest": "sha256:ba0e09212c906c866769507c113d8f72f8b19b369fd6a0fe594d7a7a283173ac"
+            }
+          ]
+        },
+        {
+          "version": "0.3.1",
+          "digest": "sha256:95316f4d2210523799f9cb17d3335890cb45a2d53374a217e33686b6a3e6c86d",
+          "url": "https://catalog.trebi.ai/v1/snapshots/slack/0.3.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.1/slack-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:213abce5b2c4dbe844cad514be1e981b82740e297c825c3a067d0e6c72b18741"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.1/slack-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:a525e335de8341e885c4e029746359866a84bface0936091cfe7872185044a60"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.1/slack-cli_linux_arm64.tar.gz",
+              "digest": "sha256:861c89914b505b1fe08436ec0d244d48632730886867fe6ea4a412b7011fb9c1"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.1/slack-cli_linux_amd64.tar.gz",
+              "digest": "sha256:df4ff5aa5b0591c92b66ce874f9ad3bf875500fa2f747c21effb80a741b7cea9"
+            }
+          ]
+        },
+        {
+          "version": "0.3.2",
+          "digest": "sha256:8fbfe05d9d732969fe1f10925fed55969b8cb8eaa9f7529f064bdad149415ee7",
+          "url": "https://catalog.trebi.ai/v1/snapshots/slack/0.3.2.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.2/slack-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:a821dd583c5cb4b7bbba43fb519b8bc8ceb77531ba033656896c3ab101307bb8"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.2/slack-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:89d3b7fe3c222b6789ee5fe93acee91d4f55a475027cf1425d57ee9fde7ef0ce"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.2/slack-cli_linux_arm64.tar.gz",
+              "digest": "sha256:26f18b866e9115d0fbbe20bc28d647a1231e4b7aaad155d366755acec4e6f3e0"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/slack/0.3.2/slack-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1acb74672bafc91bc92ace194cd1adc9168f872bebe93dc9ed72c793950db8ac"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "vitally",
+      "title": "Vitally",
+      "description": "Read and change accounts, users, notes, tasks, and projects in Vitally.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions"
+      ],
+      "runs": "local",
+      "login": "Paste an API key",
+      "latest": "0.2.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:e39b716b788cdfe76d63dd6e31c833af1a454ff4e3755d7d1a2de2fbeddcb07c",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vitally/0.1.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z"
+        },
+        {
+          "version": "0.2.0",
+          "digest": "sha256:e539290f22659690138d6d5677eaddf53b2f4ffca8d5249722268a987a101a2c",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vitally/0.2.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z"
+        }
+      ]
+    },
+    {
+      "name": "vnc",
+      "title": "VNC Remote Control",
+      "description": "See and control the screen of another computer over VNC: watch areas for changes, take pictures, type, and click.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "latest": "0.1.4",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:99fd58a03218b4ac7f8cd3c3130e836e55f0fdbfd628b18770a5ecf76024dd7d",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vnc/0.1.0.tar.gz",
+          "published_at": "2026-10-24T11:31:37Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.0/vnc-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:07105bc2052b3686947505b599871ae5878fceaaf496dd6beeb82fbfad5c708d"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.0/vnc-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:3d0163537cdb172ab73fc18edb5c3036a9329d989726c869b567f84b920ec5dd"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.0/vnc-cli_linux_arm64.tar.gz",
+              "digest": "sha256:5709b12dce077f09d6c22ec6e01e0b837d737b6cc601d8e9d2213ad7dd162177"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.0/vnc-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1a3b9874c4aa3888c072ef5eea6a18f926a95700a6e2d377461ff7eef0ae6b2d"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:6408ea2a724b5dc2e4e8ab5a1e032999abe46675eae7ae12a854066d412986e1",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vnc/0.1.1.tar.gz",
+          "published_at": "2026-10-24T12:11:00Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.1/vnc-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e869335074e7666cc84d2debdbbf5b2b00de1c5f15694bcb6710a9aa17623e11"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.1/vnc-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:2f06f1fcfeac46d7c134782f47a7cd0def39cbe4674200836a64ba7e74538798"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.1/vnc-cli_linux_arm64.tar.gz",
+              "digest": "sha256:fe7d2d880780f22db465f2f539bdfae32337c47f34534fe957ee682b88db432e"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.1/vnc-cli_linux_amd64.tar.gz",
+              "digest": "sha256:486e3295004e74d94d681d2c9e2d03568c5290c2b2a50df0bdc5fb10ed23ea3d"
+            }
+          ]
+        },
+        {
+          "version": "0.1.2",
+          "digest": "sha256:d48ee6f41ccdddc80a510b097fec56fd3064838e48cf62d4468c2a85da2ef377",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vnc/0.1.2.tar.gz",
+          "published_at": "2026-10-24T12:26:24Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.2/vnc-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e8711d48ca9f55061d0d96946084de54d94df893ec5109e2f36ff5c0042c5874"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.2/vnc-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:cb5cd74accdb92e014da1cd1b6a33cdf6a9ff71e6f723909c77c80eb7fcb4436"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.2/vnc-cli_linux_arm64.tar.gz",
+              "digest": "sha256:1709a331fc29359e57090f949abbdd5c135440c5f972046887634dc4909aa9e8"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.2/vnc-cli_linux_amd64.tar.gz",
+              "digest": "sha256:f329da07b90d5693a1e53bcaafff1bba77a7faf18044cc3c026a1ecca1e93be9"
+            }
+          ]
+        },
+        {
+          "version": "0.1.3",
+          "digest": "sha256:7206caa5179a92e3467391dc8482b8ffb33aff494c0ce03813515665d02b6c23",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vnc/0.1.3.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.3/vnc-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:0287e672c5e7bb25d75ee1dc906c816515eb7a3b6f8453bb406572670109ec69"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.3/vnc-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:d5904487577e24ea42e3ed660050e1039761bfe3df71a69139247671af7defff"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.3/vnc-cli_linux_arm64.tar.gz",
+              "digest": "sha256:6e632776fd258bfa8e7e099468eab3bd1939ed9ddb5db1c19559e2ab925e8a72"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.3/vnc-cli_linux_amd64.tar.gz",
+              "digest": "sha256:dfdf887561dc088ff9a600bc0cf5e4e9596c107e443c4dda10f846c3bf335f16"
+            }
+          ]
+        },
+        {
+          "version": "0.1.4",
+          "digest": "sha256:a5f936defc175e1b4846503f6ddadc68207b8d0c3b395d1efcb23a546efec0b8",
+          "url": "https://catalog.trebi.ai/v1/snapshots/vnc/0.1.4.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.4/vnc-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:a5f24d7843a233aa77ddd43de4e88844ef132c17e4aa6fb1cea7f1895ed6b948"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.4/vnc-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:5d1633887834bb34cb9ebd3903af1d1387b4664d8ab5f7352b8d4958f29482cb"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.4/vnc-cli_linux_arm64.tar.gz",
+              "digest": "sha256:d932d3b5199d1a71868a137947afa0b246e59a26933e4298356aaa7e3c464359"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/vnc/0.1.4/vnc-cli_linux_amd64.tar.gz",
+              "digest": "sha256:89fba913f7115936a492e73cc9ea7e2662489a5b7dfee154a759f8396fe725fe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "title": "Web pages and feeds",
+      "description": "Start work when a blog or a news feed has a new entry, or when a part of a web page changes.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events"
+      ],
+      "runs": "local",
+      "latest": "0.1.3",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "digest": "sha256:b19b52df59242d5d1a86eafdde6e091a7b783c19c98c03a8c7070d744586a409",
+          "url": "https://catalog.trebi.ai/v1/snapshots/web/0.1.0.tar.gz",
+          "published_at": "2026-10-13T14:11:26Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.0/web-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:bd81e70341e3f92a43d66a3fa5867d9fac1d3db3d8b08867942c27640f96b4bb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.0/web-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:a3951af1c5ac143d164e8fcda96b2f199142e84a3e46dec3fac9064557fc4d44"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.0/web-cli_linux_arm64.tar.gz",
+              "digest": "sha256:2097936bac0b140bf12b57cd7a753c806f2096fc6731309112d3c56cc1cf2b77"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.0/web-cli_linux_amd64.tar.gz",
+              "digest": "sha256:c95be932dfcf3b79a4e2d12960192f00fdf4b06754acb8a9f0eb9834a0a7950c"
+            }
+          ]
+        },
+        {
+          "version": "0.1.1",
+          "digest": "sha256:65c0fb472a2a7777ee530fd1bf121cfa130c1bf3d424f15f31b4eca30458b403",
+          "url": "https://catalog.trebi.ai/v1/snapshots/web/0.1.1.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.1/web-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:15224bedb033b833722ecde7c5f79cb07d1a3728df81b2d54d9f5bc8323adcaa"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.1/web-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:05e2ab7988686db4f6b92055197eb2e513ea1a4cd3e8178d508544b13f253c2a"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.1/web-cli_linux_arm64.tar.gz",
+              "digest": "sha256:568b6e669c96962ed1e014c0b3b0a3d272d172941e9a47a730aa57a89f189ef3"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.1/web-cli_linux_amd64.tar.gz",
+              "digest": "sha256:4587b0ed8f9f22453d1580fd2e4fd178b6df93d40fa33f7804a2efe455189d86"
+            }
+          ]
+        },
+        {
+          "version": "0.1.2",
+          "digest": "sha256:e0ba32626172e4c12ac67d3867f3106781d909c338679ac2b75a370db6c9554b",
+          "url": "https://catalog.trebi.ai/v1/snapshots/web/0.1.2.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.2/web-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:baf90d62b5b7f0ee5fca0401523630a1f3656dbaa0d5ff4b64a79b92d81c3ce1"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.2/web-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:8e4a90e0f62c658efdb951afa715bfd909578b706742e0d8ce93a59ef3fe6fd7"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.2/web-cli_linux_arm64.tar.gz",
+              "digest": "sha256:9a131528e42b39c551fafa4944d8886b683f8e2e4057a3ccab9d7171d0606a67"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.2/web-cli_linux_amd64.tar.gz",
+              "digest": "sha256:31ac3786125b46a9519301f2785c4321b65bff19efb1dba017366e6c15670878"
+            }
+          ]
+        },
+        {
+          "version": "0.1.3",
+          "digest": "sha256:bc945e3fced98b9a193faac2f0c04d01bb8d4047df1cc4e586448775dce4d364",
+          "url": "https://catalog.trebi.ai/v1/snapshots/web/0.1.3.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.3/web-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:a20225101ab017082903e82ba0aca06edb751ed36fdb030cb90a7399350294eb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.3/web-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:38b6ba58614cdfcc2af37d03c37c9b7f383f59df4f9bc2730e667cf38344fbf7"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.3/web-cli_linux_arm64.tar.gz",
+              "digest": "sha256:96b1cf0a8b6b547a4722bae52e3701362bf1d4ccd5b2957e83862485c8706542"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/web/0.1.3/web-cli_linux_amd64.tar.gz",
+              "digest": "sha256:1be84c11755e8a66d33dfd3069d5f627be92bfab593c6881800f26163afda2a4"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "whatsapp",
+      "title": "WhatsApp",
+      "description": "Send and receive WhatsApp messages from your own account.",
+      "publisher": "trebi",
+      "capabilities": [
+        "actions",
+        "events",
+        "channel"
+      ],
+      "runs": "local",
+      "login": "Link your phone",
+      "latest": "0.10.2",
+      "versions": [
+        {
+          "version": "0.6.0",
+          "digest": "sha256:c11ef0b3fe32be4ac097ddfa1a5fada4eee7683d4768d0eae7cf60d7833e2144",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.6.0.tar.gz",
+          "published_at": "2026-09-29T01:40:10Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.0/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:a79f6e10ce6a70df2584cf94f490ff05803897a9c75fc96367763236e5b71b56"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.0/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:ed65e4ef1f02878f9789a7c0bb959e549468dd7286cabdf0a5e244580226bf66"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.0/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:bdb4b82de014de9bba926e61ed39851ceae5b01b91b15ed72abcd4fd0481d523"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.0/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:476f5a66eb1193fa8825ed6ef05511e5ce16caf40b9ba4507924c346f7d71bcb"
+            }
+          ]
+        },
+        {
+          "version": "0.6.1",
+          "digest": "sha256:0888f2b0c9ef7659e8c5e334d3c47daad74bce90fa2274c4a23bd32a07b58d38",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.6.1.tar.gz",
+          "published_at": "2026-09-29T10:14:24Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.1/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:205478b6cde5e69ea46062473ade9592d17b20970d8f73013b557c790720de48"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.1/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:ece2622c6a9a633e384cc2b64dfb5683329f0200f05107f7d8d7c511ec6a0703"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.1/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:058d4209459c27a1ce7d0778af8153a78ab68e8bc3aed4205dca9705f4686281"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.6.1/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:ef76f4b79f110e0f78883dd21df2eb714112386b5fea9be6d03bbfd019a4cab2"
+            }
+          ]
+        },
+        {
+          "version": "0.7.1",
+          "digest": "sha256:45d08848f565bd26994ab626ada8f99fd596a7f0ee8dfc49d21491478ec360bc",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.7.1.tar.gz",
+          "published_at": "2026-10-01T13:38:52Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.7.1/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:bd2dc8a66cfd26437970181da73890bb1328359b6d12b03e5f2ea1a46cc7278f"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.7.1/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:35946b16b1942a6a258cdc15794e24dce9e9dfa8a7d59da649d47986ae0b99a4"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.7.1/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:1b2d12c348294f5ef6dc9b5e02dcf674a371fa1922e229ef73c02992c04f5f0c"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.7.1/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:e3d3eeb2b8bcdb6cbb1aa27b6f5fac8c9fd7b5d1950b0891748ec096a8adc0b3"
+            }
+          ]
+        },
+        {
+          "version": "0.8.0",
+          "digest": "sha256:8e15cf008bab995b122de0ed4820b511f0628f748ea519b39f5cdf199ea22fc6",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.8.0.tar.gz",
+          "published_at": "2026-10-01T22:40:58Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.0/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e91d1d48982d07eae443b7b35202d9fdc1ab85ccc1c1b16ff239e4979102983a"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.0/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:b9a6a8dac6fcf65cffa9d00dee12dc418479526a27269493d20818d8d1e2f608"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.0/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:e05139148acfd2f7e5f806e67e6e80d5f42d76d09992c02f99240af5be032710"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.0/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:5a976fa6dc14d53437bbda0d94f518e8de78f18527af6afe12d9bb7d2d9041a6"
+            }
+          ]
+        },
+        {
+          "version": "0.8.1",
+          "digest": "sha256:3389d6ce46d8f44d6d873c6d9c1963acdcf31fdc17595fa8adf1ec5459efffcb",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.8.1.tar.gz",
+          "published_at": "2026-10-09T02:17:31Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.1/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:707129293fd84db7d879c9936d91ca27b51b143c1822b671b7eae73f798e29bb"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.1/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:8d1b6a9c2ba8efe44d5285e25653b105cf430e29ecc2f421bc4aa1eaf313ca77"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.1/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:f21d2fb294c962d05085e13e3c90313c628925f75f69dd1b4d5c6793297d3427"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.1/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:c5cfd6bada40e7c7f8d1e749e18c2d5ccb50bff60ff1fe1d285674bbed5f7461"
+            }
+          ]
+        },
+        {
+          "version": "0.8.2",
+          "digest": "sha256:607542e3d910f56e99cb331813d419d16237f555e7d4209d5b1ee21a0b568123",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.8.2.tar.gz",
+          "published_at": "2026-10-18T02:07:32Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.2/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:33221be432c9addc9d9a243d627495d4678af294e2591f9d8b163796e14fe43d"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.2/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:08fc7f9942cea8e75cd011d42777cd4ed1102b71582b346a9750d910ff5ffe7c"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.2/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:0be21586327a0965c68dfaaeefad8cae03779fa8af1e89ffcfe56b094d1c3989"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.2/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:7733ebdde19615f80176fd2a1ecf8b37815c4a3b00b84bc7a0adfcb8df960578"
+            }
+          ]
+        },
+        {
+          "version": "0.8.3",
+          "digest": "sha256:61c933048e7d49888f0ddd87c4df711c4f1f2f333327cf84d408ccc80b3fab1b",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.8.3.tar.gz",
+          "published_at": "2026-10-19T19:32:31Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.3/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:1f9347f1753440aeff181e8df20619e4881ae392703c3901d6164ae32969d91e"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.3/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:5c161f72515d97f303cf72c09bf8b859cd48321d9b130a4362d3024ed18c23e7"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.3/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:72d8bca39dc23341654e4eb8bccb6de4e8c2e1b05fcaa7670c2787dbc01ada3b"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.8.3/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:db5dda115b19b1632b8310c3cd0d8613f85f7c8d5ce0260b0b0951a0eb6702c7"
+            }
+          ]
+        },
+        {
+          "version": "0.9.0",
+          "digest": "sha256:4c8132a17f9bf0585ff43c047d84ffe4480ede867400c999d2fc155a8a528771",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.9.0.tar.gz",
+          "published_at": "2026-10-21T01:05:45Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.0/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:f6656dcd2e6aa1a5ee659b7b009a170b3c52cf44b65100ed1aa11094a53b1a3e"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.0/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:96cfb2eb4b9de34bbcf3bfa87434dce3ddc4959d496d6d5b80b81ac5d96eabb6"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.0/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:d034e87401a985630263df45dcbaceed8bd3b4479d4b125a8452659091e452f1"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.0/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:384ceb827151fe34614f3240bcd93fe1a1b9bb4ff85b1b368ba8c7fae3fd182b"
+            }
+          ]
+        },
+        {
+          "version": "0.9.1",
+          "digest": "sha256:17118d57807fd2b6a070b7f7ce772dbfd7aca7d189ef11bba2faf45b4f7c5382",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.9.1.tar.gz",
+          "published_at": "2026-11-06T13:00:28Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.1/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:e84bdbecdb1ffb4620fdb80da13fcd7f12c38a5da61769355e005f9d4f2d2275"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.1/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:5ff97c25ddb0a8829e2c929eca653cced965767c6bf418514256b5393c796cd8"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.1/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:50a3acd0169d828565def77876b20fe8da5de116dde689b27247551fe5d25712"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.1/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:b449c5c79d2fb1e9bc4a89269fd0bc25294c48725dd7507e80f91bf6d67a51ad"
+            }
+          ]
+        },
+        {
+          "version": "0.9.2",
+          "digest": "sha256:a81e31c37ce6c8e71e0b3d7ecd03d0890cfb54be0a5b466a6651fad145baf4ae",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.9.2.tar.gz",
+          "published_at": "2026-11-06T16:42:12Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.2/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:048b53661ea43466e2d01ba88f13bcd938d67a699329162663b62f1eabcf532a"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.2/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:c00dfbc77d7af414dc12149cbf26228143a3087d48e0a39a2934dade8f81bf3e"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.2/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:c2fe271619f0aafdc97c956b784cf6524778076cb407f3a1d1799ed6b7efcdee"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.9.2/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:b020b327265e600e34e613f0972ffeda586b1f3e807240f4fcfac50b0522854d"
+            }
+          ]
+        },
+        {
+          "version": "0.10.0",
+          "digest": "sha256:494e4b0a27fa7abcb835288caa3cac2d8500fcc4f52875c0e89388af567057ed",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.10.0.tar.gz",
+          "published_at": "2026-11-09T00:37:55Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.0/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:fc5fd7c912a9a9bb6dbea4599e484edd225b4e1390d02a2bd0c7f8298d6855a4"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.0/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:3f80c40a279f5dc6df0b542be8b2e542318cda43b68a8bde438faeb8f636ada9"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.0/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:5e2d2484a0b25585bbff4e936dd43b11f0602d48aae25a4b7ca59121ac2ce449"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.0/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:6b1bac55c9dee88dbe2b2220e52aaca86468f9d70bced9a4cb1fed5b8eb83dc8"
+            }
+          ]
+        },
+        {
+          "version": "0.10.1",
+          "digest": "sha256:093cb7ea2712bf5b70abc749acbc88f25f026e5115ebbe97a2d7888aa5621d01",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.10.1.tar.gz",
+          "published_at": "2026-11-20T14:05:53Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.1/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:d1709e2c754543f44e518eafb10c21b5da798ccd7a762fc570201a5bbfe90e0e"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.1/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:32362328c6649c040086053f27baab58e7f99e1270ac0de4ede500eebcc5d95b"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.1/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:1b7d2c03394d73c726c189b8fd42e8572b3b2cc5d933e81e3400687c9a480bf0"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.1/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:01af13b9b2798571285ab41817bf1b5043e75119986e404fe8bdd8f893d7cae6"
+            }
+          ]
+        },
+        {
+          "version": "0.10.2",
+          "digest": "sha256:1aa3bedcd4e44d815d57c37f55455f8800754720cf61d2b1e32c367097639b69",
+          "url": "https://catalog.trebi.ai/v1/snapshots/whatsapp/0.10.2.tar.gz",
+          "published_at": "2026-11-21T03:11:47Z",
+          "binaries": [
+            {
+              "platform": "darwin/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.2/whatsapp-cli_darwin_arm64.tar.gz",
+              "digest": "sha256:426ea7eaece94ffd1d5fac30b2f5b0f944be8edc701642611d2bf1507bbf9112"
+            },
+            {
+              "platform": "darwin/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.2/whatsapp-cli_darwin_amd64.tar.gz",
+              "digest": "sha256:d6287c2c3cd0fbe7b894fb505609029a6d70313e8dd0baa211a5a5a5143c6849"
+            },
+            {
+              "platform": "linux/arm64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.2/whatsapp-cli_linux_arm64.tar.gz",
+              "digest": "sha256:ba4e397f6861ecc448d2ed06cffe5243f88f0072b125ed90192c9760b7c84339"
+            },
+            {
+              "platform": "linux/amd64",
+              "url": "https://catalog.trebi.ai/v1/bin/whatsapp/0.10.2/whatsapp-cli_linux_amd64.tar.gz",
+              "digest": "sha256:781131534cec87e5f3bb39d24c9b443d82292e9c8ace2035a7144076048f52c0"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

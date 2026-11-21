@@ -60,18 +60,23 @@ public struct VendorBinary: Hashable, Sendable {
     public let vendor: ProviderID
     public let binary: String
     public let minVersion: VendorVersion?
+    public let release: VendorRelease?
     public let path: String?
     public let version: VendorVersion?
     public let source: VendorSource?
     public let state: VendorState
+    /// The version of the OverSire copy, also when the PATH copy wins.
+    public private(set) var ownVersion: VendorVersion?
 
     public init(vendor: ProviderID, cli: VendorCLI, path: String?, version: VendorVersion?, source: VendorSource?) {
         self.vendor = vendor
         self.binary = cli.binary
         self.minVersion = cli.minVersion.flatMap(VendorVersion.init)
+        self.release = cli.release
         self.path = path
         self.version = version
         self.source = source
+        self.ownVersion = source == .oversire && path != nil ? version : nil
         if path == nil {
             state = .missing
         } else if let floor = minVersion, version.map({ $0 < floor }) ?? true {
@@ -81,7 +86,26 @@ public struct VendorBinary: Hashable, Sendable {
         }
     }
 
-    public var installHint: String { "Run `oversire vendor install \(vendor.rawValue)`." }
+    /// The OverSire copy first. The PATH copy only when it is ok and the OverSire copy is not.
+    public static func prefer(own: VendorBinary, path: VendorBinary) -> VendorBinary {
+        var pick: VendorBinary
+        if own.state == .ok {
+            pick = own
+        } else if path.state == .ok {
+            pick = path
+        } else if own.path != nil {
+            pick = own
+        } else {
+            pick = path
+        }
+        pick.ownVersion = own.path == nil ? nil : own.version
+        return pick
+    }
+
+    public var installHint: String {
+        if case .homebrew(let f) = release { return "Install \(f) with Homebrew: `brew install \(f)`." }
+        return "Run `oversire vendor install \(vendor.rawValue)`."
+    }
 
     /// Why the app does not run the binary, or nil.
     public var problem: String? {

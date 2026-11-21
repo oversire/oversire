@@ -15,7 +15,9 @@ extension BigTimerTracker {
                        managedEnv: "BIGTIMER_MANAGED_BY", lockedFlags: ["--server", "-s", "--token", "-t"],
                        deniedCommands: [["auth", "login"], ["auth", "logout"], ["auth", "join"], ["auth", "rotate"],
                                         ["token", "create"], ["sync", "stream"]],
-                       minVersion: "1.0.12", skillCommand: ["skill"])
+                       minVersion: "1.0.12", skillCommand: ["skill"],
+                       release: .githubRelease(repo: "Big-Time-Data/big-timer-releases", tagPrefix: "cli-v",
+                                               asset: "big-timer-cli_{version}_darwin_{arch}.tar.gz"))
     ) { config, env in
         guard let raw = config.values["server"]?.trimmingCharacters(in: .whitespaces),
               let id = BigTimerTracker.account(forServer: raw),

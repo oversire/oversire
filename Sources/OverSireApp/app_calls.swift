@@ -13,7 +13,7 @@ final class AppCalls: @unchecked Sendable {
         "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
         "ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain",
         "ci.rerun", "ci.rerunJob", "ci.cancel", "ci.dispatch", "ci.approve",
-        "vendor.list", "vendor.run", "vendor.skill",
+        "vendor.list", "vendor.run", "vendor.skill", "vendor.install", "vendor.remove",
         "item.setLabels", "item.setAreas", "project.addLabel", "project.refresh", "intake.create", "intake.list", "intake.accept", "intake.decline", "intake.snooze", "intake.merge", "intake.edit", "people.list", "activity.list",
     ]
 

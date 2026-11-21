@@ -26,6 +26,8 @@ public struct VendorCLI: Hashable, Sendable {
     public let projectFlags: [String]
     /// The args that print the agent reference of the CLI. Nil: the app does not run one.
     public let skillCommand: [String]?
+    /// Where `oversire vendor install` gets the CLI. Nil: OverSire does not install it.
+    public let release: VendorRelease?
 
     public static let helpFlags: Set<String> = ["--help", "-h"]
 
@@ -33,7 +35,7 @@ public struct VendorCLI: Hashable, Sendable {
                 defaultHost: String? = nil, accountEnv: String? = nil, projectEnv: String? = nil,
                 managedEnv: String? = nil, passEnv: [String] = [], lockedFlags: [String] = [],
                 deniedCommands: [[String]] = [], minVersion: String? = nil,
-                projectFlags: [String] = [], skillCommand: [String]? = nil) {
+                projectFlags: [String] = [], skillCommand: [String]? = nil, release: VendorRelease? = nil) {
         self.binary = binary
         self.tokenEnv = tokenEnv
         self.hostEnv = hostEnv
@@ -48,6 +50,7 @@ public struct VendorCLI: Hashable, Sendable {
         self.minVersion = minVersion
         self.projectFlags = projectFlags
         self.skillCommand = skillCommand
+        self.release = release
     }
 
     /// The leading args that do not start with "-".
@@ -109,6 +112,16 @@ public struct VendorCLI: Hashable, Sendable {
         if let managedEnv { env[managedEnv] = "OverSire" }
         return env
     }
+}
+
+/// The source of a vendor CLI for `oversire vendor install`.
+public enum VendorRelease: Hashable, Sendable {
+    /// An entry of the signed Trebi catalog.
+    case trebiCatalog(entry: String)
+    /// The newest `<tagPrefix><version>` release. `asset` has the slots `{version}` and `{arch}`.
+    case githubRelease(repo: String, tagPrefix: String, asset: String)
+    /// OverSire does not install it. The user installs the formula with Homebrew.
+    case homebrew(formula: String)
 }
 
 public enum VendorRefusal: Hashable, Sendable {

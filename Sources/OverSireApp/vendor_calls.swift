@@ -9,7 +9,7 @@ import OverSireCore
 enum VendorCallError: Error, Equatable {
     case client, noAccountGiven, bothGiven, unknownProject(String), unknownAccount(String), ambiguous([String]),
          noCLI(String), unusable(VendorBinary), noToken(String), badFolder(String), refused(VendorRefusal),
-         unknownVendor(String, known: [String])
+         unknownVendor(String, known: [String]), busy(String, VendorJob), failed(String)
 
     var message: String {
         switch self {
@@ -30,12 +30,17 @@ enum VendorCallError: Error, Equatable {
             guard let last = known.last else { return "OverSire has no vendor \(name)." }
             let list = known.count == 1 ? last : "\(known.dropLast().joined(separator: ", ")) or \(last)"
             return "OverSire has no vendor \(name). Give \(list)."
+        case .busy(let binary, let job):
+            return "\(job == .installing ? "An install" : "A remove") of \(binary) runs. Try again when it ends."
+        case .failed(let m): return m
         }
     }
 }
 
 final class VendorCalls: @unchecked Sendable {
-    static let actions: Set<String> = ["vendor.list", "vendor.run", "vendor.skill"]
+    static let actions: Set<String> = ["vendor.list", "vendor.run", "vendor.skill", "vendor.install", "vendor.remove"]
+    /// Under the 60 s that the daemon waits for an app call. A longer install goes on in the app.
+    static let installWait: Duration = .seconds(50)
     /// Under the 60 s that the daemon waits for an app call.
     static let timeout: Duration = .seconds(45)
     static let maxStdout = 1 << 20
@@ -66,6 +71,10 @@ final class VendorCalls: @unchecked Sendable {
         var vendors: @Sendable () -> [ProviderID] = { [] }
         /// The version that `<path> --version` gives.
         var version: @Sendable (String, VendorCLI) async -> VendorVersion? = { _, _ in nil }
+        /// The OverSire copy of a vendor binary: (vendor, binary name).
+        var own: @Sendable (ProviderID, String) -> String? = { _, _ in nil }
+        /// An install or a remove ended.
+        var changed: @Sendable () -> Void = {}
     }
 
     typealias Resolved = (config: AccountConfig, descriptor: ProviderDescriptor, cli: VendorCLI, project: String?)
@@ -74,16 +83,24 @@ final class VendorCalls: @unchecked Sendable {
     private let runner: any VendorProcessRunning
     private let events: EventDesk
     private let gate = AccountGate()
+    private let installer: (any VendorInstalling)?
+    private let jobs: VendorJobs
+    var installWait = VendorCalls.installWait
 
-    init(world: World, runner: any VendorProcessRunning = VendorProcess(), events: EventDesk) {
+    init(world: World, runner: any VendorProcessRunning = VendorProcess(), installer: (any VendorInstalling)? = nil, events: EventDesk) {
         self.world = world
         self.runner = runner
+        self.installer = installer
+        self.jobs = VendorJobs(changed: world.changed)
         self.events = events
     }
 
     static func live(_ d: AppData) -> VendorCalls {
         let data = WeakData(d)
         let versions = VendorVersions(runner: VendorProcess())
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let installer = VendorInstaller(http: URLSessionTransport(), commands: ProcessRunner(),
+                                        probe: { await versions.version(of: $0, cli: $1) }, userAgent: "OverSire/\(version)")
         let world = World(
             isClient: { ENV.mirrored != nil },
             accounts: { ENV.accounts },
@@ -100,8 +117,10 @@ final class VendorCalls: @unchecked Sendable {
             },
             inherited: { ProcessInfo.processInfo.environment },
             vendors: { vendors(in: ENV.registry) },
-            version: { await versions.version(of: $0, cli: $1) })
-        return VendorCalls(world: world, events: EVENTS)
+            version: { await versions.version(of: $0, cli: $1) },
+            own: { installer.ownCopy($0, binary: $1) },
+            changed: { DispatchQueue.main.async { ChangeBus.shared.post(DataChange(.connection, origin: .event)) } })
+        return VendorCalls(world: world, installer: installer, events: EVENTS)
     }
 
     static func vendors(in registry: ProviderRegistry) -> [ProviderID] {
@@ -158,6 +177,13 @@ final class VendorCalls: @unchecked Sendable {
             case .success(let page):
                 return AppCallResult(id: call.id, status: .ok, summary: page.summary, data: JSONValue(encoding: page.output))
             }
+        case "vendor.install", "vendor.remove":
+            guard let a = try? JSONValue.decode(VendorActionArgs.self, from: call.args), !a.vendor.isEmpty else {
+                return AppCallResult(id: call.id, status: .notAllowed, summary: "Give one vendor id, for example plane.")
+            }
+            let caller = ActionCaller.cli(agent: call.agent)
+            let o = call.action == "vendor.install" ? await install(a.vendor, caller: caller) : await remove(a.vendor, caller: caller)
+            return AppCallResult(id: call.id, status: o.status, summary: o.summary, data: o.change.flatMap { JSONValue(encoding: $0) })
         default:
             return AppCallResult(id: call.id, status: .notAllowed, summary: "The app does not run \(call.action) from the CLI.")
         }
@@ -173,23 +199,31 @@ final class VendorCalls: @unchecked Sendable {
             for await b in g { if let b { all[b.vendor] = b } }
             return all
         }
+        var running: [ProviderID: VendorJob] = [:]
+        for p in providers { running[p] = await jobs.current(p) }
         return providers.sorted(by: { $0.rawValue < $1.rawValue }).compactMap { provider in
             guard let d = world.descriptor(provider), let cli = d.cli, let b = bins[provider] else { return nil }
             return VendorCLIRow(
                 provider: provider.rawValue, vendor: d.displayName, binary: cli.binary, path: b.path,
                 version: b.version?.description, minVersion: cli.minVersion, source: b.source, state: b.state,
                 accounts: accounts.filter { $0.account.provider == provider }.map { Self.name($0.account) }.sorted(),
-                projects: projects.filter { $0.account.provider == provider }.map(\.identifier).sorted())
+                projects: projects.filter { $0.account.provider == provider }.map(\.identifier).sorted(),
+                ownVersion: b.ownVersion?.description, job: running[provider])
         }
     }
 
     /// The binary that vendor.run runs for a vendor, or nil when the vendor has no CLI.
     func binary(_ vendor: ProviderID) async -> VendorBinary? {
         guard let cli = world.descriptor(vendor)?.cli else { return nil }
-        let path = world.find(cli.binary)
+        let ownPath = world.own(vendor, cli.binary)
+        var ownVersion: VendorVersion?
+        if let ownPath { ownVersion = await world.version(ownPath, cli) }
+        let own = VendorBinary(vendor: vendor, cli: cli, path: ownPath, version: ownVersion, source: ownPath == nil ? nil : .oversire)
+        // An ok OverSire copy wins: no probe of the PATH copy.
+        let path = own.state == .ok ? nil : world.find(cli.binary)
         var version: VendorVersion?
         if let path { version = await world.version(path, cli) }
-        return VendorBinary(vendor: vendor, cli: cli, path: path, version: version, source: path == nil ? nil : .path)
+        return VendorBinary.prefer(own: own, path: VendorBinary(vendor: vendor, cli: cli, path: path, version: version, source: path == nil ? nil : .path))
     }
 
     /// A vendor id of the registry, with no case difference.
@@ -353,5 +387,219 @@ extension JSONValue {
     /// Decodes a value of `T` from a JSON value.
     static func decode<T: Decodable>(_ type: T.Type, from v: JSONValue) throws -> T {
         try JSONDecoder().decode(type, from: JSONEncoder().encode(v))
+    }
+}
+
+// MARK: Install and remove (OVERSIRE-582)
+
+struct VendorOutcome: Sendable {
+    let status: AppCallResult.Status
+    let summary: String
+    let change: VendorChange?
+
+    static func refused(_ e: VendorCallError) -> VendorOutcome { VendorOutcome(status: .notAllowed, summary: e.message, change: nil) }
+}
+
+/// One install or remove at a time for each vendor. A second call of the same kind joins the job.
+private actor VendorJobs {
+    private var jobs: [ProviderID: (kind: VendorJob, task: Task<VendorChange, Error>)] = [:]
+    private let changed: @Sendable () -> Void
+
+    init(changed: @escaping @Sendable () -> Void) { self.changed = changed }
+
+    func start(_ v: ProviderID, _ kind: VendorJob, binary: String,
+               _ work: @escaping @Sendable () async throws -> VendorChange) -> Result<Task<VendorChange, Error>, VendorCallError> {
+        if let j = jobs[v] { return j.kind == kind ? .success(j.task) : .failure(.busy(binary, j.kind)) }
+        // The task ends on this actor, after start returns.
+        let task = Task<VendorChange, Error> {
+            do {
+                let c = try await work()
+                await self.end(v)
+                return c
+            } catch {
+                await self.end(v)
+                throw error
+            }
+        }
+        jobs[v] = (kind, task)
+        return .success(task)
+    }
+
+    func current(_ v: ProviderID) -> VendorJob? { jobs[v]?.kind }
+
+    private func end(_ v: ProviderID) {
+        jobs[v] = nil
+        changed()
+    }
+}
+
+/// Resumes once: with the first value of the job or of the timer.
+private final class FirstOf<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<T, Never>?
+
+    init(_ c: CheckedContinuation<T, Never>) { cont = c }
+
+    func resume(_ v: T) {
+        let c: CheckedContinuation<T, Never>? = lock.withLock {
+            defer { cont = nil }
+            return cont
+        }
+        c?.resume(returning: v)
+    }
+}
+
+extension VendorCalls {
+    private enum Target {
+        case ok(ProviderID, VendorCLI, any VendorInstalling)
+        case refused(VendorCallError)
+    }
+
+    private func target(_ name: String, removeText: Bool) -> Target {
+        if world.isClient() { return .refused(.client) }
+        let vendor: ProviderID
+        switch self.vendor(named: name) {
+        case .failure(let e): return .refused(e)
+        case .success(let v): vendor = v
+        }
+        guard let cli = world.descriptor(vendor)?.cli else { return .refused(.noCLI(vendor.rawValue)) }
+        if case .homebrew(let f)? = cli.release {
+            return .refused(.failed(removeText ? "OverSire does not install \(f). Remove it with Homebrew: `brew uninstall \(f)`."
+                                               : VendorInstallError.noInstall(formula: f).description))
+        }
+        guard cli.release != nil, let installer else { return .refused(.failed("OverSire does not install \(cli.binary).")) }
+        return .ok(vendor, cli, installer)
+    }
+
+    /// The release that an install takes. It makes no download of the archive.
+    func offer(_ vendor: ProviderID) async -> Result<VendorOffer, VendorCallError> {
+        switch target(vendor.rawValue, removeText: false) {
+        case .refused(let e): return .failure(e)
+        case .ok(let v, let cli, let installer):
+            do { return .success(try await installer.offer(v, cli)) } catch { return .failure(.failed(Self.text(error))) }
+        }
+    }
+
+    func install(_ name: String, caller: ActionCaller) async -> VendorOutcome {
+        let vendor: ProviderID, cli: VendorCLI, installer: any VendorInstalling
+        switch target(name, removeText: false) {
+        case .refused(let e): return .refused(e)
+        case .ok(let v, let c, let i): (vendor, cli, installer) = (v, c, i)
+        }
+        let started = await jobs.start(vendor, .installing, binary: cli.binary) {
+            try await self.installJob(vendor, cli, installer, caller: caller)
+        }
+        let task: Task<VendorChange, Error>
+        switch started {
+        case .failure(let e): return .refused(e)
+        case .success(let t): task = t
+        }
+        let wait = installWait
+        let first: Result<VendorChange, Error>? = await withCheckedContinuation { c in
+            let once = FirstOf<Result<VendorChange, Error>?>(c)
+            Task {
+                do { once.resume(.success(try await task.value)) } catch { once.resume(.failure(error)) }
+            }
+            Task {
+                try? await Task.sleep(for: wait)
+                once.resume(nil)
+            }
+        }
+        switch first {
+        case nil:
+            return VendorOutcome(status: .failed, summary: "The install of \(cli.binary) goes on in the app. Run `oversire vendor ls` in one minute.", change: nil)
+        case .failure(let e)?:
+            return VendorOutcome(status: .failed, summary: Self.text(e), change: nil)
+        case .success(let c)?:
+            let v = c.version ?? ""
+            let summary: String
+            switch c.action {
+            case .updated: summary = "Updated \(c.binary) from \(c.previous ?? "") to \(v)."
+            case .unchanged: summary = "\(c.binary) \(v) is installed. It is the newest version."
+            default:
+                let dir = c.path.map { NSString(string: ($0 as NSString).deletingLastPathComponent).abbreviatingWithTildeInPath } ?? ""
+                summary = "Installed \(c.binary) \(v) in \(dir)."
+            }
+            return VendorOutcome(status: .ok, summary: summary, change: c)
+        }
+    }
+
+    private func installJob(_ vendor: ProviderID, _ cli: VendorCLI, _ installer: any VendorInstalling, caller: ActionCaller) async throws -> VendorChange {
+        let offer = try await installer.offer(vendor, cli)
+        var previous: VendorVersion?
+        let ownPath = world.own(vendor, cli.binary)
+        if let ownPath { previous = await world.version(ownPath, cli) }
+        if previous == offer.version, let ownPath {
+            return VendorChange(vendor: vendor.rawValue, binary: cli.binary, action: .unchanged, version: offer.version.description,
+                                path: ownPath, release: offer.release)
+        }
+        let path = try await installer.install(vendor, cli, offer)
+        let change = VendorChange(vendor: vendor.rawValue, binary: cli.binary, action: previous == nil ? .installed : .updated,
+                                  version: offer.version.description, previous: previous?.description, path: path, release: offer.release)
+        record(.vendorInstalled, change, caller: caller, sha256: offer.sha256)
+        return change
+    }
+
+    func remove(_ name: String, caller: ActionCaller) async -> VendorOutcome {
+        let vendor: ProviderID, cli: VendorCLI, installer: any VendorInstalling
+        switch target(name, removeText: true) {
+        case .refused(let e): return .refused(e)
+        case .ok(let v, let c, let i): (vendor, cli, installer) = (v, c, i)
+        }
+        let started = await jobs.start(vendor, .removing, binary: cli.binary) {
+            guard self.world.own(vendor, cli.binary) != nil else {
+                return VendorChange(vendor: vendor.rawValue, binary: cli.binary, action: .unchanged)
+            }
+            let gone = try installer.remove(vendor)
+            let change = VendorChange(vendor: vendor.rawValue, binary: cli.binary, action: .removed, version: gone.max()?.description)
+            self.record(.vendorRemoved, change, caller: caller)
+            return change
+        }
+        let change: VendorChange
+        switch started {
+        case .failure(let e): return .refused(e)
+        case .success(let t):
+            do { change = try await t.value } catch { return VendorOutcome(status: .failed, summary: Self.text(error), change: nil) }
+        }
+        guard change.action == .removed else {
+            return VendorOutcome(status: .ok, summary: "OverSire has no copy of \(cli.binary). Nothing to remove.", change: change)
+        }
+        let removed = "Removed the OverSire copy of \(cli.binary)\(change.version.map { " \($0)" } ?? "")."
+        if let now = await binary(vendor), now.state == .ok, let p = now.path {
+            return VendorOutcome(status: .ok, summary: "\(removed) OverSire now uses \(p)\(now.version.map { " \($0)" } ?? "").", change: change)
+        }
+        return VendorOutcome(status: .ok, summary: "\(removed) `vendor run` refuses \(vendor.rawValue) until you install it again.", change: change)
+    }
+
+    /// One vendor.installed or vendor.removed row.
+    private func record(_ kind: Event.Kind, _ change: VendorChange, caller: ActionCaller, sha256: String? = nil) {
+        let actor = caller.actor
+        let v = change.version ?? ""
+        var payload: [String: JSONValue] = ["vendor": .string(change.vendor), "binary": .string(change.binary), "version": .string(v)]
+        if kind == .vendorInstalled {
+            if let p = change.previous { payload["previous"] = .string(p) }
+            if let r = change.release { payload["release"] = .string(r) }
+            if let sha256 { payload["sha256"] = .string(sha256) }
+        }
+        let summary: String
+        switch change.action {
+        case .updated: summary = "Updated \(change.binary) from \(change.previous ?? "") to \(v)"
+        case .removed: summary = "Removed \(change.binary) \(v)"
+        default: summary = "Installed \(change.binary) \(v)"
+        }
+        let events = events
+        DispatchQueue.main.async {
+            events.action(kind, item: nil, verb: "vendor-\(change.action.rawValue):\(change.vendor)", summary, payload: payload,
+                          actorType: actor.type, actor: actor.name, via: actor.via)
+        }
+    }
+
+    static func text(_ error: Error) -> String {
+        switch error {
+        case let e as VendorInstallError: return e.description
+        case let e as InstallError: return e.description
+        case let e as ProviderError: return "\(e)"
+        default: return error.localizedDescription
+        }
     }
 }

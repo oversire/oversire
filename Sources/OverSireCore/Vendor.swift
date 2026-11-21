@@ -1,6 +1,6 @@
 import Foundation
 
-// The wire types of the app calls vendor.run, vendor.list and vendor.skill (app-call.json).
+// The wire types of the app calls vendor.run, vendor.list, vendor.skill, vendor.install and vendor.remove (app-call.json).
 
 /// The args of vendor.run. Set `project` or `account`.
 public struct VendorRunArgs: Codable, Hashable, Sendable {
@@ -53,10 +53,14 @@ public struct VendorCLIRow: Codable, Hashable, Sendable {
     public var state: VendorState?
     public var accounts: [String]
     public var projects: [String]
+    /// The version of the OverSire copy, also when the PATH copy wins.
+    public var ownVersion: String?
+    /// An install or a remove that runs now.
+    public var job: VendorJob?
 
     public init(provider: String, vendor: String, binary: String, path: String? = nil, version: String? = nil,
                 minVersion: String? = nil, source: VendorSource? = nil, state: VendorState? = nil,
-                accounts: [String], projects: [String]) {
+                accounts: [String], projects: [String], ownVersion: String? = nil, job: VendorJob? = nil) {
         self.provider = provider
         self.vendor = vendor
         self.binary = binary
@@ -67,6 +71,48 @@ public struct VendorCLIRow: Codable, Hashable, Sendable {
         self.state = state
         self.accounts = accounts
         self.projects = projects
+        self.ownVersion = ownVersion
+        self.job = job
+    }
+}
+
+/// The args of vendor.install and vendor.remove.
+public struct VendorActionArgs: Codable, Hashable, Sendable {
+    public var vendor: String
+
+    public init(vendor: String) { self.vendor = vendor }
+}
+
+public enum VendorJob: String, Codable, Hashable, Sendable {
+    case installing, removing
+}
+
+/// The data of a vendor.install or vendor.remove result.
+public struct VendorChange: Codable, Hashable, Sendable {
+    public enum Action: String, Codable, Hashable, Sendable {
+        case installed, updated, unchanged, removed
+    }
+
+    public var vendor: String
+    public var binary: String
+    public var action: Action
+    public var version: String?
+    /// The version before an update.
+    public var previous: String?
+    /// The OverSire copy after the change.
+    public var path: String?
+    /// trebi-catalog or github-release.
+    public var release: String?
+
+    public init(vendor: String, binary: String, action: Action, version: String? = nil, previous: String? = nil,
+                path: String? = nil, release: String? = nil) {
+        self.vendor = vendor
+        self.binary = binary
+        self.action = action
+        self.version = version
+        self.previous = previous
+        self.path = path
+        self.release = release
     }
 }
 
