@@ -77,8 +77,13 @@ final class AIRouterTests: XCTestCase {
     }
 
     func testEveryKnownKindHasAPrompt() throws {
-        for kind: AITaskKind in [.ping, .draft, .tidy, .check, .order, .sessionSummary, .sessionEnd, .question, .triage, .failureReason, .digest] {
+        for kind: AITaskKind in [.ping, .draft, .tidy, .order, .sessionSummary, .question, .failureReason, .digest] {
             XCTAssertNoThrow(try kind.prompt(AIInput(text: "x")), "\(kind)")
+        }
+        for kind: AITaskKind in ["check", "sessionEnd", .triage] {
+            XCTAssertThrowsError(try kind.prompt(AIInput(text: "x")), "\(kind)") {
+                XCTAssertEqual($0 as? AIError, .unsupported(kind))
+            }
         }
         XCTAssertThrowsError(try AITaskKind("unknown").prompt(AIInput(text: "x"))) {
             XCTAssertEqual($0 as? AIError, .unsupported("unknown"))

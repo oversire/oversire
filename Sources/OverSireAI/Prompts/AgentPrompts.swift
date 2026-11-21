@@ -1,26 +1,8 @@
 import Foundation
 import OverSireCore
 
-/// Inputs and replies of the agent session prompts: checks, queue order, summaries, questions and intake triage.
+/// Inputs and replies of the agent session prompts: status, queue order, summaries and questions.
 public enum AgentPrompts {
-    // MARK: Check
-
-    /// The facts of a quiet agent. `tail`: the last terminal lines.
-    /// `turn`: the last turn on the screen, without the harness UI. `message`: the last agent message of the runtime.
-    public static func checkInput(key: String, title: String, quietMinutes: Int, phase: String, ticking: Bool, ci: String,
-                                  prOpen: Bool, status: String, message: String, turn: String) -> AIInput {
-        AIInput(text: String(turn.suffix(6000)),
-                context: ["key": key, "title": title, "quiet": "\(quietMinutes)", "phase": phase, "ticking": ticking ? "yes" : "no",
-                          "ci": ci, "prOpen": prOpen ? "yes" : "no", "status": status, "message": String(message.prefix(4000))])
-    }
-
-    // MARK: Session end
-
-    public static func sessionEndInput(key: String, title: String, status: String, message: String, turn: String) -> AIInput {
-        AIInput(text: String(turn.suffix(6000)),
-                context: ["key": key, "title": title, "status": status, "message": String(message.prefix(4000))])
-    }
-
     // MARK: Status
 
     /// The facts of one session for the Status job. A nil `digest` means the screen is the only record.
@@ -109,33 +91,5 @@ public enum AgentPrompts {
     public static func summaryInput(key: String, title: String, body: String) -> AIInput {
         let text = body.count > summaryBudget ? String(body.prefix(summaryBudget)) + "\n[… the rest is left out …]" : body
         return AIInput(text: text, context: ["key": key, "title": title])
-    }
-
-    // MARK: Triage
-
-    /// The template fields: {KEY}, {key}, {title}, {url}, {body} and {vision}. An agent in plan mode runs the prompt,
-    /// so the filled template is the whole user text. {vision} becomes a "Project vision" block, or nothing.
-    public static func triageInput(template: String, key: String, title: String, url: String, body: String,
-                                   vision: String? = nil) -> AIInput {
-        var prompt = template.replacingOccurrences(of: "{KEY}", with: key).replacingOccurrences(of: "{key}", with: key.lowercased())
-            .replacingOccurrences(of: "{title}", with: title).replacingOccurrences(of: "{url}", with: url)
-            .replacingOccurrences(of: "{body}", with: body.isEmpty ? "(no description)" : String(body.prefix(6000)))
-        if prompt.contains("{vision}") {
-            let block = vision.flatMap { $0.isEmpty ? nil : visionBlock($0) } ?? ""
-            prompt = prompt.replacingOccurrences(of: "{vision}", with: block)
-            while prompt.contains("\n\n\n") { prompt = prompt.replacingOccurrences(of: "\n\n\n", with: "\n\n") }
-            prompt = prompt.trimmingCharacters(in: .newlines)
-        }
-        var context = ["prompt": prompt, "key": key, "title": title, "url": url]
-        if let vision, !vision.isEmpty { context["vision"] = vision }
-        return AIInput(text: body, context: context)
-    }
-
-    static func visionBlock(_ vision: String) -> String {
-        """
-        Project vision (the true north of the project):
-        \(vision)
-        If the ticket works against this vision, use the verdict off_vision. Give the one reason as the first finding.
-        """
     }
 }

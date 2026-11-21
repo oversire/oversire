@@ -52,14 +52,7 @@ final class PromptTests: XCTestCase {
         XCTAssertNil(AgentPrompts.parseOrder(#"{"order":["FRITZ-2"]}"#, keys: keys), "a missing key is refused")
     }
 
-    func testCheckAndFailurePrompts() throws {
-        let turn = String(repeating: "x", count: 7000) + "END"
-        let check = try AITaskKind.check.prompt(AgentPrompts.checkInput(key: "A-1", title: "T", quietMinutes: 12, phase: "working", ticking: false,
-                                                                        ci: "none", prOpen: true, status: "unknown", message: "", turn: turn))
-        XCTAssertTrue(check.user.hasPrefix("Item A-1: T\nScreen did not change for 12 min. Agent state: working. Spinner counter moves: no.\n"
-                                           + "CI: none. PR open: yes. Plane status: unknown.\n\nLast turn on the screen:\n"), check.user)
-        XCTAssertTrue(check.user.hasSuffix("xEND"))
-        XCTAssertEqual(check.user.count(where: { $0 == "x" }), 5997, "the end of the turn, 6000 characters")
+    func testFailurePrompt() throws {
         let fail = try AITaskKind.failureReason.prompt(CIPrompts.failureInput(
             workflow: "CI", number: 9, branch: "main", sha: "abcdef12345", commit: "Fix", job: "build", files: [],
             errors: ["error: x"], tail: ["a", "b"]))
@@ -76,27 +69,6 @@ final class PromptTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(text.components(separatedBy: "--- last lines ---\n")[1].count, 1_700, "the tail keeps about half")
         let long = CIPrompts.logText(errors: [], tail: [String(repeating: "y", count: 5_000)])
         XCTAssertTrue(long.hasSuffix(String(repeating: "y", count: 400) + "…"), "a long line is cut")
-    }
-
-    func testTriagePrompt() throws {
-        let p = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: "{KEY} {key} {title} {url} {body}", key: "TREBI-9",
-                                                                       title: "T", url: "u", body: ""))
-        XCTAssertEqual(p.user, "TREBI-9 trebi-9 T u (no description)")
-    }
-
-    func testTriageVision() throws {
-        let t = "Check {KEY}.\n\n{vision}\n\nBody: {body}"
-        let with = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: t, key: "K-1", title: "T", url: "u", body: "b",
-                                                                          vision: "Small and native."))
-        XCTAssertTrue(with.user.contains("Project vision (the true north of the project):\nSmall and native.\n"), with.user)
-        XCTAssertTrue(with.user.contains("off_vision"))
-        let without = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: t, key: "K-1", title: "T", url: "u", body: "b"))
-        XCTAssertEqual(without.user, "Check K-1.\n\nBody: b", "no vision leaves no block and no empty lines")
-        let empty = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: t, key: "K-1", title: "T", url: "u", body: "b", vision: ""))
-        XCTAssertEqual(empty.user, without.user)
-        let custom = try AITaskKind.triage.prompt(AgentPrompts.triageInput(template: "{KEY}\n\n\n{body}", key: "K-1", title: "T", url: "u",
-                                                                            body: "b", vision: "North"))
-        XCTAssertEqual(custom.user, "K-1\n\n\nb", "a custom template without {vision} stays as it is")
     }
 
     func testOrderInputVisionAndBlockers() {

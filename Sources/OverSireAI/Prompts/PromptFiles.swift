@@ -46,32 +46,6 @@ Answers:
 {{text}}
 
 """#,
-        "check": #"""
----
-taskKind: check
-version: 2
-maxTokens: 600
-inputs: text, message, key, title, quiet, phase, ticking, ci, prOpen, status
----
-
-<!-- system -->
-You check a coding agent session whose screen did not change for some time. Decide if its task looks done, looks stuck, or is still working.
-"working" means a long command runs and the agent waits for it correctly, for example a build, a test run or a watch on CI.
-Reply with one JSON object only: {"verdict":"done|stuck|working","evidence":["short fact", "..."],"nudge":"one message to send to a stuck agent, or empty"}
-Use at most 4 facts. Use simple English.
-
-<!-- user -->
-Item {{key}}: {{title}}
-Screen did not change for {{quiet}} min. Agent state: {{phase}}. Spinner counter moves: {{ticking}}.
-CI: {{ci}}. PR open: {{prOpen}}. Plane status: {{status}}.
-{{#if message}}
-Last agent message:
-{{message}}
-{{/if}}
-Last turn on the screen:
-{{text}}
-
-"""#,
         "digest": #"""
 ---
 taskKind: digest
@@ -312,33 +286,6 @@ Event rows, oldest first:
 {{text}}
 
 """#,
-        "sessionEnd": #"""
----
-taskKind: sessionEnd
-version: 1
-maxTokens: 700
-inputs: text, message, key, title, status
----
-
-<!-- system -->
-A coding agent session ended its turn. Decide if the work is done, or if the agent waits for steps that only the user can do.
-A step for the user is, for example, a manual check on a device, a secret to set, an approval, a login or a deploy.
-An offer such as "If you want, I can..." is not a step. A question about a next task is not a step.
-Reply with one JSON object only:
-{"state":"done|blocked","steps":[{"text":"one step","kind":"manual-check|secret|approval|login|deploy|other"}],"followUpAt":"ISO date or empty","blockedBy":["ITEM-KEY"]}
-Use at most 8 steps, in the words of the agent. Use simple English.
-
-<!-- user -->
-Item {{key}}: {{title}}
-Plane status: {{status}}.
-{{#if message}}
-Last agent message:
-{{message}}
-{{/if}}
-Last turn on the screen:
-{{text}}
-
-"""#,
         "sessionSummary": #"""
 ---
 taskKind: sessionSummary
@@ -426,17 +373,6 @@ Extra instructions from the user:
 
 <!-- user -->
 {{text}}
-
-"""#,
-        "triage": #"""
----
-taskKind: triage
-version: 1
-inputs: prompt
----
-
-<!-- user -->
-{{prompt}}
 
 """#,
     ]

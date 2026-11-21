@@ -96,7 +96,6 @@ final class AIClient {
         switch k {
         case .status: return "Status"
         case .itemSummary, .sessionSummary: return "Summary"
-        case .sessionEnd: return "Session end"
         case .failureReason: return "CI cause"
         case .digest: return "CI digest"
         case .order: return "Queue order"
@@ -105,7 +104,6 @@ final class AIClient {
         case .triage: return "Triage"
         case .question: return "Question"
         case .changeSummary: return "PR summary"
-        case .check: return "Check"
         default: return k.rawValue
         }
     }
