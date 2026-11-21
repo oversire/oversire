@@ -67,6 +67,12 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                                      writeBack: PlaneWriteBack(path: UIShots.tmp + "/wb.json", store: projectStore, trackers: ENV))
     let busy = BusyTracker()
     lazy var ciAssist = CIAssist(path: UIShots.tmp + "/ci.json")
+    lazy var ciJobs: CIJobsKeeper = MainActor.assumeIsolated {
+        CIJobsKeeper(reader: NoCIReader(), quota: CIQuota(meter: RateMeter(), monitor: RateLimitMonitor(), live: { false }),
+                     store: URL(fileURLWithPath: UIShots.tmp + "/ci-jobs.json"), touch: { _ in })
+    }
+
+    func ciRefresh(_ repo: String, done: @escaping (Bool) -> Void) { done(true) }
     lazy var questions = QuestionHub(agents: agentIndex, writes: writes)
     lazy var stats: WorkStats = {
         let s = WorkStats(path: UIShots.tmp + "/work-stats.json") { _ in nil }
@@ -2408,4 +2414,12 @@ extension UIShots {
         "\u{1b}[2m╰──────────────────────────────────────────────────────────────────────────────╯\u{1b}[0m",
         "  \u{1b}[2m⏵⏵ accept edits on\u{1b}[0m",
     ].joined(separator: "\r\n")
+}
+
+/// A CI reader with no data, for the fixed screenshots.
+struct NoCIReader: CIDetailReading {
+    func jobs(_ repo: String, runId: String) async -> [Job]? { nil }
+    func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure] { [] }
+    func rawLog(_ repo: String, jobId: String) async -> String? { nil }
+    func checks(_ repo: String, sha: String) async -> [CICheck]? { nil }
 }

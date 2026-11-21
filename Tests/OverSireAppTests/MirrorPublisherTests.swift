@@ -63,6 +63,9 @@ private final class FakeDocs: MirrorDocSource {
     var runs: [MirrorDoc] = []
     var prs: [MirrorDoc] = []
     var activity: [MirrorDoc] = []
+    var ciJobs: [MirrorDoc] = []
+    var ciChecks: [MirrorDoc] = []
+    var ciState = MirrorDoc.make(.ciState, id: "home", Body(n: 0))!
     var catalog = MirrorDoc.make(.catalog, id: "home", Body(n: 0))!
     var settings = MirrorDoc.make(.settings, id: "home", Body(n: 0))!
 
@@ -75,12 +78,18 @@ private final class FakeDocs: MirrorDocSource {
     func runDocs(_ repos: [String]?) -> [MirrorDoc] { runs.filter { repos?.contains($0.id) ?? true } }
     func prDocs(_ repos: [String]?) -> [MirrorDoc] { prs.filter { repos?.contains($0.id) ?? true } }
     func activityDocs(since: Date?) -> [MirrorDoc] { activity }
+    func ciJobDocs(_ repos: [String]?) -> [MirrorDoc] { ciJobs.filter { d in repos?.contains { d.id.hasPrefix($0 + "/") } ?? true } }
+    func ciCheckDocs(_ repos: [String]?) -> [MirrorDoc] { ciChecks.filter { d in repos?.contains { d.id.hasPrefix($0 + "/") } ?? true } }
+    func ciStateDoc() -> MirrorDoc { ciState }
     func catalogDoc() -> MirrorDoc { catalog }
     func settingsDoc() -> MirrorDoc { settings }
 }
 
 @MainActor
 final class MirrorPublisherTests: XCTestCase {
+    /// The answer of `withCI`. Home has `mirror-ci` when true.
+    private var ci = false
+
     private func client(_ h: FakeMirrorHome, _ host: String = "mbp.test") -> DaemonClient {
         DaemonClient(base: URL(string: "http://\(host):7690")!, token: nil, http: h)
     }
@@ -90,7 +99,7 @@ final class MirrorPublisherTests: XCTestCase {
     private func publisher(_ docs: FakeDocs, bus: ChangeBus = ChangeBus(delay: 0, schedule: { _, f in f() }),
                            home: @escaping () async -> DaemonClient?, rehome: @escaping () async -> Void = {}) -> MirrorPublisher {
         MirrorPublisher(home: home, rehome: rehome, docs: docs, bus: bus, appVersion: "1.0", source: "app-1", sourceName: "mbp",
-                        clock: { Date(timeIntervalSince1970: 1_000_000) }, debounce: 3600)
+                        clock: { Date(timeIntervalSince1970: 1_000_000) }, debounce: 3600, withCI: { [unowned self] in self.ci })
     }
 
     private func started(_ docs: FakeDocs, _ h: FakeMirrorHome, bus: ChangeBus = ChangeBus(delay: 0, schedule: { _, f in f() })) async throws -> MirrorPublisher {
@@ -132,14 +141,46 @@ final class MirrorPublisherTests: XCTestCase {
         XCTAssertNil(h.puts.last?.ready, "only the first full send sets ready")
     }
 
-    func testCIKindTouchSendsNothing() async throws {
+    func testNoCIDocsWithoutFeature() async throws {
         let docs = FakeDocs()
+        docs.ciJobs = [doc(.ciJobs, "o/r/1/1")]
+        docs.ciChecks = [doc(.ciChecks, "o/r/abc")]
         let h = FakeMirrorHome()
         let p = try await started(docs, h)
+        XCTAssertFalse(h.puts[0].docs.contains { [.ciJobs, .ciChecks, .ciState].contains($0.kind) })
         let before = h.puts.count
-        p.touched(.ciJobs, ids: nil)
+        p.touched(.ciJobs, ids: ["o/r"])
+        p.touched(.ciState, ids: nil)
         try await p.flush()
         XCTAssertEqual(h.puts.count, before)
+    }
+
+    func testCIDocsSentWithFeature() async throws {
+        ci = true
+        let docs = FakeDocs()
+        docs.ciJobs = [doc(.ciJobs, "o/r/1/1")]
+        docs.ciChecks = [doc(.ciChecks, "o/r/abc")]
+        let h = FakeMirrorHome()
+        let p = try await started(docs, h)
+        XCTAssertEqual(Set(h.puts[0].docs.filter { [.ciJobs, .ciChecks, .ciState].contains($0.kind) }.map(\.kind)), [.ciJobs, .ciChecks, .ciState])
+        docs.ciJobs = [doc(.ciJobs, "o/r/1/1"), doc(.ciJobs, "o/r/2/1")]
+        p.touched(.ciJobs, ids: ["o/r"])
+        try await p.flush()
+        XCTAssertEqual(h.puts.last?.docs.map(\.id), ["o/r/2/1"])
+    }
+
+    func testCIJobsTombstonePerRepo() async throws {
+        ci = true
+        let docs = FakeDocs()
+        docs.ciJobs = [doc(.ciJobs, "o/r/1/1"), doc(.ciJobs, "o/other/9/1")]
+        let h = FakeMirrorHome()
+        let p = try await started(docs, h)
+        docs.ciJobs = [doc(.ciJobs, "o/other/9/1")]
+        p.touched(.ciJobs, ids: ["o/r"])
+        try await p.flush()
+        let put = try XCTUnwrap(h.puts.last)
+        XCTAssertEqual(put.docs.map(\.id), ["o/r/1/1"], "only the touched repo loses docs")
+        XCTAssertEqual(put.docs.first?.deleted, true)
     }
 
     func testRemovedItemSendsTombstone() async throws {

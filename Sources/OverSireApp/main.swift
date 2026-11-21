@@ -94,6 +94,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.relay.update()
             self?.startQuestions()
             self?.agentIndex.poll()
+            self?.syncPublisher()
         }
         h.onSessions = { [weak self] account in
             self?.agentIndex.hint(account: account)
@@ -131,7 +132,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                                      projects: { [weak self] in self?.projectCatalog.resolve(PROJECTS_CFG) ?? [] },
                                      layers: { ENV.capabilities($0) }, trackers: { ENV.trackerIds },
                                      workspaces: { [weak self] in self?.projectCatalog.mirrorWorkspaces() ?? [] },
-                                     repos: { [weak self] in self?.catalog.mirrorRepos() })
+                                     repos: { [weak self] in self?.catalog.mirrorRepos() },
+                                     ciJobs: { [weak self] in self?.ciJobs.docs($0) ?? [] }, ciChecks: { [weak self] in self?.ciChecks.docs($0) ?? [] },
+                                     ciState: { [weak self] in
+                                         self?.ciState.doc() ?? MirrorDoc(kind: .ciState, id: MirrorCodec.ciStateID, v: MirrorCodec.version, at: Date(), body: .object([:]))
+                                     })
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
             let name = relay.group?.selfName ?? ProcessInfo.processInfo.hostName.components(separatedBy: ".").first ?? "Mac"
             return MirrorPublisher(home: { [weak self] in
@@ -140,7 +145,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             }, rehome: { [weak self] in
                 let group = await MainActor.run { self?.relay.group }
                 await group?.rereadAndWait()
-            }, docs: docs, appVersion: version, source: AppEnvironment.appDevice, sourceName: name)
+            }, docs: docs, appVersion: version, source: AppEnvironment.appDevice, sourceName: name,
+               withCI: { [weak self] in self?.homeFeatures.contains(DaemonInfo.mirrorCI) ?? false })
         }
     }
     /// Reads the mirror of the home daemon. Nil in Full mode.
@@ -231,6 +237,26 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         AppWindow(data: self)
     }()
     let rateLimit = RateLimitMonitor()
+    lazy var ciQuota: CIQuota = MainActor.assumeIsolated {
+        let q = CIQuota(meter: RATE_METER, monitor: rateLimit, live: { [weak self] in self?.relay.state == .live })
+        q.onChange { [weak self] in
+            self?.ciState.changed()
+            self?.touchMirror(.ciState, nil)
+        }
+        return q
+    }
+    lazy var ciJobs: CIJobsKeeper = MainActor.assumeIsolated {
+        CIJobsKeeper(reader: REPO_CLIENT, quota: ciQuota, store: URL(fileURLWithPath: CONFIG_DIR).appendingPathComponent("cache/ci-jobs.json"),
+                     touch: { [weak self] repos in self?.touchMirror(.ciJobs, repos) })
+    }
+    lazy var ciChecks: CIChecksKeeper = MainActor.assumeIsolated {
+        CIChecksKeeper(reader: REPO_CLIENT, quota: ciQuota, touch: { [weak self] repos in self?.touchMirror(.ciChecks, repos) })
+    }
+    lazy var ciState: CIStateBook = MainActor.assumeIsolated {
+        CIStateBook(quota: ciQuota, repos: { REPOS }, info: { REPO_CLIENT.ciInfo($0) })
+    }
+    /// The features of the home daemon, from its last `whoami`.
+    var homeFeatures: Set<String> = []
     let updater = Updater()
     lazy var relay: LiveSync = {
         let c = LiveSync(secrets: cloudSetup.secrets)
@@ -360,6 +386,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         updatePolling()
         rateLimit.onChange = { [weak self] in
             ((self?.popover.contentViewController as? TabVC)?.footerView as? Footer)?.showQuota(self?.rateLimit.latest)
+            MainActor.assumeIsolated { self?.ciQuota.evaluate() }
         }
         if MODE == .full { rateLimit.start() }
         updater.onReady = { [weak self] v in
@@ -381,6 +408,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             if MODE == .full {
                 self?.catalog.refreshIfStale()
                 self?.projectCatalog.refreshIfStale()
+                MainActor.assumeIsolated {
+                    self?.ciJobs.prune(now: Date())
+                    self?.ciChecks.prune(now: Date())
+                }
             }
             self?.scanImportGraphs()
         }
@@ -762,6 +793,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     self.lastPRRefresh = Date()
                     self.stats.refreshMerged()
                 }
+                self.observeCI(polled: found.filter { $0.1 != nil }.map(\.0))
                 self.lastFetch = Date()
                 let first = self.firstLoad
                 self.firstLoad = false
@@ -775,6 +807,19 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 pending?()
                 self.runPendingPartial()
             }
+        }
+    }
+
+    /// The CI keepers see the new runs. They fetch only on the app that sends the CI docs to a home that takes them.
+    func observeCI(polled: [String]) {
+        MainActor.assumeIsolated {
+            ciState.polled(polled, at: Date())
+            ciState.changed()
+            touchMirror(.ciState, nil)
+            ciQuota.evaluate()
+            guard MODE == .full, madePublisher?.isRunning == true, homeFeatures.contains(DaemonInfo.mirrorCI) else { return }
+            ciJobs.observe(grouped)
+            ciChecks.observe(runs: grouped, prs: prGrouped)
         }
     }
 
@@ -825,6 +870,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     self.prGrouped = mergeGrouped(self.prGrouped, prRes, order: REPOS)
                     self.touchMirror(.prs, repos)
                 }
+                self.observeCI(polled: fresh.map(\.0))
                 self.lastFetch = Date()
                 self.refreshInFlight = false
                 self.updateIcon()
@@ -1202,15 +1248,22 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func touchMirror(_ kind: MirrorKind, _ ids: [String]?) { MainActor.assumeIsolated { madePublisher?.touched(kind, ids: ids) } }
 
     /// The app that holds the lease sends its data to home. Home must have the mirror feed.
+    /// A change of the `mirror-ci` feature of home starts the publisher again, so that it diffs all docs with the new index.
     func syncPublisher() {
         guard MODE == .full, case .owner? = automations?.role else { MainActor.assumeIsolated { madePublisher?.stop() }; return }
-        guard !MainActor.assumeIsolated({ madePublisher?.isRunning ?? false }) else { return }
         Task { [weak self] in
             let client = await self?.relay.group?.mirrorHome()
             let info = try? await client?.whoami()
             await MainActor.run {
-                guard let self, case .owner? = self.automations?.role else { return }
-                if info?.has(DaemonInfo.mirror) == true { self.publisher.start() }
+                guard let self, let info, case .owner? = self.automations?.role else { return }
+                let features = Set(info.features ?? [])
+                let ciChanged = features.contains(DaemonInfo.mirrorCI) != self.homeFeatures.contains(DaemonInfo.mirrorCI)
+                self.homeFeatures = features
+                let running = self.madePublisher?.isRunning ?? false
+                if running && ciChanged { self.publisher.stop() }
+                guard info.has(DaemonInfo.mirror), !running || ciChanged else { return }
+                self.publisher.start()
+                self.observeCI(polled: [])
             }
         }
     }
@@ -1555,6 +1608,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 }
 
 extension GHActionsBar: RelaySink {
+    func ciRefresh(_ repo: String, done: @escaping (Bool) -> Void) {
+        refreshRepos([repo], includePRs: true, completedRuns: [], done: done)
+    }
+
     func relayRefresh(repos: [String], includePRs: Bool, completedRuns: [(String, String)], done: @escaping (Bool) -> Void) {
         refreshRepos(repos, includePRs: includePRs, completedRuns: completedRuns, done: done)
     }
@@ -1574,8 +1631,14 @@ extension GHActionsBar: RelaySink {
         projectStore.refreshForEvents(events, comments: comments, done: done)
     }
 
+    func relayPolled(_ account: AccountID) {
+        guard ENV.descriptor(account)?.layer == .ci else { return }
+        MainActor.assumeIsolated { ciState.polled(REPOS.filter { repoOwner($0) == account.id }, at: Date()) }
+    }
+
     func relayStateChanged() {
         updatePolling()
+        MainActor.assumeIsolated { ciQuota.evaluate() }
         if relay.state == .live { cloudSetup.refreshHookedRepos { [weak self] in self?.relay.update() } }
     }
 }

@@ -65,6 +65,16 @@ final class TestAppData: AppData {
     var logs: LogStore? { nil }
     var caps: Set<Capability> = []
     lazy var actions = AppActionCatalog(data: self)
+    let ciReader = FakeCIReader()
+    lazy var ciJobs: CIJobsKeeper = MainActor.assumeIsolated {
+        CIJobsKeeper(reader: ciReader, quota: CITestQuota.make(), store: URL(fileURLWithPath: tmp + "/ci-jobs.json"), touch: { _ in }, saveDelay: 0)
+    }
+    /// The repos that `ciRefresh` got.
+    var ciRefreshed: [String] = []
+    func ciRefresh(_ repo: String, done: @escaping (Bool) -> Void) {
+        ciRefreshed.append(repo)
+        done(true)
+    }
     var assistant: AssistantController? { nil }
 
     init(trackers: TrackerDirectory? = nil) {

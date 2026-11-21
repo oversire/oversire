@@ -14,6 +14,9 @@ final class AppMirrorDocs: MirrorDocSource {
     private let settings: () -> HomeSettings
     private let workspaces: () -> [CatalogWorkspace]
     private let repos: () -> CatalogRepos?
+    private let ciJobs: ([String]?) -> [MirrorDoc]
+    private let ciChecks: ([String]?) -> [MirrorDoc]
+    private let ciState: () -> MirrorDoc
     // An item that did not change keeps its doc, so a change of one project does not encode all items again.
     private var items: [String: (item: Item, doc: MirrorDoc)] = [:]
     private var activity: [String: MirrorDoc] = [:]
@@ -21,7 +24,9 @@ final class AppMirrorDocs: MirrorDocSource {
     init(store: ProjectStore, runs: @escaping () -> [(String, [Run])], prs: @escaping () -> [(String, [ChangeRequest])],
          projects: @escaping () -> [ProjectSummary], layers: @escaping (Layer) -> Set<Capability>, trackers: @escaping () -> [String],
          settings: @escaping () -> HomeSettings = { homeSettings(from: currentConfig(), accounts: AccountSummary.list(ENV)) },
-         workspaces: @escaping () -> [CatalogWorkspace] = { [] }, repos: @escaping () -> CatalogRepos? = { nil }) {
+         workspaces: @escaping () -> [CatalogWorkspace] = { [] }, repos: @escaping () -> CatalogRepos? = { nil },
+         ciJobs: @escaping ([String]?) -> [MirrorDoc] = { _ in [] }, ciChecks: @escaping ([String]?) -> [MirrorDoc] = { _ in [] },
+         ciState: @escaping () -> MirrorDoc = { MirrorDoc(kind: .ciState, id: MirrorCodec.ciStateID, v: MirrorCodec.version, at: Date(), body: .object([:])) }) {
         self.store = store
         self.runs = runs
         self.prs = prs
@@ -31,6 +36,9 @@ final class AppMirrorDocs: MirrorDocSource {
         self.settings = settings
         self.workspaces = workspaces
         self.repos = repos
+        self.ciJobs = ciJobs
+        self.ciChecks = ciChecks
+        self.ciState = ciState
     }
 
     func projectDocs(_ keys: [String]?) -> [MirrorDoc] {
@@ -103,6 +111,10 @@ final class AppMirrorDocs: MirrorDocSource {
         MirrorDoc.make(.settings, id: MirrorCodec.settingsID, settings())
             ?? MirrorDoc(kind: .settings, id: MirrorCodec.settingsID, v: MirrorCodec.version, at: Date(), body: .object([:]))
     }
+
+    func ciJobDocs(_ repos: [String]?) -> [MirrorDoc] { ciJobs(repos) }
+    func ciCheckDocs(_ repos: [String]?) -> [MirrorDoc] { ciChecks(repos) }
+    func ciStateDoc() -> MirrorDoc { ciState() }
 
     private static func sorted(_ s: Set<Capability>) -> [Capability] { s.sorted { $0.rawValue < $1.rawValue } }
 }

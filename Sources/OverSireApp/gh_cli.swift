@@ -5,7 +5,10 @@ import OverSireCore
 
 // The gh CLI and the GitHub client for the rate limit.
 let GH = GitHubClient.defaultPath
-let GITHUB = GitHubClient(commands: ProcessRunner(environment: GitHubClient.environment), http: URLSessionTransport.noRedirects, gh: GH)
+/// The rate budgets of all GitHub clients. The CI keepers read it.
+let RATE_METER = RateMeter()
+let GITHUB = GitHubClient(commands: ProcessRunner(environment: GitHubClient.environment), http: URLSessionTransport.noRedirects, gh: GH,
+                          meter: RATE_METER)
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +47,14 @@ protocol RepoAccounts: AnyObject {
 protocol RepoAddressing: Provider { func repoRef(_ path: String) -> RepoRef }
 protocol KnownJobFailures: CIProvider { func failures(_ r: RunRef, jobs: [Job]) async throws -> [Failure] }
 protocol RawLogReading: CIProvider { func rawLog(_ j: JobRef) async throws -> String }
+
+/// The CI reads of the keepers. RepoClient conforms.
+protocol CIDetailReading: Sendable {
+    func jobs(_ repo: String, runId: String) async -> [Job]?
+    func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure]
+    func rawLog(_ repo: String, jobId: String) async -> String?
+    func checks(_ repo: String, sha: String) async -> [CICheck]?
+}
 
 /// CI and pull request calls for repos named "owner/name". A failed list call sets lastFetchError.
 struct RepoClient {
@@ -143,6 +154,23 @@ struct RepoClient {
         }).get()
     }
 
+    /// The status checks of a commit that are not runs of the CI provider. nil on a client, or when the call fails.
+    func checks(_ repo: String, sha: String) async -> [CICheck]? {
+        guard Self.home == nil, let h = (try? host(repo)) as? any CommitChecking, h.capabilities.contains(.commitChecks) else { return nil }
+        return try? await h.checks(Self.repoRef(h, repo), sha: sha)
+    }
+
+    func pipelines(_ repo: String) async throws -> [Pipeline] {
+        let c = try ci(repo)
+        return try await c.pipelines(Self.repoRef(c, repo))
+    }
+
+    /// The display name of the CI provider of the repo, and its capabilities. nil on a client.
+    func ciInfo(_ repo: String) -> (name: String, capabilities: Set<Capability>)? {
+        guard Self.home == nil, let c = try? ci(repo) else { return nil }
+        return (ENV.descriptor(c.account)?.displayName ?? c.account.provider.rawValue, c.capabilities)
+    }
+
     /// nil on success, else the error text.
     func perform(_ a: RunAction, repo: String, id: String) async -> String? {
         if case .failure(let e) = await Result(awaiting: { let c = try ci(repo); try await c.perform(a, on: Self.runRef(c, repo, id: id)) }) {
@@ -203,6 +231,8 @@ struct RepoClient {
         }
     }
 }
+
+extension RepoClient: CIDetailReading {}
 
 /// A variable so a test can give it fake accounts.
 var REPO_CLIENT = RepoClient(accounts: ENV)

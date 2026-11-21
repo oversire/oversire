@@ -19,6 +19,10 @@ protocol MirrorDocSource {
     func activityDocs(since: Date?) -> [MirrorDoc]
     func catalogDoc() -> MirrorDoc
     func settingsDoc() -> MirrorDoc
+    /// The `ciJobs` docs of the repos. nil: all repos.
+    func ciJobDocs(_ repos: [String]?) -> [MirrorDoc]
+    func ciCheckDocs(_ repos: [String]?) -> [MirrorDoc]
+    func ciStateDoc() -> MirrorDoc
 }
 
 extension MirrorDoc {
@@ -51,8 +55,14 @@ final class MirrorPublisher {
         var activity = false
         var catalog = false
         var settings = false
+        var ciJobs = Set<String>(), allCIJobs = false
+        var ciChecks = Set<String>(), allCIChecks = false
+        var ciState = false
 
-        var isEmpty: Bool { !allProjects && projects.isEmpty && !allRuns && runs.isEmpty && !allPRs && prs.isEmpty && !activity && !catalog && !settings }
+        var isEmpty: Bool {
+            !allProjects && projects.isEmpty && !allRuns && runs.isEmpty && !allPRs && prs.isEmpty && !activity && !catalog && !settings
+                && !allCIJobs && ciJobs.isEmpty && !allCIChecks && ciChecks.isEmpty && !ciState
+        }
 
         mutating func merge(_ o: Pending) {
             projects.formUnion(o.projects); allProjects = allProjects || o.allProjects
@@ -61,6 +71,9 @@ final class MirrorPublisher {
             activity = activity || o.activity
             catalog = catalog || o.catalog
             settings = settings || o.settings
+            ciJobs.formUnion(o.ciJobs); allCIJobs = allCIJobs || o.allCIJobs
+            ciChecks.formUnion(o.ciChecks); allCIChecks = allCIChecks || o.allCIChecks
+            ciState = ciState || o.ciState
         }
     }
 
@@ -85,6 +98,7 @@ final class MirrorPublisher {
     private let sourceName: String
     private let clock: () -> Date
     private let debounce: TimeInterval
+    private let withCI: () -> Bool
 
     private var observation: ChangeBus.Observation?
     private var running = false
@@ -100,7 +114,8 @@ final class MirrorPublisher {
     private var failures = 0
 
     init(home: @escaping () async -> DaemonClient?, rehome: @escaping () async -> Void, docs: MirrorDocSource, bus: ChangeBus = .shared,
-         appVersion: String, source: String, sourceName: String, clock: @escaping () -> Date = Date.init, debounce: TimeInterval = 2) {
+         appVersion: String, source: String, sourceName: String, clock: @escaping () -> Date = Date.init, debounce: TimeInterval = 2,
+         withCI: @escaping () -> Bool) {
         self.home = home
         self.rehome = rehome
         self.docs = docs
@@ -110,6 +125,7 @@ final class MirrorPublisher {
         self.sourceName = sourceName
         self.clock = clock
         self.debounce = debounce
+        self.withCI = withCI
     }
 
     var isRunning: Bool { running }
@@ -131,7 +147,7 @@ final class MirrorPublisher {
         failures = 0
     }
 
-    /// nil ids: all ids of the kind. A `project` or `item` id is a store key. A `runs` or `prs` id is a repo.
+    /// nil ids: all ids of the kind. A `project` or `item` id is a store key. A `runs`, `prs`, `ciJobs` or `ciChecks` id is a repo.
     func touched(_ kind: MirrorKind, ids: [String]?) {
         guard running else { return }
         switch kind {
@@ -146,7 +162,11 @@ final class MirrorPublisher {
             pending.catalog = true
             pending.settings = true   // the account summaries follow the accounts
         case .settings: pending.settings = true
-        case .ciJobs, .ciChecks, .ciState: break
+        case .ciJobs:
+            if let ids { pending.ciJobs.formUnion(ids) } else { pending.allCIJobs = true }
+        case .ciChecks:
+            if let ids { pending.ciChecks.formUnion(ids) } else { pending.allCIChecks = true }
+        case .ciState: pending.ciState = true
         }
         schedule(after: debounce)
     }
@@ -224,13 +244,15 @@ final class MirrorPublisher {
 
     /// The first send to a home, a new epoch or a new home. Diffs all docs with the index, then sets `ready`.
     private func sendAll(_ client: DaemonClient) async throws {
-        let index = try await client.mirrorIndex()
+        let ci = withCI()
+        let index = try await client.mirrorIndex(withCI: ci)
         epoch = index.epoch
         known = Dictionary(index.docs.map { (Self.key($0.kind, $0.id), Entry(kind: $0.kind, id: $0.id, hash: $0.hash)) },
                            uniquingKeysWith: { a, _ in a })
         base = client.base
         pending = Pending()
-        let wanted = docs.projectDocs(nil) + docs.runDocs(nil) + docs.prDocs(nil) + docs.activityDocs(since: cutoff()) + [docs.catalogDoc(), docs.settingsDoc()]
+        var wanted = docs.projectDocs(nil) + docs.runDocs(nil) + docs.prDocs(nil) + docs.activityDocs(since: cutoff()) + [docs.catalogDoc(), docs.settingsDoc()]
+        if ci { wanted += docs.ciJobDocs(nil) + docs.ciCheckDocs(nil) + [docs.ciStateDoc()] }
         needsAll = true
         try await send(client, wanted: wanted, inScope: { _ in true }, ready: true)
         needsAll = false
@@ -273,6 +295,20 @@ final class MirrorPublisher {
             if p.settings {
                 wanted.append(docs.settingsDoc())
                 scopes.append { $0.kind == .settings }
+            }
+            if withCI() {
+                if p.allCIJobs || !p.ciJobs.isEmpty {
+                    wanted += docs.ciJobDocs(p.allCIJobs ? nil : Array(p.ciJobs))
+                    scopes.append { e in e.kind == .ciJobs && (p.allCIJobs || p.ciJobs.contains { e.id.hasPrefix($0 + "/") }) }
+                }
+                if p.allCIChecks || !p.ciChecks.isEmpty {
+                    wanted += docs.ciCheckDocs(p.allCIChecks ? nil : Array(p.ciChecks))
+                    scopes.append { e in e.kind == .ciChecks && (p.allCIChecks || p.ciChecks.contains { e.id.hasPrefix($0 + "/") }) }
+                }
+                if p.ciState {
+                    wanted.append(docs.ciStateDoc())
+                    scopes.append { $0.kind == .ciState }
+                }
             }
             try await send(client, wanted: wanted, inScope: { e in scopes.contains { $0(e) } }, ready: false)
         } catch {

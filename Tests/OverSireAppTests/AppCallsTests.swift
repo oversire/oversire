@@ -34,6 +34,19 @@ final class AppCallsTests: XCTestCase {
         for id in ["item.closeSubItems", "intake.delete", "pr.merge"] { XCTAssertFalse(AppCalls.allowed.contains(id), id) }
     }
 
+    func testCIReadsAllowed() async {
+        for id in ["ci.log", "ci.jobs", "ci.workflows", "ci.refresh"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        XCTAssertFalse(AppCalls.allowed.contains("ci.rerun"))
+        let posted = Posted()
+        let read = ActionSpec(id: "ci.log", title: "Log", help: "", kind: .read) { _ in .ok(summary: "log") }
+        let write = ActionSpec(id: "ci.rerun", title: "Rerun", help: "", kind: .change) { _ in .ok(summary: "ran") }
+        let calls = AppCalls(catalog: ActionList([read, write])) { await posted.add($0) }
+        await calls.handle(AppCall(id: "a", action: "ci.log", args: .object([:])))
+        await calls.handle(AppCall(id: "b", action: "ci.rerun", args: .object([:])))
+        let r = await posted.results
+        XCTAssertEqual(r.map(\.status), [.ok, .notAllowed])
+    }
+
     func testRunsItemCommentForCli() async throws {
         let rig = try await EpicRig()
         let item = rig.items[0]

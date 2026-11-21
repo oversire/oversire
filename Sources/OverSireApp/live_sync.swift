@@ -17,6 +17,12 @@ protocol RelaySink: AnyObject {
     func relayStateChanged()
     /// A live feed of a tracker account went up or down. It does no refresh.
     func relayFeedChanged(_ account: AccountID, live: Bool)
+    /// A poll of the account worked, also when nothing changed.
+    func relayPolled(_ account: AccountID)
+}
+
+extension RelaySink {
+    func relayPolled(_ account: AccountID) {}
 }
 
 // Splits a batch of events into a repo refresh and a project refresh.
@@ -189,8 +195,12 @@ final class LiveSync {
         let p = currentPlan()
         plan = p
         let polled = p.polled
-        let onPolled: @Sendable (AccountID) -> Void = { _ in
-            DispatchQueue.main.async { [weak self] in if self?.generation == gen { self?.lastPoll = Date() } }
+        let onPolled: @Sendable (AccountID) -> Void = { account in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == gen else { return }
+                self.lastPoll = Date()
+                self.sink?.relayPolled(account)
+            }
         }
         let online: @Sendable () -> Bool = { NetworkPath.shared.isOnline }
         let kinds = Self.sourceKinds(mode: MODE, cloud: p.cloud, fallback: !p.fallback.isEmpty)

@@ -25,6 +25,9 @@ protocol AppData: AnyObject {
     var sessions: SessionNotes { get }
     var questions: QuestionHub { get }
     var ciAssist: CIAssist { get }
+    var ciJobs: CIJobsKeeper { get }
+    /// Fetches the runs and the PRs of one repo once. `done` gets false when the fetch failed.
+    func ciRefresh(_ repo: String, done: @escaping (Bool) -> Void)
     var itemSummaries: ItemSummaries { get }
     var stats: WorkStats { get }
     var busy: BusyTracker { get }
