@@ -71,7 +71,8 @@ A vendor can have a command line tool. `oversire vendor run` then runs it for th
 cli: VendorCLI(binary: "linear-cli", tokenEnv: "LINEAR_API_KEY", hostEnv: "LINEAR_HOST", hostField: "host",
                defaultHost: "https://api.linear.app", accountEnv: "LINEAR_TEAM", projectEnv: "LINEAR_PROJECT",
                managedEnv: "LINEAR_MANAGED_BY", lockedFlags: ["--api-key", "--host"],
-               deniedCommands: [["auth", "login"], ["listen"]], minVersion: "1.4.0")
+               deniedCommands: [["auth", "login"], ["listen"]], minVersion: "1.4.0",
+               projectFlags: ["--project", "-p"], skillCommand: ["skill"])
 ```
 
 - `binary` is a name, never a path. The app looks in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
@@ -83,7 +84,10 @@ cli: VendorCLI(binary: "linear-cli", tokenEnv: "LINEAR_API_KEY", hostEnv: "LINEA
 - `passEnv` names the variables that the app copies from its own environment. The child gets no other variable.
 - `lockedFlags` are the flags that the app sets itself (the host and the token). The app refuses a call that has one of them. Only an argument that starts with `-` is compared.
 - `deniedCommands` are the leading command words that the app refuses: login, config changes, and commands that never end.
-- The app refuses args that start with a flag. The vendor command must come first.
+- `projectFlags` are the flags that the app sets from `--project`. The app refuses them only in a call with `--project`. A call with `--account` can give them.
+- `skillCommand` is the args that print the agent reference of the CLI, for example `["skill"]`. A `skill` command prints the embedded SKILL.md. With `managedEnv` set, it leaves out login, token and config. Nil means that the app does not run one (`gh skill` is a different command).
+- `oversire vendor skill <provider id>` shows a header from the descriptor and that text. The app runs the skill command with the managed value only: no token, host or account. When the command fails, the text points to the help.
+- The app refuses args that start with a flag, except `--help` and `-h`. The vendor command must come first. The args can also start with `help`.
 - The app runs one call at a time for each account, with no TTY, a time limit of 45 s and an output limit of 1 MiB. It writes one `vendor.call` event for each run, with the command words and the exit code, never the args.
 
 ## 3. Implement the base protocol

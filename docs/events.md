@@ -57,6 +57,8 @@ The CI writes of the app (`ci.rerun`, `ci.cancel`, `ci.dispatch`, `ci.approve`) 
 
 `oversire vendor run` writes one `vendor.call` row for each run of a vendor CLI. The summary has the CLI name, the subcommand words and the exit code, never the args. The app writes no row for a refused call.
 
+`oversire vendor skill` is a read. It writes no row.
+
 A write from an `oversire` command (an app call) names the agent as the actor. This holds for `item.state_changed`, `item.link_added`, `item.attachment_added`, `item.areas_set`, the triage rows `intake.accepted`, `intake.declined`, `intake.snoozed`, `intake.duplicated`, `intake.deleted` and `intake.updated`, and the poll rows `item.created`, `item.updated`, `comment.created` and `intake.created` of that write. The app marks the item until the refresh after the write ends.
 
 ## The path

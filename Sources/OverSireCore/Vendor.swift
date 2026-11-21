@@ -1,6 +1,6 @@
 import Foundation
 
-// The wire types of the app calls vendor.run and vendor.list (app-call.json).
+// The wire types of the app calls vendor.run, vendor.list and vendor.skill (app-call.json).
 
 /// The args of vendor.run. Set `project` or `account`.
 public struct VendorRunArgs: Codable, Hashable, Sendable {
@@ -67,5 +67,34 @@ public struct VendorCLIRow: Codable, Hashable, Sendable {
         self.state = state
         self.accounts = accounts
         self.projects = projects
+    }
+}
+
+/// The args of vendor.skill. `vendor` is a provider id: plane, bigtimer or github.
+public struct VendorSkillArgs: Codable, Hashable, Sendable {
+    public var vendor: String
+
+    public init(vendor: String) { self.vendor = vendor }
+}
+
+/// Where the reference part of vendor.skill comes from.
+public enum VendorSkillReference: String, Codable, Hashable, Sendable {
+    case skill, help, notInstalled
+}
+
+/// The data of a vendor.skill result.
+public struct VendorSkillOutput: Codable, Hashable, Sendable {
+    public var vendor: String
+    public var binary: String
+    public var path: String?
+    public var reference: VendorSkillReference
+    public var markdown: String
+
+    public init(vendor: String, binary: String, path: String? = nil, reference: VendorSkillReference, markdown: String) {
+        self.vendor = vendor
+        self.binary = binary
+        self.path = path
+        self.reference = reference
+        self.markdown = markdown
     }
 }

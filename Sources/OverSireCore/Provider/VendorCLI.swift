@@ -22,11 +22,18 @@ public struct VendorCLI: Hashable, Sendable {
     public let deniedCommands: [[String]]
     /// The lowest version that the app runs. Nil: the app runs any version.
     public let minVersion: String?
+    /// The flags that the app sets when the call has `--project`.
+    public let projectFlags: [String]
+    /// The args that print the agent reference of the CLI. Nil: the app does not run one.
+    public let skillCommand: [String]?
+
+    public static let helpFlags: Set<String> = ["--help", "-h"]
 
     public init(binary: String, tokenEnv: String? = nil, hostEnv: String? = nil, hostField: String? = nil,
                 defaultHost: String? = nil, accountEnv: String? = nil, projectEnv: String? = nil,
                 managedEnv: String? = nil, passEnv: [String] = [], lockedFlags: [String] = [],
-                deniedCommands: [[String]] = [], minVersion: String? = nil) {
+                deniedCommands: [[String]] = [], minVersion: String? = nil,
+                projectFlags: [String] = [], skillCommand: [String]? = nil) {
         self.binary = binary
         self.tokenEnv = tokenEnv
         self.hostEnv = hostEnv
@@ -39,6 +46,8 @@ public struct VendorCLI: Hashable, Sendable {
         self.lockedFlags = lockedFlags
         self.deniedCommands = deniedCommands
         self.minVersion = minVersion
+        self.projectFlags = projectFlags
+        self.skillCommand = skillCommand
     }
 
     /// The leading args that do not start with "-".
@@ -48,16 +57,21 @@ public struct VendorCLI: Hashable, Sendable {
 
     /// The words of the event summary: the leading command words of only lower-case letters and hyphens, at most 3.
     public static func summaryWords(_ args: [String]) -> [String] {
-        Array(command(args).prefix { w in w.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || $0 == "-" } }.prefix(3))
+        if let first = args.first, helpFlags.contains(first) { return ["help"] }
+        return Array(command(args).prefix { w in w.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || $0 == "-" } }.prefix(3))
     }
 
     /// Why the app does not run these args, or nil.
-    public func refusal(_ args: [String]) -> VendorRefusal? {
+    /// `project`: the call has `--project`. The app then refuses `projectFlags` too.
+    public func refusal(_ args: [String], project: Bool) -> VendorRefusal? {
         guard let first = args.first else { return .noArgs }
-        if first.hasPrefix("-") { return .flagFirst }
+        if first.hasPrefix("-") && !Self.helpFlags.contains(first) { return .flagFirst }
         let locked = Set(lockedFlags.map(Self.flagName))
-        for a in args where a.hasPrefix("-") && locked.contains(Self.flagName(a)) {
-            return .lockedFlag(String(a.prefix { $0 != "=" }))
+        let projectOnly = project ? Set(projectFlags.map(Self.flagName)) : []
+        for a in args where a.hasPrefix("-") {
+            let name = Self.flagName(a), flag = String(a.prefix { $0 != "=" })
+            if locked.contains(name) { return .lockedFlag(flag) }
+            if projectOnly.contains(name) { return .projectFlag(flag) }
         }
         let words = Self.command(args).map { $0.lowercased() }
         for d in deniedCommands where words.starts(with: d) { return .deniedCommand(d.joined(separator: " ")) }
@@ -88,6 +102,13 @@ public struct VendorCLI: Hashable, Sendable {
         if let tokenEnv, let token, !token.isEmpty { env[tokenEnv] = token }
         return env
     }
+
+    /// The environment of the skill command: `base` and the managed value. No token, host or account.
+    public func skillEnvironment(base: [String: String]) -> [String: String] {
+        var env = base
+        if let managedEnv { env[managedEnv] = "OverSire" }
+        return env
+    }
 }
 
 public enum VendorRefusal: Hashable, Sendable {
@@ -97,6 +118,8 @@ public enum VendorRefusal: Hashable, Sendable {
     case lockedFlag(String)
     /// The denied words, joined with a space.
     case deniedCommand(String)
+    /// A flag of `projectFlags` in a call with `--project`.
+    case projectFlag(String)
 
     public var message: String {
         switch self {
@@ -104,6 +127,7 @@ public enum VendorRefusal: Hashable, Sendable {
         case .flagFirst: return "Put the command first, then its flags."
         case .lockedFlag(let f): return "OverSire sets \(f). Do not give it."
         case .deniedCommand(let c): return "OverSire does not run the command \(c)."
+        case .projectFlag(let f): return "OverSire sets \(f) from --project. Do not give it."
         }
     }
 }

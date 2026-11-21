@@ -15,7 +15,7 @@ extension BigTimerTracker {
                        managedEnv: "BIGTIMER_MANAGED_BY", lockedFlags: ["--server", "-s", "--token", "-t"],
                        deniedCommands: [["auth", "login"], ["auth", "logout"], ["auth", "join"], ["auth", "rotate"],
                                         ["token", "create"], ["sync", "stream"]],
-                       minVersion: "1.0.12")
+                       minVersion: "1.0.12", skillCommand: ["skill"])
     ) { config, env in
         guard let raw = config.values["server"]?.trimmingCharacters(in: .whitespaces),
               let id = BigTimerTracker.account(forServer: raw),

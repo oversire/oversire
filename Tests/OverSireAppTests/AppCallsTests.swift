@@ -154,8 +154,8 @@ final class AppCallsTests: XCTestCase {
     }
 
     func testAllowsVendorActions() {
-        for id in ["vendor.list", "vendor.run"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
-        XCTAssertEqual(VendorCalls.actions, ["vendor.list", "vendor.run"])
+        for id in ["vendor.list", "vendor.run", "vendor.skill"] { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
+        XCTAssertEqual(VendorCalls.actions, ["vendor.list", "vendor.run", "vendor.skill"])
     }
 
     func testVendorActionsSkipTheCatalog() async {

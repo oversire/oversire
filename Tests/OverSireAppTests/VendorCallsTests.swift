@@ -42,12 +42,15 @@ final class VendorCallsTests: XCTestCase {
 
     func world(client: Bool = false, accounts: [AccountConfig]? = nil, token: String? = "plane_api_0123456789abcdef",
                installed: Set<String> = ["plane-cli", "gh"],
-               versions: [String: String] = ["plane-cli": "0.2.2", "gh": "2.102.0"]) -> VendorCalls.World {
+               versions: [String: String] = ["plane-cli": "0.2.2", "gh": "2.102.0", "big-timer-cli": "1.0.12"],
+               projects: [(identifier: String, account: AccountID)]? = nil) -> VendorCalls.World {
         let accounts = accounts ?? [plane, gh, actions]
+        let projects = projects ?? [(identifier: "OVERSIRE", account: AccountID(provider: "plane", id: "ocral")),
+                                    (identifier: "SLING", account: AccountID(provider: "plane", id: "ocral"))]
         let registry = registry
         return VendorCalls.World(
             isClient: { client }, accounts: { accounts }, descriptor: { registry.descriptor($0) }, token: { _ in token },
-            projects: { [(identifier: "OVERSIRE", account: AccountID(provider: "plane", id: "ocral")), (identifier: "SLING", account: AccountID(provider: "plane", id: "ocral"))] },
+            projects: { projects },
             find: { installed.contains($0) ? "/usr/local/bin/\($0)" : nil },
             inherited: { ["GH_CONFIG_DIR": "/cfg", "AWS_SECRET": "no"] },
             vendors: { VendorCalls.vendors(in: registry) },
@@ -389,6 +392,205 @@ final class VendorCallsTests: XCTestCase {
         guard case .failure(let e) = calls.vendor(named: "linear") else { return XCTFail("linear is no vendor") }
         XCTAssertEqual(e, .unknownVendor("linear", known: ["bigtimer", "github", "plane"]))
         XCTAssertEqual(e.message, "OverSire has no vendor linear. Give bigtimer, github or plane.")
+    }
+
+    // MARK: vendor.skill
+
+    static let planeHeader = """
+        # Plane (plane): plane-cli through OverSire
+
+        The OverSire app on this Mac runs plane-cli for you. Do not run plane-cli directly: it has no token outside OverSire.
+
+        - Run: `oversire vendor run --project <PROJECT> -- <command> [flags]`, or `oversire vendor run --account <ACCOUNT> -- <command> [flags]`.
+        - Put the command first, then its flags. Help: `oversire vendor run --project <PROJECT> -- help <command>`, or `-- <command> --help`.
+        - The app sets: PLANE_API_KEY (the token of the account), PLANE_HOST (the host), PLANE_WORKSPACE (the workspace), PLANE_PROJECT (the project of --project), PLANE_MANAGED_BY=OverSire.
+        - The app refuses these flags: --api-key, -k, --host, --workspace, -w. With --project, also: --project, -p.
+        - The app refuses these commands: auth login, auth logout, auth workspace add, auth workspace remove, config set, listen, serve.
+        - Accounts: plane:ocral. Projects: OVERSIRE, SLING.
+        - plane-cli 0.2.2: PATH copy at /usr/local/bin/plane-cli.
+        - The app sends no stdin and gives no TTY. The output has at most 1 MB. The command has 45 s.
+
+        """
+
+    func skillCall(_ vendor: String) -> AppCall {
+        AppCall(id: "s1", action: "vendor.skill", args: .object(["vendor": .string(vendor)]), agent: "claude s1")
+    }
+
+    func skillOutput(_ r: AppCallResult) throws -> VendorSkillOutput {
+        try JSONValue.decode(VendorSkillOutput.self, from: XCTUnwrap(r.data))
+    }
+
+    func testSkillPlaneHeaderAndText() async throws {
+        let runner = FakeRunner()
+        runner.exit = VendorExit(status: 0, stdout: Data("# plane-cli\nUse wi list.\n".utf8), stderr: Data(), truncated: false, timedOut: false, ms: 20)
+        let (calls, _, o) = rig(nil, runner)
+        let r = await calls.handle(skillCall("plane"))
+        XCTAssertEqual(r.status, .ok)
+        XCTAssertEqual(r.summary, "The skill of plane-cli.")
+        let out = try skillOutput(r)
+        XCTAssertEqual(out.reference, .skill)
+        XCTAssertEqual(out.path, "/usr/local/bin/plane-cli")
+        XCTAssertEqual(out.markdown, Self.planeHeader + "\n## plane-cli reference\n\n# plane-cli\nUse wi list.\n")
+        XCTAssertEqual(runner.launches.count, 1)
+        let l = try XCTUnwrap(runner.launches.first)
+        XCTAssertEqual(l.args, ["skill"])
+        var env = VendorCalls.base
+        env["PLANE_MANAGED_BY"] = "OverSire"
+        XCTAssertEqual(l.environment, env)
+        XCTAssertNil(l.environment["PLANE_API_KEY"])
+        XCTAssertNil(l.cwd)
+        XCTAssertEqual(l.timeout, .seconds(45))
+        XCTAssertEqual(l.logWords, ["plane-cli", "skill"])
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let n = await o.rows.count
+        XCTAssertEqual(n, 0, "a read writes no row")
+    }
+
+    func testSkillBigTimerHeader() async throws {
+        let bt = AccountConfig(account: AccountID(provider: "bigtimer", id: "bt.example.com"), values: ["server": "https://bt.example.com"])
+        let w = world(accounts: [bt], installed: ["big-timer-cli"],
+                      projects: [(identifier: "ACME", account: AccountID(provider: "bigtimer", id: "bt.example.com"))])
+        let (calls, _, _) = rig(w)
+        let page = try await calls.skill(VendorSkillArgs(vendor: "bigtimer")).get()
+        XCTAssertEqual(page.header, """
+            # Big Timer (bigtimer): big-timer-cli through OverSire
+
+            The OverSire app on this Mac runs big-timer-cli for you. Do not run big-timer-cli directly: it has no token outside OverSire.
+
+            - Run: `oversire vendor run --project <PROJECT> -- <command> [flags]`, or `oversire vendor run --account <ACCOUNT> -- <command> [flags]`.
+            - Put the command first, then its flags. Help: `oversire vendor run --project <PROJECT> -- help <command>`, or `-- <command> --help`.
+            - The app sets: BIGTIMER_TOKEN (the token of the account), BIGTIMER_SERVER (the host), BIGTIMER_MANAGED_BY=OverSire.
+            - The app refuses these flags: --server, -s, --token, -t.
+            - The app refuses these commands: auth login, auth logout, auth join, auth rotate, token create, sync stream.
+            - Accounts: bigtimer:bt.example.com. Projects: ACME.
+            - big-timer-cli 1.0.12: PATH copy at /usr/local/bin/big-timer-cli.
+            - The app sends no stdin and gives no TTY. The output has at most 1 MB. The command has 45 s.
+
+            """)
+    }
+
+    func testSkillGitHubUsesHelpWithoutRun() async throws {
+        let (calls, runner, _) = rig()
+        let r = await calls.handle(skillCall("github"))
+        XCTAssertEqual(r.status, .ok)
+        XCTAssertEqual(r.summary, "gh has no skill text. Read its help.")
+        XCTAssertTrue(runner.launches.isEmpty)
+        let out = try skillOutput(r)
+        XCTAssertEqual(out.reference, .help)
+        XCTAssertEqual(out.markdown, """
+            # GitHub (github): gh through OverSire
+
+            The OverSire app on this Mac runs gh for you.
+
+            - Run: `oversire vendor run --account <ACCOUNT> -- <command> [flags]`.
+            - Put the command first, then its flags. Help: `oversire vendor run --account <ACCOUNT> -- help <command>`, or `-- <command> --help`.
+            - gh keeps its own login. OverSire has no token for it.
+            - The app refuses these flags: --watch.
+            - The app refuses these commands: auth, config set, extension, alias set, run watch, codespace ssh, skill.
+            - Accounts: github:oversire. Projects: none.
+            - gh 2.102.0: PATH copy at /usr/local/bin/gh.
+            - The app sends no stdin and gives no TTY. The output has at most 1 MB. The command has 45 s.
+
+            ## gh reference
+
+            gh has no skill text for OverSire. Read the help: `oversire vendor run --account <ACCOUNT> -- help <command>`, or `-- <command> --help`.
+
+            """)
+    }
+
+    func testSkillOldBinaryFallsBack() async throws {
+        let cases: [(VendorExit?, (any Error)?)] = [
+            (VendorExit(status: 3, stdout: Data("No help topic for 'skill'".utf8), stderr: Data(), truncated: false, timedOut: false, ms: 5), nil),
+            (nil, CocoaError(.fileNoSuchFile)),
+            (VendorExit(status: 0, stdout: Data("part".utf8), stderr: Data(), truncated: false, timedOut: true, ms: 45000), nil),
+            (VendorExit(status: 0, stdout: Data("part".utf8), stderr: Data(), truncated: true, timedOut: false, ms: 5), nil),
+            (VendorExit(status: 0, stdout: Data(" \n".utf8), stderr: Data(), truncated: false, timedOut: false, ms: 5), nil),
+        ]
+        for (i, c) in cases.enumerated() {
+            let runner = FakeRunner()
+            if let e = c.0 { runner.exit = e }
+            runner.error = c.1
+            let (calls, _, _) = rig(world(versions: ["plane-cli": "0.2.1"]), runner)
+            let r = await calls.handle(skillCall("plane"))
+            XCTAssertEqual(r.status, .ok, "\(i)")
+            XCTAssertEqual(r.summary, "plane-cli gave no skill text. Read its help.", "\(i)")
+            let out = try skillOutput(r)
+            XCTAssertEqual(out.reference, .help, "\(i)")
+            XCTAssertTrue(out.markdown.contains("plane-cli gave no skill text. It can be an old version."), "\(i)")
+            XCTAssertTrue(out.markdown.contains("- plane-cli 0.2.1: old, OverSire needs 0.2.2. PATH copy at /usr/local/bin/plane-cli.\n"), "\(i)")
+            XCTAssertEqual(runner.launches.count, 1, "\(i)")
+        }
+    }
+
+    func testSkillNotInstalled() async throws {
+        let (calls, runner, _) = rig(world(installed: []))
+        let r = await calls.handle(skillCall("plane"))
+        XCTAssertEqual(r.status, .ok)
+        XCTAssertEqual(r.summary, "plane-cli is not installed.")
+        XCTAssertTrue(runner.launches.isEmpty)
+        let out = try skillOutput(r)
+        XCTAssertEqual(out.reference, .notInstalled)
+        XCTAssertNil(out.path)
+        XCTAssertTrue(out.markdown.contains("\n- plane-cli: not installed.\n"), out.markdown)
+        XCTAssertTrue(out.markdown.hasSuffix("Run `oversire vendor install plane`.\n"), out.markdown)
+    }
+
+    func testSkillVendorNames() async {
+        let (calls, _, _) = rig()
+        let upper = await calls.handle(skillCall("PLANE"))
+        XCTAssertEqual(upper.status, .ok)
+        for name in ["plane-cli", "github-actions", ""] {
+            let r = await calls.handle(skillCall(name))
+            XCTAssertEqual(r.status, .notAllowed, name)
+            XCTAssertEqual(r.summary, VendorCallError.unknownVendor(name, known: ["bigtimer", "github", "plane"]).message, name)
+        }
+        let bad = await calls.handle(AppCall(id: "x", action: "vendor.skill", args: .object([:])))
+        XCTAssertEqual(bad.summary, VendorCallError.unknownVendor("", known: ["bigtimer", "github", "plane"]).message)
+    }
+
+    func testSkillNoAccount() async throws {
+        let (calls, _, _) = rig(world(accounts: []))
+        let r = await calls.handle(skillCall("plane"))
+        XCTAssertEqual(r.status, .ok)
+        XCTAssertTrue(try skillOutput(r).markdown.contains("- Accounts: none. Add one in Settings › Providers. Projects: OVERSIRE, SLING.\n"))
+    }
+
+    func testSkillClientRefuses() async {
+        let (calls, runner, _) = rig(world(client: true))
+        let r = await calls.handle(skillCall("plane"))
+        XCTAssertEqual(r.status, .notAllowed)
+        XCTAssertEqual(r.summary, VendorCallError.client.message)
+        XCTAssertTrue(runner.launches.isEmpty)
+    }
+
+    func testRunAllowsHelpFirst() async throws {
+        let (calls, runner, o) = rig()
+        let r = await calls.handle(call(project: "OVERSIRE", args: ["--help"]))
+        XCTAssertEqual(r.status, .ok)
+        XCTAssertEqual(runner.launches.first?.args, ["--help"])
+        let e = await rows(o, count: 1)
+        XCTAssertEqual(e.first?.summary, "plane-cli help, exit 0")
+    }
+
+    func testRunPlaneWorkspaceAndProjectFlags() async {
+        let (calls, runner, _) = rig()
+        let p = await calls.handle(call(project: "OVERSIRE", args: ["wi", "list", "-p", "SLING"]))
+        XCTAssertEqual(p.status, .notAllowed)
+        XCTAssertEqual(p.summary, "OverSire sets -p from --project. Do not give it.")
+        XCTAssertTrue(runner.launches.isEmpty)
+        let a = await calls.handle(call(account: "plane:ocral", args: ["wi", "list", "-p", "SLING"]))
+        XCTAssertEqual(a.status, .ok)
+        XCTAssertEqual(runner.launches.count, 1)
+        let w = await calls.handle(call(account: "plane:ocral", args: ["wi", "list", "-w", "x"]))
+        XCTAssertEqual(w.status, .notAllowed)
+        XCTAssertEqual(w.summary, "OverSire sets -w. Do not give it.")
+    }
+
+    func testDescriptorSkillCommands() {
+        XCTAssertEqual(registry.descriptor("plane")?.cli?.skillCommand, ["skill"])
+        XCTAssertEqual(registry.descriptor("bigtimer")?.cli?.skillCommand, ["skill"])
+        XCTAssertNotNil(registry.descriptor("github")?.cli)
+        XCTAssertNil(registry.descriptor("github")?.cli?.skillCommand)
     }
 
     func testBadArgsAreNotAllowed() async {

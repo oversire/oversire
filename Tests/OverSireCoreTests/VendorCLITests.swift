@@ -26,27 +26,57 @@ final class VendorCLITests: XCTestCase {
 
     func testRefusesLockedFlags() {
         for flag in ["--host", "-host", "--host=x", "-k", "-k=x", "--api-key"] {
-            XCTAssertEqual(plane.refusal(["wi", "list", flag]), .lockedFlag(String(flag.prefix { $0 != "=" })), flag)
+            XCTAssertEqual(plane.refusal(["wi", "list", flag], project: false), .lockedFlag(String(flag.prefix { $0 != "=" })), flag)
         }
-        for flag in ["--hostname", "-kx", "--key"] { XCTAssertNil(plane.refusal(["wi", "list", flag]), flag) }
-        XCTAssertNil(bigTimer.refusal(["server", "version"]), "a command word is no flag")
-        XCTAssertNil(plane.refusal(["wi", "list", "host", "k"]), "a value without a dash is no flag")
+        for flag in ["--hostname", "-kx", "--key"] { XCTAssertNil(plane.refusal(["wi", "list", flag], project: false), flag) }
+        XCTAssertNil(bigTimer.refusal(["server", "version"], project: false), "a command word is no flag")
+        XCTAssertNil(plane.refusal(["wi", "list", "host", "k"], project: false), "a value without a dash is no flag")
     }
 
     func testRefusesDeniedCommands() {
-        XCTAssertEqual(plane.refusal(["auth", "login"]), .deniedCommand("auth login"))
-        XCTAssertNil(plane.refusal(["auth", "show"]))
-        XCTAssertEqual(plane.refusal(["listen", "--events", "x"]), .deniedCommand("listen"))
-        XCTAssertEqual(bigTimer.refusal(["sync", "stream"]), .deniedCommand("sync stream"))
-        XCTAssertNil(bigTimer.refusal(["sync", "pull"]))
-        XCTAssertEqual(gh.refusal(["auth", "token"]), .deniedCommand("auth"))
-        XCTAssertEqual(plane.refusal(["Auth", "Login"]), .deniedCommand("auth login"))
+        XCTAssertEqual(plane.refusal(["auth", "login"], project: false), .deniedCommand("auth login"))
+        XCTAssertNil(plane.refusal(["auth", "show"], project: false))
+        XCTAssertEqual(plane.refusal(["listen", "--events", "x"], project: false), .deniedCommand("listen"))
+        XCTAssertEqual(bigTimer.refusal(["sync", "stream"], project: false), .deniedCommand("sync stream"))
+        XCTAssertNil(bigTimer.refusal(["sync", "pull"], project: false))
+        XCTAssertEqual(gh.refusal(["auth", "token"], project: false), .deniedCommand("auth"))
+        XCTAssertEqual(plane.refusal(["Auth", "Login"], project: false), .deniedCommand("auth login"))
     }
 
     func testRefusesFlagFirst() {
-        XCTAssertEqual(plane.refusal(["-w", "ocral", "wi", "list"]), .flagFirst)
-        XCTAssertEqual(plane.refusal([]), .noArgs)
+        XCTAssertEqual(plane.refusal(["-w", "ocral", "wi", "list"], project: false), .flagFirst)
+        XCTAssertEqual(plane.refusal([], project: false), .noArgs)
         XCTAssertFalse(VendorRefusal.lockedFlag("--host").message.isEmpty)
+    }
+
+    func testHelpFlagFirstIsAllowed() {
+        XCTAssertNil(plane.refusal(["--help"], project: false))
+        XCTAssertNil(plane.refusal(["-h"], project: false))
+        XCTAssertNil(plane.refusal(["help", "wi"], project: false))
+        XCTAssertEqual(plane.refusal(["--help", "--host", "x"], project: false), .lockedFlag("--host"))
+        XCTAssertEqual(plane.refusal(["-w", "x", "wi"], project: false), .flagFirst)
+    }
+
+    func testProjectFlagsOnlyWithProject() {
+        let cli = VendorCLI(binary: "plane-cli", lockedFlags: ["--workspace", "-w"], projectFlags: ["--project", "-p"])
+        XCTAssertEqual(cli.refusal(["wi", "list", "-p", "X"], project: true), .projectFlag("-p"))
+        XCTAssertNil(cli.refusal(["wi", "list", "-p", "X"], project: false))
+        XCTAssertEqual(cli.refusal(["wi", "list", "--project=X"], project: true), .projectFlag("--project"))
+        XCTAssertNil(cli.refusal(["wi", "list", "-W"], project: true), "-W is another flag")
+        XCTAssertEqual(cli.refusal(["wi", "list", "-w", "x"], project: false), .lockedFlag("-w"))
+        XCTAssertEqual(VendorRefusal.projectFlag("-p").message, "OverSire sets -p from --project. Do not give it.")
+    }
+
+    func testSkillEnvironment() {
+        var want = base
+        want["PLANE_MANAGED_BY"] = "OverSire"
+        XCTAssertEqual(plane.skillEnvironment(base: base), want)
+        XCTAssertEqual(gh.skillEnvironment(base: base), base)
+    }
+
+    func testSummaryWordsOfHelpFlag() {
+        XCTAssertEqual(VendorCLI.summaryWords(["--help"]), ["help"])
+        XCTAssertEqual(VendorCLI.summaryWords(["-h", "wi"]), ["help"])
     }
 
     func testEnvironmentPlane() {

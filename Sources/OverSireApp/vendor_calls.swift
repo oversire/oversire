@@ -35,7 +35,7 @@ enum VendorCallError: Error, Equatable {
 }
 
 final class VendorCalls: @unchecked Sendable {
-    static let actions: Set<String> = ["vendor.list", "vendor.run"]
+    static let actions: Set<String> = ["vendor.list", "vendor.run", "vendor.skill"]
     /// Under the 60 s that the daemon waits for an app call.
     static let timeout: Duration = .seconds(45)
     static let maxStdout = 1 << 20
@@ -151,6 +151,13 @@ final class VendorCalls: @unchecked Sendable {
                 return AppCallResult(id: call.id, status: .notAllowed, summary: "Give --project or --account, and the command after --.")
             }
             return await run(a, call: call)
+        case "vendor.skill":
+            let name = (try? JSONValue.decode(VendorSkillArgs.self, from: call.args))?.vendor ?? ""
+            switch await skill(VendorSkillArgs(vendor: name)) {
+            case .failure(let e): return notAllowed(e)
+            case .success(let page):
+                return AppCallResult(id: call.id, status: .ok, summary: page.summary, data: JSONValue(encoding: page.output))
+            }
         default:
             return AppCallResult(id: call.id, status: .notAllowed, summary: "The app does not run \(call.action) from the CLI.")
         }
@@ -190,6 +197,36 @@ final class VendorCalls: @unchecked Sendable {
         let all = world.vendors()
         if let p = all.first(where: { $0.rawValue.caseInsensitiveCompare(name) == .orderedSame }) { return .success(p) }
         return .failure(.unknownVendor(name, known: all.map(\.rawValue).sorted()))
+    }
+
+    /// The page of vendor.skill. A read: it writes no event.
+    func skill(_ a: VendorSkillArgs) async -> Result<VendorSkillPage, VendorCallError> {
+        if world.isClient() { return .failure(.client) }
+        let provider: ProviderID
+        switch vendor(named: a.vendor) {
+        case .failure(let e): return .failure(e)
+        case .success(let p): provider = p
+        }
+        guard let d = world.descriptor(provider), let cli = d.cli, let bin = await binary(provider) else {
+            return .failure(.noCLI(world.descriptor(provider)?.displayName ?? provider.rawValue))
+        }
+        let accounts = world.accounts().filter { $0.account.provider == provider }.map { Self.name($0.account) }.sorted()
+        let projects = await world.projects().filter { $0.account.provider == provider }.map(\.identifier).sorted()
+        var text: String?
+        if let exe = bin.path, cli.skillCommand != nil { text = await skillText(cli, exe: exe) }
+        return .success(VendorSkillPage(vendor: provider, displayName: d.displayName, cli: cli, accounts: accounts,
+                                        projects: projects, binary: bin, skillText: text))
+    }
+
+    /// The stdout of the skill command, or nil when the run fails or gives no text.
+    private func skillText(_ cli: VendorCLI, exe: String) async -> String? {
+        guard let args = cli.skillCommand else { return nil }
+        let launch = VendorLaunch(exe: exe, args: args, environment: cli.skillEnvironment(base: Self.base), cwd: nil,
+                                  timeout: Self.timeout, maxStdout: Self.maxStdout, maxStderr: Self.maxStderr,
+                                  logWords: [cli.binary, "skill"])
+        guard let exit = try? await runner.run(launch), !exit.timedOut, !exit.truncated, exit.status == 0 else { return nil }
+        let text = Self.clean(exit.stdout, truncated: false, secrets: [])
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
     }
 
     static func name(_ a: AccountID) -> String { "\(a.provider.rawValue):\(a.id)" }
@@ -245,7 +282,7 @@ final class VendorCalls: @unchecked Sendable {
         case .success(let v): r = v
         }
         let cli = r.cli, name = Self.name(r.config.account)
-        if let refusal = cli.refusal(a.args) { return notAllowed(.refused(refusal)) }
+        if let refusal = cli.refusal(a.args, project: r.project != nil) { return notAllowed(.refused(refusal)) }
         guard let bin = await binary(r.config.account.provider) else { return notAllowed(.noCLI(r.descriptor.displayName)) }
         guard bin.state == .ok, let exe = bin.path else { return notAllowed(.unusable(bin)) }
         var token: String?

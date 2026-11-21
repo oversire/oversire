@@ -18,7 +18,7 @@ extension GitHubCodeHost {
                                                "XDG_DATA_HOME", "GNUPGHOME", "SSH_AUTH_SOCK"],
                        lockedFlags: ["--watch"],
                        deniedCommands: [["auth"], ["config", "set"], ["extension"], ["alias", "set"], ["run", "watch"],
-                                        ["codespace", "ssh"]])
+                                        ["codespace", "ssh"], ["skill"]])
     ) { config, env in
         let s = GitHubAccountSettings(config, env)
         return GitHubCodeHost(owner: s.owner, repos: s.repos, client: s.client)

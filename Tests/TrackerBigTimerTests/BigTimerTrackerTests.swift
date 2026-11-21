@@ -653,9 +653,9 @@ final class BigTimerTrackerTests: XCTestCase {
         XCTAssertEqual(cli.tokenEnv, "BIGTIMER_TOKEN")
         XCTAssertEqual(cli.hostEnv, "BIGTIMER_SERVER")
         XCTAssertTrue(BigTimerTracker.descriptor.fields.contains { $0.key == cli.hostField })
-        XCTAssertNil(cli.refusal(["server", "version"]), "a command word is no flag")
-        XCTAssertNotNil(cli.refusal(["issue", "list", "--token", "x"]))
-        XCTAssertNotNil(cli.refusal(["sync", "stream"]))
+        XCTAssertNil(cli.refusal(["server", "version"], project: false), "a command word is no flag")
+        XCTAssertNotNil(cli.refusal(["issue", "list", "--token", "x"], project: false))
+        XCTAssertNotNil(cli.refusal(["sync", "stream"], project: false))
     }
 
     // MARK: Epics

@@ -16,6 +16,8 @@ final class ContractTests: XCTestCase {
         "vendor-run-args": roundTrip(VendorRunArgs.self),
         "vendor-run-output": roundTrip(VendorRunOutput.self),
         "vendor-cli-row": roundTrip(VendorCLIRow.self),
+        "vendor-skill-args": roundTrip(VendorSkillArgs.self),
+        "vendor-skill-output": roundTrip(VendorSkillOutput.self),
         "member-call": roundTrip(MemberCall.self),
         "member-call-request": roundTrip(MemberCallRequest.self),
         "member-call-frame": roundTrip(MemberCallFrame.self),
