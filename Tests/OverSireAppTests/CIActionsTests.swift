@@ -7,6 +7,8 @@ import OverSireTestKit
 
 @MainActor
 final class CIActionsTests: XCTestCase {
+    // CIJobs keeps only the runs of the last 24 h.
+    private static let recent = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
     private var data: TestAppData!
     private var link: ActionLink!
     private var spec: [String: ActionSpec] = [:]
@@ -74,7 +76,7 @@ final class CIActionsTests: XCTestCase {
     func testLogShortAndCompleteJob() async throws {
         data.ciReader.setJobs("o/r", run: "5", [.sample("78")])
         data.ciReader.setLog("78", "a\nb\nc")
-        data.ciJobs.observe([("o/r", [.ci(5, updated: "2026-11-21T11:00:00Z")])])
+        data.ciJobs.observe([("o/r", [.ci(5, updated: Self.recent)])])
         await settle { data.ciJobs.doc(repo: "o/r", run: "5", attempt: 1) != nil }
         let r = await run("ci.log", ["repo": .string("o/r"), "jobId": .string("78")])
         guard case .ok(_, let body?, _) = r else { return XCTFail("\(r)") }
@@ -99,7 +101,7 @@ final class CIActionsTests: XCTestCase {
 
     func testJobsUsesDocUnlessFresh() async throws {
         data.ciReader.setJobs("o/r", run: "9", [.sample("91")])
-        let run9 = Run.ci(9, updated: "2026-11-21T11:00:00Z")
+        let run9 = Run.ci(9, updated: Self.recent)
         data.grouped = [("o/r", [run9])]
         data.ciJobs.observe(data.grouped)
         await settle { data.ciJobs.doc(repo: "o/r", run: "9", attempt: 1) != nil }
@@ -117,7 +119,7 @@ final class CIActionsTests: XCTestCase {
 
     func testJobsFetchesWhenNoDoc() async throws {
         data.ciReader.setJobs("o/r", run: "12", [.sample("121"), .sample("122")])
-        data.grouped = [("o/r", [.ci(12, updated: "2026-11-21T11:00:00Z")])]
+        data.grouped = [("o/r", [.ci(12, updated: Self.recent)])]
         let r = await run("ci.jobs", ["repo": .string("o/r"), "runId": .string("12")])
         guard case .ok(_, let body?, _) = r else { return XCTFail("\(r)") }
         XCTAssertEqual(try MirrorCodec.value(CIJobsDoc.self, from: body).jobs.count, 2)
@@ -146,7 +148,7 @@ final class CIActionsTests: XCTestCase {
 
     private func failedRun(_ id: Int = 30) {
         data.ciReader.setJobs("o/r", run: "\(id)", [.sample("\(id)1", name: "build"), .sample("\(id)2", name: "lint", conclusion: "failure")])
-        data.grouped = [("o/r", [.ci(id, conclusion: "failure", updated: "2026-11-21T11:00:00Z")])]
+        data.grouped = [("o/r", [.ci(id, conclusion: "failure", updated: Self.recent)])]
     }
 
     private func explained(_ r: ActionResult) throws -> CIExplanation {
@@ -215,7 +217,7 @@ final class CIActionsTests: XCTestCase {
         data.ciReader.setJobs("o/r", run: "33", [.sample("332", name: "lint", conclusion: "failure")])
         data.ciReader.setFailures("o/r", run: "33", [Failure(job: "lint", step: "Lint", messages: ["unused import"])])
         data.ciReader.setLog("332", "first\nsecond tail line")
-        data.grouped = [("o/r", [.ci(33, conclusion: "failure", updated: "2026-11-21T11:00:00Z")])]
+        data.grouped = [("o/r", [.ci(33, conclusion: "failure", updated: Self.recent)])]
         data.ciJobs.observe(data.grouped)
         await settle { data.ciJobs.doc(repo: "o/r", run: "33", attempt: 1) != nil }
         let logs = data.ciReader.count("log")
