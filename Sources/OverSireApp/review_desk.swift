@@ -482,7 +482,10 @@ final class ReviewDesk {
     /// The note and the status of the item go to the tracker one after the other. A slow source app does not hold the review.
     private func write(item key: String, comment: String?, status: String?, subItems: Bool) {
         guard let tracker, comment != nil || status != nil else { return }
+        // In order: the sub-items go to Done before the parent.
+        let prev = writes.last
         writes.append(Task {
+            await prev?.value
             if let comment { _ = await tracker.act("item.comment", ["key": .string(key), "body": .string(comment)]) }
             if let status {
                 _ = await tracker.act("item.setStatus", ["key": .string(key), "status": .string(status), "force": .bool(true), "subItems": .bool(subItems)])
