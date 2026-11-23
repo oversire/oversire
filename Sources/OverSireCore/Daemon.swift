@@ -226,10 +226,13 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public struct Listen: Codable, Hashable, Sendable {
         public var loopback: String         // host:port
         public var tailscale: String?
+        /// The base of the web links, for example http://mbp.tail1234.ts.net:7690.
+        public var web: String?
 
-        public init(loopback: String, tailscale: String? = nil) {
+        public init(loopback: String, tailscale: String? = nil, web: String? = nil) {
             self.loopback = loopback
             self.tailscale = tailscale
+            self.web = web
         }
     }
 
@@ -243,7 +246,7 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public var home: MachineName?
     public var device: String?              // set only on a call with a credential
     public var update: DaemonUpdate?
-    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls, mirror-ci, ci, ci-redirect
+    public var features: [String]?          // launch-env, agent-secrets, app-calls, mirror, member-calls, mirror-ci, ci, ci-redirect, links
     public var listen: Listen
 
     public static let launchEnv = "launch-env"
@@ -254,6 +257,7 @@ public struct DaemonInfo: Codable, Hashable, Sendable {
     public static let mirrorCI = "mirror-ci"
     public static let ci = "ci"
     public static let ciRedirect = "ci-redirect"
+    public static let links = "links"
 
     public func has(_ feature: String) -> Bool { features?.contains(feature) ?? false }
 

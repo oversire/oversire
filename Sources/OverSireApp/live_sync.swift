@@ -123,6 +123,8 @@ final class LiveSync {
     var onMirror: (() -> Void)?
     /// A click of a client for this app. It comes only from the group home, and only the app that leads runs it.
     var onMemberCall: ((MemberCall, MachineLink) -> Void)?
+    /// A link click for this app, from any linked daemon. The owner lease does not apply.
+    var onOpenRoute: ((OpenRoute, MachineLink) -> Void)?
     /// True when the CI quota is low (`CIQuota.degraded`). Interest polling stops then.
     var ciDegraded: () -> Bool = { false }
 
@@ -322,6 +324,8 @@ final class LiveSync {
                         }
                         self.onMemberCall?(c, l)
                     }
+                case .openRoute(let o)?:
+                    DispatchQueue.main.async { [weak self] in self?.onOpenRoute?(o, l) }
                 default: break
                 }
                 guard l.local else { return }

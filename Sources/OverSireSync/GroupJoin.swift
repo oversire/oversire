@@ -62,6 +62,8 @@ public enum DaemonFrame: Hashable, Sendable {
     case memberCall(MemberCall)
     /// The watch list of the home daemon for the source app.
     case ci(CIFrame)
+    /// A link click for this app (link.json). A frame of each linked daemon counts.
+    case openRoute(OpenRoute)
 
     /// nil for a frame of another type.
     public static func parse(_ text: String) -> DaemonFrame? {
@@ -89,6 +91,7 @@ public enum DaemonFrame: Hashable, Sendable {
             guard let f = try? DaemonClient.decode(data) as CIFrame, f.event == CIFrame.watches else { return nil }
             return .ci(f)
         case "mirror": return (try? DaemonClient.decode(data) as MirrorFrame).map(DaemonFrame.mirror)
+        case "openRoute": return (try? DaemonClient.decode(data) as OpenRouteFrame).map { .openRoute($0.open) }
         default: return nil
         }
     }

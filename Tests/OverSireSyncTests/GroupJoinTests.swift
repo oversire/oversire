@@ -49,6 +49,16 @@ final class GroupJoinTests: XCTestCase {
         XCTAssertNil(DaemonFrame.parse(#"{"type":"appCall","call":{"id":"x"}}"#))
     }
 
+    func testAnOpenRouteFrameParsesAndAFrameWithoutAPathGivesNil() throws {
+        let frame = String(decoding: try contractFixture("open-route-frame", "frame"), as: UTF8.self)
+        guard case .openRoute(let o)? = DaemonFrame.parse(frame) else { return XCTFail("no openRoute frame") }
+        XCTAssertEqual(o.path, "item/OVERSIRE-400/changes")
+        XCTAssertEqual(o.focus, "OVERSIRE-402")
+        XCTAssertEqual(o.source, .web)
+        XCTAssertEqual(o.daemon, "mbp")
+        XCTAssertNil(DaemonFrame.parse(#"{"type":"openRoute","open":{"id":"o-1","source":"cli","daemon":"mbp"}}"#))
+    }
+
     func testDecodeMemberCall() throws {
         let call = String(decoding: try contractFixture("member-call", "status"), as: UTF8.self)
         guard case .memberCall(let c)? = DaemonFrame.parse(#"{"type":"memberCall","call":"# + call + "}") else {

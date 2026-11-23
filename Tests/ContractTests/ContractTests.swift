@@ -23,6 +23,10 @@ final class ContractTests: XCTestCase {
         "member-call": roundTrip(MemberCall.self),
         "member-call-request": roundTrip(MemberCallRequest.self),
         "member-call-frame": roundTrip(MemberCallFrame.self),
+        "open-route-frame": roundTrip(OpenRouteFrame.self),
+        "app-presence": roundTrip(AppPresence.self),
+        "open-request": roundTrip(OpenRequest.self),
+        "open-result": roundTrip(OpenResult.self),
         "subject-ref": roundTrip(SubjectRef.self),
         "item-patch": roundTrip(ItemPatch.self),
         "change-action": roundTrip(ChangeAction.self),
@@ -173,6 +177,7 @@ final class ContractTests: XCTestCase {
         "billing.json": 1, "ai-endpoint.json": 1, "runner.json": 1, "session-digest.json": 1, "daemon.json": 2,
         "assistant.json": 1, "session-stream.json": 1, "groom.json": 1, "runbook.json": 1, "review.json": 1,
         "event.json": 1, "event-kinds.json": 1, "app-call.json": 1, "mirror.json": 1, "ci.json": 1,
+        "link.json": 1,
     ]
 
     static func roundTrip<T: Codable>(_: T.Type) -> @Sendable (Data) throws -> Data {

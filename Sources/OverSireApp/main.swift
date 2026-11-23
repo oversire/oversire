@@ -298,6 +298,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 }
             }
         }
+        c.onOpenRoute = { [weak self] o, _ in self?.openFromLink(o) }
         c.appCalls = { [weak self] link in
             let client = link.client(http: DaemonTransport.shared)
             return self.map { AppCalls(catalog: $0.actions, vendor: $0.vendorCalls) { try await client.send($0) } }
@@ -393,6 +394,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         // Before the first reloadList: projectStore.track publishes the cached items at once, and each tick asks the gates.
         startAutomations()
         machineHub.start()
+        if !UIShots.shooting { MainActor.assumeIsolated { presence.start() } }
         RUNBOOKS.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "runbook:" + key) }
         NotificationCenter.default.addObserver(forName: RunbookBook.changed, object: RUNBOOKS, queue: .main) { [weak self] _ in self?.updateIcon() }
         RUNBOOKS.start()
@@ -707,6 +709,20 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func open(_ route: Route, focus: String? = nil) {
         if popover?.isShown == true { popover.close() }
         appWindow.show(route, focus: focus)
+    }
+
+    /// A /go/ link or `oversire open` on a daemon chose this Mac.
+    func openFromLink(_ o: OpenRoute) {
+        let l = LinkOpen(open: o)
+        log.info("link open id=\(o.id, privacy: .public) path=\(o.path, privacy: .public) from=\(o.daemon, privacy: .public)")
+        if let t = l.target { open(t.route, focus: t.focus) }
+        MainActor.assumeIsolated { ClickToast.show(l.toast.text, bad: l.toast.bad) }
+    }
+
+    lazy var presence: PresenceReporter = MainActor.assumeIsolated {
+        PresenceReporter(links: { [weak self] in self?.machineHub.active ?? [] }) { l, p in
+            try await l.client(http: DaemonTransport.shared).presence(p)
+        }
     }
 
     /// ⌘J: shows or hides the assistant panel. A hidden window shows with the panel.
@@ -1307,6 +1323,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     }
 
     func applicationWillTerminate(_ note: Notification) {
+        MainActor.assumeIsolated { presence.stop() }
         projectStore.flush()
         guard let o = automations else { return }
         let done = DispatchSemaphore(value: 0)
