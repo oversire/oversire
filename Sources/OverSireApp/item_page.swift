@@ -261,6 +261,16 @@ final class ItemPage: Page, NSTextFieldDelegate {
         return REVIEWS.failureRows([desk.summary.machine]) + tab(desk)
     }
 
+    /// A sub-item key as the focus of the Changes tab shows only the files of that sub-item.
+    override func focus(_ id: String) {
+        if tab == .changes, let desk = reviewDesk(.code), desk.summary.part(id) != nil {
+            desk.filter.item = id
+            reload()
+            return
+        }
+        super.focus(id)
+    }
+
     /// A sub-item whose code folds into the review of its parent (OVERSIRE-591).
     private func reviewedIn(_ p: ReviewSummary) -> [PageRow] {
         let k = key, part = p.part(key)
