@@ -532,6 +532,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self?.enhanceAgent.autoStart()
             self?.binder.reconcileParents()
         }
+        NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.binder.adopt(REVIEWS.rows)
+        }
         projectStore.onAccepted = { [weak self] key, title, project, actor in
             guard let self, let snap = projectStore.snapshot(project) else { return }
             binder.ensure(key: key, title: title, parent: nil, project: snap.summary, source: .intake, actor: actor)

@@ -61,6 +61,7 @@ struct BindRequest {
     var machine: String?
     var branch: String?
     var shareParentGroup = false
+    var root: String?            // nil: the workspace root of the project
 }
 
 enum BindError: Error, Equatable {
@@ -119,7 +120,7 @@ final class WorktreeBinder {
             group = g
             branch = r.branch ?? PROJECTS_CFG.local(project.identifier).branch(key: key, title: title)
         }
-        let rootPath = (mode == .parent ? pb?.root : nil) ?? root(project)
+        let rootPath = (mode == .parent ? pb?.root : nil) ?? r.root ?? root(project)
         guard group.hasPrefix("/") || rootPath != nil else { return .failure(.noRoot(project.identifier)) }
         if r.branch == nil, mode == .own, branch.isEmpty { branch = key.lowercased() }
         let b = WorktreeBinding(key: key, machine: machine, root: rootPath ?? "/", group: group, branch: branch,
@@ -160,6 +161,21 @@ final class WorktreeBinder {
         let parent = item.parentId.flatMap { pid in snap.items.first { $0.id == pid }?.key }
         let r = BindRequest(worktree: dir, machine: machine, branch: branch ?? "")
         return bind(key: item.key, title: item.title, parent: parent, project: snap.summary, r, source: source, actor: actor)
+    }
+
+    /// Binds the review group of a sub-item that has no binding, so that its review folds into the parent.
+    /// It is for the items made before the bindings (OVERSIRE-584).
+    func adopt(_ reviews: [ReviewSummary]) {
+        for r in reviews where r.kind == .code && r.parts == nil && book.binding(r.key) == nil {
+            guard let group = r.group, let (_, snap, item) = store.item(key: r.key), let pid = item.parentId,
+                  let parent = snap.items.first(where: { $0.id == pid })?.key else { continue }
+            guard mayAct() else { return }
+            let req = BindRequest(worktree: group, machine: r.machine, branch: r.repos.first?.branch ?? "", root: r.root)
+            if case .failure(let e) = bind(key: item.key, title: item.title, parent: parent, project: snap.summary, req,
+                                           source: .auto, actor: EventActor(type: .system, name: "binder")) {
+                log.info("No worktree binding for \(r.key, privacy: .public): \(e.message, privacy: .public)")
+            }
+        }
     }
 
     /// Writes the parent again when the tracker moved the item.

@@ -83,6 +83,20 @@ final class WorktreeBindingBookTests: XCTestCase {
         WorktreeBinding(key: key, machine: "mbp", root: "/w", group: ".wt/\(key.lowercased())", parent: parent)
     }
 
+    func testAReviewGroupOfAnOldSubItemGetsABindingWithItsParent() async throws {
+        let rig = try await EpicRig()
+        let child = try await rig.fake.create(ItemDraft(title: "Child", parent: rig.items[0].id), in: rig.fake.project)
+        await rig.reload()
+        let row = ReviewSummary(key: child.key, kind: .code, machine: "mbp", state: .ready, root: "/src", group: ".wt/\(child.key.lowercased())", updatedAt: Date())
+        let top = ReviewSummary(key: rig.items[1].key, kind: .code, machine: "mbp", state: .ready, root: "/src", group: ".wt/x", updatedAt: Date())
+        await MainActor.run { rig.d.binder.adopt([row, top]) }
+        let (b, other) = await MainActor.run { (rig.d.bindings.binding(child.key), rig.d.bindings.binding(rig.items[1].key)) }
+        XCTAssertEqual(b?.parent, rig.items[0].key)
+        XCTAssertEqual(b?.dir, "/src/.wt/\(child.key.lowercased())")
+        XCTAssertEqual(b?.source, .auto)
+        XCTAssertNil(other, "an item with no parent keeps no binding")
+    }
+
     func testChildrenOfAParentAreSortedByKey() {
         let d = TestAppData()
         for r in [b("P-3", parent: "P"), b("P-2", parent: "P"), b("Q-1", parent: "Q")] { d.bindings.save(r) }
