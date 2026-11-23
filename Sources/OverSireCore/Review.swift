@@ -52,11 +52,15 @@ public struct ReviewRepo: Codable, Hashable, Sendable, Identifiable {
     public var merge: MergeMode
     public var conflictFiles: [String]?
     public var commits: [ReviewCommit]?
+    /// The key of the group that owns the repo, in a folded summary.
+    public var item: String?
 
-    public var id: String { name }
+    /// The same repo name occurs in many parts of a folded summary.
+    public var id: String { item.map { "\($0)/\(name)" } ?? name }
 
     public init(name: String, branch: String, base: String, ahead: Int, behind: Int = 0, added: Int = 0, removed: Int = 0, files: Int = 0,
-                dirty: Bool = false, merge: MergeMode = .fastForward, conflictFiles: [String]? = nil, commits: [ReviewCommit]? = nil) {
+                dirty: Bool = false, merge: MergeMode = .fastForward, conflictFiles: [String]? = nil, commits: [ReviewCommit]? = nil,
+                item: String? = nil) {
         self.name = name
         self.branch = branch
         self.base = base
@@ -69,6 +73,39 @@ public struct ReviewRepo: Codable, Hashable, Sendable, Identifiable {
         self.merge = merge
         self.conflictFiles = conflictFiles
         self.commits = commits
+        self.item = item
+    }
+}
+
+/// One group of a folded parent row.
+public struct ReviewPart: Codable, Hashable, Sendable, Identifiable {
+    public var key: String
+    public var root: String
+    public var group: String?
+    public var state: ReviewState
+    public var round: Int
+    public var pending: Int
+    public var unanswered: Int
+    public var session: ReviewSession?
+    public var note: String?
+    public var readyAt: Date?
+    public var mergedAt: Date?
+
+    public var id: String { key }
+
+    public init(key: String, root: String, group: String? = nil, state: ReviewState, round: Int = 0, pending: Int = 0, unanswered: Int = 0,
+                session: ReviewSession? = nil, note: String? = nil, readyAt: Date? = nil, mergedAt: Date? = nil) {
+        self.key = key
+        self.root = root
+        self.group = group
+        self.state = state
+        self.round = round
+        self.pending = pending
+        self.unanswered = unanswered
+        self.session = session
+        self.note = note
+        self.readyAt = readyAt
+        self.mergedAt = mergedAt
     }
 }
 
@@ -90,13 +127,15 @@ public struct ReviewSummary: Codable, Hashable, Sendable, Identifiable {
     public var note: String?
     public var readyAt: Date?
     public var updatedAt: Date
+    /// The groups of a folded parent row. Nil when the row is not folded.
+    public var parts: [ReviewPart]?
 
     /// Unique across machines and kinds.
     public var id: String { "\(machine)/\(kind.rawValue)/\(key)" }
 
     public init(key: String, kind: ReviewKind, title: String? = nil, machine: String, state: ReviewState, round: Int = 0, pending: Int = 0,
                 unanswered: Int = 0, root: String, group: String? = nil, repos: [ReviewRepo] = [], subitems: [String] = [],
-                session: ReviewSession? = nil, note: String? = nil, readyAt: Date? = nil, updatedAt: Date) {
+                session: ReviewSession? = nil, note: String? = nil, readyAt: Date? = nil, updatedAt: Date, parts: [ReviewPart]? = nil) {
         self.key = key
         self.kind = kind
         self.title = title
@@ -113,7 +152,12 @@ public struct ReviewSummary: Codable, Hashable, Sendable, Identifiable {
         self.note = note
         self.readyAt = readyAt
         self.updatedAt = updatedAt
+        self.parts = parts
     }
+
+    /// The row holds the groups of sub-items.
+    public var folded: Bool { !(parts ?? []).isEmpty }
+    public func part(_ key: String) -> ReviewPart? { parts?.first { $0.key == key } }
 
     public var added: Int { repos.reduce(0) { $0 + $1.added } }
     public var removed: Int { repos.reduce(0) { $0 + $1.removed } }
@@ -169,12 +213,14 @@ public struct ReviewFile: Codable, Hashable, Sendable, Identifiable {
     public var viewed: Bool
     /// The file changed after the reviewer marked it viewed.
     public var viewedStale: Bool?
+    /// The key of the group of the file, in a folded detail.
+    public var item: String?
 
-    public var id: String { repo + "/" + path }
+    public var id: String { (item.map { $0 + "/" } ?? "") + repo + "/" + path }
     public var isStale: Bool { viewedStale == true }
 
     public init(repo: String, path: String, oldPath: String? = nil, status: FileStatus, added: Int, removed: Int, binary: Bool = false,
-                untracked: Bool? = nil, viewed: Bool = false, viewedStale: Bool? = nil) {
+                untracked: Bool? = nil, viewed: Bool = false, viewedStale: Bool? = nil, item: String? = nil) {
         self.repo = repo
         self.path = path
         self.oldPath = oldPath
@@ -185,6 +231,7 @@ public struct ReviewFile: Codable, Hashable, Sendable, Identifiable {
         self.untracked = untracked
         self.viewed = viewed
         self.viewedStale = viewedStale
+        self.item = item
     }
 }
 
@@ -349,11 +396,14 @@ public struct ReviewRound: Codable, Hashable, Sendable, Identifiable {
     public var deliveredAt: Date?
     public var error: String?
     public var answeredAt: Date?
+    /// The key of the group of the round, in a folded detail.
+    public var item: String?
 
-    public var id: Int { n }
+    /// The rounds of the parts of a folded detail share numbers.
+    public var id: String { (item.map { $0 + "#" } ?? "#") + String(n) }
 
     public init(n: Int, verdict: ReviewVerdict, summary: String? = nil, count: Int, submittedAt: Date, delivery: Delivery, session: String? = nil,
-                deliveredAt: Date? = nil, error: String? = nil, answeredAt: Date? = nil) {
+                deliveredAt: Date? = nil, error: String? = nil, answeredAt: Date? = nil, item: String? = nil) {
         self.n = n
         self.verdict = verdict
         self.summary = summary
@@ -364,6 +414,7 @@ public struct ReviewRound: Codable, Hashable, Sendable, Identifiable {
         self.deliveredAt = deliveredAt
         self.error = error
         self.answeredAt = answeredAt
+        self.item = item
     }
 }
 
@@ -491,7 +542,12 @@ public struct ReviewReady: Codable, Hashable, Sendable {
 
 public struct MergeRequest: Codable, Hashable, Sendable {
     public var removeGroup: Bool
-    public init(removeGroup: Bool) { self.removeGroup = removeGroup }
+    /// The groups to merge as all or none. Nil: the key of the path only.
+    public var items: [String]?
+    public init(removeGroup: Bool, items: [String]? = nil) {
+        self.removeGroup = removeGroup
+        self.items = items
+    }
 }
 
 public struct RepoMerge: Codable, Hashable, Sendable {
@@ -501,12 +557,14 @@ public struct RepoMerge: Codable, Hashable, Sendable {
     public var result: Result
     public var head: String?
     public var conflictFiles: [String]?
+    public var item: String?
 
-    public init(name: String, result: Result, head: String? = nil, conflictFiles: [String]? = nil) {
+    public init(name: String, result: Result, head: String? = nil, conflictFiles: [String]? = nil, item: String? = nil) {
         self.name = name
         self.result = result
         self.head = head
         self.conflictFiles = conflictFiles
+        self.item = item
     }
 }
 
