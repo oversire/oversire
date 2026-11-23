@@ -1207,6 +1207,7 @@ final class DialogSheet: NSWindow {
     let stack = NSStackView(v: [], spacing: 12)
     private(set) var cancelButton: ActionButton?
     private(set) var primaryButton: ActionButton?
+    private(set) var extraButton: ActionButton?
     private let foot = NSStackView(h: [], spacing: 8)
     private var onCancel: () -> Void = {}
     private var timer: Timer?
@@ -1276,13 +1277,23 @@ final class DialogSheet: NSWindow {
         return String(format: "%d:%02d", n / 60, n % 60)
     }
 
-    /// cancel: Escape. primary: Return.
-    func buttons(cancel: String, primary: String? = nil, onCancel: @escaping () -> Void, onPrimary: (() -> Void)? = nil) {
+    /// cancel: Escape. primary: Return. extra: a second action at the left of cancel.
+    /// onPrimary stays the last parameter, so that a trailing closure is the primary action.
+    func buttons(cancel: String, primary: String? = nil, extra: String? = nil, onCancel: @escaping () -> Void, onExtra: (() -> Void)? = nil,
+                 onPrimary: (() -> Void)? = nil) {
         foot.arrangedSubviews.forEach { $0.removeFromSuperview() }
         self.onCancel = onCancel
         let c = ActionButton(cancel, key: "\u{1b}") { onCancel() }
         cancelButton = c
-        var views: [NSView] = [Spacer(), c]
+        var views: [NSView] = [Spacer()]
+        if let extra, let onExtra {
+            let x = ActionButton(extra) { onExtra() }
+            extraButton = x
+            views.append(x)
+        } else {
+            extraButton = nil
+        }
+        views.append(c)
         if let primary, let onPrimary {
             let p = ActionButton(primary, style: .primary, key: "\r") { onPrimary() }
             primaryButton = p

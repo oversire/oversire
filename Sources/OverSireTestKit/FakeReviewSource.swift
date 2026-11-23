@@ -176,18 +176,34 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
         }
     }
 
+    /// The items of each merge, or nil.
+    public private(set) var mergeItems: [[String]?] = []
+
+    /// With items, each part merges in turn. The first part that does not merge stops the rest.
     public func merge(_ key: String, _ r: MergeRequest) async throws -> MergeResult {
+        with { mergeItems.append(r.items) }
+        guard let items = r.items else { return try mergeOne(key, r, item: nil) }
+        var repos: [RepoMerge] = []
+        for k in items {
+            let one = try mergeOne(k, r, item: k)
+            repos += one.repos
+            if !one.merged { return MergeResult(merged: false, repos: repos, error: "\(k): a repo has a conflict.", notPushed: one.notPushed) }
+        }
+        return MergeResult(merged: true, repos: repos, removed: r.removeGroup, notPushed: with { notPushed })
+    }
+
+    private func mergeOne(_ key: String, _ r: MergeRequest, item: String?) throws -> MergeResult {
         let res: MergeResult = try change(key, .code, "merge") { d in
             guard d.summary.state != .waiting else { throw ProviderError.vendor(code: "409", message: "A session of \(key) works.") }
             if let bad = d.summary.repos.firstIndex(where: { $0.merge == .conflict }) {
                 d.summary.state = .conflict
                 let repos = d.summary.repos.enumerated().map { i, repo in
-                    RepoMerge(name: repo.name, result: i == bad ? .conflict : .skipped, conflictFiles: i == bad ? repo.conflictFiles : nil)
+                    RepoMerge(name: repo.name, result: i == bad ? .conflict : .skipped, conflictFiles: i == bad ? repo.conflictFiles : nil, item: item)
                 }
                 return MergeResult(merged: false, repos: repos, notPushed: notPushed)
             }
             d.summary.state = .merged
-            let repos = d.summary.repos.map { RepoMerge(name: $0.name, result: $0.merge == .rebase ? .rebased : .merged, head: "f00d\($0.ahead)") }
+            let repos = d.summary.repos.map { RepoMerge(name: $0.name, result: $0.merge == .rebase ? .rebased : .merged, head: "f00d\($0.ahead)", item: item) }
             notPushed += d.summary.repos.map { NotPushed(root: d.summary.root, repo: $0.name, base: $0.base, ahead: $0.ahead) }
             return MergeResult(merged: true, repos: repos, removed: r.removeGroup, notPushed: notPushed)
         }

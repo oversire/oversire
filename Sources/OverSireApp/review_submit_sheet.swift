@@ -22,7 +22,7 @@ final class ReviewSubmitSheet {
         self.verdict = verdict ?? (desk.pending.isEmpty ? .approve : .requestChanges)
         let n = desk.pending.count
         let what = desk.kind == .plan ? "plan" : "code"
-        sheet = DialogSheet(title: "Submit \(what) review · round \(desk.nextRound)", width: 560)
+        sheet = DialogSheet(title: desk.folded ? "Submit \(what) review" : "Submit \(what) review · round \(desk.nextRound)", width: 560)
         _ = sheet.note("\(desk.key) · \(n) pending comment\(n == 1 ? "" : "s") · machine \(desk.machine)")
         summary = CommentField("", placeholder: "Summary for the agent (optional)", label: "Summary for the agent")
         post = CheckBox("Also post the round on the tracker item", on: false, label: "Also post the round on the tracker item")
@@ -69,6 +69,9 @@ final class ReviewSubmitSheet {
                 target.stringValue = "Approve opens the merge next. Nothing merges before you confirm."
                 button = "Approve, then merge…"
             }
+        } else if desk.folded {
+            // The prompt of the first part. Each part gets its own.
+            preview.stringValue = desk.prompt(summary: summary.stringValue, part: desk.submitKeys(verdict).first)
         } else {
             preview.stringValue = desk.prompt(summary: summary.stringValue)
             switch session?.state {
@@ -80,6 +83,12 @@ final class ReviewSubmitSheet {
             default:
                 target.stringValue = "The session has ended. The daemon starts a new session in the same place with the prompt."
             }
+        }
+        if desk.folded {
+            let keys = desk.submitKeys(verdict).map(FilePanel.short)
+            target.stringValue = keys.isEmpty ? "No part is ready." : verdict == .approve
+                ? "Approve goes to \(keys.joined(separator: ", ")). Approve opens the merge next."
+                : "One round each to the session\(keys.count == 1 ? "" : "s") of \(keys.joined(separator: ", "))."
         }
         sheet.primaryButton?.title = button
         sheet.primaryButton?.isEnabled = verdict == .approve || !desk.pending.isEmpty || !summary.stringValue.isEmpty
@@ -95,6 +104,10 @@ final class ReviewSubmitSheet {
                 _ = try await desk.submit(v, summary: summary.stringValue, post: post.isOn)
                 sheet.dismiss()
                 done(v)
+            } catch let e as PartialSubmit {
+                // The sheet stays open: a new submit goes only to the parts that still have pending comments.
+                self.error.stringValue = e.errorDescription ?? ""
+                update()
             } catch {
                 self.error.stringValue = "The submit failed: " + ((error as? ProviderError)?.message ?? error.localizedDescription)
                 sheet.primaryButton?.isEnabled = true

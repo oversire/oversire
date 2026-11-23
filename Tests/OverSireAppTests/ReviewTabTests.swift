@@ -211,8 +211,8 @@ final class ReviewTabTests: XCTestCase {
         XCTAssertEqual(d.nextRound, 1)
         XCTAssertTrue(d.pending.allSatisfy(ReviewDesk.canEdit))
 
-        let round = try await d.submit(.requestChanges, summary: "  ", post: false)
-        XCTAssertEqual(round.count, 2)
+        let rounds = try await d.submit(.requestChanges, summary: "  ", post: false)
+        XCTAssertEqual(rounds.map(\.count), [2])
         XCTAssertEqual(d.pending.count, 0)
         XCTAssertEqual(d.comments.map(\.state), [.submitted, .submitted])
         XCTAssertFalse(d.comments.contains(where: ReviewDesk.canEdit), "a submitted comment belongs to its round")

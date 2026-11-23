@@ -58,6 +58,18 @@ struct LinePick: Hashable {
     }
 }
 
+/// A folded submit that failed on some parts. The other parts got their round.
+struct PartialSubmit: LocalizedError {
+    var sent: [ReviewRound]
+    var failed: [(key: String, error: Error)]
+
+    var errorDescription: String? {
+        let why = failed.map { "\($0.key) (\(($0.error as? ProviderError)?.message ?? $0.error.localizedDescription))" }
+        let ok = sent.compactMap(\.item)
+        return (ok.isEmpty ? "" : "Sent to \(ok.joined(separator: ", ")). ") + "Not sent to " + why.joined(separator: ", ") + "."
+    }
+}
+
 /// One review that the person works on: its detail, the diffs, the pending batch and the place in the tab.
 /// Each call goes to the daemon of the machine of the review. Use it on the main thread.
 final class ReviewDesk {
@@ -374,57 +386,107 @@ final class ReviewDesk {
         return await run { try await source.markViewed(self.owner(f), ViewedMark(repo: f.repo, path: f.path, viewed: on)) }
     }
 
+    /// The parts that a submit goes to. A folded review sends one round to each part with pending comments.
+    /// An approve, or a submit with only a summary, also goes to each ready part.
+    func submitKeys(_ verdict: ReviewVerdict) -> [String] {
+        guard folded else { return [key] }
+        let withComments = Set(pending.map(\.key))
+        let ready = Set(parts.filter { $0.state == .ready }.map(\.key))
+        let keys = verdict == .approve || withComments.isEmpty ? withComments.union(ready) : withComments
+        return parts.map(\.key).filter(keys.contains)
+    }
+
     /// All pending comments become one round. The app writes the tracker parts: the round comment, and Todo for an approved plan.
-    func submit(_ verdict: ReviewVerdict, summary text: String?, post: Bool) async throws -> ReviewRound {
+    /// A folded review sends one round to each part (OVERSIRE-592). A failed part does not stop the others: the error is `PartialSubmit`.
+    func submit(_ verdict: ReviewVerdict, summary text: String?, post: Bool) async throws -> [ReviewRound] {
         guard let source else { throw ProviderError.transport("No daemon has this review.") }
         await clearError()
         let batch = pending
         let note = text?.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = note?.isEmpty == false ? note : nil
-        do {
-            // A given launch wins over the agent of the last session, so send one only when the daemon knows none.
-            let known = self.summary.session?.harness != nil
-            let launch = verdict == .requestChanges && !known ? agent(key) : nil
-            let round = try await source.submit(key, SubmitReview(kind: kind, verdict: verdict, summary: summary, postToTracker: post, launch: launch))
-            await MainActor.run {
-                let note = post ? self.trackerNote(round, batch) : nil
-                self.write(comment: note, status: verdict == .approve && self.kind == .plan ? "todo" : nil)
+        let keys = submitKeys(verdict)
+        var sent: [ReviewRound] = []
+        var failed: [(key: String, error: Error)] = []
+        for k in keys {
+            do {
+                // A given launch wins over the agent of the last session, so send one only when the daemon knows none.
+                let known = (folded ? parts.first { $0.key == k }?.session : self.summary.session)?.harness != nil
+                let launch = verdict == .requestChanges && !known ? agent(k) : nil
+                var round = try await source.submit(k, SubmitReview(kind: kind, verdict: verdict, summary: summary, postToTracker: post, launch: launch))
+                if folded, round.item == nil { round.item = k }
+                let mine = folded ? batch.filter { $0.key == k } : batch
+                await MainActor.run { [round] in
+                    let note = post ? self.trackerNote(round, mine) : nil
+                    self.write(item: k, comment: note, status: verdict == .approve && self.kind == .plan ? "todo" : nil, subItems: true)
+                }
+                sent.append(round)
+            } catch {
+                guard folded else {
+                    await fail(error)
+                    throw error
+                }
+                failed.append((k, error))
             }
-            await load()
-            return round
-        } catch {
-            await fail(error)
-            throw error
         }
+        await load()
+        guard failed.isEmpty else {
+            let e = PartialSubmit(sent: sent, failed: failed)
+            await fail(e)
+            throw e
+        }
+        return sent
     }
 
-    /// Merges each repo locally. `setDone` sets the item and its sub-items to Done, with a merge comment.
-    func merge(removeGroup: Bool, setDone: Bool) async throws -> MergeResult {
+    /// Merges each repo locally. `items` merges these parts of a folded review as all or none (OVERSIRE-592).
+    /// Each merged sub-item goes to Done. `setDone` sets the key and its sub-items to Done, with a merge comment;
+    /// for a folded review only when all parts are merged.
+    func merge(items: [String]? = nil, removeGroup: Bool, setDone: Bool) async throws -> MergeResult {
         guard let source else { throw ProviderError.transport("No daemon has this review.") }
         await clearError()
         do {
-            let r = try await source.merge(key, MergeRequest(removeGroup: removeGroup))
+            let r = try await source.merge(key, MergeRequest(removeGroup: removeGroup, items: items))
+            // An old daemon does not know items: it merges the key only, and its repos have no item.
+            if items != nil, !r.repos.isEmpty, r.repos.allSatisfy({ $0.item == nil }) { throw Self.oldDaemon(machine) }
             await MainActor.run {
-                if r.merged, setDone { self.write(comment: self.mergeNote(r), status: "done") }
+                if r.merged { self.writeMerge(r, items: items, setDone: setDone) }
                 self.changed()
             }
             await load()
             return r
         } catch {
-            await fail(error)
-            throw error
+            var e = error
+            if items != nil, case .vendor(let code, let m)? = error as? ProviderError, code == "400", m.contains("items") { e = Self.oldDaemon(machine) }
+            await fail(e)
+            throw e
+        }
+    }
+
+    static func oldDaemon(_ machine: String) -> ProviderError {
+        .vendor(code: "400", message: "Update oversire on \(machine) to merge sub-items.")
+    }
+
+    private func writeMerge(_ r: MergeResult, items: [String]?, setDone: Bool) {
+        guard let items else {
+            if setDone { write(item: key, comment: mergeNote(r), status: "done", subItems: true) }
+            return
+        }
+        for k in items where k != key { write(item: k, comment: mergeNote(r, item: k), status: "done", subItems: false) }
+        let all = parts.allSatisfy { items.contains($0.key) || $0.mergedAt != nil }
+        if items.contains(key) || (setDone && all) {
+            write(item: key, comment: items.contains(key) ? mergeNote(r, item: key) : nil, status: setDone && all ? "done" : nil, subItems: true)
         }
     }
 
     private var writes: [Task<Void, Never>] = []
 
     /// The note and the status of the item go to the tracker one after the other. A slow source app does not hold the review.
-    private func write(comment: String?, status: String?) {
+    private func write(item key: String, comment: String?, status: String?, subItems: Bool) {
         guard let tracker, comment != nil || status != nil else { return }
-        let key = self.key
         writes.append(Task {
             if let comment { _ = await tracker.act("item.comment", ["key": .string(key), "body": .string(comment)]) }
-            if let status { _ = await tracker.act("item.setStatus", ["key": .string(key), "status": .string(status), "force": .bool(true), "subItems": .bool(true)]) }
+            if let status {
+                _ = await tracker.act("item.setStatus", ["key": .string(key), "status": .string(status), "force": .bool(true), "subItems": .bool(subItems)])
+            }
         })
     }
 
@@ -434,12 +496,12 @@ final class ReviewDesk {
         writes = []
     }
 
-    /// The agent rebases the group and fixes the conflict.
-    func fix() async throws -> ReviewRound {
+    /// The agent rebases the group and fixes the conflict. `item`: the part with the conflict in a folded review.
+    func fix(item: String? = nil) async throws -> ReviewRound {
         guard let source else { throw ProviderError.transport("No daemon has this review.") }
         await clearError()
         do {
-            let r = try await source.fix(key)
+            let r = try await source.fix(item ?? key)
             await load()
             return r
         } catch {
@@ -491,10 +553,10 @@ final class ReviewDesk {
         return lines.joined(separator: "\n")
     }
 
-    /// The merge comment on the item.
-    func mergeNote(_ r: MergeResult) -> String {
-        let repos = r.repos.filter { $0.result == .merged || $0.result == .rebased }.map { m -> String in
-            let base = summary.repos.first { $0.name == m.name }?.base ?? "base"
+    /// The merge comment on the item. `item`: only the repos of this part.
+    func mergeNote(_ r: MergeResult, item: String? = nil) -> String {
+        let repos = r.repos.filter { ($0.result == .merged || $0.result == .rebased) && (item == nil || $0.item == item) }.map { m -> String in
+            let base = summary.repos.first { $0.name == m.name && (item == nil || $0.item == item) }?.base ?? "base"
             return "- `\(m.name)` into `\(base)`" + (m.head.map { " at `\($0)`" } ?? "") + (m.result == .rebased ? ", after a rebase" : "")
         }
         return (["**Merged locally** on \(machine). Not pushed."] + repos).joined(separator: "\n")
@@ -507,8 +569,11 @@ final class ReviewDesk {
     }
 
     /// The prompt that the agent gets for the batch, as the daemon writes it. A preview only.
-    func prompt(summary text: String?) -> String {
-        let place = kind == .plan ? summary.root : summary.group ?? summary.root
+    /// `part`: the prompt of one part of a folded review.
+    func prompt(summary text: String?, part: String? = nil) -> String {
+        let p = part.flatMap { k in parts.first { $0.key == k } }
+        let key = p?.key ?? self.key, nextRound = p.map { $0.round + 1 } ?? self.nextRound
+        let place = kind == .plan ? summary.root : p?.group ?? summary.group ?? summary.root
         var out: String
         if kind == .plan {
             out = "Plan review round \(nextRound) of \(key). Work in \(place).\n"
@@ -526,7 +591,7 @@ final class ReviewDesk {
                 + "Do not merge.\n"
         }
         if let s = text?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { out += "\nSummary: \(s)\n" }
-        for c in pending {
+        for c in pending where p == nil || c.key == p?.key {
             out += "\n[\(c.id)] \(Self.place(c, plan: detail?.plan))\n"
             if let ex = c.excerpt, kind == .code {
                 let first = c.anchor.lines.lowerBound

@@ -18,6 +18,7 @@ extension UIShots {
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
     /// fold-list, fold-changes, fold-child, fold-off: the review of OVERSIRE-589 with the groups of its sub-items (OVERSIRE-591).
+    /// fold-merge and fold-submit: the merge and submit sheets of that review (OVERSIRE-592).
     func reviewState(_ scene: String, in w: AppWindow) {
         if scene.hasPrefix("fold-") { return foldState(scene, in: w) }
         let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
@@ -254,6 +255,16 @@ extension UIShots {
             }
             w.router.go(.item("OVERSIRE-589", .changes))
         case "fold-child": w.router.go(.item("OVERSIRE-591", .changes))
+        case "fold-merge", "fold-submit":
+            w.router.go(.item("OVERSIRE-589", .changes))
+            guard let d = REVIEWS.review("OVERSIRE-589", kind: .code).flatMap({ REVIEWS.desk($0) }) else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if scene == "fold-merge" {
+                    ReviewMergeSheet(desk: d) {}.present(over: w.window)
+                } else {
+                    ReviewSubmitSheet(desk: d, verdict: .requestChanges) { _ in }.present(over: w.window)
+                }
+            }
         default: w.router.go(.work(.review))
         }
     }
