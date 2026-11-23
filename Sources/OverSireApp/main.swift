@@ -207,6 +207,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         b.onBound = { [weak self] in self?.writeBack.writeBinding($0) }
         return b
     }()
+    lazy var bindingPush = BindingPush(book: bindings, clients: { [weak self] in
+        guard let hub = self?.machineHub else { return [] }
+        return hub.active.map { $0.local ? hub.local : $0.client(http: hub.http) }
+    }, triggers: [WorktreeBindingBook.changed, MachineHub.changed])
     lazy var worktreeScan = WorktreeScanBook(sources: WorktreeScanBook.groupSources, bindings: bindings, binder: binder,
                                              known: { [weak self] in self?.projectStore.item(key: $0) != nil })
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
@@ -535,6 +539,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: nil, queue: .main) { [weak self] _ in
             self?.binder.adopt(REVIEWS.rows)
         }
+        bindingPush.schedule()
         projectStore.onAccepted = { [weak self] key, title, project, actor in
             guard let self, let snap = projectStore.snapshot(project) else { return }
             binder.ensure(key: key, title: title, parent: nil, project: snap.summary, source: .intake, actor: actor)

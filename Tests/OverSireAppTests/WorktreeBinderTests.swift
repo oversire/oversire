@@ -97,6 +97,25 @@ final class WorktreeBindingBookTests: XCTestCase {
         XCTAssertNil(other, "an item with no parent keeps no binding")
     }
 
+    func testThePushSendsTheBindingsOnceAndRetriesAnOldDaemon() async throws {
+        let d = TestAppData()
+        d.bindings.save(b("P-2", parent: "P"))
+        let http = RecordedHTTP()
+        let url = "http://127.0.0.1:7690/v1/worktree-bindings"
+        http.on("PUT", url, 404)
+        let push = await MainActor.run {
+            BindingPush(book: d.bindings, clients: { [DaemonClient(base: DaemonClient.loopback, token: nil, http: http)] }, triggers: [])
+        }
+        func run() async { await withCheckedContinuation { c in DispatchQueue.main.async { push.push { c.resume() } } } }
+        await run()
+        http.on("PUT", url, 204)
+        await run()
+        await run()
+        XCTAssertEqual(http.requests.count, 2, "a refusal gets a retry; a daemon with the same bindings gets no second push")
+        let page: WorktreeBindingsPage = try DaemonClient.decode(http.requests[1].httpBody ?? Data())
+        XCTAssertEqual(page.bindings.map(\.parent), ["P"])
+    }
+
     func testChildrenOfAParentAreSortedByKey() {
         let d = TestAppData()
         for r in [b("P-3", parent: "P"), b("P-2", parent: "P"), b("Q-1", parent: "Q")] { d.bindings.save(r) }

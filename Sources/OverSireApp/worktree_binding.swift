@@ -55,6 +55,52 @@ final class WorktreeBindingBook {
     }
 }
 
+/// Sends all bindings to each daemon of the group. A daemon reads the bindings of the home store
+/// only when it is the home. With a cloud home, it knows them only from this push.
+final class BindingPush {
+    private let book: WorktreeBindingBook
+    private let clients: () -> [DaemonClient]
+    private var sent: [URL: [WorktreeBinding]] = [:]
+    private var pending: DispatchWorkItem?
+    private var observers: [NSObjectProtocol] = []
+    var delay: TimeInterval = 2
+
+    init(book: WorktreeBindingBook, clients: @escaping () -> [DaemonClient], triggers: [Notification.Name]) {
+        self.book = book
+        self.clients = clients
+        observers = triggers.map {
+            NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { [weak self] _ in self?.schedule() }
+        }
+    }
+
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+    func schedule() {
+        pending?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.push() }
+        pending = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: w)
+    }
+
+    /// Sends to each daemon that does not have the bindings now. An old daemon refuses the route: it gets a retry at the next change.
+    func push(done: (() -> Void)? = nil) {
+        let all = book.records.values.sorted { $0.key < $1.key }
+        let due = clients().filter { sent[$0.base] != all }
+        guard !due.isEmpty else { done?(); return }
+        for c in due { sent[c.base] = all }
+        Task { [weak self] in
+            var failed: [URL] = []
+            for c in due {
+                do { try await c.putBindings(all) } catch { failed.append(c.base) }
+            }
+            await MainActor.run {
+                for u in failed { self?.sent[u] = nil }
+                done?()
+            }
+        }
+    }
+}
+
 /// What a caller asks for. Nil fields take the defaults.
 struct BindRequest {
     var worktree: String?        // a path or a template with {key}

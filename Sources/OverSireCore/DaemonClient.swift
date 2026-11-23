@@ -295,6 +295,11 @@ public final class DaemonClient: Sendable {
         _ = try await send(try json("DELETE", path, Optional<[String: String]>.none))
     }
 
+    /// Gives the daemon the bindings of the store. A daemon that is not the home finds the review groups through them.
+    public func putBindings(_ bindings: [WorktreeBinding]) async throws {
+        _ = try await send(try json("PUT", "/v1/worktree-bindings", WorktreeBindingsPage(bindings: bindings)))
+    }
+
     public func markViewed(_ key: String, _ m: ViewedMark) async throws {
         _ = try await send(try json("PUT", Self.reviewPath(key, "/viewed"), m))
     }
