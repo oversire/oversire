@@ -29,7 +29,7 @@ final class AppCallsTests: XCTestCase {
 
     func testAllowsItemWrites() {
         let ids = ["item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start",
-                   "item.reopen", "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
+                   "item.reopen", "item.create", "item.bindWorktree", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
                    "item.setLabels", "item.setAreas", "project.addLabel", "project.refresh", "intake.create", "people.list", "activity.list"]
         for id in ids { XCTAssertTrue(AppCalls.allowed.contains(id), id) }
         for id in ["item.closeSubItems", "intake.delete", "pr.merge"] { XCTAssertFalse(AppCalls.allowed.contains(id), id) }

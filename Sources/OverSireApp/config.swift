@@ -386,12 +386,13 @@ struct ProjectsConfig: Codable {
 
     // The agent, the prompt and the resolved start command for an item. The project settings come first, then the app defaults.
     /// `agent` starts this one time with another agent. The default does not change.
-    func launch(for item: Item, agent: String? = nil) -> (agent: AgentLaunch, prompt: String) {
+    /// `group` is the bound group folder of the item; nil uses `.wt/<key>`.
+    func launch(for item: Item, agent: String? = nil, group: String? = nil) -> (agent: AgentLaunch, prompt: String) {
         let l = local(item.key.split(separator: "-").dropLast().joined(separator: "-"))
         var r = runtime
         if let p = l.prompt, !p.isEmpty { r.prompt = p }
         let a = agent ?? defaultAgent(item.key)
-        return (r.launch(a, name: item.key, key: item.key, title: item.title), SessionPrompt.withSubItemsRule(r.prompt(for: item)))
+        return (r.launch(a, name: item.key, key: item.key, title: item.title), SessionPrompt.withSubItemsRule(r.prompt(for: item, group: group)))
     }
 
     /// The agent of the project of a key ("ENG-4" or "ENG"), else the default agent.
@@ -516,14 +517,16 @@ struct ProjectLocalSettings: Codable, Equatable {
     }
 
     // The branch name of an item: {key} lowercase, {KEY}, {slug} from the title, {title}.
-    func branch(for item: Item) -> String {
-        let slug = item.title.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+    func branch(for item: Item) -> String { branch(key: item.key, title: item.title) }
+
+    func branch(key: String, title: String) -> String {
+        let slug = title.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
             .split(separator: "-", omittingEmptySubsequences: true).prefix(6).joined(separator: "-")
         return (branchTemplate?.isEmpty == false ? branchTemplate! : ProjectLocalSettings.defaultBranch)
-            .replacingOccurrences(of: "{KEY}", with: item.key)
-            .replacingOccurrences(of: "{key}", with: item.key.lowercased())
+            .replacingOccurrences(of: "{KEY}", with: key)
+            .replacingOccurrences(of: "{key}", with: key.lowercased())
             .replacingOccurrences(of: "{slug}", with: String(slug))
-            .replacingOccurrences(of: "{title}", with: item.title)
+            .replacingOccurrences(of: "{title}", with: title)
     }
 }
 
@@ -734,7 +737,7 @@ struct SharedAgents: Equatable {
 }
 
 struct RuntimeConfig: Codable, Equatable {
-    static let defaultPrompt = "work on {url} in worktree group .wt/{key}"
+    static let defaultPrompt = "work on {url} in worktree group {group}"
     static let intakeKey = "intake"
     static let knownAgents = ["claude", "codex", "opencode"]
     /// The CLIs that an agent can have as its base, in menu order.
@@ -941,11 +944,13 @@ struct RuntimeConfig: Codable, Equatable {
         return hint
     }
 
-    // {url}, {key} (lowercase), {KEY} and {title}. A URL that is not a web page gives the key, and a read hint follows.
-    func prompt(for item: Item) -> String {
+    // {url}, {group}, {key} (lowercase), {KEY} and {title}. A URL that is not a web page gives the key, and a read hint follows.
+    /// `group` is the bound group folder; nil gives `.wt/<key>`.
+    func prompt(for item: Item, group: String? = nil) -> String {
         let hint = RuntimeConfig.readHint(for: item)
         let text = (prompt.isEmpty ? RuntimeConfig.defaultPrompt : prompt)
             .replacingOccurrences(of: "{url}", with: hint == nil ? item.url : item.key)
+            .replacingOccurrences(of: "{group}", with: group ?? WorktreeBinding.defaultGroup(item.key))
             .replacingOccurrences(of: "{KEY}", with: item.key)
             .replacingOccurrences(of: "{key}", with: item.key.lowercased())
             .replacingOccurrences(of: "{title}", with: item.title)

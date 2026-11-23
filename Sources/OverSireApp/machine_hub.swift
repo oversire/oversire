@@ -154,6 +154,9 @@ final class MachineHub {
     /// The runtime of the sessions machine (Settings › Machines). nil: the machine has no link.
     var sessions: MachineRuntime? { config().sessionsLink(links).flatMap { runtime($0.machine) } }
 
+    /// The name of the sessions machine, while it has a link.
+    var sessionsMachine: String? { config().sessionsLink(links)?.machine }
+
     /// Sets the sessions machine when the pick names no member: a stale name, or an empty pick after this app
     /// joined without a daemon.
     func repairSessions(adopt: Bool) {

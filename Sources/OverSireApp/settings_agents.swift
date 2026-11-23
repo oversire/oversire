@@ -44,7 +44,7 @@ extension SettingsPage {
         promptRow.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
         promptRow.addArrangedSubview(NSTextField.text("Prompt", size: 13, weight: .medium))
         promptRow.addFull(prompt)
-        promptRow.addArrangedSubview(NSTextField.text("Placeholders: {url} {key} {KEY} {title}. Keep {url} first.", size: 11.5, color: Palette.dim))
+        promptRow.addArrangedSubview(NSTextField.text("Placeholders: {url} {group} {key} {KEY} {title}. Keep {url} first.", size: 11.5, color: Palette.dim))
         let n = Set(r.commands.keys).union(r.profiles.keys).union(r.env.keys).union(r.runsOn.keys).union(RuntimeConfig.shared.defs.keys)
             .subtracting([RuntimeConfig.intakeKey]).count
         let open = Self.commandsOpen

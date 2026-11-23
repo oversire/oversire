@@ -143,6 +143,15 @@ final class SyncedStoreTests: XCTestCase {
         XCTAssertEqual(Set(ops.map(\.collection)), ["notes", "queue-triggers"])
     }
 
+    func testAWorktreeBindingGoesUpWithTheKeyAsId() async throws {
+        let hub = FakeStoreHub()
+        let a = client("a", hub)
+        try await a.put(WorktreeBinding(key: "OVERSIRE-402", machine: "mbp", root: "/w", group: ".wt/oversire-402", updatedAt: Date(timeIntervalSince1970: 0)))
+        await a.sync()
+        let ops = await hub.ops()
+        XCTAssertEqual(ops.map { "\($0.collection)/\($0.id)" }, ["worktree-bindings/OVERSIRE-402"])
+    }
+
     func testLocalCollectionsDoNotSync() async throws {
         let hub = FakeStoreHub()
         let a = client("a", hub)

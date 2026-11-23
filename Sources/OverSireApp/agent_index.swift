@@ -293,9 +293,12 @@ final class AgentIndex: NSObject {
         publish()
     }
 
+    /// The bound group folder of an item. The binder binds the default when the item has none.
+    var groupOf: ((Item) -> String?)?
+
     // Opens a Claude session for the item in its Orca workspace, then sends the prompt.
     func start(_ item: Item, root: String, agent: String? = nil, done: @escaping (Result<Launch, ProviderError>) -> Void) {
-        let (agent, prompt) = PROJECTS_CFG.launch(for: item, agent: agent)
+        let (agent, prompt) = PROJECTS_CFG.launch(for: item, agent: agent, group: groupOf?(item))
         launch(key: item.key, note: item.url, root: root, agent: agent, prompt: prompt, startKey: StartKey.work(item.key), done: done)
     }
 

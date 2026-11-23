@@ -17,6 +17,14 @@ struct ItemActions {
     static let startArg = ("string", "The start day as YYYY-MM-DD. `none` or an empty text removes it.")
     static let dueArg = ("string", "The due day as YYYY-MM-DD. `none` or an empty text removes it.")
     static let estimateArg = ("string", "The estimate in the units of the tracker, for example M for Big Timer. `none` or an empty text removes it.")
+    static let worktreeArg = ("string", "The worktree group folder: a path relative to the workspace root, an absolute path, or a template with {key}. Default .wt/{key}.")
+    static let machineArg = ("string", "The machine that holds the folder. Default: the machine that runs the sessions.")
+    static let branchArg = ("string", "The planned branch. Default: the branch template of the project.")
+    static let shareArg = ("boolean", "True: the sub-item works in the group of its parent.")
+
+    static func bindRequest(_ a: ActionArgs) -> BindRequest {
+        BindRequest(worktree: a.string("worktree"), machine: a.string("machine"), branch: a.string("branch"), shareParentGroup: a.bool("shareParentGroup") == true)
+    }
 
     /// The day as YYYY-MM-DD. `none` and an empty text give an empty text, which removes the date. A bad day gives nil.
     static func day(_ text: String) -> String? {
@@ -273,7 +281,9 @@ struct ItemActions {
                                                "parent": ("string", "The key of the parent item."),
                                                "labels": ("array", "Label names. See project.labels."),
                                                "epic": ("string", "The epic id or title in the project."),
-                                               "startDate": Self.startArg, "dueDate": Self.dueArg, "estimate": Self.estimateArg],
+                                               "startDate": Self.startArg, "dueDate": Self.dueArg, "estimate": Self.estimateArg,
+                                               "worktree": Self.worktreeArg, "machine": Self.machineArg, "branch": Self.branchArg,
+                                               "shareParentGroup": Self.shareArg],
                                               required: ["project", "title"])) { a in
                 await link.run { d, done in
                     guard let snap = d.projectStore.snapshot(a.string("project") ?? "") else { done(.notAllowed("OverSire has no loaded project \(a.string("project") ?? "").")); return }
@@ -313,10 +323,15 @@ struct ItemActions {
                             case .failure(let e): done(.failed(e.message))
                             case .success(let m):
                                 let note = parent.map { " under \($0.key)" } ?? ""
-                                let data = JSONValue.object(["key": .string(m.ref.key), "id": .string(m.ref.id), "url": .string(m.ref.url.absoluteString)])
+                                var data: [String: JSONValue] = ["key": .string(m.ref.key), "id": .string(m.ref.id), "url": .string(m.ref.url.absoluteString)]
                                 var tail = ""
                                 if let epic { tail = m.epicError.map { ". It is not in \(epic.title): \($0)" } ?? " in \(epic.title)" }
-                                done(.ok(summary: "\(m.ref.key) is made\(note)\(tail).", data: data))
+                                switch d.binder.bind(key: m.ref.key, title: a.string("title") ?? "", parent: parent?.key, project: snap.summary,
+                                                     Self.bindRequest(a), source: .create, actor: a.caller.actor) {
+                                case .success(let b): data["worktree"] = b.json
+                                case .failure(let e): tail += ". No worktree binding: \(e.message.dropLast())"
+                                }
+                                done(.ok(summary: "\(m.ref.key) is made\(note)\(tail).", data: .object(data)))
                             }
                         }
                     }
@@ -332,6 +347,18 @@ struct ItemActions {
                             }
                             make(ids)
                         }
+                    }
+                }
+            },
+            ActionSpec(id: "item.bindWorktree", title: "Bind worktree", help: "Sets the fixed worktree folder of an item. The daemon finds its review through it.",
+                       kind: .change, input: ActionSpec.args(["key": Self.key, "worktree": Self.worktreeArg, "machine": Self.machineArg, "branch": Self.branchArg,
+                                                             "shareParentGroup": Self.shareArg], required: ["key"])) { a in
+                await link.item(a) { d, f, done in
+                    let parent = f.item.parentId.flatMap { pid in f.snap.items.first { $0.id == pid }?.key }
+                    switch d.binder.bind(key: f.item.key, title: f.item.title, parent: parent, project: f.snap.summary, Self.bindRequest(a),
+                                         source: .link, actor: a.caller.actor) {
+                    case .success(let b): done(.ok(summary: "\(f.item.key) works in \(b.group) on \(b.machine).", data: .object(["worktree": b.json])))
+                    case .failure(let e): done(.notAllowed("No worktree binding for \(f.item.key): \(e.message)"))
                     }
                 }
             },

@@ -47,6 +47,12 @@ final class TestAppData: AppData {
     lazy var agentSecrets = AgentSecrets(device: "app-tests") { .failure(.noHome) }
     var agentPlaces = AgentPlaces(this: "mbp")
     lazy var areas = ItemAreaBook(writes: writes)
+    lazy var bindings = WorktreeBindingBook(writes: writes)
+    /// The sessions machine and the root of each project for the binder.
+    var bindMachine: String? = "mbp"
+    var bindRoot: String? = "/w"
+    lazy var binder = WorktreeBinder(book: bindings, store: projectStore, events: projectStore.events,
+                                     machine: { [unowned self] in self.bindMachine }, root: { [unowned self] _ in self.bindRoot })
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, actions: actions)

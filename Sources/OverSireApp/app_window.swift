@@ -16,6 +16,8 @@ protocol AppData: AnyObject {
     var queue: WorkQueue { get }
     var memory: ProjectMemory { get }
     var areas: ItemAreaBook { get }
+    var bindings: WorktreeBindingBook { get }
+    var binder: WorktreeBinder { get }
     var suggestions: SuggestionBook { get }
     var planner: PlannerBook { get }
     var statusJob: StatusJob { get }

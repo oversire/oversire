@@ -154,6 +154,8 @@ final class ProjectStore {
     var commentMarkTTL: TimeInterval = 300
     /// Takes the epic rows. Tests set their own desk.
     var events: EventDesk = EVENTS
+    /// An intake item became a work item. The binder binds its worktree.
+    var onAccepted: ((_ key: String, _ title: String, _ project: String, _ actor: EventActor) -> Void)?
     private var assetCache: [String: (url: String, at: Date)] = [:]
     private(set) lazy var relations = RelationCache(
         tracker: { [weak self] in self?.trackers.tracker($0.project.workspace) as? any RelationManaging },
@@ -1553,7 +1555,10 @@ final class ProjectStore {
         var payload: [String: JSONValue] = ["intake": .string(item.id), "title": .string(item.name)]
         let kind: Event.Kind
         switch action {
-        case .accept: kind = .intakeAccepted; payload["commented"] = .bool(commented)
+        case .accept:
+            kind = .intakeAccepted
+            payload["commented"] = .bool(commented)
+            if let key { onAccepted?(key, item.name, project, actor) }
         case .decline: kind = .intakeDeclined; payload["commented"] = .bool(commented)
         case .snooze(let until): kind = .intakeSnoozed; payload["until"] = .string(isoFmt.string(from: until))
         case .duplicate(let of): kind = .intakeDuplicated; payload["of"] = .string(of)

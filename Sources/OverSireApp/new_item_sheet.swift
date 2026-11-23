@@ -40,6 +40,11 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
     private let countLabel = NSTextField(labelWithString: "0 chars")
     private let fieldsBox = Flipped()
     private var fieldPops: [(field: ProjectField, pop: NSPopUpButton, mark: NSTextField)] = []
+    private let worktreeLabel = NSTextField(labelWithString: "WORKTREE")
+    private let worktreeField = NSTextField()
+    private let worktreeOn = NSTextField(labelWithString: "")
+    private let worktreeHint = NSTextField(labelWithString: "{key} is the new key")
+    private let machine: String?
     private let noticeLabel = NSTextField(labelWithString: "")
     private let cancelBtn = NSButton(title: "Cancel", target: nil, action: nil)
     private let createBtn = NSButton(title: "Create  ⌘↩", target: nil, action: nil)
@@ -48,8 +53,13 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
     private var pad: CGFloat { 16 }
     private var innerW: CGFloat { cardW - 2 * pad }
 
-    init(store: ProjectStore, actions: AppActionCatalog, projects: [ProjectSummary], target: String?, prefill: String?, w: CGFloat) {
+    static let defaultWorktree = ".wt/{key}"
+
+    /// `machine` is the machine that runs the sessions. It holds the worktree.
+    init(store: ProjectStore, actions: AppActionCatalog, projects: [ProjectSummary], target: String?, prefill: String?, w: CGFloat,
+         machine: String? = nil) {
         self.store = store
+        self.machine = machine
         self.actions = actions
         self.projects = projects
         self.ai = AIClient.current
@@ -174,6 +184,21 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
 
         card.addSubview(fieldsBox)
 
+        worktreeLabel.font = .systemFont(ofSize: 10, weight: .semibold); worktreeLabel.textColor = .secondaryLabelColor
+        card.addSubview(worktreeLabel)
+        worktreeField.stringValue = Self.defaultWorktree
+        worktreeField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        worktreeField.setAccessibilityLabel("Worktree folder")
+        worktreeField.toolTip = "The fixed worktree group of the new item, relative to the workspace root, or absolute"
+        card.addSubview(worktreeField)
+        worktreeOn.font = .systemFont(ofSize: 12); worktreeOn.textColor = .secondaryLabelColor
+        worktreeOn.stringValue = machine.map { "on \($0)" } ?? "no sessions machine"
+        worktreeOn.lineBreakMode = .byTruncatingTail
+        card.addSubview(worktreeOn)
+        worktreeHint.font = .systemFont(ofSize: 10.5); worktreeHint.textColor = .tertiaryLabelColor
+        worktreeHint.alignment = .right
+        card.addSubview(worktreeHint)
+
         noticeLabel.font = .systemFont(ofSize: 11)
         noticeLabel.lineBreakMode = .byTruncatingTail
         card.addSubview(noticeLabel)
@@ -297,6 +322,12 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         y += 32
         fieldsBox.frame.origin = NSPoint(x: pad, y: y)
         y += fieldsBox.frame.height + 8
+        worktreeLabel.frame = NSRect(x: pad, y: y, width: 100, height: 14)
+        worktreeHint.frame = NSRect(x: pad + 100, y: y, width: innerW - 100, height: 14)
+        y += 16
+        worktreeField.frame = NSRect(x: pad, y: y, width: innerW - 160, height: 24)
+        worktreeOn.frame = NSRect(x: pad + innerW - 152, y: y + 4, width: 152, height: 16)
+        y += 32
         noticeLabel.frame = NSRect(x: pad, y: y, width: innerW, height: 16)
         noticeLabel.isHidden = notice == nil
         if let n = notice {
@@ -531,12 +562,15 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         var args: [String: JSONValue] = ["project": .string(key), "title": .string(title), "body": .string(body)]
         if let o = options[ProjectSnapshot.statusFieldId] { args["status"] = .string(o) }
         if let o = options[ProjectSnapshot.priorityFieldId] { args["priority"] = .string(o) }
+        let worktree = worktreeField.stringValue.trimmingCharacters(in: .whitespaces)
+        if !worktree.isEmpty, worktree != Self.defaultWorktree { args["worktree"] = .string(worktree) }
         actions.run("item.create", args) { [weak self] r in
             guard let self else { return }
             self.creating = false
             switch r {
-            case .ok:
-                self.onClose?(key, "Added to \(name)")
+            case .ok(let summary, _, _):
+                let warn = summary.range(of: "No worktree binding").map { " · " + summary[$0.lowerBound...] } ?? ""
+                self.onClose?(key, "Added to \(name)\(warn)")
             case .failed(let m), .notAllowed(let m):
                 self.show(m, error: true)
             }

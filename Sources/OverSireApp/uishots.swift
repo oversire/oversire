@@ -57,6 +57,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         AgentPlace(name: "mbp"), AgentPlace(name: "mba", sessions: true), AgentPlace(name: "mini", home: true),
     ])
     lazy var areas = ItemAreaBook(writes: writes)
+    lazy var bindings = WorktreeBindingBook(writes: writes)
+    lazy var binder = WorktreeBinder(book: bindings, store: projectStore, events: projectStore.events, machine: { "mbp" },
+                                     root: { _ in "/Users/fritz/Projects/oversire-workspace" })
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, actions: actions)
@@ -1146,6 +1149,9 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                             NetworkPath.shared.update(satisfied: true)
                         }
                         self.glance = self.popoverSample()
+                    } else if p == "newitem" {
+                        // newitem: the New item sheet with the Worktree row (OVERSIRE-586).
+                        self.glance = self.newItemSample()
                     } else if p == "groom:sheet", let win = w.window, let snap = self.projectStore.snapshot("TREBI") {
                         let labels = Set(snap.items.flatMap(\.labels)).sorted()
                         GroomSheet(agent: self.groomAgent, projectKey: snap.summary.ref.storeKey, identifier: snap.summary.identifier, labels: labels).present(over: win)
@@ -1554,6 +1560,26 @@ extension UIShots {
     }
 
     // The footer of the popover with the problem line, in a plain window.
+    private func newItemSample() -> NSWindow {
+        let projects = projectCatalog.resolve(PROJECTS_CFG).filter { projectStore.snapshots[$0.ref.storeKey] != nil }
+        var s: NewItemSheet!
+        (NSApp.appearance ?? NSApp.effectiveAppearance).performAsCurrentDrawingAppearance {
+            s = NewItemSheet(store: projectStore, actions: actions, projects: projects, target: projects.first?.identifier,
+                             prefill: "Add quick capture to the menu", w: POP_W, machine: "mbp")
+        }
+        s.frame = NSRect(x: 0, y: 0, width: POP_W, height: s.cardHeight)
+        let g = NSWindow(contentRect: NSRect(x: 1360, y: 200, width: POP_W, height: s.cardHeight), styleMask: [.borderless], backing: .buffered, defer: false)
+        g.appearance = NSApp.appearance
+        g.contentView = s
+        s.onResize = { [weak s, weak g] in
+            guard let s, let g else { return }
+            g.setContentSize(NSSize(width: POP_W, height: s.cardHeight))
+            s.frame.size.height = s.cardHeight
+        }
+        g.orderFrontRegardless()
+        return g
+    }
+
     private func popoverSample() -> NSWindow {
         let f = Footer(POP_W, updated: Date(), problems: openProblems)
         let g = NSWindow(contentRect: NSRect(x: 1360, y: 200, width: POP_W, height: f.frame.height), styleMask: [.borderless], backing: .buffered, defer: false)

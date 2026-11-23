@@ -86,6 +86,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         a.onAlert = { [weak self] key, agent in self?.agentAlert(key, agent) }
         a.open = { [weak self] k in self.map { $0.projectStore.item(key: k) != nil && !$0.projectStore.isDone(key: k) } ?? false }
         a.tracked = { [weak self] k in self?.projectStore.item(key: k) != nil }
+        a.groupOf = { [weak self] i in self?.binder.ensure(i, source: .session, actor: .user)?.group }
         return a
     }()
     lazy var machineHub: MachineHub = {
@@ -199,6 +200,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var assistant: AssistantController? { assistantRoot.controller }
     lazy var memory = ProjectMemory(writes: STORE_WRITES)
     lazy var areas = ItemAreaBook(writes: STORE_WRITES)
+    lazy var bindings = WorktreeBindingBook(writes: STORE_WRITES)
+    lazy var binder: WorktreeBinder = {
+        let b = WorktreeBinder(book: bindings, store: projectStore, events: projectStore.events,
+                               machine: { [weak self] in self?.machineHub.sessionsMachine }, root: { PROJECTS_CFG.orcaRoot($0) })
+        b.onBound = { [weak self] in self?.writeBack.writeBinding($0) }
+        return b
+    }()
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
     var logs: LogStore?
     private var orderLog: WorkOrderLog?
@@ -209,6 +217,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var writeBack: PlaneWriteBack = {
         let w = PlaneWriteBack(path: WRITEBACK_PATH, store: projectStore, trackers: ENV)
         w.onError = { log.error("\($0)") }
+        w.binding = { [weak self] in self?.bindings.binding($0) }
         return w
     }()
     lazy var parentGuard: ParentGuard = {
@@ -512,6 +521,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
         NotificationCenter.default.addObserver(forName: ProjectStore.changed, object: projectStore, queue: .main) { [weak self] _ in
             self?.enhanceAgent.autoStart()
+            self?.binder.reconcileParents()
+        }
+        projectStore.onAccepted = { [weak self] key, title, project, actor in
+            guard let self, let snap = projectStore.snapshot(project) else { return }
+            binder.ensure(key: key, title: title, parent: nil, project: snap.summary, source: .intake, actor: actor)
         }
         queue.areaBook = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.areas : nil }
         queue.planner = { [unowned self] in UIShots.cloud ?? self.relay.canRun ? self.planner : nil }
@@ -1177,6 +1191,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         enhanceAgent.mayAct = may
         cleaner.mayAct = may
         writeBack.mayAct = may
+        binder.mayAct = may
         parentGuard.mayAct = may
         sessions.mayAct = may
         ciAssist.mayAct = may

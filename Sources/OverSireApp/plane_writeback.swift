@@ -68,6 +68,8 @@ final class PlaneWriteBack {
     var onError: ((String) -> Void)?
     /// False when another app owns the automations (AutomationOwner).
     var mayAct: () -> Bool = { true }
+    /// The worktree binding of a key.
+    var binding: (String) -> WorktreeBinding? = { _ in nil }
 
     init(path: String, store: ProjectStore, trackers: TrackerDirectory) {
         self.path = path
@@ -86,18 +88,32 @@ final class PlaneWriteBack {
         }
     }
 
-    // Markdown of the block for a workstream.
-    static func blockMarkdown(_ s: Workstream) -> String {
+    // Markdown of the block for a workstream. The Branch line of a binding replaces the checkout branches.
+    static func blockMarkdown(_ s: Workstream, binding: WorktreeBinding? = nil) -> String {
         var lines: [String] = []
         if let a = s.agent {
             let since = DateFormatter.localizedString(from: a.since, dateStyle: .short, timeStyle: .short)
             lines.append("- Session: \(a.phase == .working ? "Working since \(since)" : a.label())")
         }
-        for co in s.checkouts where !co.branch.isEmpty { lines.append("- Branch: `\(co.branch)`") }
+        if let binding { lines += bindingLines(binding) } else {
+            for co in s.checkouts where !co.branch.isEmpty { lines.append("- Branch: `\(co.branch)`") }
+        }
         for r in s.latestRuns.prefix(3) { lines.append("- CI: [\(r.run.workflowName ?? r.run.name) #\(r.run.number)](\(r.run.url)) \(Tone(r.run).word.lowercased())") }
         for p in s.prs.prefix(2) { lines.append("- PR: [\(p.repo) #\(p.pr.number)](\(p.pr.url)) \(p.pr.isDraft ? "draft" : p.pr.state.lowercased())") }
         lines.append("- Open in OverSire: oversire://item/\(s.key)")
         return lines.joined(separator: "\n")
+    }
+
+    /// The block of an item with a binding and no session yet.
+    static func blockMarkdown(binding b: WorktreeBinding) -> String {
+        (bindingLines(b) + ["- Open in OverSire: oversire://item/\(b.key)"]).joined(separator: "\n")
+    }
+
+    static func bindingLines(_ b: WorktreeBinding) -> [String] {
+        var lines = ["- Worktree: `\(b.group)` on \(b.machine)"]
+        if !b.branch.isEmpty { lines.append("- Branch: `\(b.branch)`") }
+        if let p = b.parent { lines.append("- Review in: \(p)") }
+        return lines
     }
 
     // Writes what changed. At most one write per item each 2 minutes.
@@ -116,7 +132,7 @@ final class PlaneWriteBack {
                 links += s.latestRuns.prefix(2).map { ($0.run.url, "CI \($0.run.workflowName ?? $0.run.name) #\($0.run.number)") }
             }
             links = links.filter { !state.links.contains($0.0) }
-            let block = cfg.block ? PlaneWriteBack.blockMarkdown(s) : nil
+            let block = cfg.block ? PlaneWriteBack.blockMarkdown(s, binding: binding(s.key)) : nil
             let review = cfg.moveToReview && !s.prs.isEmpty && snap.option(item.statusOptionId).map { $0.category == .progress || $0.category == .todo } == true
                 ? snap.statusOptions.first { $0.category == .review } : nil
             let needLabel = wantLabel != nil && wantLabel != state.label
@@ -157,6 +173,36 @@ final class PlaneWriteBack {
                     self.done[key] = state
                     self.save()
                     if let e = errors.first { self.onError?("Write-back to \(key): \(e)") }
+                }
+            }
+        }
+    }
+
+    // Writes the block of a new binding. A later `sync` keeps the binding lines.
+    /// A new item is often not in the snapshot yet, so it tries again `tries` times.
+    func writeBinding(_ b: WorktreeBinding, tries: Int = 3) {
+        let cfg = AGENTS.writeBack
+        guard cfg.enabled, cfg.block, mayAct(), !inFlight.contains(b.key) else { return }
+        guard let (_, snap, item) = store.item(key: b.key) else {
+            if tries > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.writeBinding(b, tries: tries - 1) } }
+            return
+        }
+        guard let client = trackers.tracker(snap.summary.ref.workspace) as? any HTMLBodies, let ref = item.ref(in: snap.summary.ref) else { return }
+        let block = PlaneWriteBack.blockMarkdown(binding: b)
+        guard block != done[b.key]?.block else { return }
+        inFlight.insert(b.key)
+        let key = b.key
+        Task { [weak self] in
+            let r = await Result(awaiting: {
+                let html = try await client.descriptionHTML(ref)
+                try await client.setDescription(ref, html: OverSireBlock.merge(html, block: client.html(fromMarkdown: block)))
+            })
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.inFlight.remove(key)
+                switch r {
+                case .success: self.done[key, default: Done()].block = block; self.save()
+                case .failure(let e): self.onError?("Write-back to \(key): \(e.message)")
                 }
             }
         }

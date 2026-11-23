@@ -432,6 +432,7 @@ func runSelfTest() {
                          updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
     var rc = RuntimeConfig()
     check(rc.prompt(for: draftItem) == "work on https://app.plane.so/ocral/browse/FRITZ-7/ in worktree group .wt/fritz-7", "runtime prompt template")
+    check(rc.prompt(for: draftItem, group: "/x/wt").hasSuffix("in worktree group /x/wt"), "runtime prompt bound group")
     let btItem = Item(id: "u-2", key: "FRITZ-7", title: "Add quick capture", url: "bigtimer://issue/FRITZ-7",
                       statusOptionId: "s1", fields: [:], assignees: [], labels: [], author: nil, updatedBy: nil,
                       updatedAt: Date(), activityAt: Date(), commentCount: 0, lastComment: nil, mentionsMe: false)
@@ -837,6 +838,9 @@ func runSelfTest() {
         ws.agent = AgentSession(phase: .working, since: Date().addingTimeInterval(-3_000))
         let md = PlaneWriteBack.blockMarkdown(ws)
         check(md.contains("Working since") && !md.contains("50m"), "block: no running time, so it does not change each minute")
+        let bound = PlaneWriteBack.blockMarkdown(ws, binding: WorktreeBinding(key: "FRITZ-1", machine: "mbp", root: "/w", group: ".wt/fritz-1",
+                                                                              branch: "fritz-1", parent: "FRITZ-0"))
+        check(bound.contains("- Worktree: `.wt/fritz-1` on mbp") && bound.contains("- Review in: FRITZ-0"), "block: binding lines")
     }
 
     // Snap basket: render a fixture basket and check the ticket. No screen access.

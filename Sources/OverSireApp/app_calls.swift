@@ -10,7 +10,7 @@ final class AppCalls: @unchecked Sendable {
         "item.get", "item.list", "item.history", "item.markdown", "item.setEpic", "epic.list", "epic.show", "epic.plan", "epic.create", "epic.update", "epic.close", "epic.addItems", "epic.removeItems",
         "project.northStar", "project.setNorthStar",
         "item.setStatus", "item.setPriority", "item.update", "item.edit", "item.comment", "item.assignMe", "item.assign", "item.start", "item.reopen",
-        "item.create", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
+        "item.create", "item.bindWorktree", "item.relate", "item.link", "item.attach", "project.statuses", "project.labels", "project.people", "search.all",
         "ci.log", "ci.jobs", "ci.workflows", "ci.refresh", "ci.explain",
         "ci.rerun", "ci.rerunJob", "ci.cancel", "ci.dispatch", "ci.approve",
         "vendor.list", "vendor.run", "vendor.skill", "vendor.install", "vendor.remove",

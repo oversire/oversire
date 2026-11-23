@@ -567,7 +567,7 @@ final class ProjectSettingsPage: Page {
             c.add(field("Prompt", TextInput(prompt, label: "Prompt template", mono: true, lines: 3) { [weak self] v in
                 guard let self, v != self.local.prompt else { return }
                 self.editLocal { $0.prompt = v }
-            }, help: "Placeholders: {url}, {key}, {title}."))
+            }, help: "Placeholders: {url}, {group}, {key}, {title}."))
         }
         body.addFull(c)
     }

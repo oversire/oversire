@@ -254,7 +254,8 @@ class TabVC: NSViewController {
         let projects = app.projectCatalog.resolve(PROJECTS_CFG).filter { app.projectStore.snapshots[$0.ref.storeKey] != nil }
         guard !projects.isEmpty else { return }
         sheet?.removeFromSuperview()
-        let s = NewItemSheet(store: app.projectStore, actions: app.actions, projects: projects, target: target, prefill: prefill, w: POP_W)
+        let s = NewItemSheet(store: app.projectStore, actions: app.actions, projects: projects, target: target, prefill: prefill, w: POP_W,
+                             machine: app.machineHub.sessionsMachine)
         s.onClose = { [weak self] key, notice in self?.closeNewItem(key: key, notice: notice) }
         s.onResize = { [weak self] in self?.relayout() }
         view.addSubview(s)

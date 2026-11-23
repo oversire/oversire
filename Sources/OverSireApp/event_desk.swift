@@ -158,19 +158,19 @@ final class EventDesk: @unchecked Sendable {
 
     /// A row of an action in this app. verb makes the id unique with the time. An agent caller gives its actor.
     func action(_ kind: Event.Kind, item: String?, project: String? = nil, verb: String, _ summary: String, payload: [String: JSONValue]? = nil,
-                actorType: ActorType = .human, actor: String? = nil, via: String? = nil) {
+                actorType: ActorType = .human, actor: String? = nil, via: String? = nil, parentItem: String? = nil) {
         let at = now()
         let id = "app:\(machine()):\(item ?? "-"):\(verb):\(Int64(at.timeIntervalSince1970 * 1000))"
-        send([EventDraft(id: id, at: at, kind: kind, item: item, project: project?.lowercased(), machine: machine(), actorType: actorType,
+        send([EventDraft(id: id, at: at, kind: kind, item: item, parentItem: parentItem, project: project?.lowercased(), machine: machine(), actorType: actorType,
                          actor: actor ?? self.actor, via: via ?? self.via, summary: summary, payload: payload)])
     }
 
     /// A row of the app itself, for you: the queue.
     func system(_ kind: Event.Kind, item: String?, project: String?, actor: String, verb: String, _ summary: String,
-                payload: [String: JSONValue]? = nil) {
+                payload: [String: JSONValue]? = nil, parentItem: String? = nil) {
         let at = now()
         let id = "app:\(machine()):\(item ?? "-"):\(verb):\(Int64(at.timeIntervalSince1970 * 1000))"
-        send([EventDraft(id: id, at: at, kind: kind, item: item, project: project?.lowercased(), machine: machine(), actorType: .system,
+        send([EventDraft(id: id, at: at, kind: kind, item: item, parentItem: parentItem, project: project?.lowercased(), machine: machine(), actorType: .system,
                          actor: actor, onBehalf: email(), via: via, summary: summary, payload: payload)])
     }
 
