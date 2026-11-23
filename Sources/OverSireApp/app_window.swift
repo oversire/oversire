@@ -769,11 +769,12 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
             return i
         case copyId:
             let i = NSToolbarItem(itemIdentifier: id)
-            let b = NSButton(image: NSImage(systemSymbolName: "link", accessibilityDescription: "Copy the link of this page")!, target: self,
-                             action: #selector(copyLink))
+            let b = NSPopUpButton(frame: .zero, pullsDown: true)
             b.bezelStyle = .texturedRounded
-            b.widthAnchor.constraint(equalToConstant: 32).isActive = true
-            b.toolTip = "Copy the oversire:// link of this page"
+            b.menu = copyLinkMenu()
+            b.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            b.toolTip = "Copy the link of this page"
+            b.setAccessibilityLabel("Copy link menu")
             i.view = b
             i.label = "Copy link"
             return i
@@ -816,8 +817,36 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
 
     @objc func goBack(_ sender: Any?) { router.back() }
     @objc func goForward(_ sender: Any?) { router.forward() }
-    @objc func copyLink() {
-        RowActions.copy(router.current.url.absoluteString)
+    // The first item of a pull-down menu is its title.
+    func copyLinkMenu() -> NSMenu {
+        let m = NSMenu()
+        let head = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        head.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Copy link menu")
+        m.addItem(head)
+        for (title, action) in [("Copy app link", #selector(copyAppLink)), ("Copy web link", #selector(copyWebLink)),
+                                ("Copy Markdown link", #selector(copyMarkdownLink))] {
+            let it = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            it.target = self
+            m.addItem(it)
+        }
+        return m
+    }
+
+    // Page has no focus value to read, so a copied link has no focus.
+    private var copyTarget: Target { Target(router.current) }
+
+    @objc func copyAppLink() { RowActions.copy(copyTarget.url.absoluteString) }
+
+    @objc func copyWebLink() {
+        guard let base = WebLink.base() else { return }
+        RowActions.copy(WebLink.url(copyTarget, base: base).absoluteString)
+    }
+
+    @objc func copyMarkdownLink() {
+        let r = router.current
+        var title = r.title
+        if case .item(let k, _) = r, let t = data.projectStore.item(key: k)?.item.title { title = "\(k) \(t)" }
+        RowActions.copy(WebLink.markdown(copyTarget, title: title, base: WebLink.base()))
     }
     /// ⌘R: the app data and the parts of the page. An ⌥-click does everything.
     @objc func refreshNow() {
@@ -936,6 +965,11 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         switch item.action {
         case #selector(goBack(_:)): return router.canGoBack
         case #selector(goForward(_:)): return router.canGoForward
+        case #selector(copyAppLink): item.toolTip = copyTarget.url.absoluteString; return true
+        case #selector(copyWebLink):
+            let base = WebLink.base()
+            item.toolTip = base.map { WebLink.url(copyTarget, base: $0).absoluteString } ?? "No daemon gives web links. Update oversire on the home Mac."
+            return base != nil
         default: return true
         }
     }

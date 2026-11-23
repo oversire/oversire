@@ -67,6 +67,27 @@ final class MachineRuntimeCallerTests: XCTestCase {
         XCTAssertFalse(sync.owner.mayAct)
     }
 
+    @MainActor
+    func testTheWebBaseComesFromADaemonWithTheFeatureLinks() async throws {
+        for (features, want) in [(["links"], "http://mba.t.ts.net:7690"), ([], nil)] as [([String], String?)] {
+            let d = FakeDaemon(machine: "mba")
+            d.info.features = features
+            d.info.listen = .init(loopback: "127.0.0.1:7690", web: "http://mba.t.ts.net:7690")
+            let h = hub(d)
+            h.use([mba])
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("group-sync-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let store = LocalStore(dir: dir)
+            let desk = RunnerDesk(store: store, hub: RelayAnswers { RelayAPI(base: "http://relay", token: nil) }, http: d)
+            let sync = GroupSync(hub: h, writes: StoreWrites(store: store), desk: desk, http: d)
+            h.setHealth("mba", .live)
+            sync.apply()
+            _ = await Wait.until(timeout: .seconds(1)) { d.requests.contains { $0.url?.path == "/v1/whoami" } }
+            try await Task.sleep(nanoseconds: 50_000_000)
+            XCTAssertEqual(sync.webBase?.absoluteString, want, "features \(features)")
+        }
+    }
+
     // MARK: MachineHub
 
     func testOneRuntimeForEachMachine() {

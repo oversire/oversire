@@ -1236,6 +1236,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
                         self.planState(p, in: w)
                     } else if p.hasPrefix("clicks:") {
                         self.clicksScene(String(p.dropFirst(7)), in: w)
+                    } else if p.hasPrefix("link:") {
+                        self.linkScene(String(p.dropFirst(5)), theme: theme.rawValue, in: w)
                     } else if UIShots.settingsClientScenes.contains(p) {
                         self.settingsClientScene(p, in: w)
                     } else if UIShots.vendorScenes.contains(p) {
@@ -2537,4 +2539,31 @@ struct NoCIReader: CIDetailReading {
     func failures(_ repo: String, runId: String, jobs: [Job]) async -> [Failure] { [] }
     func rawLog(_ repo: String, jobId: String) async -> String? { nil }
     func checks(_ repo: String, sha: String) async -> [CICheck]? { nil }
+}
+
+extension UIShots {
+    /// link:<frame>: the Copy link menu and the toast of a link open (OVERSIRE-593). Frames: menu, menu-old (no web base),
+    /// toast-cli, toast-web, toast-update (a route that this app does not know).
+    func linkScene(_ frame: String, theme: String, in w: AppWindow) {
+        let base = URL(string: "http://mbp.tail8ed2.ts.net:7690")
+        switch frame {
+        case "menu", "menu-old":
+            WebLink.base = { frame == "menu" ? base : nil }
+            w.router.go(.item("FRITZ-17", .changes))
+            guard let b = w.window?.toolbar?.items.first(where: { $0.itemIdentifier.rawValue == "copy" })?.view else {
+                return print("UISHOTS no copy link button")
+            }
+            let menu = w.copyLinkMenu()
+            menu.removeItem(at: 0)
+            shootMenu(menu, under: b, name: "\(theme)-link-\(frame)-open")
+        case "toast-cli", "toast-web", "toast-update":
+            let o = OpenRoute(id: "o-7c2d91", path: frame == "toast-update" ? "galaxy/FRITZ-17" : "item/FRITZ-17", focus: nil,
+                              source: frame == "toast-web" ? .web : .cli, daemon: "mbp")
+            let l = LinkOpen(open: o)
+            if let t = l.target { w.router.go(t.route) }
+            MainActor.assumeIsolated { ClickToast.show(l.toast.text, bad: l.toast.bad) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.glance = ClickToast.current }
+        default: print("UISHOTS bad link frame \(frame)")
+        }
+    }
 }

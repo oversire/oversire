@@ -27,6 +27,8 @@ final class GroupSync {
     // True when the group came after the first read of the daemons. Before it, nil does not mean solo.
     private var loaded = false
     private var runtimes: [String: [ProviderID]] = [:]
+    /// The base of the /go/ links of each daemon with the feature links.
+    private var webs: [String: URL] = [:]
     private var reading: Set<String> = []
     private var observer: NSObjectProtocol?
 
@@ -116,6 +118,12 @@ final class GroupSync {
         }
     }
 
+    /// The base of the web links: the daemon of the group home, else the daemon of this Mac. nil: an old daemon.
+    var webBase: URL? {
+        if let group { return webs[group.home.rawValue] }
+        return hub.links.first(where: \.local).flatMap { webs[$0.machine] }
+    }
+
     /// The links whose daemon source is live.
     var live: [MachineLink] { hub.links.filter { hub.isLive($0.machine) } }
 
@@ -163,6 +171,7 @@ final class GroupSync {
                     self.reading.remove(l.machine)
                     guard let info else { return }
                     self.runtimes[l.machine] = info.runtimes
+                    self.webs[l.machine] = info.has(DaemonInfo.links) ? info.listen.web.flatMap(URL.init(string:)) : nil
                     self.desk.update(self.choice)
                 }
             }

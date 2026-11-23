@@ -395,6 +395,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         startAutomations()
         machineHub.start()
         if !UIShots.shooting { MainActor.assumeIsolated { presence.start() } }
+        WebLink.base = { [weak self] in self?.relay.group?.webBase }
         RUNBOOKS.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "runbook:" + key) }
         NotificationCenter.default.addObserver(forName: RunbookBook.changed, object: RUNBOOKS, queue: .main) { [weak self] _ in self?.updateIcon() }
         RUNBOOKS.start()
