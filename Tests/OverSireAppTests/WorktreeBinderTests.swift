@@ -116,6 +116,18 @@ final class WorktreeBindingBookTests: XCTestCase {
         XCTAssertEqual(page.bindings.map(\.parent), ["P"])
     }
 
+    func testAClientDoesNotPush() async throws {
+        let d = TestAppData()
+        let http = RecordedHTTP()
+        http.on("PUT", "http://127.0.0.1:7690/v1/worktree-bindings", 204)
+        let push = await MainActor.run {
+            BindingPush(book: d.bindings, clients: { [DaemonClient(base: DaemonClient.loopback, token: nil, http: http)] }, triggers: [])
+        }
+        push.owner = { false }
+        await withCheckedContinuation { c in DispatchQueue.main.async { push.push { c.resume() } } }
+        XCTAssertTrue(http.requests.isEmpty, "the empty push of a client removes the bindings of the daemon")
+    }
+
     func testChildrenOfAParentAreSortedByKey() {
         let d = TestAppData()
         for r in [b("P-3", parent: "P"), b("P-2", parent: "P"), b("Q-1", parent: "Q")] { d.bindings.save(r) }

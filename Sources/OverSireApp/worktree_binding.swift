@@ -64,6 +64,8 @@ final class BindingPush {
     private var pending: DispatchWorkItem?
     private var observers: [NSObjectProtocol] = []
     var delay: TimeInterval = 2
+    /// Only the app that holds the store pushes. A client has no bindings, and its empty push removes them from the daemon.
+    var owner: () -> Bool = { MODE == .full }
 
     init(book: WorktreeBindingBook, clients: @escaping () -> [DaemonClient], triggers: [Notification.Name]) {
         self.book = book
@@ -84,6 +86,7 @@ final class BindingPush {
 
     /// Sends to each daemon that does not have the bindings now. An old daemon refuses the route: it gets a retry at the next change.
     func push(done: (() -> Void)? = nil) {
+        guard owner() else { done?(); return }
         let all = book.records.values.sorted { $0.key < $1.key }
         let due = clients().filter { sent[$0.base] != all }
         guard !due.isEmpty else { done?(); return }
