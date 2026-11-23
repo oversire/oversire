@@ -317,8 +317,7 @@ final class ActionCatalogTests: XCTestCase {
         let posted = rig.fake.postedUpdates
         XCTAssertEqual(posted.map(\.markdown), [secret])
         XCTAssertEqual(posted.map(\.health), [.atRisk])
-        let snap = await rig.snapshot()
-        XCTAssertEqual(snap?.epic(rig.epic.id)?.state, .active)
+        await until("the view shows the state") { await rig.snapshot()?.epic(rig.epic.id)?.state == .active }
         // A health with no note gives a body.
         let bare = await rig.d.actions.run("epic.update", args(["project": .string("FAKE"), "epic": .string("Review desk"), "health": .string("on_track")]))
         XCTAssertEqual(bare, .ok(summary: "Epic Review desk is updated."))

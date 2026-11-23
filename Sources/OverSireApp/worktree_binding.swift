@@ -93,7 +93,7 @@ final class BindingPush {
             for c in due {
                 do { try await c.putBindings(all) } catch { failed.append(c.base) }
             }
-            await MainActor.run {
+            await MainActor.run { [failed] in
                 for u in failed { self?.sent[u] = nil }
                 done?()
             }
