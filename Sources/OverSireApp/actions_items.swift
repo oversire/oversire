@@ -357,7 +357,7 @@ struct ItemActions {
                     let parent = f.item.parentId.flatMap { pid in f.snap.items.first { $0.id == pid }?.key }
                     switch d.binder.bind(key: f.item.key, title: f.item.title, parent: parent, project: f.snap.summary, Self.bindRequest(a),
                                          source: .link, actor: a.caller.actor) {
-                    case .success(let b): done(.ok(summary: "\(f.item.key) works in \(b.group) on \(b.machine).", data: .object(["worktree": b.json])))
+                    case .success(let b): done(.ok(summary: "\(f.item.key) works in \(b.group) on \(b.machine).", data: .object(["key": .string(f.item.key), "worktree": b.json])))
                     case .failure(let e): done(.notAllowed("No worktree binding for \(f.item.key): \(e.message)"))
                     }
                 }
