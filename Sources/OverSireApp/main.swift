@@ -207,6 +207,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         b.onBound = { [weak self] in self?.writeBack.writeBinding($0) }
         return b
     }()
+    lazy var worktreeScan = WorktreeScanBook(sources: WorktreeScanBook.groupSources, bindings: bindings, binder: binder,
+                                             known: { [weak self] in self?.projectStore.item(key: $0) != nil })
     lazy var suggestions = SuggestionBook(writes: STORE_WRITES)
     var logs: LogStore?
     private var orderLog: WorkOrderLog?
@@ -397,6 +399,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         REVIEWS.tracker = actions
         NotificationCenter.default.addObserver(forName: ReviewBook.changed, object: REVIEWS, queue: .main) { [weak self] _ in self?.updateIcon() }
         REVIEWS.start()
+        NotificationCenter.default.addObserver(forName: WorktreeScanBook.changed, object: worktreeScan, queue: .main) { [weak self] _ in
+            self?.reloadList(DataChange(.agents, origin: .event))
+        }
+        worktreeScan.start()
         NotificationCenter.default.addObserver(forName: Favorites.changed, object: FAVORITES, queue: .main) { [weak self] _ in
             (self?.popover.contentViewController as? TabVC)?.rebuildContent()
             self?.bus.post(DataChange(.projects, origin: .user))
@@ -565,6 +571,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let c = PROJECTS_CFG.capture
         let clip = c.pasteClipboard
             ? NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        openNewItem(prefill: clip, suggest: c.aiTitle)
+    }
+
+    /// The Projects tab with the New item sheet. `worktree` fills the folder of an unlinked worktree.
+    func openNewItem(prefill: String?, suggest: Bool = false, worktree: NewItemSheet.Folder? = nil) {
         selectedTab = .projects
         if popover.isShown {
             if let vc = popover.contentViewController as? TabVC, vc.selectedTab == .projects {
@@ -578,7 +589,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             toggle()
         }
         NSApp.activate(ignoringOtherApps: true)
-        (popover.contentViewController as? TabVC)?.presentNewItem(target: nil, prefill: clip, suggest: c.aiTitle)
+        (popover.contentViewController as? TabVC)?.presentNewItem(target: nil, prefill: prefill, suggest: suggest, worktree: worktree)
     }
 
     // The menu bar of the app. Without a Dock icon it is hidden, but its key equivalents still work.

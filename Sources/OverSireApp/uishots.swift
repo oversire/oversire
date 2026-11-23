@@ -60,6 +60,11 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     lazy var bindings = WorktreeBindingBook(writes: writes)
     lazy var binder = WorktreeBinder(book: bindings, store: projectStore, events: projectStore.events, machine: { "mbp" },
                                      root: { _ in "/Users/fritz/Projects/oversire-workspace" })
+    lazy var worktreeScan: WorktreeScanBook = {
+        let b = WorktreeScanBook(sources: { [] }, bindings: bindings, binder: binder, known: { _ in false })
+        b.reads = false
+        return b
+    }()
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, actions: actions)
@@ -159,6 +164,8 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
     static let sessionKey = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_SESSION_KEY"] ?? "OVERSIRE-143"
     /// Finished items with leftovers, and OVERSIRE-205 as Done with open sub-items.
     static let cleanup = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_CLEANUP"] == "1"
+    // OVERSIRE_UISHOTS_WORKTREES=1: worktree bindings, unlinked worktrees and a daemon that is too old (OVERSIRE-588).
+    static let worktrees = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_WORKTREES"] == "1"
     // OVERSIRE_UISHOTS_LIVE=on or quota: Settings › Accounts and sync shows a connected cloud, or one near the write quota.
     static let live = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_LIVE"]
     // OVERSIRE_UISHOTS_BIGTIMER=live, connecting, retrying, refused or nostream: a Big Timer account with that stream state. In memory only.
@@ -456,6 +463,28 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         hub.read = true
         machineHub = hub
         ENV.machines = hub
+    }
+
+    /// OVERSIRE-143 is bound with changes, FRITZ-17 is bound on mini, and mbp has three worktrees with no item.
+    private func seedWorktrees() {
+        guard UIShots.worktrees else { return }
+        let root = "/Users/fritz/Projects/oversire-workspace"
+        bindings.seed(WorktreeBinding(key: UIShots.sessionKey, machine: "mbp", root: root, group: WorktreeBinding.defaultGroup(UIShots.sessionKey),
+                                      branch: UIShots.sessionKey.lowercased()))
+        bindings.seed(WorktreeBinding(key: "FRITZ-17", machine: "mini", root: "/Users/fritz/Projects/fritz", group: ".wt/fritz-17", branch: "fritz-17"))
+        let guess = projectStore.snapshot("OVERSIRE")?.items.first { $0.key != UIShots.sessionKey && bindings.binding($0.key) == nil }?.key ?? "OVERSIRE-402"
+        let group = root + "/" + WorktreeBinding.defaultGroup(UIShots.sessionKey)
+        let mbp = WorktreesPage(worktrees: [
+            WorktreeInfo(path: group + "/oversire", repo: root + "/oversire", branch: UIShots.sessionKey.lowercased(), base: "main", uncommitted: 3, ahead: 2),
+            WorktreeInfo(path: group + "/cli", repo: root + "/cli", branch: UIShots.sessionKey.lowercased(), base: "main", uncommitted: 1),
+            WorktreeInfo(path: root + "/.claude/worktrees/quick-fix-3f2a", repo: root + "/oversire", branch: "quick-fix-3f2a", base: "main",
+                         uncommitted: 4, ahead: 1, session: "claude:7f3c", guess: WorktreeGuess(key: guess, from: .prompt)),
+            WorktreeInfo(path: "/Users/fritz/orca/workspaces/oversire/fix-menu", repo: root + "/oversire", branch: "fritz-12-menu", base: "main",
+                         ahead: 2, guess: WorktreeGuess(key: "FRITZ-12", from: .branch)),
+            WorktreeInfo(path: root + "/.claude/worktrees/spike", repo: root + "/cli", branch: "spike", base: "main", uncommitted: 7),
+        ], at: Date())
+        worktreeScan.set(["mbp": mbp])
+        worktreeScan.seedOld(["mini"])
     }
 
     private func seedCleanup() {
@@ -989,6 +1018,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
         seedSummaries()
         seedSessions()
         seedCleanup()
+        seedWorktrees()
         seedEpics()
         // OVERSIRE_UISHOTS_FAVORITES=FRITZ-17,FRITZ-12: these items are favorites.
         if let f = ProcessInfo.processInfo.environment["OVERSIRE_UISHOTS_FAVORITES"] { FAVORITES.seed(f.split(separator: ",").map(String.init)) }

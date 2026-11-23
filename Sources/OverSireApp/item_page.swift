@@ -714,6 +714,7 @@ final class ItemPage: Page, NSTextFieldDelegate {
         if let r = enhanceRow(pk: pk) { rows.append(r) }
         rows += questionRows()
         rows.append(statusRow(stream: stream))
+        rows.append(worktreeRow(item))
         if let r = cleanupRow(item) { rows.append(r) }
         if hasCloud, data.suggestions.openPlan(naming: item.key) != nil {
             rows.append(PageRow("suggestion", item.key) { [unowned self] in self.suggestion(item) })
@@ -740,6 +741,80 @@ final class ItemPage: Page, NSTextFieldDelegate {
         return PageRow("status", print, rprint) { [unowned self] in
             StatusCard(key: self.key, stream: stream, data: self.data, needsYou: self.needsYou, recap: input) { [weak self] in self?.go($0) }.build()
         }
+    }
+
+    // The fixed worktree folder of the item (OVERSIRE-588).
+    private func worktreeRow(_ item: Item) -> PageRow {
+        let b = data.bindings.binding(item.key)
+        let st = b.flatMap { data.worktreeScan.state(of: $0) }
+        let this = data.agentPlaces.this
+        return PageRow("worktree", b, st?.uncommitted, st?.ahead, st?.exists, this) { [unowned self] in
+            self.worktreeCard(item, b, state: st, this: this)
+        }
+    }
+
+    private func worktreeCard(_ item: Item, _ b: WorktreeBinding?, state st: (uncommitted: Int, ahead: Int, exists: Bool)?, this: String) -> NSView {
+        guard let b else {
+            let link = ActionButton("Link…", style: .plain) { [weak self] in self?.pickWorktree(item) }
+            link.setAccessibilityLabel("Link a worktree folder to \(item.key)")
+            let c = Card(title: "Worktree", trailing: [link])
+            c.add(NSTextField.text("No worktree. The work makes the default folder when it starts.", size: 12.5, color: Palette.dim))
+            return c
+        }
+        let copy = ActionButton("Copy path", symbol: "doc.on.doc", style: .plain) { RowActions.copy(b.dir) }
+        copy.setAccessibilityLabel("Copy the worktree path of \(item.key)")
+        let here = b.machine == this
+        let term = ActionButton("Open in Terminal", symbol: "terminal", style: .plain) {
+            NSWorkspace.shared.open([URL(fileURLWithPath: b.dir)], withApplicationAt: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app"),
+                                    configuration: NSWorkspace.OpenConfiguration())
+        }
+        term.isEnabled = here && st?.exists != false
+        term.toolTip = here ? (st?.exists == false ? "The folder is not there yet" : b.dir) : "The folder is on \(b.machine)"
+        let changes = ActionButton("Changes", style: .plain) { [weak self] in self?.go(.item(item.key, .changes)) }
+        changes.setAccessibilityLabel("Open the changes of \(item.key)")
+        let c = Card(title: "Worktree", trailing: [copy, term, changes])
+        let path = NSTextField.text(b.dir, size: 12.5, mono: true)
+        path.lineBreakMode = .byTruncatingMiddle
+        path.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        path.toolTip = b.dir
+        c.add(path)
+        var facts = ["on \(b.machine)"]
+        if !b.branch.isEmpty { facts.append("branch \(b.branch)") }
+        if b.mode == .parent, let p = b.parent { facts.append("the group of \(p)") }
+        let state: String
+        var color = Palette.dim
+        switch st {
+        case nil: state = "State not read yet"
+        case let s? where !s.exists: state = "No worktree yet. The work makes it."
+        case let s?:
+            let parts = AgentsPage.changes(WorktreeInfo(path: b.dir, repo: "", branch: b.branch, base: "", uncommitted: s.uncommitted, ahead: s.ahead))
+            state = parts.isEmpty ? "No changes" : parts
+            if !parts.isEmpty { color = Palette.warn }
+        }
+        let line = NSTextField.text(facts.joined(separator: " · ") + " · " + state, size: 12, color: color)
+        line.setAccessibilityLabel("Worktree \(b.dir), " + facts.joined(separator: ", ") + ". " + state)
+        c.add(line)
+        return c
+    }
+
+    // The palette lists items, not folders, so a menu lists the unlinked worktrees.
+    private func pickWorktree(_ item: Item) {
+        let rows = data.worktreeScan.unlinked
+        guard !rows.isEmpty else {
+            note = (.info, "No worktree has changes and no item. Bind a folder with oversire item bind \(item.key) --worktree <path>.")
+            reload()
+            return
+        }
+        let menu = NSMenu()
+        for u in rows {
+            menu.addItem(ClosureItem("\(u.dir) on \(u.machine)") { [weak self] in
+                guard let self else { return }
+                let r = self.data.binder.link(key: item.key, dir: u.dir, machine: u.machine, branch: u.info.branch, source: .link, actor: .user)
+                if case .failure(let e)? = r { self.note = (.bad, "Could not link: \(e.message)") }
+                self.reload()
+            })
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     /// The catch-up of the item tree from the event rows. Nil before the first read.

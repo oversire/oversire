@@ -55,11 +55,21 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
 
     static let defaultWorktree = ".wt/{key}"
 
-    /// `machine` is the machine that runs the sessions. It holds the worktree.
+    /// A worktree folder that exists, for "Make item" of an unlinked worktree.
+    struct Folder: Equatable {
+        var dir: String
+        var machine: String
+        var branch: String
+    }
+
+    private let folder: Folder?
+
+    /// `machine` is the machine that runs the sessions. It holds the worktree. `worktree` replaces both.
     init(store: ProjectStore, actions: AppActionCatalog, projects: [ProjectSummary], target: String?, prefill: String?, w: CGFloat,
-         machine: String? = nil) {
+         machine: String? = nil, worktree: Folder? = nil) {
         self.store = store
-        self.machine = machine
+        self.folder = worktree
+        self.machine = worktree?.machine ?? machine
         self.actions = actions
         self.projects = projects
         self.ai = AIClient.current
@@ -186,7 +196,7 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
 
         worktreeLabel.font = .systemFont(ofSize: 10, weight: .semibold); worktreeLabel.textColor = .secondaryLabelColor
         card.addSubview(worktreeLabel)
-        worktreeField.stringValue = Self.defaultWorktree
+        worktreeField.stringValue = folder?.dir ?? Self.defaultWorktree
         worktreeField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         worktreeField.setAccessibilityLabel("Worktree folder")
         worktreeField.toolTip = "The fixed worktree group of the new item, relative to the workspace root, or absolute"
@@ -564,6 +574,10 @@ final class NewItemSheet: Flipped, NSTextViewDelegate, NSTextFieldDelegate {
         if let o = options[ProjectSnapshot.priorityFieldId] { args["priority"] = .string(o) }
         let worktree = worktreeField.stringValue.trimmingCharacters(in: .whitespaces)
         if !worktree.isEmpty, worktree != Self.defaultWorktree { args["worktree"] = .string(worktree) }
+        if let f = folder, worktree == f.dir {
+            args["machine"] = .string(f.machine)
+            if !f.branch.isEmpty { args["branch"] = .string(f.branch) }
+        }
         actions.run("item.create", args) { [weak self] r in
             guard let self else { return }
             self.creating = false

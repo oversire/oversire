@@ -153,6 +153,15 @@ final class WorktreeBinder {
         }
     }
 
+    /// Binds a folder that exists to a known item. Nil when the store does not know the key.
+    func link(key: String, dir: String, machine: String, branch: String?, source: WorktreeBinding.Source,
+              actor: EventActor) -> Result<WorktreeBinding, BindError>? {
+        guard let (_, snap, item) = store.item(key: key) else { return nil }
+        let parent = item.parentId.flatMap { pid in snap.items.first { $0.id == pid }?.key }
+        let r = BindRequest(worktree: dir, machine: machine, branch: branch ?? "")
+        return bind(key: item.key, title: item.title, parent: parent, project: snap.summary, r, source: source, actor: actor)
+    }
+
     /// Writes the parent again when the tracker moved the item.
     func reconcileParents() {
         for b in book.records.values {

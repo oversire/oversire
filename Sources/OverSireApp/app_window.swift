@@ -18,6 +18,7 @@ protocol AppData: AnyObject {
     var areas: ItemAreaBook { get }
     var bindings: WorktreeBindingBook { get }
     var binder: WorktreeBinder { get }
+    var worktreeScan: WorktreeScanBook { get }
     var suggestions: SuggestionBook { get }
     var planner: PlannerBook { get }
     var statusJob: StatusJob { get }

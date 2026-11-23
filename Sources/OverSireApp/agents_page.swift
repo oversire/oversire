@@ -101,10 +101,22 @@ final class AgentsPage: Page {
         }
 
         var rows: [PageRow] = []
-        let grouped = !safe.isEmpty || !unsafe.isEmpty
+        let scan = data.worktreeScan
+        let unlinked = scan.unlinked
+        let grouped = !safe.isEmpty || !unsafe.isEmpty || !unlinked.isEmpty || !scan.old.isEmpty
         for (title, group) in [("Finished", safe), ("Done, but not safe to remove", unsafe), ("In progress", rest)] where !group.isEmpty {
             if grouped { rows.append(StickyListCard.group(title, title, count: group.count)) }
             rows += group.map { cardRow($0, cleanup: lines[$0.id]) }
+        }
+        if !unlinked.isEmpty || !scan.old.isEmpty {
+            rows.append(StickyListCard.group("unlinked", "Not linked to an item", count: unlinked.count))
+            rows += unlinked.map(unlinkedRow)
+            for m in scan.old.sorted() {
+                rows.append(PageRow("unlinked.old." + m, m) {
+                    Row([NSTextField.text("The daemon on \(m) is too old for this list.", size: 12.5, color: Palette.dim), Spacer()], height: 36,
+                        label: "The daemon on \(m) is too old for the list of worktrees with no item")
+                })
+            }
         }
         if cards.isEmpty {
             let failed = idx.lastError != nil
@@ -121,6 +133,74 @@ final class AgentsPage: Page {
         let table = table
         out.append(PageSection("worktrees", rows: [PageRow.list("table", rows: rows) { StickyListCard.table(table) }]))
         return out
+    }
+
+    // MARK: Not linked
+
+    private func unlinkedRow(_ u: WorktreeScanBook.Unlinked) -> PageRow {
+        let known = u.info.guess.map { data.projectStore.item(key: $0.key) != nil } == true
+        return PageRow("unlinked." + u.machine + ":" + u.info.path, hash: PageRow.hash([u.machine, u.info, u.dir, known])) { [weak self] in
+            self?.unlinkedView(u, known: known) ?? NSView()
+        }
+    }
+
+    static func changes(_ w: WorktreeInfo) -> String {
+        var out: [String] = []
+        if w.uncommitted > 0 { out.append("\(w.uncommitted) file\(w.uncommitted == 1 ? "" : "s") not committed") }
+        if w.ahead > 0 { out.append("\(w.ahead) commit\(w.ahead == 1 ? "" : "s") not on \(w.base.isEmpty ? "the base" : w.base)") }
+        return out.joined(separator: " · ")
+    }
+
+    private func unlinkedView(_ u: WorktreeScanBook.Unlinked, known: Bool) -> NSView {
+        let w = u.info
+        let home = NSHomeDirectory()
+        let shown = w.path.hasPrefix(home + "/") ? "~" + w.path.dropFirst(home.count) : w.path
+        let name = NSTextField.text(shown, size: 12.5, mono: true)
+        name.lineBreakMode = .byTruncatingMiddle
+        name.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        name.toolTip = w.path
+        let place = NSTextField.text([u.machine, w.branch.isEmpty ? "no branch" : w.branch].joined(separator: " · "), size: 11.5, color: Palette.dim, mono: true)
+        place.lineBreakMode = .byTruncatingMiddle
+        place.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        let worktree = NSStackView(v: [name, place], spacing: 3)
+        worktree.alignment = .leading
+        worktree.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: worktree.widthAnchor).isActive = true }
+        let guess = w.guess.map { g in
+            "Likely \(g.key), from the " + (g.from == .prompt ? "session prompt" : g.from == .cwd ? "folder name" : "branch name")
+        } ?? "No item named in the folder, the branch or a session"
+        let status = TwoLine(Self.changes(w), subView: NSTextField.text(guess, size: 11.5, color: Palette.dim), titleSize: 12.5, weight: .regular,
+                             titleColor: Palette.warn)
+        let cells: [String: NSView] = ["worktree": worktree, "state": Chiplet("No item", symbol: "link"), "status": status,
+                                       "terms": NSTextField.text("", size: 12)]
+        var trailing: [NSView] = []
+        if let g = w.guess, known {
+            let b = ActionButton("Link to \(g.key)", symbol: "link") { [weak self] in self?.link(u, key: g.key) }
+            b.setAccessibilityLabel("Link \(w.path) to \(g.key)")
+            trailing.append(b)
+        }
+        let pick = ActionButton("Link…", style: .plain) { [weak self] in self?.pickLink(u) }
+        pick.setAccessibilityLabel("Link \(w.path) to an item")
+        let make = ActionButton("Make item", style: .plain) {
+            (NSApp.delegate as? GHActionsBar)?.openNewItem(prefill: w.branch.isEmpty ? nil : w.branch,
+                                                           worktree: NewItemSheet.Folder(dir: u.dir, machine: u.machine, branch: w.branch))
+        }
+        make.setAccessibilityLabel("Make an item for \(w.path)")
+        trailing += [pick, make]
+        let label = "\(w.path) on \(u.machine), no item. \(Self.changes(w)). \(guess)"
+        let row = TableRow(table, cells: cells, trailing: trailing, height: 54, label: label)
+        if let box = row.cells.boxes["worktree"] { worktree.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true }
+        return row
+    }
+
+    private func pickLink(_ u: WorktreeScanBook.Unlinked) {
+        guard let w = view.window?.windowController as? AppWindow else { return }
+        CommandPalette.pickItem(over: w, prompt: "Link \(u.info.path) to: type a key or a title", exclude: []) { [weak self] k in self?.link(u, key: k) }
+    }
+
+    private func link(_ u: WorktreeScanBook.Unlinked, key: String) {
+        let r = data.binder.link(key: key, dir: u.dir, machine: u.machine, branch: u.info.branch, source: .link, actor: .user)
+        if case .failure(let e)? = r { AlertConfirm.tell("OverSire could not link the worktree.", info: e.message.prefix(1).uppercased() + e.message.dropFirst(), in: view.window) }
+        reload()
     }
 
     private func runnerTitle(_ s: RunnerSession) -> String {

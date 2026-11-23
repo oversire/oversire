@@ -53,6 +53,11 @@ final class TestAppData: AppData {
     var bindRoot: String? = "/w"
     lazy var binder = WorktreeBinder(book: bindings, store: projectStore, events: projectStore.events,
                                      machine: { [unowned self] in self.bindMachine }, root: { [unowned self] _ in self.bindRoot })
+    lazy var worktreeScan: WorktreeScanBook = {
+        let b = WorktreeScanBook(sources: { [] }, bindings: bindings, binder: binder, known: { [unowned self] in self.projectStore.item(key: $0) != nil })
+        b.reads = false
+        return b
+    }()
     lazy var suggestions = SuggestionBook(writes: writes)
     lazy var planner = PlannerBook(writes: writes)
     lazy var enhanceAgent = EnhanceAgent(store: projectStore, memory: memory, questions: questions, agents: agentIndex, actions: actions)

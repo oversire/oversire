@@ -256,6 +256,15 @@ public final class DaemonClient: Sendable {
         }
     }
 
+    // MARK: Worktrees (member route, daemon.json)
+
+    /// An old daemon gives 404, so this throws `ProviderError.notFound`.
+    public func worktrees(changed: Bool, dir: String?) async throws -> WorktreesPage {
+        var r = request("/v1/worktrees" + Self.query(["changed": changed ? "1" : nil, "dir": dir]))
+        r.timeoutInterval = 30
+        return try Self.decode(try await send(r))
+    }
+
     // MARK: Reviews (member routes, review.json)
 
     /// A background read. A daemon with many groups can need more than the default timeout.
