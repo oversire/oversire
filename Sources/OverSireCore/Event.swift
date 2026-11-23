@@ -211,6 +211,7 @@ extension Event {
         public static let itemLinkAdded: Kind = "item.link_added"
         public static let itemAttachmentAdded: Kind = "item.attachment_added"
         public static let itemAreasSet: Kind = "item.areas_set"
+        public static let itemWorktreeBound: Kind = "item.worktree.bound"
         public static let worktreeAdded: Kind = "worktree.added"
         public static let worktreeRemoved: Kind = "worktree.removed"
         public static let gitCommit: Kind = "git.commit"

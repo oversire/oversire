@@ -159,6 +159,9 @@ final class ContractTests: XCTestCase {
         "ci-watch-request": roundTrip(CIWatchRequest.self),
         "ci-watch-answer": roundTrip(CIWatchAnswer.self),
         "ci-frame": roundTrip(CIFrame.self),
+        "worktree-binding": roundTrip(WorktreeBinding.self),
+        "worktree-bindings-page": roundTrip(WorktreeBindingsPage.self),
+        "worktrees-page": roundTrip(WorktreesPage.self),
     ]
 
     // Schema file → x-oversire-schema. store.json is 2: QueueLane lost lastStarted and error.

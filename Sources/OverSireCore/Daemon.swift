@@ -122,6 +122,59 @@ public struct DaemonSessionsPage: Codable, Hashable, Sendable {
     public init(sessions: [DaemonSession]) { self.sessions = sessions }
 }
 
+/// The answer of `GET /v1/worktree-bindings`.
+public struct WorktreeBindingsPage: Codable, Hashable, Sendable {
+    public var bindings: [WorktreeBinding]
+    public init(bindings: [WorktreeBinding]) { self.bindings = bindings }
+}
+
+/// The item that a worktree with no binding is likely for.
+public struct WorktreeGuess: Codable, Hashable, Sendable {
+    public enum From: String, Codable, Sendable { case cwd, branch, prompt }
+    public var key: String
+    public var from: From
+    public init(key: String, from: From) {
+        self.key = key
+        self.from = from
+    }
+}
+
+/// One git worktree on the machine of a daemon.
+public struct WorktreeInfo: Codable, Hashable, Sendable {
+    public var path: String
+    public var repo: String
+    public var branch: String
+    public var base: String
+    public var uncommitted: Int
+    public var ahead: Int
+    public var session: String?
+    public var guess: WorktreeGuess?
+
+    public init(path: String, repo: String, branch: String, base: String, uncommitted: Int = 0, ahead: Int = 0,
+                session: String? = nil, guess: WorktreeGuess? = nil) {
+        self.path = path
+        self.repo = repo
+        self.branch = branch
+        self.base = base
+        self.uncommitted = uncommitted
+        self.ahead = ahead
+        self.session = session
+        self.guess = guess
+    }
+
+    public var changed: Bool { uncommitted > 0 || ahead > 0 }
+}
+
+/// The answer of `GET /v1/worktrees`.
+public struct WorktreesPage: Codable, Hashable, Sendable {
+    public var worktrees: [WorktreeInfo]
+    public var at: Date
+    public init(worktrees: [WorktreeInfo], at: Date) {
+        self.worktrees = worktrees
+        self.at = at
+    }
+}
+
 /// The environment of the agent process. The `oversire hook` command sends it with each hook call.
 public struct HookEnv: Codable, Hashable, Sendable {
     public var paneKey: String?
