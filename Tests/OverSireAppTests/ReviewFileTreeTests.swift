@@ -164,4 +164,45 @@ final class ReviewFileTreeTests: XCTestCase {
         q.query = "review"
         XCTAssertEqual(tree(q).steps(.list).map(\.id), tree(q).rows(.list).compactMap(\.file?.id), "the steps use the filter")
     }
+
+    // MARK: Folded review (OVERSIRE-591)
+
+    private let folded = [
+        ReviewFile(repo: "cli", path: "review/fold.go", status: .added, added: 9, removed: 0, item: "X-2"),
+        ReviewFile(repo: "app", path: "a.swift", status: .modified, added: 1, removed: 1, item: "X-3"),
+        ReviewFile(repo: "cli", path: "review/merge.go", status: .modified, added: 2, removed: 0, item: "X-3"),
+        ReviewFile(repo: "app", path: "a.swift", status: .modified, added: 3, removed: 0, item: "X-1"),
+    ]
+
+    private func foldedTree(_ g: FileGrouping, filter: FileFilter = FileFilter(), collapsed: Set<String> = []) -> FileTree {
+        FileTree(files: folded, repos: ["app", "cli"], filter: filter, collapsed: collapsed, pending: ["X-3/cli/review/merge.go": 2],
+                 items: ["X-2", "X-3", "X-1"], grouping: g)
+    }
+
+    func testAFoldedTreeGroupsTheFilesBySubItemThenRepo() {
+        let rows = foldedTree(.item).rows(.tree)
+        XCTAssertEqual(names(rows), [
+            "X-2", "  review", "    fold.go",
+            "X-3", "  app", "    a.swift", "  cli", "    review", "      merge.go",
+            "X-1", "  a.swift",
+        ])
+        XCTAssertEqual(rows.first { $0.name == "X-3" }?.pending, 2)
+        XCTAssertEqual(rows.first { $0.kind == .folder && $0.depth == 2 }?.id, "X-3/cli/review")
+        XCTAssertEqual(Set(rows.map(\.id)).count, rows.count, "each row id is unique")
+    }
+
+    func testAFoldedTreeGroupsTheFilesByRepoThenSubItem() {
+        XCTAssertEqual(names(foldedTree(.repo).rows(.tree)), [
+            "app", "  X-3", "    a.swift", "  X-1", "    a.swift",
+            "cli", "  X-2", "    review", "      fold.go", "  X-3", "    review", "      merge.go",
+        ])
+    }
+
+    func testTheItemFilterAndAClosedSubItem() {
+        var f = FileFilter()
+        f.item = "X-3"
+        XCTAssertEqual(foldedTree(.item, filter: f).shown.map(\.id), ["X-3/app/a.swift", "X-3/cli/review/merge.go"])
+        XCTAssertEqual(names(foldedTree(.item, collapsed: ["X-3"]).rows(.tree)), ["X-2", "  review", "    fold.go", "X-3", "X-1", "  a.swift"])
+        XCTAssertEqual(foldedTree(.item).steps(.tree).map(\.id), ["X-2/cli/review/fold.go", "X-3/app/a.swift", "X-3/cli/review/merge.go", "X-1/app/a.swift"])
+    }
 }

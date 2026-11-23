@@ -123,12 +123,11 @@ final class ReviewChangesTab {
             ReviewMergeSheet(desk: desk) { self.reload() }.present(over: self.window())
         }
         t.jump = { [weak self, weak desk] c in
-            guard let desk, case .code(let repo, let path, _, _, _) = c.anchor else { return }
-            let id = repo + "/" + path
+            guard let desk, case .code(let repo, _, _, _, _) = c.anchor, let id = desk.fileID(c) else { return }
             desk.file = id
             desk.reveal = ReviewThreads.anchorID(c)
             if let f = desk.files.first(where: { $0.id == id }), !desk.filter.matches(f) { desk.filter = FileFilter() }
-            desk.collapsed = desk.collapsed.filter { !id.hasPrefix($0 + "/") }
+            desk.collapsed = desk.collapsed.filter { !id.hasPrefix($0 + "/") && $0 != repo && $0 != c.key + "/" + repo }
             self?.open(desk)
         }
         threads[desk.id] = t
@@ -174,7 +173,7 @@ final class ReviewChangesTab {
                 ReadNote("The daemon on \(s.machine) did not give the review.", part: part)
             })
         }
-        out.append(PageRow("repos", s.repos, s.note, s.state, s.group, desk.pending.count, desk.filter.repo, read) { [unowned self] in self.repos(desk) })
+        out.append(PageRow("repos", s.repos, s.parts, s.note, s.state, s.group, desk.pending.count, desk.filter.repo, desk.filter.item, read) { [unowned self] in self.repos(desk) })
         if desk.detail == nil {
             guard !read.didFail else { return out }
             out.append(PageRow("loading", desk.loading) {
@@ -245,7 +244,7 @@ final class ReviewChangesTab {
             }
         }
         out.append(PageRow("body", desk.files, desk.file, desk.split, desk.pick, diff, diffRead?.state, diffRead?.last.retry(now: Date()), notes, t.hash, desk.pendingByFile, s.repos,
-                           desk.filter, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.maxFiles, desk.opened, desk.wholeFile, desk.change, update: fill) {
+                           desk.filter, desk.grouping, desk.view, desk.collapsed, desk.reveal, desk.wrap, desk.maximized, desk.maxFiles, desk.opened, desk.wholeFile, desk.change, update: fill) {
             let pane = TwoPane(sideWidth: Self.sideWidth, keep: "changes")
             fill(pane)
             return pane
@@ -274,7 +273,8 @@ final class ReviewChangesTab {
     private func repos(_ desk: ReviewDesk) -> NSView {
         let s = desk.summary
         let card = Card(padding: 12, spacing: 8)
-        for r in s.repos {
+        if s.folded { parts(desk, into: card) }
+        for r in s.repos where !s.folded {
             let mark = ReviewMark(r)
             let texts = [
                 NSTextField.text(r.name, size: 12.5, weight: .semibold, mono: true),
@@ -335,6 +335,48 @@ final class ReviewChangesTab {
         foot.append(ReadAccessory(desk.review.part(id: "review", title: "Review of \(s.key)")))
         card.add(NSStackView(h: foot, spacing: 8))
         return card
+    }
+
+    /// One line for each group of a folded review: the sub-items in key order, then the parent. A click shows only its files.
+    private func parts(_ desk: ReviewDesk, into card: Card) {
+        let s = desk.summary
+        for p in desk.parts {
+            let repos = s.repos.filter { $0.item == p.key }
+            let ahead = repos.reduce(0) { $0 + $1.ahead }
+            let worst = repos.first { $0.merge == .conflict } ?? repos.first { $0.merge == .rebase } ?? repos.first
+            let mark = worst.map { ReviewMark($0) } ?? ReviewMark("✓", Palette.ok, "Nothing to merge")
+            let who = p.key == s.key ? "parent" : "sub-item"
+            var texts: [NSView] = [
+                NSTextField.text(p.key, size: 12.5, weight: .semibold, mono: true),
+                NSTextField.text(who, size: 11.5, color: Palette.dim),
+                NSTextField.text(repos.map { "\($0.name) \($0.branch) → \($0.base)" }.joined(separator: ", "), size: 12, color: Palette.mut, mono: true),
+                NSTextField.text("·  \(ahead) commit\(ahead == 1 ? "" : "s")", size: 12, color: Palette.mut),
+            ]
+            if repos.contains(where: \.dirty) { texts.append(NSTextField.text("·  Uncommitted files", size: 12, color: Palette.warn)) }
+            texts += [Spacer(), NSTextField.text(ReviewRow.word(p.state) + (p.pending > 0 ? " · \(p.pending) pending" : ""), size: 12, color: Palette.mut)]
+            if let w = worst {
+                switch w.merge {
+                case .fastForward: texts.append(mark.line("Can fast-forward"))
+                case .rebase: texts.append(mark.line("\(w.base) has \(w.behind) new commit\(w.behind == 1 ? "" : "s")"))
+                case .conflict: texts.append(mark.line("Conflict: " + (w.conflictFiles ?? []).joined(separator: ", ")))
+                }
+            } else {
+                texts.append(mark.line())
+            }
+            let on = desk.filter.item == p.key
+            let label = "\(p.key), \(who), \(ReviewRow.word(p.state)), \(ahead) commits, \(mark.word)" + (on ? ", files shown" : ", show its files")
+            let row = Row(texts, height: 28, inset: 8, label: label) { [weak self] in
+                desk.filter.item = on ? nil : p.key
+                self?.reload()
+            }
+            row.stack.spacing = 8
+            row.menuItems = {
+                [ClosureItem("Copy Key") { RowActions.copy(p.key) }] + repos.map { r in ClosureItem("Copy Branch \(r.branch)") { RowActions.copy(r.branch) } }
+            }
+            row.restBorder = on ? Palette.acc : nil
+            row.selected = on
+            card.add(row)
+        }
     }
 
     // MARK: File names

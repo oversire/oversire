@@ -45,9 +45,16 @@ enum FileView: String {
     }
 }
 
+/// How a folded review groups its files (OVERSIRE-591).
+enum FileGrouping: String, Hashable {
+    case item, repo
+}
+
 struct FileFilter: Hashable {
     /// Nil shows all repos.
     var repo: String?
+    /// Nil shows the files of all sub-items.
+    var item: String?
     var query = ""
     var hidden: Set<FileGroup> = []
     var hideViewed = false
@@ -58,6 +65,7 @@ struct FileFilter: Hashable {
 
     func matches(_ f: ReviewFile) -> Bool {
         if let repo, f.repo != repo { return false }
+        if let item, f.item != item { return false }
         if hidden.contains(FileGroup(f.status)) { return false }
         if f.viewed ? hideViewed : hideNotViewed { return false }
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -67,10 +75,11 @@ struct FileFilter: Hashable {
 
 /// The rows of the file panel, in order.
 struct FileTree {
-    enum Kind: Hashable { case head, repo, folder, file }
+    /// `part` is a sub-item (or the parent) of a folded review.
+    enum Kind: Hashable { case head, part, repo, folder, file }
 
     struct Row: Hashable {
-        /// A folder id is `repo/path`; it keys the folds.
+        /// A folder id is `repo/path`, with `item/` first in a folded review; it keys the folds.
         let id: String
         let kind: Kind
         let name: String
@@ -88,6 +97,9 @@ struct FileTree {
     var collapsed: Set<String> = []
     /// ReviewFile.id → pending comments.
     var pending: [String: Int] = [:]
+    /// The keys of the parts of a folded review, in order.
+    var items: [String] = []
+    var grouping = FileGrouping.item
 
     var shown: [ReviewFile] { files.filter(filter.matches) }
 
@@ -102,30 +114,73 @@ struct FileTree {
         repos + Set(files.map(\.repo)).subtracting(repos).sorted()
     }
 
-    /// Repo rows show only when the panel shows more than one repo.
-    private var repoRows: Bool { filter.repo == nil && Set(files.map(\.repo)).count > 1 }
+    /// The files carry the key of their part.
+    var folded: Bool { files.contains { $0.item != nil } }
+
+    private var itemOrder: [String] {
+        var out = items
+        for f in files { if let k = f.item, !out.contains(k) { out.append(k) } }
+        return out
+    }
 
     func rows(_ view: FileView) -> [Row] {
         let shown = self.shown
+        guard folded else { return byRepo(shown, item: nil, view, depth: 0, heads: filter.repo == nil && Set(files.map(\.repo)).count > 1) }
+        var out: [Row] = []
+        switch grouping {
+        case .item:
+            for k in itemOrder {
+                let fs = shown.filter { $0.item == k }
+                guard !fs.isEmpty else { continue }
+                let open = view == .list || isOpen(k)
+                out.append(Row(id: k, kind: view == .list ? .head : .part, name: k, depth: 0, files: fs.count, pending: sum(fs), open: open))
+                guard open else { continue }
+                out += byRepo(fs, item: k, view, depth: 1, heads: filter.repo == nil && Set(fs.map(\.repo)).count > 1)
+            }
+        case .repo:
+            for r in order {
+                let fs = shown.filter { $0.repo == r }
+                guard !fs.isEmpty else { continue }
+                let open = view == .list || isOpen(r)
+                out.append(Row(id: r, kind: view == .list ? .head : .repo, name: r, depth: 0, files: fs.count, pending: sum(fs), open: open))
+                guard open else { continue }
+                for k in itemOrder {
+                    let ks = fs.filter { $0.item == k }
+                    guard !ks.isEmpty else { continue }
+                    let id = k + "/" + r, inner = view == .list || isOpen(id)
+                    out.append(Row(id: id, kind: view == .list ? .head : .part, name: k, depth: 1, files: ks.count, pending: sum(ks), open: inner))
+                    guard inner else { continue }
+                    out += byRepo(ks, item: k, view, depth: 2, heads: false)
+                }
+            }
+        }
+        return out
+    }
+
+    private func sum(_ fs: [ReviewFile]) -> Int { fs.reduce(0) { $0 + (pending[$1.id] ?? 0) } }
+
+    /// The rows of the files of one part, or of a plain review. `heads` adds a row for each repo.
+    private func byRepo(_ shown: [ReviewFile], item: String?, _ view: FileView, depth base: Int, heads: Bool) -> [Row] {
+        let prefix = item.map { $0 + "/" } ?? ""
         var out: [Row] = []
         for r in order {
             let fs = shown.filter { $0.repo == r }
             guard !fs.isEmpty else { continue }
             switch view {
             case .list:
-                if repoRows { out.append(Row(id: r, kind: .head, name: r, depth: 0, files: fs.count)) }
+                if heads { out.append(Row(id: prefix + r, kind: .head, name: r, depth: 0, files: fs.count)) }
                 out += fs.map { Row(id: $0.id, kind: .file, name: $0.path, depth: 0, file: $0, pending: pending[$0.id] ?? 0) }
             case .tree:
                 let root = Node()
                 fs.forEach { root.add($0, pending: pending[$0.id] ?? 0) }
-                var depth = 0
-                if repoRows {
-                    let open = isOpen(r)
-                    out.append(Row(id: r, kind: .repo, name: r, depth: 0, files: root.count, pending: root.pending, open: open))
+                var depth = base
+                if heads {
+                    let open = isOpen(prefix + r)
+                    out.append(Row(id: prefix + r, kind: .repo, name: r, depth: base, files: root.count, pending: root.pending, open: open))
                     guard open else { continue }
-                    depth = 1
+                    depth += 1
                 }
-                walk(root, repo: r, prefix: "", depth: depth, into: &out)
+                walk(root, repo: prefix + r, prefix: "", depth: depth, into: &out)
             }
         }
         return out

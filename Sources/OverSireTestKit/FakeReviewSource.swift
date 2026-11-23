@@ -20,6 +20,12 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
     public private(set) var launches: [AgentLaunchSpec?] = []
     /// Each call throws this error while it is set.
     public var failure: Error?
+    /// Each call on one of these keys throws its error. For one part of a folded review.
+    public var failures: [String: Error] = [:]
+    /// The parent of each sub-item key, as the worktree bindings of the daemon. A folded read uses it.
+    public var parents: [String: String] = [:]
+    /// The fold of the last read.
+    public private(set) var lastFold: ReviewFold = .off
 
     public init(machine: String) { self.machine = machine }
 
@@ -49,20 +55,56 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
 
     // MARK: ReviewSource
 
-    public func reviews(kind: ReviewKind?) async throws -> ReviewsPage {
+    public func reviews(kind: ReviewKind?, fold: ReviewFold) async throws -> ReviewsPage {
         try with {
             try call("reviews")
-            let list = order.compactMap { details[$0]?.summary }.filter { kind == nil || $0.kind == kind }
+            lastFold = fold
+            var list = order.compactMap { details[$0]?.summary }.filter { kind == nil || $0.kind == kind }
+            let parts = Dictionary(grouping: list.filter { $0.kind == .code && parent(of: $0.key, fold) != nil }) { parent(of: $0.key, fold)! }
+            guard !parts.isEmpty else { return ReviewsPage(reviews: list, notPushed: notPushed) }
+            list.removeAll { $0.kind == .code && (parent(of: $0.key, fold) != nil || parts[$0.key] != nil) }
+            for p in parts.keys.sorted() {
+                list.append(folded(p, parts[p]!.map(\.key)).summary)
+            }
             return ReviewsPage(reviews: list, notPushed: notPushed)
         }
     }
 
-    public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail {
+    public func review(_ key: String, kind: ReviewKind, fold: ReviewFold) async throws -> ReviewDetail {
         try with {
             try call("review \(key)")
+            lastFold = fold
+            let kids = kind == .code ? parents.keys.filter { parent(of: $0, fold) == key && details[Self.id($0, .code)] != nil } : []
+            if !kids.isEmpty { return folded(key, kids) }
             guard let d = details[Self.id(key, kind)] else { throw ProviderError.notFound }
             return d
         }
+    }
+
+    private func parent(of key: String, _ fold: ReviewFold) -> String? { fold.folds(key) ? parents[key] : nil }
+
+    /// The folded detail of parent, as the daemon makes it: the sub-items in key order, then the parent.
+    private func folded(_ parent: String, _ kids: [String]) -> ReviewDetail {
+        let keys = kids.sorted { $0.localizedStandardCompare($1) == .orderedAscending } + [parent]
+        let parts = keys.compactMap { details[Self.id($0, .code)] }
+        let first = parts[0].summary
+        var s = details[Self.id(parent, .code)]?.summary
+            ?? ReviewSummary(key: parent, kind: .code, machine: machine, state: .ready, root: first.root, updatedAt: first.updatedAt)
+        s.repos = parts.flatMap { d in d.summary.repos.map { var r = $0; r.item = d.summary.key; return r } }
+        s.subitems = kids.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        s.pending = parts.reduce(0) { $0 + $1.summary.pending }
+        s.unanswered = parts.reduce(0) { $0 + $1.summary.unanswered }
+        s.round = parts.map(\.summary.round).max() ?? 0
+        s.parts = parts.map {
+            let p = $0.summary
+            return ReviewPart(key: p.key, root: p.root, group: p.group, state: p.state, round: p.round, pending: p.pending,
+                              unanswered: p.unanswered, session: p.session, note: p.note, readyAt: p.readyAt)
+        }
+        let states = parts.map(\.summary.state)
+        s.state = states.contains(.conflict) ? .conflict : states.contains(.ready) ? .ready : states.contains(.waiting) ? .waiting : .merged
+        let files = parts.flatMap { d in d.files.map { var f = $0; f.item = d.summary.key; return f } }
+        let rounds = parts.flatMap { d in d.rounds.map { var r = $0; r.item = d.summary.key; return r } }
+        return ReviewDetail(summary: s, files: files, comments: parts.flatMap(\.comments), rounds: rounds)
     }
 
     public func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff {
@@ -183,6 +225,7 @@ public final class FakeReviewSource: ReviewSource, @unchecked Sendable {
     private func call(_ name: String) throws {
         calls.append(name)
         if let failure { throw failure }
+        if let key = name.split(separator: " ").dropFirst().first, let e = failures[String(key)] { throw e }
     }
 
     /// Changes the review of the key. `kind` nil: the review that has the comment. Each change sends review.changed.

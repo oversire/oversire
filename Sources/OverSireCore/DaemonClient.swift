@@ -268,14 +268,14 @@ public final class DaemonClient: Sendable {
     // MARK: Reviews (member routes, review.json)
 
     /// A background read. A daemon with many groups can need more than the default timeout.
-    public func reviews(kind: ReviewKind?) async throws -> ReviewsPage {
-        var r = request("/v1/reviews" + Self.query(["kind": kind?.rawValue]))
+    public func reviews(kind: ReviewKind?, fold: ReviewFold = .off) async throws -> ReviewsPage {
+        var r = request("/v1/reviews" + Self.query(["kind": kind?.rawValue, "fold": fold.fold, "nofold": fold.nofold]))
         r.timeoutInterval = 30
         return try Self.decode(try await send(r))
     }
 
-    public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail {
-        try await get(Self.reviewPath(key) + Self.query(["kind": kind.rawValue]))
+    public func review(_ key: String, kind: ReviewKind, fold: ReviewFold = .off) async throws -> ReviewDetail {
+        try await get(Self.reviewPath(key) + Self.query(["kind": kind.rawValue, "fold": fold.fold]))
     }
 
     public func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff {

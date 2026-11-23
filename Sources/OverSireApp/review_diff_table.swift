@@ -167,7 +167,7 @@ final class DiffPanel: NSView {
         if let old = desk.pick, old.repo == f.repo, old.path == f.path {
             desk.pick = old.click(p.line, side: p.side, shift: shift)
         } else {
-            desk.pick = LinePick(repo: f.repo, path: f.path, side: p.side, line: p.line)
+            desk.pick = LinePick(item: f.item, repo: f.repo, path: f.path, side: p.side, line: p.line)
         }
         desk.block = nil
         if again { reload() } else { table.refresh() }
@@ -289,6 +289,14 @@ final class DiffPanel: NSView {
             let tag = Chiplet(wide ? "Changed since viewed" : "", symbol: "arrow.clockwise", color: Palette.warn)
             tag.setAccessibilityLabel("This file changed after you marked it as viewed")
             tag.toolTip = "The file changed after you marked it as viewed."
+            parts.append(tag)
+        }
+        // A folded review: the session of the sub-item gets the comments of its files.
+        if let owner = f.item, desk.folded {
+            let tag = Chiplet(wide ? "Comments go to the session of \(FilePanel.short(owner))" : FilePanel.short(owner), symbol: "arrow.turn.down.right", color: Palette.acc)
+            tag.setAccessibilityLabel("Comments go to the session of \(owner)")
+            tag.toolTip = "Comments go to the session of \(owner)."
+            tag.setContentCompressionResistancePriority(.required, for: .horizontal)
             parts.append(tag)
         }
         // The normal view is narrow. The file row shows the pending count there.

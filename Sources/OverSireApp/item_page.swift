@@ -254,8 +254,28 @@ final class ItemPage: Page, NSTextFieldDelegate {
 
     /// The rows of a review tab, after a warning when the last read of its machine failed.
     private func reviewRows(_ kind: ReviewKind, _ tab: (ReviewDesk) -> [PageRow]) -> [PageRow] {
-        guard let desk = reviewDesk(kind) else { return REVIEWS.failureRows() + noReview(kind) }
+        guard let desk = reviewDesk(kind) else {
+            if kind == .code, let p = REVIEWS.parent(of: key) { return REVIEWS.failureRows([p.machine]) + reviewedIn(p) }
+            return REVIEWS.failureRows() + noReview(kind)
+        }
         return REVIEWS.failureRows([desk.summary.machine]) + tab(desk)
+    }
+
+    /// A sub-item whose code folds into the review of its parent (OVERSIRE-591).
+    private func reviewedIn(_ p: ReviewSummary) -> [PageRow] {
+        let k = key, part = p.part(key)
+        return [PageRow("reviewed-in", k, p.key, part?.state, part?.pending) { [weak self] in
+            let c = Card(padding: 12, spacing: 8)
+            let text = "The code of \(k) is reviewed in \(p.key), with the other sub-items."
+                + (part.map { " Its group is \(ReviewRow.word($0.state))" + ($0.pending > 0 ? ", \($0.pending) pending comment\($0.pending == 1 ? "" : "s")." : ".") } ?? "")
+            let open = ActionButton("Open \(p.key) Changes", symbol: "arrow.right", style: .primary) {
+                // Show only the files of this sub-item in the parent.
+                REVIEWS.desk(p)?.filter.item = k
+                self?.go(.item(p.key, .changes))
+            }
+            c.add(NSStackView(h: [Glyph("square.stack", color: Palette.acc, size: 13), NSTextField.text(text, size: 12.5, color: Palette.mut, lines: 2), Spacer(), open], spacing: 8))
+            return c
+        }]
     }
 
     private func noReview(_ kind: ReviewKind) -> [PageRow] {
@@ -280,8 +300,9 @@ final class ItemPage: Page, NSTextFieldDelegate {
         let hasRun = run != nil || tab == .runbook
         let mark = run.map { RunbookTab.tone($0.state) }
         let plan = REVIEWS.review(key, kind: .plan), code = REVIEWS.review(key, kind: .code)
-        let hasPlan = plan != nil || tab == .plan, hasCode = code != nil || tab == .changes
-        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks, hasRun, run?.state, run?.position, plan, code) { [unowned self] in
+        let folded = code == nil ? REVIEWS.parent(of: key) : nil
+        let hasPlan = plan != nil || tab == .plan, hasCode = code != nil || folded != nil || tab == .changes
+        return PageRow("tabs", tab, prog.done, started, prog.total, warn, asks, hasRun, run?.state, run?.position, plan, code, folded?.key) { [unowned self] in
             let tabs = Route.ItemTab.allCases.filter { t in
                 switch t {
                 case .runbook: return hasRun

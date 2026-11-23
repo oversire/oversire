@@ -51,6 +51,16 @@ final class MachineRuntimeReviewTests: XCTestCase {
         XCTAssertEqual(http.requests.map(\.timeoutInterval), [30, 5, 5, 5])
     }
 
+    func testAFoldedReadSendsTheFoldAndDecodesTheParts() async throws {
+        let (rt, http) = runtime([.init(body: try fixture("reviews-page", "folded")), .init(body: try fixture("review-detail", "folded"))])
+        let fold = ReviewFold(on: true, except: ["sling"])
+        let page = try await rt.reviews(kind: .code, fold: fold)
+        XCTAssertNotNil(page.reviews.first?.parts)
+        let d = try await rt.review(page.reviews[0].key, kind: .code, fold: fold)
+        XCTAssertTrue(d.files.allSatisfy { $0.item != nil })
+        XCTAssertEqual(http.requests.map(line), ["GET /v1/reviews?kind=code&fold=1&nofold=SLING", "GET /v1/reviews/\(page.reviews[0].key)?kind=code&fold=1"])
+    }
+
     func testTheFullDiffAsksForTheWholeFile() async throws {
         let (rt, http) = runtime([.init(body: try fixture("file-diff", "full"))])
         let diff = try await rt.diff("OVERSIRE-436", repo: "oversire", path: "demo/hello.go", full: true)

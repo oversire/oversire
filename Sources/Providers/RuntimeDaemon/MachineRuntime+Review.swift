@@ -3,9 +3,11 @@ import OverSireCore
 
 /// The daemon of the machine keeps its reviews. Each change comes as a review frame on its WebSocket.
 extension MachineRuntime: ReviewSource {
-    public func reviews(kind: ReviewKind?) async throws -> ReviewsPage { try await client.reviews(kind: kind) }
+    public func reviews(kind: ReviewKind?, fold: ReviewFold) async throws -> ReviewsPage { try await client.reviews(kind: kind, fold: fold) }
 
-    public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail { try await client.review(key, kind: kind) }
+    public func review(_ key: String, kind: ReviewKind, fold: ReviewFold) async throws -> ReviewDetail {
+        try await client.review(key, kind: kind, fold: fold)
+    }
 
     public func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff {
         try await client.diff(key, repo: repo, path: path, full: full)

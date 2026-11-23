@@ -2,11 +2,11 @@ import Cocoa
 import OverSireCore
 
 enum ProjectSettingsSection: String, CaseIterable {
-    case appearance, links, memory, sessions, notifications
+    case appearance, links, memory, sessions, review, notifications
     case general, workflow, labels, members, features
 
     var title: String { self == .memory ? "Vision and memory" : rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
-    var local: Bool { [.appearance, .links, .memory, .sessions, .notifications].contains(self) }
+    var local: Bool { [.appearance, .links, .memory, .sessions, .review, .notifications].contains(self) }
 
     var symbol: String {
         switch self {
@@ -14,6 +14,7 @@ enum ProjectSettingsSection: String, CaseIterable {
         case .links: return "link"
         case .memory: return "scope"
         case .sessions: return "terminal"
+        case .review: return "checklist"
         case .notifications: return "bell"
         case .general: return "info.circle"
         case .workflow: return "circle.dotted"
@@ -204,6 +205,7 @@ final class ProjectSettingsPage: Page {
         case .links: links(body, p)
         case .memory: memory(body, p)
         case .sessions: sessions(body)
+        case .review: review(body)
         case .notifications: notifications(body)
         default: tracker(body, p)
         }
@@ -569,6 +571,16 @@ final class ProjectSettingsPage: Page {
                 self.editLocal { $0.prompt = v }
             }, help: "Placeholders: {url}, {group}, {key}, {title}."))
         }
+        body.addFull(c)
+    }
+
+    private func review(_ body: NSStackView) {
+        let c = card("Review", local: true)
+        c.add(SwitchRow("Review sub-items in the parent", note: "Work › Review shows one row for the parent, with the code of each sub-item that has its own worktree. Off: each sub-item has its own row.",
+                        on: local.foldSubitems) { [weak self] on in
+            self?.editLocal { $0.foldSubitems = on }
+            Task { await REVIEWS.refresh() }
+        })
         body.addFull(c)
     }
 

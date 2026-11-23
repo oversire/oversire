@@ -129,12 +129,21 @@ final class ReviewRow: Row {
     init(_ s: ReviewSummary, title: String, go: @escaping (Route) -> Void) {
         let mark = ReviewMark(s)
         let target = ReviewRow.route(s)
-        let place = [s.key, s.kind == .plan ? "plan" : s.subitems.isEmpty ? "single item" : "\(s.subitems.count) sub-items",
+        let kids = ReviewRow.kids(s)
+        let place = [s.key, s.kind == .plan ? "plan" : s.folded ? "\(kids.count) sub-item\(kids.count == 1 ? "" : "s")"
+                        : s.subitems.isEmpty ? "single item" : "\(s.subitems.count) sub-items",
                      s.round > 0 ? "round \(s.round + (s.state == .ready ? 1 : 0))" : nil, s.machine].compactMap { $0 }.joined(separator: " · ")
         let name = TwoLine(title, place)
         name.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         var main: [NSView] = [name]
-        if !s.subitems.isEmpty {
+        if s.folded {
+            main.append(NSStackView(h: kids.prefix(6).map { p in
+                let c = Chiplet(FilePanel.short(p.key) + " " + ReviewRow.glyph(p.state), mono: true)
+                c.setAccessibilityLabel("\(p.key), \(ReviewRow.word(p.state))")
+                c.toolTip = "\(p.key): \(ReviewRow.word(p.state))"
+                return c as NSView
+            }, spacing: 4))
+        } else if !s.subitems.isEmpty {
             main.append(NSStackView(h: s.subitems.prefix(6).map { k in
                 Chiplet(k.split(separator: "-").last.map(String.init) ?? k, mono: true) as NSView
             }, spacing: 4))
@@ -149,8 +158,11 @@ final class ReviewRow: Row {
         glyph.widthAnchor.constraint(equalToConstant: 16).isActive = true
         var cells: [NSView] = [glyph, left]
         if s.kind == .code {
-            let repos = s.repos.map(\.name).joined(separator: " ")
-            cells.append(ReviewRow.cell(repos, "\(s.repos.count) repo\(s.repos.count == 1 ? "" : "s") · \(s.commitCount) commit\(s.commitCount == 1 ? "" : "s")", width: 150))
+            var names: [String] = []
+            for r in s.repos where !names.contains(r.name) { names.append(r.name) }
+            let n = s.parts?.count ?? s.repos.count
+            let unit = s.folded ? "group" : "repo"
+            cells.append(ReviewRow.cell(names.joined(separator: " "), "\(n) \(unit)\(n == 1 ? "" : "s") · \(s.commitCount) commit\(s.commitCount == 1 ? "" : "s")", width: 150))
             cells.append(ReviewRow.cell("\(s.fileCount) file\(s.fileCount == 1 ? "" : "s") +\(s.added) −\(s.removed)", ReviewRow.comments(s), width: 150))
             let worst = s.repos.first { $0.merge == s.merge }
             let base = worst.map { ReviewMark($0) } ?? ReviewMark("✓", Palette.ok, "Nothing to merge")
@@ -173,8 +185,32 @@ final class ReviewRow: Row {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// The parts of a folded row that are sub-items.
+    static func kids(_ s: ReviewSummary) -> [ReviewPart] { (s.parts ?? []).filter { $0.key != s.key } }
+
+    /// The glyph of a part state, as in `ReviewMark`. The chip label and the tooltip say the word.
+    static func glyph(_ st: ReviewState) -> String {
+        switch st {
+        case .ready: return "◆"
+        case .waiting: return "●"
+        case .conflict: return "✕"
+        case .merged: return "✓"
+        }
+    }
+
+    /// One word for the state of a part.
+    static func word(_ st: ReviewState) -> String {
+        switch st {
+        case .ready: return "ready"
+        case .waiting: return "waiting"
+        case .conflict: return "conflict"
+        case .merged: return "merged"
+        }
+    }
+
     static func route(_ s: ReviewSummary) -> Route {
         if s.kind == .plan { return .item(s.key, .plan) }
+        if s.folded { return .item(s.key, .changes) }
         return s.state == .waiting ? .item(s.key, .session) : .item(s.key, .changes)
     }
 

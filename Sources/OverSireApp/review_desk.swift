@@ -14,13 +14,16 @@ extension AppActionCatalog: ReviewTracking {
 
 /// The lines of a code comment: a click picks one line, a shift-click on the same side picks the lines between.
 struct LinePick: Hashable {
+    /// The sub-item that owns the file in a folded review. Nil: the key of the desk.
+    let item: String?
     let repo: String
     let path: String
     let side: ReviewAnchor.Side
     let first: Int
     var last: Int
 
-    init(repo: String, path: String, side: ReviewAnchor.Side, line: Int) {
+    init(item: String? = nil, repo: String, path: String, side: ReviewAnchor.Side, line: Int) {
+        self.item = item
         self.repo = repo
         self.path = path
         self.side = side
@@ -30,7 +33,7 @@ struct LinePick: Hashable {
 
     /// The pick after a click on `line`. A shift-click on another file or side starts a new pick.
     func click(_ line: Int, side: ReviewAnchor.Side, shift: Bool) -> LinePick {
-        guard shift, side == self.side else { return LinePick(repo: repo, path: path, side: side, line: line) }
+        guard shift, side == self.side else { return LinePick(item: item, repo: repo, path: path, side: side, line: line) }
         var p = self
         p.last = line
         return p
@@ -70,11 +73,15 @@ final class ReviewDesk {
     private let now: () -> Date
 
     private(set) var summary: ReviewSummary
+    /// The fold of the read. The book sets it from the project settings.
+    var reviewFold = ReviewFold.off
     /// The read of the review. A failed read keeps the old detail, and tries again by itself.
     private(set) lazy var review = PartReader<ReviewDetail>(
-        fetch: { [source, key, kind] in
+        fetch: { [weak self, source, key, kind] in
             guard let source else { throw ProviderError.transport("No daemon has this review.") }
-            return try await source.review(key, kind: kind)
+            let desk = self
+            let fold = await MainActor.run { desk?.reviewFold ?? .off }
+            return try await source.review(key, kind: kind, fold: kind == .code ? fold : .off)
         },
         onRead: { [unowned self] d in
             // A Viewed mark keeps the diffs. A new commit drops them.
@@ -136,6 +143,8 @@ final class ReviewDesk {
     }
     static var maxFilesOn: Bool = UIShots.shooting || (UserDefaults.standard.object(forKey: "review.maxFiles") as? Bool ?? true)
     var filter = FileFilter()
+    /// A folded review groups its files by sub-item or by repo.
+    var grouping = FileGrouping.item
     var collapsed: Set<String> = []
     /// The comment to scroll to after the next build of the diff.
     var reveal: String?
@@ -176,14 +185,29 @@ final class ReviewDesk {
     /// The round that a submit makes.
     var nextRound: Int { summary.round + 1 }
 
+    /// The review shows the groups of sub-items (OVERSIRE-591).
+    var folded: Bool { summary.folded }
+
+    /// The key whose session gets the comments of the file: its sub-item, else the key of the desk.
+    func owner(_ f: ReviewFile) -> String { f.item ?? key }
+
+    /// The parts of a folded review, in order. Empty for a plain review.
+    var parts: [ReviewPart] { summary.parts ?? [] }
+
+    /// The file id of a code comment. In a folded review the files carry the key of the comment.
+    func fileID(_ c: ReviewComment) -> String? {
+        guard case .code(let repo, let path, _, _, _) = c.anchor else { return nil }
+        return (folded ? c.key + "/" : "") + repo + "/" + path
+    }
+
     /// Only a pending comment changes. A submitted comment belongs to its round.
     static func canEdit(_ c: ReviewComment) -> Bool { c.state == .pending }
 
     /// The comments of one file, in line order.
     func comments(in f: ReviewFile) -> [ReviewComment] {
         comments.filter {
-            if case .code(let repo, let path, _, _, _) = $0.anchor { return repo == f.repo && path == f.path }
-            return false
+            guard case .code(let repo, let path, _, _, _) = $0.anchor, repo == f.repo, path == f.path else { return false }
+            return f.item == nil || $0.key == f.item
         }.sorted { Self.line($0) < Self.line($1) }
     }
 
@@ -197,21 +221,22 @@ final class ReviewDesk {
     /// The pending comments of each file id, for the file list.
     var pendingByFile: [String: Int] {
         var out: [String: Int] = [:]
-        for c in pending { if case .code(let repo, let path, _, _, _) = c.anchor { out[repo + "/" + path, default: 0] += 1 } }
+        for c in pending { if let id = fileID(c) { out[id, default: 0] += 1 } }
         return out
     }
 
     /// ReviewFile.id → answered comments.
     var answeredByFile: [String: Int] {
         var out: [String: Int] = [:]
-        for c in comments where c.state == .answered {
-            if case .code(let repo, let path, _, _, _) = c.anchor { out[repo + "/" + path, default: 0] += 1 }
-        }
+        for c in comments where c.state == .answered { if let id = fileID(c) { out[id, default: 0] += 1 } }
         return out
     }
 
     var tree: FileTree {
-        FileTree(files: files, repos: summary.repos.map(\.name), filter: filter, collapsed: collapsed, pending: pendingByFile)
+        var repos: [String] = []
+        for r in summary.repos where !repos.contains(r.name) { repos.append(r.name) }
+        return FileTree(files: files, repos: repos, filter: filter, collapsed: collapsed, pending: pendingByFile,
+                        items: parts.map(\.key), grouping: grouping)
     }
 
     // MARK: Calls
@@ -223,9 +248,9 @@ final class ReviewDesk {
     func diffRead(_ f: ReviewFile) -> PartReader<FileDiff> {
         if let r = diffReads[f.id] { return r }
         let r = PartReader<FileDiff>(
-            fetch: { [source, key] in
+            fetch: { [source, owner = owner(f)] in
                 guard let source else { throw ProviderError.transport("No daemon has this review.") }
-                return try await source.diff(key, repo: f.repo, path: f.path, full: true)
+                return try await source.diff(owner, repo: f.repo, path: f.path, full: true)
             },
             now: now, schedule: schedule, changed: { [weak self] in self?.changed() })
         diffReads[f.id] = r
@@ -295,11 +320,13 @@ final class ReviewDesk {
         return anchor
     }
 
-    func add(_ anchor: ReviewAnchor, text: String) async -> Bool {
+    /// `item` is the sub-item that owns the file. Its session gets the comment.
+    func add(_ anchor: ReviewAnchor, text: String, item: String? = nil) async -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, let source else { return false }
+        let owner = item ?? key
         return await run {
-            _ = try await source.addComment(self.key, CommentDraft(kind: self.kind, anchor: anchor, text: t))
+            _ = try await source.addComment(owner, CommentDraft(kind: self.kind, anchor: anchor, text: t))
             await MainActor.run { self.pick = nil; self.block = nil; self.draft = "" }
         }
     }
@@ -307,26 +334,29 @@ final class ReviewDesk {
     func edit(_ c: ReviewComment, text: String) async -> Bool {
         guard Self.canEdit(c), let source else { return false }
         return await run {
-            try await source.editComment(self.key, id: c.id, CommentEdit(text: text))
+            try await source.editComment(c.key, id: c.id, CommentEdit(text: text))
             await MainActor.run { self.editing = nil }
         }
     }
 
     func delete(_ c: ReviewComment) async -> Bool {
         guard Self.canEdit(c), let source else { return false }
-        return await run { try await source.deleteComment(self.key, id: c.id, kind: self.kind) }
+        return await run { try await source.deleteComment(c.key, id: c.id, kind: self.kind) }
     }
 
     /// Deletes all pending comments.
     func discardAll() async -> Bool {
         guard let source else { return false }
         let list = pending
-        return await run { for c in list { try await source.deleteComment(self.key, id: c.id, kind: self.kind) } }
+        return await run { for c in list { try await source.deleteComment(c.key, id: c.id, kind: self.kind) } }
     }
 
     /// The path of the file on the disk of the machine of the review.
     func absolutePath(_ f: ReviewFile) -> String {
-        let group = summary.group.map { $0.hasPrefix("/") ? $0 : (summary.root as NSString).appendingPathComponent($0) } ?? summary.root
+        let part = f.item.flatMap { summary.part($0) }
+        let root = part?.root ?? summary.root
+        let g = part != nil ? part?.group : summary.group
+        let group = g.map { $0.hasPrefix("/") ? $0 : (root as NSString).appendingPathComponent($0) } ?? root
         return ((group as NSString).appendingPathComponent(f.repo) as NSString).appendingPathComponent(f.path)
     }
 
@@ -341,7 +371,7 @@ final class ReviewDesk {
 
     func setViewed(_ f: ReviewFile, _ on: Bool) async -> Bool {
         guard let source else { return false }
-        return await run { try await source.markViewed(self.key, ViewedMark(repo: f.repo, path: f.path, viewed: on)) }
+        return await run { try await source.markViewed(self.owner(f), ViewedMark(repo: f.repo, path: f.path, viewed: on)) }
     }
 
     /// All pending comments become one round. The app writes the tracker parts: the round comment, and Todo for an approved plan.

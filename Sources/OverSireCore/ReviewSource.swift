@@ -5,9 +5,10 @@ import Foundation
 public protocol ReviewSource: Sendable {
     /// The machine of the daemon. Each call of a row goes to this machine.
     var machine: String { get }
-    /// `kind` nil: code and plan.
-    func reviews(kind: ReviewKind?) async throws -> ReviewsPage
-    func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail
+    /// `kind` nil: code and plan. `fold` puts the code groups of the sub-items into the row of their parent.
+    func reviews(kind: ReviewKind?, fold: ReviewFold) async throws -> ReviewsPage
+    /// A folded parent has the files and the rounds of each part. A sub-item key gives its own detail.
+    func review(_ key: String, kind: ReviewKind, fold: ReviewFold) async throws -> ReviewDetail
     /// `full`: ask for the whole file. The reply sets `full` only when the daemon sent it.
     func diff(_ key: String, repo: String, path: String, full: Bool) async throws -> FileDiff
     func addComment(_ key: String, _ d: CommentDraft) async throws -> ReviewComment
@@ -21,4 +22,9 @@ public protocol ReviewSource: Sendable {
     func merge(_ key: String, _ r: MergeRequest) async throws -> MergeResult
     /// The agent rebases the group and fixes the conflict.
     func fix(_ key: String) async throws -> ReviewRound
+}
+
+extension ReviewSource {
+    public func reviews(kind: ReviewKind?) async throws -> ReviewsPage { try await reviews(kind: kind, fold: .off) }
+    public func review(_ key: String, kind: ReviewKind) async throws -> ReviewDetail { try await review(key, kind: kind, fold: .off) }
 }

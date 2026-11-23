@@ -96,7 +96,7 @@ final class ReviewThreads {
         var parts: [NSView] = [NSTextField.text("Rounds", size: 12, weight: .semibold, color: Palette.mut)]
         for r in desk.rounds {
             let (mark, word) = Self.state(r)
-            let text = "Round \(r.n) · \(r.count) comment\(r.count == 1 ? "" : "s") · \(clockFmt.string(from: r.submittedAt))"
+            let text = "Round \(r.n)" + (r.item.map { " · " + FilePanel.short($0) } ?? "") + " · \(r.count) comment\(r.count == 1 ? "" : "s") · \(clockFmt.string(from: r.submittedAt))"
             let chip = Chiplet(text + " · " + word, icon: mark.view(size: 11))
             chip.setAccessibilityLabel("\(text), \(word)" + (r.error.map { ", \($0)" } ?? ""))
             chip.toolTip = r.error ?? r.summary
@@ -197,7 +197,8 @@ final class ReviewThreads {
     /// The new comment for a place. Return adds it to the pending batch.
     func composer(_ anchor: ReviewAnchor, label: String) -> NSView {
         let card = Card(padding: 10, spacing: 6, fill: Palette.raise, border: Palette.acc)
-        card.add(NSTextField.text("New comment · \(label)", size: 11.5, weight: .semibold, color: Palette.acc))
+        let owner = desk.folded ? desk.pick?.item.map { " · goes to the session of " + FilePanel.short($0) } ?? "" : ""
+        card.add(NSTextField.text("New comment · \(label)" + owner, size: 11.5, weight: .semibold, color: Palette.acc))
         let f = CommentField(composerField?.stringValue ?? desk.draft, placeholder: "What should the agent change here?", label: "New comment, \(label)")
         f.target = self
         f.action = #selector(addDraft)
@@ -219,7 +220,8 @@ final class ReviewThreads {
         let text = f.stringValue
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         desk.draft = text
-        act { await self.desk.add(anchor, text: text) }
+        let item = desk.pick?.item
+        act { await self.desk.add(anchor, text: text, item: item) }
     }
 
     private func cancelDraft() {

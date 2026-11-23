@@ -62,7 +62,7 @@ final class ReviewBook {
 
     private let sources: () -> [any ReviewSource]
     private let bus: ChangeBus
-    private var pages: [String: ReviewsPage] = [:]   // machine → page
+    private(set) var pages: [String: ReviewsPage] = [:]   // machine → page
     private var desks: [String: ReviewDesk] = [:]    // ReviewSummary.id → desk
     private var healths: [String: ReviewHealth] = [:] // machine → last read
     private let sink: any LogSink
@@ -72,6 +72,8 @@ final class ReviewBook {
     var tracker: (any ReviewTracking)? = nil
     /// False for `--uishots`: the seeded rows stay.
     var reads = true
+    /// The fold of the code reads: on, but not for the projects that turn it off (OVERSIRE-591).
+    var fold: () -> ReviewFold = { ReviewBook.settingsFold() }
 
     init(sources: @escaping () -> [any ReviewSource] = ReviewBook.groupSources, bus: ChangeBus = .shared,
          log: any LogSink = AppLog(), now: @escaping () -> Date = Date.init) {
@@ -85,6 +87,10 @@ final class ReviewBook {
     static func groupSources() -> [any ReviewSource] {
         guard let hub = ENV.machines else { return [] }
         return hub.active.compactMap { hub.runtime($0.machine) }
+    }
+
+    static func settingsFold(_ cfg: ProjectsConfig = PROJECTS_CFG) -> ReviewFold {
+        ReviewFold(on: true, except: cfg.settings.filter { !$0.value.foldSubitems }.map(\.key))
     }
 
     // MARK: What the page shows
@@ -115,6 +121,11 @@ final class ReviewBook {
     func review(_ key: String, kind: ReviewKind? = nil) -> ReviewSummary? {
         let list = rows.filter { $0.key == key && (kind == nil || $0.kind == kind) }
         return list.first { $0.kind == .code } ?? list.first
+    }
+
+    /// The folded row whose parts hold the group of key. Nil for the parent itself.
+    func parent(of key: String) -> ReviewSummary? {
+        rows.first { $0.key != key && $0.part(key) != nil }
     }
 
     static func since(_ s: ReviewSummary) -> Date { s.readyAt ?? s.updatedAt }
@@ -192,14 +203,19 @@ final class ReviewBook {
     func apply(_ e: ReviewEvent, from machine: String) async {
         let m = e.machine ?? machine
         await refresh(machine: m)
-        let desk = await MainActor.run { desks["\(m)/\(e.kind.rawValue)/\(e.key)"] }
-        await desk?.load()
+        let open = await MainActor.run { () -> [ReviewDesk] in
+            var keys = [e.key]
+            if e.kind == .code, let p = parent(of: e.key) { keys.append(p.key) }
+            return keys.compactMap { desks["\(m)/\(e.kind.rawValue)/\($0)"] }
+        }
+        for d in open { await d.load() }
     }
 
     /// One job line for each read: 3 failures in a row open a problem, a read that works clears it.
     private func read(_ s: any ReviewSource) async -> Result<ReviewsPage, ProviderError> {
         let t0 = Date()
-        let r = await Result<ReviewsPage, ProviderError>(awaiting: { try await s.reviews(kind: nil) })
+        let f = await MainActor.run { fold() }
+        let r = await Result<ReviewsPage, ProviderError>(awaiting: { try await s.reviews(kind: nil, fold: f) })
         let ms = Int(Date().timeIntervalSince(t0) * 1000)
         switch r {
         case .success(let p):
@@ -223,9 +239,13 @@ final class ReviewBook {
 
     /// The desk of a review. It stays while the app runs, so a tab keeps its place and its drafts.
     func desk(_ s: ReviewSummary) -> ReviewDesk? {
-        if let d = desks[s.id] { return d }
+        if let d = desks[s.id] {
+            d.reviewFold = fold()
+            return d
+        }
         guard let src = source(s.machine) else { return nil }
         let d = ReviewDesk(summary: s, source: src, tracker: tracker, bus: bus)
+        d.reviewFold = fold()
         d.local = src is LocalMachineRuntime
         d.agent = { key in
             let rt = PROJECTS_CFG.runtime

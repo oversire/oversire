@@ -25,6 +25,14 @@ final class ProjectLocalSettingsTests: XCTestCase {
         XCTAssertFalse(l.hidden)
     }
 
+    func testTheFoldIsOnByDefaultAndTheBookSkipsTheProjectsThatTurnItOff() throws {
+        XCTAssertTrue(try decode("{}").local("oversire").foldSubitems)
+        let c = try decode(#"{"settings":{"SLING":{"foldSubitems":false},"OVERSIRE":{"muted":true}}}"#)
+        XCTAssertFalse(c.local("sling").foldSubitems)
+        XCTAssertTrue(c.local("oversire").foldSubitems)
+        XCTAssertEqual(ReviewBook.settingsFold(c), ReviewFold(on: true, except: ["SLING"]))
+    }
+
     func testIconChoiceRoundTrip() throws {
         for i in [IconChoice.auto, .upload, .tracker, .repo("a/b"), .org("a"), .letter] {
             XCTAssertEqual(IconChoice(raw: i.raw), i)

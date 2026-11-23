@@ -17,7 +17,9 @@ extension UIShots {
     /// long: a file of 4000 lines, with the widest line at line 3938 (OVERSIRE-439).
     /// stale and stale-list: the last read of mba failed 3 h after its last good read (OVERSIRE-424).
     /// The file panel (OVERSIRE-386): files (list view), search, filters (one repo, no changed files), pending (the popover) and hover.
+    /// fold-list, fold-changes, fold-child, fold-off: the review of OVERSIRE-589 with the groups of its sub-items (OVERSIRE-591).
     func reviewState(_ scene: String, in w: AppWindow) {
+        if scene.hasPrefix("fold-") { return foldState(scene, in: w) }
         let failed = ["mba": ReviewHealth(read: Date().addingTimeInterval(-3 * 3600), error: "The request timed out.")]
         Self.seedReviews(empty: scene == "empty", health: scene.hasPrefix("stale") ? failed : [:], long: scene == "long" || scene == "old-daemon", full: ["full", "expand", "steps", "ruler", "viewed", "diff-stale"].contains(scene), stale: scene == "viewed")
         guard let code = REVIEWS.review("FRITZ-17", kind: .code).flatMap({ REVIEWS.desk($0) }),
@@ -239,6 +241,93 @@ extension UIShots {
             "mini": ReviewsPage(reviews: [waiting, conflict, older]),
         ], health: health)
         for d in [fritzDesk, planDesk, ReviewDesk(detail: ReviewDetail(summary: conflict)), ReviewDesk(detail: ReviewDetail(summary: older))] { REVIEWS.put(d) }
+    }
+
+    func foldState(_ scene: String, in w: AppWindow) {
+        Self.seedReviews()
+        Self.seedFold(on: scene != "fold-off")
+        switch scene {
+        case "fold-changes":
+            if let d = REVIEWS.review("OVERSIRE-589", kind: .code).flatMap({ REVIEWS.desk($0) }) {
+                d.file = "OVERSIRE-591/oversire/Sources/OverSireApp/review_file_tree.swift"
+                d.pick = LinePick(item: "OVERSIRE-591", repo: "oversire", path: "Sources/OverSireApp/review_file_tree.swift", side: .new, line: 52)
+            }
+            w.router.go(.item("OVERSIRE-589", .changes))
+        case "fold-child": w.router.go(.item("OVERSIRE-591", .changes))
+        default: w.router.go(.work(.review))
+        }
+    }
+
+    /// OVERSIRE-589 on mba: three sub-items with groups, and the group of the parent. Off: a row for each group.
+    static func seedFold(on: Bool) {
+        let now = Date()
+        func ago(_ m: Double) -> Date { now.addingTimeInterval(-m * 60) }
+        let root = "/Users/ada/src/oversire-workspace"
+        func repo(_ name: String, _ key: String, ahead: Int, behind: Int = 0, merge: MergeMode = .fastForward, files: Int, _ subject: String) -> ReviewRepo {
+            ReviewRepo(name: name, branch: key.lowercased(), base: "main", ahead: ahead, behind: behind, added: 40 * files, removed: 6 * files, files: files,
+                       merge: merge, commits: [ReviewCommit(sha: "c\(key.suffix(3))a19e", subject: subject)], item: on ? key : nil)
+        }
+        let groups: [(key: String, title: String, state: ReviewState, pending: Int, repos: [ReviewRepo])] = [
+            ("OVERSIRE-590", "Daemon folds sub-item reviews", .ready, 0, [repo("cli", "OVERSIRE-590", ahead: 2, files: 2, "Fold the reviews of sub-items into the parent")]),
+            ("OVERSIRE-591", "Changes tab of a folded review", .ready, 1, [repo("oversire", "OVERSIRE-591", ahead: 3, files: 3, "Group the file tree by sub-item")]),
+            ("OVERSIRE-592", "Merge sheet for many groups", .waiting, 0, [repo("oversire", "OVERSIRE-592", ahead: 1, behind: 2, merge: .rebase, files: 1, "Merge the groups in key order"),
+                                                                         repo("cli", "OVERSIRE-592", ahead: 1, files: 1, "Merge many groups")]),
+            ("OVERSIRE-589", "Sub-item reviews fold into the parent", .ready, 0, [repo("oversire", "OVERSIRE-589", ahead: 1, files: 1, "Add the review fold to the contract")]),
+        ]
+        let parts = groups.map { g in
+            ReviewPart(key: g.key, root: root, group: ".wt/\(g.key.lowercased())", state: g.state, round: g.key == "OVERSIRE-590" ? 1 : 0, pending: g.pending,
+                       session: ReviewSession(state: g.state == .waiting ? .working : .idle, harness: "claude", canSend: true), readyAt: ago(20))
+        }
+        let files = [
+            ReviewFile(repo: "cli", path: "review/fold.go", status: .added, added: 260, removed: 0, item: "OVERSIRE-590"),
+            ReviewFile(repo: "cli", path: "review/engine.go", status: .modified, added: 48, removed: 22, viewed: true, item: "OVERSIRE-590"),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/review_file_tree.swift", status: .modified, added: 86, removed: 20, item: "OVERSIRE-591"),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/review_file_panel.swift", status: .modified, added: 44, removed: 6, item: "OVERSIRE-591"),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/review_desk.swift", status: .modified, added: 40, removed: 14, item: "OVERSIRE-591"),
+            ReviewFile(repo: "oversire", path: "Sources/OverSireApp/review_merge_sheet.swift", status: .modified, added: 70, removed: 12, item: "OVERSIRE-592"),
+            ReviewFile(repo: "cli", path: "review/merge.go", status: .modified, added: 120, removed: 8, item: "OVERSIRE-592"),
+            ReviewFile(repo: "oversire", path: "Contract/schema/review.json", status: .modified, added: 52, removed: 4, item: "OVERSIRE-589"),
+        ]
+        let tree = "Sources/OverSireApp/review_file_tree.swift"
+        let comments = [
+            ReviewComment(id: "c_00000101", key: "OVERSIRE-590", round: 1, state: .answered, anchor: .code(repo: "cli", path: "review/fold.go", line: 40, side: .new),
+                          text: "Sort the keys by number, not by text.", reply: "keyCompare sorts X-9 before X-10.", createdAt: ago(90), answeredAt: ago(25)),
+            ReviewComment(id: "c_00000102", key: "OVERSIRE-591", round: 1, state: .pending, anchor: .code(repo: "oversire", path: tree, line: 49, side: .new),
+                          excerpt: "    var item: String?", text: "Say that nil shows all sub-items.", createdAt: ago(2)),
+        ]
+        let rounds = [ReviewRound(n: 1, verdict: .requestChanges, count: 1, submittedAt: ago(88), delivery: .sent, session: "s_590", deliveredAt: ago(88), answeredAt: ago(25), item: "OVERSIRE-590")]
+        let diff = FileDiff(repo: "oversire", path: tree, status: .modified, hunks: [
+            DiffHunk(oldStart: 44, oldLines: 6, newStart: 44, newLines: 12, header: "struct FileFilter: Hashable {", lines: [
+                DiffLine(kind: .ctx, old: 44, new: 44, text: "struct FileFilter: Hashable {"),
+                DiffLine(kind: .ctx, old: 45, new: 45, text: "    /// Nil shows all repos."),
+                DiffLine(kind: .ctx, old: 46, new: 46, text: "    var repo: String?"),
+                DiffLine(kind: .add, new: 47, text: "    /// Nil shows the files of all sub-items."),
+                DiffLine(kind: .add, new: 48, text: "    var item: String?"),
+                DiffLine(kind: .ctx, old: 47, new: 49, text: "    var query = \"\""),
+                DiffLine(kind: .ctx, old: 48, new: 50, text: "    var hidden: Set<FileGroup> = []"),
+                DiffLine(kind: .ctx, old: 49, new: 51, text: ""),
+                DiffLine(kind: .ctx, old: 50, new: 52, text: "    func matches(_ f: ReviewFile) -> Bool {"),
+                DiffLine(kind: .ctx, old: 51, new: 53, text: "        if let repo, f.repo != repo { return false }"),
+                DiffLine(kind: .add, new: 54, text: "        if let item, f.item != item { return false }"),
+                DiffLine(kind: .ctx, old: 52, new: 55, text: "        if hidden.contains(FileGroup(f.status)) { return false }"),
+            ]),
+        ])
+        var page = REVIEWS.pages["mba"] ?? ReviewsPage()
+        if on {
+            let s = ReviewSummary(key: "OVERSIRE-589", kind: .code, title: "Sub-item reviews fold into the parent", machine: "mba", state: .ready, round: 1, pending: 1,
+                                  root: root, group: ".wt/oversire-589", repos: groups.flatMap(\.repos), subitems: ["OVERSIRE-590", "OVERSIRE-591", "OVERSIRE-592"],
+                                  readyAt: ago(20), updatedAt: ago(2), parts: parts)
+            page.reviews.insert(s, at: 0)
+            REVIEWS.set(REVIEWS.pages.merging(["mba": page]) { $1 })
+            REVIEWS.put(ReviewDesk(detail: ReviewDetail(summary: s, files: files, comments: comments, rounds: rounds), diffs: [diff]))
+        } else {
+            for g in groups {
+                let s = ReviewSummary(key: g.key, kind: .code, title: g.title, machine: "mba", state: g.state, pending: g.pending, root: root,
+                                      group: ".wt/\(g.key.lowercased())", repos: g.repos, readyAt: ago(20), updatedAt: ago(2))
+                page.reviews.insert(s, at: 0)
+            }
+            REVIEWS.set(REVIEWS.pages.merging(["mba": page]) { $1 })
+        }
     }
 
     /// A full diff of a Go file of 120 lines: one added line at 40, one changed line at 100.

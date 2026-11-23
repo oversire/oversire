@@ -495,6 +495,8 @@ struct ProjectLocalSettings: Codable, Equatable {
     var categories: [String: StatusCategory] = [:]   // status id → category
     var hidden = false
     var muted = false
+    /// Work › Review shows the code of the sub-items in the row of the parent (OVERSIRE-591).
+    var foldSubitems = true
 
     static let defaultBranch = "{key}/{slug}"
 
@@ -514,6 +516,7 @@ struct ProjectLocalSettings: Codable, Equatable {
         categories = try c.decodeIfPresent([String: StatusCategory].self, forKey: .categories) ?? [:]
         hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
         muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? false
+        foldSubitems = try c.decodeIfPresent(Bool.self, forKey: .foldSubitems) ?? true
     }
 
     // The branch name of an item: {key} lowercase, {KEY}, {slug} from the title, {title}.

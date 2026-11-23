@@ -104,6 +104,15 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
     private var repos = Segmented([], selected: 0, label: "Repository") { _ in }
     private var repoNames: [String] = []
     private let repoSlot = NSStackView(h: [], spacing: 0)
+    /// The sub-item filter and the grouping of a folded review (OVERSIRE-591).
+    private var items = Segmented([], selected: 0, label: "Sub-item") { _ in }
+    private var itemKeys: [String] = []
+    private let itemSlot = NSStackView(h: [], spacing: 0)
+    private lazy var grouping = Segmented(["By sub-item", "By repo"], selected: 0, label: "Group files") { [weak self] i in
+        self?.desk?.grouping = i == 0 ? .item : .repo
+        self?.changed()
+    }
+    private lazy var groupSlot = NSStackView(h: [grouping, Spacer()], spacing: 0)
     private var chips: [FileGroup: SwitchChip] = [:]
     private lazy var notViewedChip = SwitchChip("○", "Not viewed", color: Palette.acc) { [weak self] in self?.flipViewed(false) }
     private lazy var viewedChip = SwitchChip("✓", "Viewed", color: Palette.ok) { [weak self] in self?.flipViewed(true) }
@@ -142,7 +151,7 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         seen.setAccessibilityRole(.group)
         seen.setAccessibilityLabel("Show files by viewed state")
         head.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-        [top, search, repoSlot, row, seen, progress].forEach { head.addFull($0) }
+        [top, search, itemSlot, groupSlot, repoSlot, row, seen, progress].forEach { head.addFull($0) }
         update()
     }
 
@@ -196,7 +205,27 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         searchButton.setAccessibilityExpanded(searchOpen)
         view.selectedSegment = desk.view == .tree ? 0 : 1
 
-        let names = desk.summary.repos.map(\.name)
+        let keys = desk.parts.map(\.key)
+        if keys != itemKeys {
+            itemKeys = keys
+            items = Segmented(["All"] + keys.map(Self.short), selected: 0, label: "Sub-item") { [weak self] i in
+                guard let self else { return }
+                self.desk?.filter.item = i == 0 ? nil : self.itemKeys[i - 1]
+                self.changed()
+            }
+            for (i, k) in keys.enumerated() { items.setToolTip(k, forSegment: i + 1) }
+            itemSlot.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            itemSlot.addArrangedSubview(items)
+        }
+        itemSlot.isHidden = keys.isEmpty
+        groupSlot.isHidden = keys.isEmpty
+        for (i, k) in keys.enumerated() { items.setLabel("\(Self.short(k)) \(desk.files.filter { $0.item == k }.count)", forSegment: i + 1) }
+        items.setLabel("All \(all)", forSegment: 0)
+        items.selectedSegment = desk.filter.item.flatMap { keys.firstIndex(of: $0) }.map { $0 + 1 } ?? 0
+        grouping.selectedSegment = desk.grouping == .item ? 0 : 1
+
+        var names: [String] = []
+        for r in desk.summary.repos where !names.contains(r.name) { names.append(r.name) }
         if names != repoNames {
             repoNames = names
             repos = Segmented(["All"] + names, selected: 0, label: "Repository") { [weak self] i in
@@ -214,6 +243,7 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
 
         var scoped = FileFilter()
         scoped.repo = desk.filter.repo
+        scoped.item = desk.filter.item
         let inScope = desk.files.filter(scoped.matches)
         for (g, c) in chips { c.set(on: !desk.filter.hidden.contains(g), count: inScope.filter { FileGroup($0.status) == g }.count) }
         let seen = inScope.filter(\.viewed).count
@@ -221,6 +251,12 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
         viewedChip.set(on: !desk.filter.hideViewed, count: seen)
         progress.stringValue = "\(desk.files.filter(\.viewed).count) of \(all) viewed"
         progress.isHidden = all == 0
+    }
+
+    /// "OVERSIRE-401" → "401". A key with no number stays whole.
+    static func short(_ key: String) -> String {
+        guard let i = key.lastIndex(of: "-"), Int(key[key.index(after: i)...]) != nil else { return key }
+        return String(key[key.index(after: i)...])
     }
 
     // MARK: Rows
@@ -250,7 +286,7 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
                 let s = NSStackView(h: [t, Spacer()])
                 s.edgeInsets = NSEdgeInsets(top: 8, left: 6, bottom: 2, right: 6)
                 list.addFull(s)
-            case .repo, .folder: list.addFull(folderRow(r, desk: desk))
+            case .part, .repo, .folder: list.addFull(folderRow(r, desk: desk))
             case .file: list.addFull(fileRow(r, desk: desk, answered: answered[r.id] ?? 0))
             }
         }
@@ -274,15 +310,19 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
             if desk.collapsed.contains(r.id) { desk.collapsed.remove(r.id) } else { desk.collapsed.insert(r.id) }
             self?.changed()
         }
-        let repo = r.kind == .repo
+        let repo = r.kind == .repo || r.kind == .part
         let name = NSTextField.text(r.name, size: repo ? 12 : 12.5, weight: repo ? .bold : .regular, color: repo ? Palette.fg : Palette.mut, mono: repo)
         name.lineBreakMode = .byTruncatingMiddle
         name.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         var views: [NSView] = [Glyph(r.open ? "chevron.down" : "chevron.right", color: Palette.dim, size: 9),
-                               Glyph(repo ? "shippingbox" : "folder", color: repo ? Palette.acc : Palette.dim, size: 11.5), name, Spacer()]
+                               Glyph(r.kind == .part ? "square.stack" : repo ? "shippingbox" : "folder", color: repo ? Palette.acc : Palette.dim, size: 11.5), name]
+        let part = r.kind == .part ? desk.summary.part(r.name) : nil
+        if let part { views.append(NSTextField.text(ReviewRow.word(part.state), size: 11, color: Palette.dim)) }
+        views.append(Spacer())
         if r.pending > 0 { views += badge("text.bubble", r.pending, Palette.warn) }
         views.append(NSTextField.text("\(r.files)", size: 11, color: Palette.dim, mono: true))
-        let label = "\(repo ? "Repo" : "Folder") \(r.name), \(r.files) files" + (r.pending > 0 ? ", \(r.pending) pending comments" : "")
+        let what = r.kind == .part ? (r.name == desk.key ? "Item" : "Sub-item") : repo ? "Repo" : "Folder"
+        let label = "\(what) \(r.name)" + (part.map { ", " + ReviewRow.word($0.state) } ?? "") + ", \(r.files) files" + (r.pending > 0 ? ", \(r.pending) pending comments" : "")
             + (r.open ? ", open" : ", closed")
         let row = TreeRow(views, height: 26, inset: 6 + CGFloat(r.depth) * 14, label: label) { toggle() }
         row.stack.spacing = 5
@@ -376,9 +416,9 @@ final class FilePanel: NSObject, NSSearchFieldDelegate {
     }
 
     private func commits(_ desk: ReviewDesk, into list: NSStackView) {
-        for r in desk.summary.repos where desk.filter.repo == nil || desk.filter.repo == r.name {
+        for r in desk.summary.repos where (desk.filter.repo == nil || desk.filter.repo == r.name) && (desk.filter.item == nil || desk.filter.item == r.item) {
             guard let commits = r.commits, !commits.isEmpty else { continue }
-            let t = NSTextField.text(desk.summary.repos.count > 1 ? "Commits · \(r.name)" : "Commits", size: 11, weight: .semibold, color: Palette.dim)
+            let t = NSTextField.text(desk.summary.repos.count > 1 ? "Commits · " + (r.item.map { $0 + " · " } ?? "") + r.name : "Commits", size: 11, weight: .semibold, color: Palette.dim)
             let h = NSStackView(h: [t, Spacer()])
             h.edgeInsets = NSEdgeInsets(top: 12, left: 6, bottom: 2, right: 6)
             list.addFull(h)
