@@ -25,7 +25,7 @@ final class StatusJobTests: XCTestCase {
         engine = FakeAIEngine()
         engine.on(.status, .success(reply))
         let writes = StoreWrites(store: LocalStore(dir: dir))
-        let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                     statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         agents = AgentIndex(writes: nil)
         agents.hold = true
@@ -102,7 +102,7 @@ final class StatusJobTests: XCTestCase {
         let disk: [String: AnyEncodable] = ["snapshots": AnyEncodable([ref.storeKey: snap]), "readActivity": AnyEncodable([String]()),
                                             "readItems": AnyEncodable([String]())]
         try JSONEncoder().encode(disk).write(to: URL(fileURLWithPath: path))
-        let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                  statePath: path, activityPath: dir.path + "/activity.jsonl")
         XCTAssertNotNil(store.item(key: "A-1"))
         return store

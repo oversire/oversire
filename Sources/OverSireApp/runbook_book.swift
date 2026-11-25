@@ -14,7 +14,7 @@ final class RunbookBook {
     private var notified: Set<String> = []
     /// Posts one notification for a gate or a pause that waits this long. nil: never.
     var tellAfter: () -> TimeInterval? = { AGENTS.questionNotice.delay }
-    var notify: (_ key: String, _ title: String, _ body: String) -> Void = { _, _, _ in }
+    var notify: (_ run: RunbookRun, _ row: NeedsYou) -> Void = { _, _ in }
 
     init(runtime: @escaping () -> (any RunbookRunning)? = { ENV.runtime as? any RunbookRunning }, bus: ChangeBus = .shared) {
         self.runtime = runtime
@@ -95,8 +95,9 @@ final class RunbookBook {
     func tell(now: Date = Date()) {
         guard let after = tellAfter() else { return }
         for n in NeedsYou.runbooks(open) where !notified.contains(n.id) && now.timeIntervalSince(n.at) >= after {
+            guard let r = runs[n.key] else { continue }
             notified.insert(n.id)
-            notify(n.key, "\(n.key) needs you", n.reason)
+            notify(r, n)
         }
     }
 

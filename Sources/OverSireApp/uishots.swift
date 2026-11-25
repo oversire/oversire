@@ -133,7 +133,7 @@ final class UIShots: NSObject, AppData, NSApplicationDelegate {
             }
         }
         if UIShots.loading { try? FileManager.default.removeItem(atPath: tmp + "/state.json") }
-        projectStore = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        projectStore = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                     statePath: tmp + "/state.json", activityPath: tmp + "/activity.jsonl")
         super.init()
         projectStore.hold = UIShots.loading

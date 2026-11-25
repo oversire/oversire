@@ -58,7 +58,7 @@ final class WorkContextTests: XCTestCase {
     private func seeded(items extra: Int = 0, trackers: TrackerDirectory? = nil) -> TestAppData {
         let d = TestAppData()
         if let trackers {
-            d.projectStore = ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+            d.projectStore = ProjectStore(trackers: trackers, notifier: ProjectNotifier(),
                                           statePath: d.tmp + "/state.json", activityPath: d.tmp + "/activity.jsonl")
         }
         var items = [item(1, title: "Fix the sync"), item(2, parent: "i1", status: "s2"), item(3)]

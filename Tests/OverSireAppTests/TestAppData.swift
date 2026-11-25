@@ -28,7 +28,7 @@ final class TestAppData: AppData {
     lazy var writes = StoreWrites(store: LocalStore(dir: URL(fileURLWithPath: tmp + "/store")))
     /// The trackers of the project store. Nil: the global ENV.
     let trackers: TrackerDirectory?
-    lazy var projectStore = ProjectStore(trackers: trackers ?? ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+    lazy var projectStore = ProjectStore(trackers: trackers ?? ENV, notifier: ProjectNotifier(),
                                          statePath: tmp + "/state.json", activityPath: tmp + "/activity.jsonl")
     lazy var agentIndex = AgentIndex(writes: writes)
     let workstreams = WorkstreamIndex()

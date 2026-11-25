@@ -27,7 +27,7 @@ final class ProjectSaveTests: XCTestCase {
     override func tearDown() { try? FileManager.default.removeItem(at: dir) }
 
     private func store(_ held: Held, _ fake: FakeTracker = FakeTracker()) -> ProjectStore {
-        ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(),
                      statePath: statePath, activityPath: dir.path + "/activity.jsonl",
                      schedule: { _, f in held.work.append(f) })
     }

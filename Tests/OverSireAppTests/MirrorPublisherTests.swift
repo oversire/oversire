@@ -386,7 +386,7 @@ final class MirrorPublisherTests: XCTestCase {
         let t = FakeTracker(account: "ws", capabilities: caps)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-docs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(),
                                  statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         let summary = ProjectSummary(ref: t.project, identifier: "FAKE", title: "Fake", url: "https://x/FAKE", closed: false)
         store.track([summary], live: [])
@@ -525,7 +525,7 @@ final class MirrorPublisherTests: XCTestCase {
         let t = PagedTracker(FakeTracker(account: "ws"))
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-docs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(),
                                  statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         let summary = ProjectSummary(ref: t.t.project, identifier: "FAKE", title: "Fake", url: "https://x/FAKE", closed: false)
         store.track([summary], live: [])

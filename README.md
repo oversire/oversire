@@ -25,7 +25,7 @@ OverSire is built on three principles:
 - **Per-run details** — workflow name, run number, branch badge, timestamps, and duration
 - **Expandable run rows** — click a run to expand it inline: failed runs show the exact failure annotations (job/step + message), successful runs show the full commit message and durations, in-progress runs show live elapsed time and per-workflow status
 - **Calculated ETA** — estimates remaining time for running actions based on historical durations
-- **macOS notifications** — alerts for the run events you choose: starts, passes, failures, cancellations, and other endings — click a notification to open the popover
+- **macOS notifications** — alerts for the run events you choose: starts, passes, failures, cancellations, and other endings — click a notification to open its page
 
 ### Pull Requests Tab
 - **Review queue** — shows PRs where your review is requested, across all tracked repos

@@ -22,7 +22,7 @@ final class PlaneDownTests: XCTestCase {
         savedError = lastFetchError
         summary = try await fake.projects()[0]
         data = TestAppData()
-        data.projectStore = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        data.projectStore = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(),
                                          statePath: data.tmp + "/s.json", activityPath: data.tmp + "/a.jsonl")
     }
 
@@ -84,7 +84,7 @@ final class PlaneDownTests: XCTestCase {
         let all = built(WorkPage(.work(.items), data: data, router: Router())).flatMap(texts)
         XCTAssertTrue(all.contains { $0.hasPrefix("Read failed") })
         XCTAssertFalse(all.contains("\(ENV.trackerNames()) did not give your items."))
-        let fresh = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let fresh = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(),
                                  statePath: data.tmp + "/f.json", activityPath: data.tmp + "/f.jsonl")
         XCTAssertTrue(fresh.plane.staleAccessory.isEmpty)
     }

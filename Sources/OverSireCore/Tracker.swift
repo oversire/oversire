@@ -521,6 +521,115 @@ public enum ItemChange: Codable, Hashable, Sendable {
     }
 }
 
+/// The changes of one item in one notification window, folded to the net change.
+public struct ItemNet: Hashable, Sendable {
+    public struct Step: Hashable, Sendable {
+        public let change: ItemChange
+        public let at: Date
+
+        public init(change: ItemChange, at: Date) {
+            self.change = change
+            self.at = at
+        }
+    }
+
+    /// The net close or reopen. `closedAgain`: reopened, then closed. `reopenedAgain`: closed, then reopened.
+    public enum Move: Hashable, Sendable { case none, closed, reopened, closedAgain, reopenedAgain }
+
+    public private(set) var steps: [Step]
+
+    public init(_ steps: [Step] = []) { self.steps = steps }
+
+    public mutating func add(_ changes: [ItemChange], at: Date) {
+        steps += changes.map { Step(change: $0, at: at) }
+    }
+
+    /// The first `from` and the last `to`. Nil when no status step is in the window.
+    public var status: (from: String?, to: String?, steps: Int)? {
+        let all = steps.compactMap { s -> (String?, String?)? in
+            if case .status(let from, let to) = s.change { return (from, to) }
+            return nil
+        }
+        guard let first = all.first, let last = all.last else { return nil }
+        return (first.0, last.1, all.count)
+    }
+
+    public var move: Move {
+        let closes = steps.compactMap { s -> Bool? in
+            switch s.change {
+            case .closed: return true
+            case .reopened: return false
+            default: return nil
+            }
+        }
+        guard let first = closes.first, let last = closes.last else { return .none }
+        switch (first, last) {
+        case (true, true): return .closed
+        case (false, false): return .reopened
+        case (false, true): return .closedAgain
+        case (true, false): return .reopenedAgain
+        }
+    }
+
+    public var closedAt: Date? { steps.last { $0.change == .closed }?.at }
+    public var reopenedAt: Date? { steps.last { $0.change == .reopened }?.at }
+    public var mention: Bool { steps.contains { $0.change == .mention } }
+    public var added: Bool { steps.contains { $0.change == .added } }
+    public var removed: Bool { steps.contains { $0.change == .removed } }
+
+    /// The sum of the new comments, and the newest comment.
+    public var comments: (count: Int, last: Comment)? {
+        var out: (count: Int, last: Comment)?
+        for s in steps {
+            guard case .comments(let n, let c) = s.change else { continue }
+            let newest = out.map { $0.last.createdAt > c.createdAt ? $0.last : c } ?? c
+            out = ((out?.count ?? 0) + n, newest)
+        }
+        return out
+    }
+
+    /// An add and a remove of the same name cancel.
+    public var assigned: [String] { assignees.added }
+    public var unassigned: [String] { assignees.removed }
+
+    private var assignees: (added: [String], removed: [String]) {
+        var added: [String] = [], removed: [String] = []
+        for s in steps {
+            switch s.change {
+            case .assigned(let u):
+                if let i = removed.firstIndex(of: u) { removed.remove(at: i) } else if !added.contains(u) { added.append(u) }
+            case .unassigned(let u):
+                if let i = added.firstIndex(of: u) { added.remove(at: i) } else if !removed.contains(u) { removed.append(u) }
+            default: break
+            }
+        }
+        return (added, removed)
+    }
+
+    /// One entry for each field, in first change order: the first `from` and the last `to`. A field that is back at its value goes.
+    public var fields: [(name: String, from: String?, to: String?)] {
+        var out: [(name: String, from: String?, to: String?)] = []
+        for s in steps {
+            guard case .field(let name, let from, let to) = s.change else { continue }
+            if let i = out.firstIndex(where: { $0.name == name }) { out[i].to = to } else { out.append((name, from, to)) }
+        }
+        return out.filter { $0.from != $0.to }
+    }
+
+    /// Nothing to show: all the changes cancel.
+    public var isEmpty: Bool {
+        status == nil && move == .none && !mention && comments == nil && !added && !removed
+            && assigned.isEmpty && unassigned.isEmpty && fields.isEmpty
+    }
+
+    /// Something changed, but the item is as it was at the start of the window.
+    public var noNetChange: Bool {
+        guard !isEmpty, [.none, .closedAgain, .reopenedAgain].contains(move) else { return false }
+        return (status.map { $0.from == $0.to } ?? true) && !mention && comments == nil && !added && !removed
+            && assigned.isEmpty && unassigned.isEmpty && fields.isEmpty
+    }
+}
+
 public struct ActivityEntry: Codable, Hashable, Sendable {
     public let id: String
     public var projectKey: String

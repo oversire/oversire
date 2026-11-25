@@ -22,7 +22,7 @@ final class AutomationGatesTests: XCTestCase {
         savedAgents = AGENTS
         savedAI = AI_CFG
         writes = StoreWrites(store: LocalStore(dir: dir))
-        projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                 statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         agents = AgentIndex(writes: nil)
         let rt = FakeRuntime()

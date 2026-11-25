@@ -3,15 +3,17 @@ import OverSireCore
 
 // macOS notifications for project changes. "My items" means the token owner is an
 // assignee or the author. The user's own comments are skipped. Changes to one
-// item inside two minutes become one notification (same id, combined body).
+// item inside two minutes become one notification (same id) that shows the net change.
 
 final class ProjectNotifier {
     var now: () -> Date = Date.init
-    private let post: (_ title: String, _ subtitle: String, _ body: String, _ id: String) -> Void
-    private var window: [String: (body: String, at: Date)] = [:]
+    private let post: (Notice) -> Void
+    private let withdraw: (String) -> Void
+    private var window: [String: (net: ItemNet, at: Date)] = [:]
 
-    init(post: @escaping (_ title: String, _ subtitle: String, _ body: String, _ id: String) -> Void) {
+    init(post: @escaping (Notice) -> Void = { _ in }, withdraw: @escaping (String) -> Void = { _ in }) {
         self.post = post
+        self.withdraw = withdraw
     }
 
     func handle(_ changes: [(itemId: String, ItemChange)], in snapshot: ProjectSnapshot, settings: ProjectNotificationSettings) {
@@ -23,29 +25,19 @@ final class ProjectNotifier {
             if !allows(change, item: item, me: login, settings: settings) { continue }
             byItem[id, default: []].append(change)
         }
+        let stamp = now()
+        window = window.filter { stamp.timeIntervalSince($0.value.at) < 120 }
         for (id, list) in byItem {
+            var net = window[id]?.net ?? ItemNet()
+            net.add(list, at: stamp)
+            window[id] = (net, window[id]?.at ?? stamp)
             let item = snapshot.items.first { $0.id == id }
-            let text = list.map(\.text).joined(separator: "\n")
-            let title = snapshot.summary.ref.workspace + " › " + snapshot.summary.title
-            let subtitle = item.map { "\($0.key) \($0.title)" } ?? "Work item"
-            let stamp = now()
-            let body: String
-            if let prev = window[id], stamp.timeIntervalSince(prev.at) < 120 {
-                body = prev.body + "\n" + text
-                window[id] = (body, prev.at)
-            } else {
-                body = text
-                window[id] = (body, stamp)
-            }
-            post(title, subtitle, body, "project:\(id)")
+            if let n = Notice.item(net, item: item, itemId: id, in: snapshot) { post(n) } else { withdraw("project:\(id)") }
         }
     }
 
-    func intake(_ lines: [(IntakeItem, String)], in snapshot: ProjectSnapshot) {
-        let title = snapshot.summary.ref.workspace + " › " + snapshot.summary.title
-        for (item, text) in lines {
-            post(title, item.name, text, "intake:\(snapshot.summary.ref.storeKey)|\(item.workItemId)")
-        }
+    func intake(_ i: IntakeItem, _ line: IntakeLine, body: String?, in snapshot: ProjectSnapshot) {
+        post(.intake(i, line, body: body, in: snapshot))
     }
 
     func allows(_ change: ItemChange, item: Item?, me login: String?, settings: ProjectNotificationSettings) -> Bool {

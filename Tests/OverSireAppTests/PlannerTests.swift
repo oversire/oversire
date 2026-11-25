@@ -122,7 +122,7 @@ final class PlannerTests: XCTestCase {
 
     func testReviewSentences() {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oversire-tests-\(UUID().uuidString)").path
-        let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                  statePath: dir + "/state.json", activityPath: dir + "/activity.jsonl")
         let lines = draft.lines.map { PlanReviewView.sentence($0, store: store, kind: { $0 == "api" ? .core : .feature }) }
         XCTAssertEqual(lines, ["Start OVERSIRE-3 first.", "Mark OVERSIRE-2 as blocked by OVERSIRE-1.",

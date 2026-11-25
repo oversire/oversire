@@ -25,7 +25,7 @@ final class ParentGuardTests: XCTestCase {
         child = try await fake.create(ItemDraft(title: "Child", parent: parent.id), in: fake.project)
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("parent-guard-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        store = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        store = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(),
                              statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         guardian = ParentGuard(path: dir.path + "/parent-guard.json", store: store)
         guardian.enabled = { true }

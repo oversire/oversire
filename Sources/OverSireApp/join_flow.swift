@@ -229,12 +229,7 @@ struct UserJoinNotifier: JoinNotifying {
     }
 
     func post(_ r: JoinRequestFrame, group: String) {
-        let c = UNMutableNotificationContent()
-        c.title = ApproveCenter.title(r, group: group)
-        c.body = "Approve only if \(r.machine) shows the code \(r.confirm)."
-        c.sound = .default
-        c.categoryIdentifier = Self.category
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: ApproveCenter.prefix + r.request, content: c, trigger: nil))
+        NoticeCenter(center: UNUserNotificationCenter.current()).post(.join(r, group: group))
     }
 
     func withdraw(_ request: String) {

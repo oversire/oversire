@@ -24,7 +24,7 @@ final class IntakeDetailReadTests: XCTestCase {
         let summary = try await fake.projects()[0]
         pk = summary.ref.storeKey
         let d = TestAppData()
-        d.projectStore = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        d.projectStore = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(),
                                       statePath: d.tmp + "/s.json", activityPath: d.tmp + "/a.jsonl")
         d.projectStore.seed(ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date(), intake: [item]))
         page = IntakeDetailPage(.intakeItem("FAKE", item.id), data: d, router: Router())

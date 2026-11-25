@@ -101,7 +101,7 @@ final class ProjectRefreshTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("refresh-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         lastState = dir.path + "/state.json"
-        return ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, id in notify(id) }),
+        return ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { notify($0.id) }),
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
 
@@ -1226,7 +1226,7 @@ final class ProjectRefreshTests: XCTestCase {
     private func clientStore(notify: @escaping (String) -> Void = { _ in }) throws -> (ProjectStore, String) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("client-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let store = ProjectStore(trackers: Trackers(SlowTracker()), notifier: ProjectNotifier(post: { _, _, _, id in notify(id) }),
+        let store = ProjectStore(trackers: Trackers(SlowTracker()), notifier: ProjectNotifier(post: { notify($0.id) }),
                                  statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         store.client = true
         return (store, dir.path)
@@ -1327,7 +1327,7 @@ final class ProjectRefreshTests: XCTestCase {
         let t = SlowTracker()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("client-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: Trackers(t), notifier: ProjectNotifier(),
                                  statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         store.client = true
         let summary = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "", closed: false)

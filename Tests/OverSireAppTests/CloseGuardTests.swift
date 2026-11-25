@@ -24,7 +24,7 @@ final class CloseGuardTests: XCTestCase {
         child = try await fake.create(ItemDraft(title: "Child", parent: parent.id), in: fake.project)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("close-guard-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        store = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        store = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(),
                              statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         let snap = ProjectSnapshot(summary: try await fake.projects()[0], statusOptions: try await fake.statuses(fake.project),
                                    items: try await fake.items(fake.project, since: nil, limit: 50), fetchedAt: Date())

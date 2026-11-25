@@ -121,7 +121,7 @@ final class ProjectCommentTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("comments-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let posts = posts
-        return ProjectStore(trackers: Directory(t), notifier: ProjectNotifier(post: { _, _, body, _ in posts.add(body) }),
+        return ProjectStore(trackers: Directory(t), notifier: ProjectNotifier(post: { posts.add($0.body) }),
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
 

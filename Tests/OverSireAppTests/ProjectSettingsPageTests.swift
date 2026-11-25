@@ -141,7 +141,7 @@ final class ProjectSettingsPageTests: XCTestCase {
     @MainActor
     private func clientData() -> TestAppData {
         let data = TestAppData()
-        let store = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(),
                                  statePath: data.tmp + "/s.json", activityPath: data.tmp + "/a.jsonl")
         store.client = true
         let summary = ProjectSummary(ref: ref, identifier: "SLING", title: "Sling", url: "", closed: false)

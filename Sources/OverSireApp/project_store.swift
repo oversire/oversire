@@ -1703,24 +1703,29 @@ final class ProjectStore {
     }
 
     // New, changed and closed intake items. A closed item is accepted when it is now in the list.
+    // A new item reads its body first, at most 5 for each poll.
     private func notifyIntake(old: ProjectSnapshot?, new snap: ProjectSnapshot) {
         guard PROJECTS_CFG.notifications(for: snap.summary.identifier)?.intake == true, let before = old?.intake, let after = snap.intake else { return }
         let was = Dictionary(before.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let now = Dictionary(after.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        var lines: [(IntakeItem, String)] = []
+        var reads = 0
         for i in after where !suppressNotify.contains(i.workItemId) {
             if let prev = was[i.id] {
-                if prev.name != i.name || prev.priority != i.priority { lines.append((i, "Intake item changed")) }
+                if prev.name != i.name || prev.priority != i.priority { notifier.intake(i, .changed, body: nil, in: snap) }
+            } else if reads < 5 {
+                reads += 1
+                intakeDetail(projectKey: snap.summary.ref.storeKey, item: i, priority: .background) { [weak self] r in
+                    self?.notifier.intake(i, .new, body: try? r.get().body, in: snap)
+                }
             } else {
-                lines.append((i, "New intake item" + (i.author.map { " from \($0)" } ?? "")))
+                notifier.intake(i, .new, body: nil, in: snap)
             }
         }
         for i in before where now[i.id] == nil {
             if suppressNotify.remove(i.workItemId) != nil { continue }
-            let accepted = snap.items.contains { $0.id == i.workItemId }
-            lines.append((i, accepted ? "Intake item accepted" : "Intake item declined or removed"))
+            let key = snap.items.first { $0.id == i.workItemId }?.key
+            notifier.intake(i, key.map { .accepted(key: $0) } ?? .declined, body: nil, in: snap)
         }
-        notifier.intake(lines, in: snap)
     }
 
     func item(_ id: String) -> (key: String, snap: ProjectSnapshot, item: Item)? {

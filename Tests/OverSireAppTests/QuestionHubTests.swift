@@ -109,14 +109,14 @@ final class QuestionHubTests: XCTestCase {
         var told: [String] = []
         let got = expectation(description: "notification")
         h.tellAfter = { 0 }
-        h.notify = { _, title, _ in told.append(title); got.fulfill() }
+        h.notify = { q, key in told.append("\(key ?? "")|\(q.items.first?.text ?? "")"); got.fulfill() }
         h.attach(board)
         ch.ask(question(s, "1", origin: .work(item)))
         await board.refresh()
         await fulfillment(of: [got], timeout: 2)
         await board.refresh()
         try? await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertEqual(told, ["OVERSIRE-1 asks a question"])
+        XCTAssertEqual(told, ["OVERSIRE-1|Which schema 1?"])
     }
 
     func testNoticeSetting() {

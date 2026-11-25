@@ -75,7 +75,7 @@ final class ProjectPriorityTests: XCTestCase {
         item = made.item
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("priority-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        store = ProjectStore(trackers: Trackers(probe), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        store = ProjectStore(trackers: Trackers(probe), notifier: ProjectNotifier(),
                              statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         summary = try await probe.projects()[0]
         let snap = ProjectSnapshot(summary: summary, statusOptions: try await probe.fake.statuses(probe.project),

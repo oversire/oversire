@@ -252,8 +252,9 @@ func runSelfTest() {
                                     fetchedAt: Date())
     check(ProjectStore.diff(before, closeSnap).contains { $0.1 == .closed }, "done state closes")
 
-    var notes: [(title: String, subtitle: String, body: String, id: String)] = []
-    let notifier = ProjectNotifier(post: { notes.append(($0, $1, $2, $3)) })
+    var notes: [Notice] = []
+    var withdrawn: [String] = []
+    let notifier = ProjectNotifier(post: { notes.append($0) }, withdraw: { withdrawn.append($0) })
     var clock = Date(timeIntervalSince1970: 1_000_000)
     notifier.now = { clock }
     let mine = projectSnap([projectItem("a", status: "s1", assignees: ["ada"])])
@@ -262,7 +263,8 @@ func runSelfTest() {
     notifier.handle([("a", .mention)], in: mine, settings: settings)
     notifier.handle([("b", .mention)], in: theirs, settings: settings)
     check(notes.count == 1 && notes[0].id == "project:a", "mention only on my items")
-    check(notes[0].title == "acme › Board" && notes[0].subtitle == "ENG-a Item a", "notification title \(notes[0])")
+    check(notes[0].title == "@ bea mentioned you · ENG-a" && notes[0].subtitle == "Item a", "notification title \(notes[0])")
+    check(notes[0].thread == mine.summary.ref.storeKey && !notes[0].title.contains("acme"), "notification thread \(notes[0])")
     notes = []
     notifier.handle([("b", .status(from: "Todo", to: "Done"))], in: theirs, settings: settings)
     notifier.handle([("a", .status(from: "Todo", to: "Done"))], in: mine, settings: settings)
@@ -274,7 +276,7 @@ func runSelfTest() {
     clock = clock.addingTimeInterval(180)
     notifier.handle([("b", .assigned("Ada"))], in: theirs, settings: settings)
     notifier.handle([("b", .assigned("bea"))], in: theirs, settings: settings)
-    check(notes.count == 1 && notes[0].body == "Assigned Ada", "assigned notifies only me")
+    check(notes.count == 1 && notes[0].title == "→ Assigned to you · ENG-b" && notes[0].body == "Todo · by bea", "assigned notifies only me \(notes)")
     notes = []
     let own = ItemChange.comments(new: 1, last: Comment(id: "c", author: "Ada", createdAt: clock, url: "u"))
     notifier.handle([("a", own)], in: mine, settings: settings)
@@ -283,15 +285,24 @@ func runSelfTest() {
     check(notes.isEmpty, "other fields stay quiet")
     notifier.handle([("a", .mention)], in: projectSnap(mine.items, me: nil), settings: settings)
     check(notes.isEmpty, "no owner, no mine")
-    notes = []
-    notifier.handle([("a", .status(from: "Todo", to: "In progress"))], in: mine, settings: settings)
-    clock = clock.addingTimeInterval(60)
-    notifier.handle([("a", .closed)], in: mine, settings: settings)
-    check(notes.count == 2 && notes[0].id == notes[1].id, "grouped notification keeps one id")
-    check(notes[1].body.contains("Status") && notes[1].body.contains("Closed"), "grouped body \(notes[1].body)")
+    clock = clock.addingTimeInterval(180)
+    notifier.handle([("a", .status(from: "Todo", to: "Done")), ("a", .closed)], in: mine, settings: settings)
+    check(notes.count == 1 && notes[0].title == "✓ Done · ENG-a" && notes[0].body == "Was Todo.", "closed is one line \(notes)")
+    clock = clock.addingTimeInterval(180)
+    notifier.handle([("a", .status(from: "Done", to: "In progress")), ("a", .reopened)], in: mine, settings: settings)
+    clock = clock.addingTimeInterval(30)
+    notifier.handle([("a", .status(from: "In progress", to: "Done")), ("a", .closed)], in: mine, settings: settings)
+    check(notes.count == 3 && Set(notes.map(\.id)).count == 1, "the window keeps one id")
+    check(notes[2].title == "✓ Done again · ENG-a" && notes[2].level == .passive, "the window shows the net change \(notes[2])")
     clock = clock.addingTimeInterval(180)
     notifier.handle([("a", .reopened)], in: mine, settings: settings)
-    check(notes[2].body == "Reopened", "a new window after 2 minutes")
+    check(notes[3].title == "↺ Reopened · ENG-a", "a new window after 2 minutes \(notes[3])")
+    var fields = settings
+    fields.otherFields = NotifyScope(any: true, mine: true)
+    clock = clock.addingTimeInterval(180)
+    notifier.handle([("a", .field(name: "Priority", from: "Low", to: "High"))], in: mine, settings: fields)
+    notifier.handle([("a", .field(name: "Priority", from: "High", to: "Low"))], in: mine, settings: fields)
+    check(notes.count == 5 && withdrawn == ["project:a"], "a change that goes back withdraws \(withdrawn)")
 
     func relayEvent(_ json: String) -> CloudSignal? {
         try! JSONDecoder().decode(CloudEvent.self, from: Data(json.utf8)).signal(at: Date())

@@ -62,10 +62,9 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     var repoCatalog: RepoCatalog { catalog }
     lazy var projectCatalog = ProjectCatalog(trackers: ENV, path: PROJECT_CACHE_PATH)
     lazy var projectNotifier: ProjectNotifier = {
-        ProjectNotifier(post: { [weak self] title, subtitle, body, id in
-            self?.notify(title: title, subtitle: subtitle, body: body, id: id)
-        })
+        ProjectNotifier(post: { [weak self] in self?.notify($0) }, withdraw: { [weak self] in self?.notices.withdraw([$0]) })
     }()
+    lazy var notices = NoticeCenter(center: UNUserNotificationCenter.current())
     lazy var projectStore: ProjectStore = {
         // A client warms from the mirror cache. The files of Full mode stay as they are.
         let client = MODE == .client
@@ -245,7 +244,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     lazy var ciAssist = CIAssist(path: CI_ASSIST_PATH)
     lazy var questions: QuestionHub = {
         let h = QuestionHub(agents: agentIndex, writes: STORE_WRITES)
-        h.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "agent:" + (key ?? "question")) }
+        h.notify = { [weak self] q, key in
+            guard let self else { return }
+            let found = key.flatMap { self.projectStore.item(key: $0) }
+            self.notify(.question(q, key: key, agent: key.flatMap { self.agentIndex.agent($0)?.agent }, item: found?.item, project: found?.snap))
+        }
         return h
     }()
     lazy var itemSummaries = ItemSummaries(path: ITEM_SUMMARIES_PATH)
@@ -401,7 +404,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         machineHub.start()
         if !UIShots.shooting { MainActor.assumeIsolated { presence.start() } }
         WebLink.base = { [weak self] in self?.relay.group?.webBase }
-        RUNBOOKS.notify = { [weak self] key, title, body in self?.notify(title: title, subtitle: "", body: body, id: "runbook:" + key) }
+        RUNBOOKS.notify = { [weak self] r, row in
+            guard let self else { return }
+            self.notify(.runbook(r, row, project: self.projectStore.item(key: row.key)?.snap))
+        }
         NotificationCenter.default.addObserver(forName: RunbookBook.changed, object: RUNBOOKS, queue: .main) { [weak self] _ in self?.updateIcon() }
         RUNBOOKS.start()
         REVIEWS.tracker = actions
@@ -425,11 +431,11 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
         if MODE == .full { rateLimit.start() }
         updater.onReady = { [weak self] v in
-            self?.notify(title: "OverSire", subtitle: "v\(v) is ready to install", body: "Install it from Settings › General.", id: "update-ready-\(v)")
+            self?.notify(.updateReady(v))
         }
         updater.start()
         if let v = updater.takeUpdateNotice() {
-            notify(title: "OverSire", subtitle: "Updated to v\(v)", body: "The new version is running.", id: "updated-\(v)")
+            notify(.updated(v))
         }
 
         // New repos of a whole-owner pick start to track after a catalog refresh.
@@ -1185,8 +1191,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     log.info("Re-run (\(action.rawValue)) requested for \(runs.count) run(s) in \(repo)")
                 } else {
                     log.error("Re-run failed in \(repo): \(errors.joined(separator: "; "))")
-                    self.notify(title: repo, subtitle: "Re-run failed", body: errors.joined(separator: "\n"),
-                                id: "rerun-\(UUID().uuidString)")
+                    self.notify(.rerunFailed(repo: repo, runs[0], errors: errors))
                 }
                 // GitHub queues the new attempt a moment after the request.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -1394,7 +1399,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 if run.status == "in_progress" && old != "in_progress" {
                     log.info("Transition: \(wf) on \(run.headBranch) → in_progress (was \(old ?? "new"))")
                     if NOTIFICATIONS.started {
-                        notify(title: repo, subtitle: "\u{25B6}\u{FE0F} Action Started", body: "\(wf) on \(run.headBranch)", id: "start-\(run.url)")
+                        notify(.ciStarted(repo: repo, run))
                     }
                 }
                 if run.status == "completed" && (old == "in_progress" || old == "queued") {
@@ -1406,9 +1411,12 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                         rerun(repo: repo, runs: [run], failedOnly: true)
                         continue
                     }
-                    if let ending = notificationEnding(run) {
-                        notify(title: repo, subtitle: ending,
-                               body: "\(wf) on \(run.headBranch) \u{2014} \(run.durationText)", id: "end-\(run.url)")
+                    if endingNotified(run) {
+                        // The jobs doc is in only when the keeper read the run before. Else the body has no failed job.
+                        let failure = run.isFailure ? MainActor.assumeIsolated {
+                            ciJobs.doc(repo: repo, run: run.id, attempt: run.attempt ?? 1)?.failures.first
+                        } : nil
+                        notify(.ciEnded(repo: repo, run, failure: failure, linked: link?.key))
                     }
                 }
             }
@@ -1422,17 +1430,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         for run in newRuns { prevStatuses[run.url] = run.status }
     }
 
-    // Returns nil when the user has disabled notifications for this conclusion.
-    func notificationEnding(_ run: Run) -> String? {
+    // False when the user turned off notifications for this conclusion.
+    func endingNotified(_ run: Run) -> Bool {
         switch run.conclusion ?? "" {
-        case "success":
-            return NOTIFICATIONS.succeeded ? "\u{2705} Action Passed" : nil
-        case "failure", "timed_out", "startup_failure":
-            return NOTIFICATIONS.failed ? "\u{274C} Action Failed" : nil
-        case "cancelled":
-            return NOTIFICATIONS.cancelled ? "\u{1F6AB} Action Cancelled" : nil
-        default:
-            return NOTIFICATIONS.other ? "\u{26AA} Action Completed" : nil
+        case "success": return NOTIFICATIONS.succeeded
+        case "failure", "timed_out", "startup_failure": return NOTIFICATIONS.failed
+        case "cancelled": return NOTIFICATIONS.cancelled
+        default: return NOTIFICATIONS.other
         }
     }
 
@@ -1441,7 +1445,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         let problems = ProblemTracker(path: PROBLEMS_PATH)
         problems.opened = { [weak self] p in
             guard NOTIFICATIONS.problems else { return }
-            self?.notify(title: "OverSire problem", subtitle: p.job + (p.host.map { " · \($0)" } ?? "") + (p.area == .net ? p.subject.map { " · \($0)" } ?? "" : ""), body: p.message, id: "problem-" + p.key)
+            self?.notify(.problem(p))
         }
         let store = LogStore(dir: LOGS_DIR, problems: problems)
         store.secrets = [AIClient.keyStore.get(AIClient.keyName)].compactMap { $0 }
@@ -1461,25 +1465,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         }
     }
 
-    func notify(title: String, subtitle: String, body: String, id: String) {
-        let c = UNMutableNotificationContent()
-        c.title = title; c.subtitle = subtitle; c.body = body; c.sound = .default
-        c.threadIdentifier = title
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: c, trigger: nil))
-    }
+    func notify(_ n: Notice) { notices.post(n) }
 
     // "Needs input" and "Agent done" for an item that OverSire tracks.
     func agentAlert(_ key: String, _ agent: AgentSession) {
         let found = projectStore.snapshots.values.lazy.compactMap { s in
-            s.items.first { $0.key.uppercased() == key }.map { (s, $0) }
+            s.items.first { $0.key.uppercased() == key }.map { (snap: s, item: $0) }
         }.first
-        let n = found.map { PROJECTS_CFG.notifications(for: $0.0.summary.identifier) } ?? PROJECTS_CFG.notifications
+        let n = found.map { PROJECTS_CFG.notifications(for: $0.snap.summary.identifier) } ?? PROJECTS_CFG.notifications
         guard let n, agent.phase == .waiting ? n.agentWaiting : n.agentDone else { return }
-        let title = found.map { $0.0.summary.ref.workspace + " › " + $0.0.summary.title } ?? "Orca"
-        let subtitle = found.map { "\($0.1.key) \($0.1.title)" } ?? key
-        var body = agent.phase == .waiting ? "Session needs input" : "Session done"
-        if let m = agent.message?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty { body += ": " + String(m.prefix(200)) }
-        notify(title: title, subtitle: subtitle, body: body, id: "agent:" + (found?.1.id ?? key))
+        notify(.agent(key, agent, item: found?.item, project: found?.snap))
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

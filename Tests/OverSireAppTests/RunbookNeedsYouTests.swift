@@ -89,7 +89,7 @@ final class RunbookNeedsYouTests: XCTestCase {
     func testOneNoticeForEachGateAfterTheDelay() {
         let book = RunbookBook(runtime: { nil }, bus: ChangeBus())
         var told: [String] = []
-        book.notify = { key, title, _ in told.append("\(key)|\(title)") }
+        book.notify = { r, row in told.append("\(r.item.key)|\(row.key)") }
         book.tellAfter = { nil }
         book.set([run(.gate, current: "implement", planned + [step("implement", .waits)])])
         book.tellAfter = { 1800 }
@@ -97,7 +97,7 @@ final class RunbookNeedsYouTests: XCTestCase {
         XCTAssertEqual(told, [], "the delay of the question setting")
         book.tell(now: t0.addingTimeInterval(600 + 1800))
         book.tell(now: t0.addingTimeInterval(600 + 3600))
-        XCTAssertEqual(told, ["OVERSIRE-2|OVERSIRE-2 needs you"])
+        XCTAssertEqual(told, ["OVERSIRE-2|OVERSIRE-2"])
         book.tellAfter = { nil }
         book.set([run(.paused, current: "implement", planned + [step("implement", .ended)], id: "rb_2")])
         book.tell(now: t0.addingTimeInterval(7200))
@@ -163,7 +163,7 @@ final class RunbookNeedsYouTests: XCTestCase {
             PROJECTS_CFG.runtime.runbooks = PROJECTS_CFG.runtime.defaultRunbooks
             PROJECTS_CFG.orca.roots[ref.storeKey] = "/src/oversire"
             let writes = StoreWrites(store: LocalStore(dir: dir))
-            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                         statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
             let q = WorkQueue(writes: writes, store: projects, agents: AgentIndex(writes: writes))
             var runs: [RunbookRun] = []

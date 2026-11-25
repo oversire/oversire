@@ -97,7 +97,7 @@ final class AttachmentBookTests: XCTestCase {
         let summary = ProjectSummary(ref: ref.project, identifier: "FAKE", title: "Fake", url: "", closed: false)
         let file = ItemAttachment(id: "a1", name: "shot.png", size: 3, mimeType: "image/png", createdAt: Date(timeIntervalSince1970: 1_700_000_000))
         let rows = try MirrorCodec.body(MirrorRows(rows: [file]))
-        let store = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let store = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(),
                                  statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         store.client = true
         store.catalog = ClientCatalog(projects: [CatalogProject(summary: summary, capabilities: [.attachmentsRead])], capabilities: [:], trackers: [])

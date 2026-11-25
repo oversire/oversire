@@ -37,7 +37,7 @@ final class StartKeyTests: XCTestCase {
         try? FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
         try? FileManager.default.copyItem(at: dir.appendingPathComponent("state.json"), to: sub.appendingPathComponent("state.json"))
         let writes = StoreWrites(store: LocalStore(dir: sub))
-        let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                     statePath: sub.path + "/state.json", activityPath: sub.path + "/activity.jsonl")
         let agents = AgentIndex(writes: writes)
         agents.runtime = { host }

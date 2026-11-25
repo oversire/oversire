@@ -23,7 +23,7 @@ final class QuestionHub {
     private(set) var board: QuestionBoard?
     /// Posts one notification for a question that waits this long. nil: never.
     var tellAfter: () -> TimeInterval? = { AGENTS.questionNotice.delay }
-    var notify: (_ key: String?, _ title: String, _ body: String) -> Void = { _, _, _ in }
+    var notify: (_ q: SessionQuestion, _ key: String?) -> Void = { _, _ in }
     var runs: RunbookBook = RUNBOOKS
     /// The answers of the runner sessions: the daemon of the session, else the hub.
     var sender: any RunnerAnswerSending = RUNNER_DESK
@@ -250,8 +250,7 @@ final class QuestionHub {
         let now = Date()
         for e in open where !notified.contains(e.id) && now.timeIntervalSince(e.question.askedAt) >= after {
             notified.insert(e.id)
-            let key = key(e.question)
-            notify(key, "\(key ?? "A session") asks a question", e.question.items.first?.text ?? "")
+            notify(e.question, key(e.question))
         }
     }
 }

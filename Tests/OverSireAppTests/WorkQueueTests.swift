@@ -111,7 +111,7 @@ final class WorkQueueTests: XCTestCase {
 
         await MainActor.run {
             let writes = StoreWrites(store: store)
-            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                         statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
             let q = WorkQueue(writes: writes, store: projects, agents: AgentIndex(writes: writes))
             XCTAssertEqual(q.state(lane.project)?.error, "No workspace")
@@ -136,7 +136,7 @@ final class WorkQueueTests: XCTestCase {
 
         await MainActor.run {
             let writes = StoreWrites(store: LocalStore(dir: dir))
-            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+            let projects = ProjectStore(trackers: ENV, notifier: ProjectNotifier(),
                                         statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
             let q = WorkQueue(writes: writes, store: projects, agents: AgentIndex(writes: writes))
             XCTAssertFalse(q.add(key: "OVERSIRE-9"), "no tracked item")

@@ -19,7 +19,7 @@ final class ProjectStoreRemoteTests: XCTestCase {
     private func clientStore() throws -> ProjectStore {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("remote-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let s = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        let s = ProjectStore(trackers: NoTrackers(), notifier: ProjectNotifier(),
                              statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
         s.client = true
         return s

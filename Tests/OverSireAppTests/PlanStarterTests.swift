@@ -182,7 +182,7 @@ final class PlanStarterTests: XCTestCase {
         let summary = try await fake.projects()[0]
         let d = await MainActor.run { () -> TestAppData in
             let d = TestAppData()
-            d.projectStore = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(post: { _, _, _, _ in }),
+            d.projectStore = ProjectStore(trackers: Trackers(fake), notifier: ProjectNotifier(),
                                           statePath: d.tmp + "/s.json", activityPath: d.tmp + "/a.jsonl")
             d.projectStore.seed(ProjectSnapshot(summary: summary, statusOptions: [], items: [], fetchedAt: Date(), intake: [i]))
             return d
