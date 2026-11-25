@@ -65,6 +65,16 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         ProjectNotifier(post: { [weak self] in self?.notify($0) }, withdraw: { [weak self] in self?.notices.withdraw([$0]) })
     }()
     lazy var notices = NoticeCenter(center: UNUserNotificationCenter.current())
+    lazy var responder: NoticeResponder = MainActor.assumeIsolated {
+        NoticeResponder(actions: actions, open: { [weak self] in self?.open($0) },
+                        canStart: { [weak self] key in
+                            guard let f = self?.projectStore.item(key: key) else { return false }
+                            return f.snap.unplanned(f.item) == nil && !(PROJECTS_CFG.orca.roots[f.snap.summary.ref.storeKey] ?? "").isEmpty
+                        },
+                        groom: { [weak self] pk in self?.openGroom(pk) },
+                        install: { [weak self] in self?.updater.install() },
+                        post: { [weak self] in self?.notify($0) })
+    }
     lazy var projectStore: ProjectStore = {
         // A client warms from the mirror cache. The files of Full mode stay as they are.
         let client = MODE == .client
@@ -340,7 +350,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
         let nc = UNUserNotificationCenter.current()
         nc.delegate = self
-        UserJoinNotifier.register(on: nc)
+        notices.register()
         nc.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if granted { log.info("Notification permission granted") }
             else { log.warning("Notification permission denied: \(error?.localizedDescription ?? "user declined")") }
@@ -1480,15 +1490,15 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler handler: @escaping () -> Void) {
+        let content = response.notification.request.content
         let id = response.notification.request.identifier
+        let action = NoticeAction(id: response.actionIdentifier)
+        let text = (response as? UNTextInputNotificationResponse)?.userText
+        let dismissed = response.actionIdentifier == UNNotificationDismissActionIdentifier
         DispatchQueue.main.async {
-            self.notificationClickAt = Date()
-            self.closeTime = .distantPast
-            if id.hasPrefix("intake:") {
-                if self.popover.isShown { self.popover.close() }
-                let parts = id.dropFirst("intake:".count).split(separator: "|").map(String.init)
-                if let key = parts.first { self.open(self.projectStore.intakeRoute(key, id: parts.count > 1 ? parts[1] : nil)) }
-                return
+            if action?.foreground ?? !dismissed {
+                self.notificationClickAt = Date()
+                self.closeTime = .distantPast
             }
             if id.hasPrefix(ApproveCenter.prefix) {
                 let request = String(id.dropFirst(ApproveCenter.prefix.count))
@@ -1497,8 +1507,24 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                     let yes = response.actionIdentifier == UserJoinNotifier.approve
                     let approvals = self.machineHub.approvals
                     Task { @MainActor in await approvals.decide(request, approve: yes, in: nil) }
+                case UNNotificationDismissActionIdentifier: break
                 default: self.showJoinRequest(request)
                 }
+                return
+            }
+            if let action, action != .open {
+                log.info("notification action \(action.id.prefix(while: { $0 != ":" }), privacy: .public) on \(id.prefix(while: { $0 != ":" && $0 != "-" }), privacy: .public)")
+                let pressed = NoticeResponder.Pressed(id: id, category: content.categoryIdentifier, target: NoticeTarget(userInfo: content.userInfo),
+                                                      thread: content.threadIdentifier)
+                let responder = self.responder
+                Task { @MainActor in await responder.handle(action, on: pressed, text: text) }
+                return
+            }
+            if dismissed { return }
+            if id.hasPrefix("intake:") {
+                if self.popover.isShown { self.popover.close() }
+                let parts = id.dropFirst("intake:".count).split(separator: "|").map(String.init)
+                if let key = parts.first { self.open(self.projectStore.intakeRoute(key, id: parts.count > 1 ? parts[1] : nil)) }
                 return
             }
             if let route = self.notificationRoute(id) {
@@ -1519,17 +1545,18 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
 
     /// The page that a notification id names. Nil when the target is not loaded.
     func notificationRoute(_ id: String) -> Route? {
-        func after(_ prefix: String) -> String? { id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : nil }
-        func key(_ s: String) -> String? { (projectStore.item(s) ?? projectStore.item(key: s.uppercased()))?.item.key }
-        if let s = after("project:") { return key(s).map { .item($0, .overview) } }
-        if let s = after("agent:") { return key(s).map { .item($0, .session) } }
-        if let s = after("runbook:") { return key(s).map { .item($0, .runbook) } }
-        if let url = after("start-") ?? after("end-") {
-            for (repo, runs) in grouped { if let r = runs.first(where: { $0.url == url }) { return .run(repo: repo, id: r.id) } }
-            return .runs(.all)
+        NoticeRoute.route(id, item: { [projectStore] s in (projectStore.item(s) ?? projectStore.item(key: s.uppercased()))?.item.key }) { [grouped] url in
+            for (repo, runs) in grouped { if let r = runs.first(where: { $0.url == url }) { return (repo, r.id) } }
+            return nil
         }
-        if id.hasPrefix("problem-") { return .settings(.logs) }
-        return nil
+    }
+
+    /// Opens the Intake page of the project and its Groom sheet. A Groom that runs now shows on the page.
+    func openGroom(_ pk: String) {
+        open(projectStore.intakeRoute(pk))
+        guard groomAgent.state(pk).map({ $0.isApplied }) ?? true else { return }
+        // The sheet needs the page in the window, so it waits for the next turn of the run loop.
+        DispatchQueue.main.async { [weak self] in (self?.appWindow.page as? IntakeListPage)?.groomSheet(pk) }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,

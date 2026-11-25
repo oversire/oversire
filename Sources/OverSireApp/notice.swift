@@ -33,10 +33,35 @@ struct NoticeTarget: Equatable {
     var run: String?
     var version: String?
     var request: String?
+
+    /// The `userInfo` of the notification: only the set fields.
+    var userInfo: [String: String] {
+        let all: [(String, String?)] = [("key", key), ("itemId", itemId), ("project", project), ("question", question), ("repo", repo),
+                                        ("run", run), ("version", version), ("request", request)]
+        return Dictionary(uniqueKeysWithValues: all.compactMap { k, v in v.map { (k, $0) } })
+    }
+
+    init(key: String? = nil, itemId: String? = nil, project: String? = nil, question: String? = nil, repo: String? = nil,
+         run: String? = nil, version: String? = nil, request: String? = nil) {
+        self.key = key
+        self.itemId = itemId
+        self.project = project
+        self.question = question
+        self.repo = repo
+        self.run = run
+        self.version = version
+        self.request = request
+    }
+
+    init(userInfo: [AnyHashable: Any]) {
+        func s(_ k: String) -> String? { userInfo[k] as? String }
+        self.init(key: s("key"), itemId: s("itemId"), project: s("project"), question: s("question"), repo: s("repo"), run: s("run"),
+                  version: s("version"), request: s("request"))
+    }
 }
 
 /// The action set of a notice.
-enum NoticeCategory: Equatable {
+enum NoticeCategory: Hashable {
     case item, comment, assigned, open, intake, agentWaiting, agentDone, runbook, ciFailed, problem, update, join
     /// `options` is empty when the question does not fit the buttons.
     case question(options: [String], approve: Bool, reply: Bool)
@@ -55,8 +80,143 @@ enum NoticeCategory: Equatable {
         case .problem: return "problem"
         case .update: return "update"
         case .join: return UserJoinNotifier.category
-        case .question: return "question"
+        case .question(let options, let approve, let reply):
+            // One category for each button set: "question.<labels>.<a and r>".
+            return "question.\(options.joined(separator: "|")).\(approve ? "a" : "")\(reply ? "r" : "")"
         }
+    }
+
+    var actions: [NoticeAction] {
+        switch self {
+        case .item: return [.open, .markRead]
+        case .comment: return [.open, .reply]
+        case .assigned: return [.open, .startWork]
+        case .open: return [.open]
+        case .intake: return [.open, .groom]
+        case .agentWaiting: return [.openSession, .reply]
+        case .agentDone: return [.reviewChanges, .open]
+        case .runbook: return [.openRun]
+        case .ciFailed: return [.openLogs, .rerunFailed]
+        case .problem: return [.openLogs]
+        case .update: return [.install, .later]
+        case .join: return [.approve, .deny]
+        case .question(let options, let approve, let reply):
+            let picks: [NoticeAction] = approve ? [.approve, .deny] : options.prefix(3).map { .answer($0) }
+            return (picks.isEmpty ? [.openSession] : picks) + (reply ? [.reply] : [])
+        }
+    }
+
+    /// The hint text of the Reply field.
+    var replyPlaceholder: String {
+        switch self {
+        case .agentWaiting: return "Write to the session"
+        case .question: return "Write an answer"
+        default: return "Write a comment"
+        }
+    }
+
+    /// The categories that do not change. The question categories come with each question.
+    static let fixed: [NoticeCategory] = [.item, .comment, .assigned, .open, .intake, .agentWaiting, .agentDone, .runbook, .ciFailed, .problem,
+                                          .update, .join]
+}
+
+/// A button of a notice.
+enum NoticeAction: Hashable {
+    case open, markRead, reply, startWork, groom, openSession, reviewChanges, openLogs, rerunFailed, openRun, install, later, approve, deny
+    /// Answers a question with the option label.
+    case answer(String)
+
+    var id: String {
+        switch self {
+        case .open: return "open"
+        case .markRead: return "read"
+        case .reply: return "reply"
+        case .startWork: return "work"
+        case .groom: return "groom"
+        case .openSession: return "session"
+        case .reviewChanges: return "changes"
+        case .openLogs: return "logs"
+        case .rerunFailed: return "rerun"
+        case .openRun: return "run"
+        case .install: return "install"
+        case .later: return "later"
+        case .approve: return "approve"
+        case .deny: return "deny"
+        case .answer(let label): return Self.answerPrefix + label
+        }
+    }
+
+    private static let answerPrefix = "answer:"
+    private static let plain: [NoticeAction] = [.open, .markRead, .reply, .startWork, .groom, .openSession, .reviewChanges, .openLogs, .rerunFailed,
+                                                .openRun, .install, .later, .approve, .deny]
+
+    /// Nil for the default and dismiss ids of macOS.
+    init?(id: String) {
+        if id.hasPrefix(Self.answerPrefix) { self = .answer(String(id.dropFirst(Self.answerPrefix.count))); return }
+        guard let a = Self.plain.first(where: { $0.id == id }) else { return nil }
+        self = a
+    }
+
+    var title: String {
+        switch self {
+        case .open: return "Open"
+        case .markRead: return "Mark read"
+        case .reply: return "Reply"
+        case .startWork: return "Start work"
+        case .groom: return "Groom"
+        case .openSession: return "Open session"
+        case .reviewChanges: return "Review changes"
+        case .openLogs: return "Open logs"
+        case .rerunFailed: return "Re-run failed"
+        case .openRun: return "Open run"
+        case .install: return "Install now"
+        case .later: return "Later"
+        case .approve: return "Approve"
+        case .deny: return "Deny"
+        case .answer(let label): return label
+        }
+    }
+
+    /// The action shows a page, so the app comes to the front.
+    var foreground: Bool {
+        switch self {
+        case .open, .startWork, .groom, .openSession, .reviewChanges, .openLogs, .openRun: return true
+        default: return false
+        }
+    }
+
+    var destructive: Bool { self == .deny }
+
+    /// The first words of the failure notice, for example "Reply not sent".
+    var failure: String {
+        switch self {
+        case .reply: return "Reply not sent"
+        case .answer, .approve, .deny: return "Answer not sent"
+        case .markRead: return "Not marked read"
+        case .rerunFailed: return "Re-run not started"
+        case .startWork: return "Session not started"
+        default: return "\(title) did not work"
+        }
+    }
+}
+
+/// The page of a notice id.
+enum NoticeRoute {
+    static let failedPrefix = "failed:"
+
+    /// `item` gives the key of an item id or key, nil when it is not loaded. `run` gives the run of a URL.
+    /// Nil: no page. An `agent:question` notice then opens the panel.
+    static func route(_ id: String, item: (String) -> String?, run: (String) -> (repo: String, id: String)?) -> Route? {
+        func after(_ prefix: String) -> String? { id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : nil }
+        if let s = after(failedPrefix) { return route(s, item: item, run: run) }
+        if let s = after("project:") { return item(s).map { .item($0, .overview) } }
+        if let s = after("agent:") { return item(s).map { .item($0, .session) } }
+        if let s = after("runbook:") { return item(s).map { .item($0, .runbook) } }
+        if let url = after("start-") ?? after("end-") ?? after("rerun-") {
+            return run(url).map { .run(repo: $0.repo, id: $0.id) } ?? .runs(.all)
+        }
+        if id.hasPrefix("problem-") { return .settings(.logs) }
+        return nil
     }
 }
 
@@ -190,10 +350,12 @@ extension Notice {
 
     static func question(_ q: SessionQuestion, key: String?, agent: AgentName?, item: Item?, project: ProjectSnapshot?) -> Notice {
         let first = q.items.first
-        let fits = q.items.count == 1 && first?.kind == .single && (first?.options.count ?? 0) <= 3
-        let reply = first.map { $0.kind == .free || $0.allowsOther } ?? false
+        // A question that does not fit the buttons, or that the session takes no answer for, shows only Open session.
+        let one = q.items.count == 1 && q.answerable
+        let fits = one && first?.kind == .single && (first?.options.count ?? 0) <= 3
+        let reply = one && (first.map { $0.kind == .free || $0.allowsOther } ?? false)
         let category = NoticeCategory.question(options: fits ? first?.options.map(\.label) ?? [] : [],
-                                               approve: q.items.count == 1 && first?.kind == .approve, reply: reply)
+                                               approve: one && first?.kind == .approve, reply: reply)
         let store = project?.summary.ref.storeKey
         return Notice(id: "agent:" + (key ?? "question"), title: "? Question · \(key ?? "Session")", subtitle: subtitle(agent, item),
                       body: excerpt(first?.text, limit: 200) ?? "", thread: store ?? appThread, level: .timeSensitive, category: category,
@@ -274,8 +436,7 @@ extension Notice {
     }
 
     static func updateReady(_ v: String) -> Notice {
-        // OVERSIRE-603 adds "Install now". Until then the body tells where to install.
-        Notice(id: "update-ready-\(v)", title: "⬆ Update ready · OverSire \(v)", body: "Install it from Settings › General.",
+        Notice(id: "update-ready-\(v)", title: "⬆ Update ready · OverSire \(v)", body: "Install now restarts OverSire. Or install it later from Settings › General.",
                thread: appThread, category: .update, target: NoticeTarget(version: v))
     }
 
@@ -288,6 +449,11 @@ extension Notice {
         Notice(id: ApproveCenter.prefix + r.request, title: "⊕ Join request · \(r.machine)", subtitle: group,
                body: "Code \(r.confirm). Check that the same code shows on \(r.machine).", thread: appThread, level: .timeSensitive,
                category: .join, target: NoticeTarget(request: r.request))
+    }
+
+    /// "✕ Reply not sent · KEY", in the thread of the notice `id`. A click opens the page of `id`.
+    static func failed(_ action: NoticeAction, id: String, subject: String, reason: String, thread: String, target: NoticeTarget) -> Notice {
+        Notice(id: NoticeRoute.failedPrefix + id, title: "✕ \(action.failure) · \(subject)", body: reason, thread: thread, target: target)
     }
 }
 

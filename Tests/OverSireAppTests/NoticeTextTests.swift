@@ -240,7 +240,7 @@ final class NoticeTextTests: XCTestCase {
 
     func testUpdateReady() {
         let n = Notice.updateReady("1.4.2")
-        assert(n, "⬆ Update ready · OverSire 1.4.2", "", "Install it from Settings › General.", .active)
+        assert(n, "⬆ Update ready · OverSire 1.4.2", "", "Install now restarts OverSire. Or install it later from Settings › General.", .active)
         XCTAssertEqual(n.id, "update-ready-1.4.2")
         XCTAssertEqual(Notice.updated("1.4.2").title, "✓ Updated · OverSire 1.4.2")
         XCTAssertEqual(Notice.updated("1.4.2").level, .passive)
@@ -296,11 +296,16 @@ final class NoticeTextTests: XCTestCase {
 }
 
 final class NoticeCenterTests: XCTestCase {
-    private final class FakeCenter: NoticePosting {
+    final class FakeCenter: NoticePosting {
         var delivered: [UNNotificationRequest] = []
         var removed: [[String]] = []
-        func deliver(_ request: UNNotificationRequest) { delivered.append(request) }
+        var set: [Set<UNNotificationCategory>] = []
+        /// The calls in order: "set", "get", "add <id>".
+        var calls: [String] = []
+        func deliver(_ request: UNNotificationRequest) { delivered.append(request); calls.append("add \(request.identifier)") }
         func removeDelivered(_ ids: [String]) { removed.append(ids) }
+        func setCategories(_ categories: Set<UNNotificationCategory>) { set.append(categories); calls.append("set") }
+        func categories(_ done: @escaping (Set<UNNotificationCategory>) -> Void) { calls.append("get"); done(set.last ?? []) }
     }
 
     func testPostAndWithdraw() {
@@ -311,5 +316,54 @@ final class NoticeCenterTests: XCTestCase {
         XCTAssertEqual(fake.delivered.map(\.identifier), ["project:1"])
         XCTAssertEqual(fake.delivered.first?.content.threadIdentifier, "a/p")
         XCTAssertEqual(fake.removed, [["project:1"]])
+    }
+
+    func testRegisterKeepsJoinCategory() {
+        let fake = FakeCenter()
+        NoticeCenter(center: fake).register()
+        let ids = Set(fake.set.last?.map(\.identifier) ?? [])
+        XCTAssertTrue(ids.contains(UserJoinNotifier.category))
+        XCTAssertEqual(ids, Set(NoticeCategory.fixed.map(\.id)))
+        let join = fake.set.last?.first { $0.identifier == UserJoinNotifier.category }
+        XCTAssertEqual(join?.actions.map(\.identifier), [UserJoinNotifier.approve, UserJoinNotifier.deny])
+    }
+
+    func testQuestionCategoryBeforeAdd() {
+        let fake = FakeCenter()
+        let c = NoticeCenter(center: fake)
+        c.register()
+        let q = NoticeCategory.question(options: ["Yes", "No"], approve: false, reply: true)
+        c.post(Notice(id: "agent:K-1", title: "? Question · K-1", thread: "a/p", category: q))
+        XCTAssertEqual(fake.calls, ["set", "set", "get", "add agent:K-1"])
+        XCTAssertTrue(fake.set.last?.contains { $0.identifier == q.id } == true)
+        XCTAssertTrue(fake.set.last?.contains { $0.identifier == UserJoinNotifier.category } == true, "the fixed categories stay")
+        // The same buttons again: no new set.
+        c.post(Notice(id: "agent:K-2", title: "? Question · K-2", thread: "a/p", category: q))
+        XCTAssertEqual(fake.calls.suffix(1), ["add agent:K-2"])
+    }
+
+    func testQuestionCategoriesKeepTheLast20() {
+        let fake = FakeCenter()
+        let c = NoticeCenter(center: fake)
+        for n in 0..<25 { c.post(Notice(id: "q\(n)", title: "?", thread: "t", category: .question(options: ["o\(n)"], approve: false, reply: false))) }
+        XCTAssertEqual(c.questions.count, NoticeCenter.maxQuestions)
+        XCTAssertEqual(c.questions.first, .question(options: ["o5"], approve: false, reply: false))
+        XCTAssertEqual(fake.set.last?.count, NoticeCategory.fixed.count + NoticeCenter.maxQuestions)
+    }
+
+    func testReplyIsTextInput() {
+        let c = NoticeCenter.category(.comment)
+        let reply = c.actions.last as? UNTextInputNotificationAction
+        XCTAssertEqual(reply?.identifier, "reply")
+        XCTAssertEqual(reply?.textInputButtonTitle, "Send")
+        XCTAssertEqual(reply?.textInputPlaceholder, "Write a comment")
+        XCTAssertEqual((NoticeCenter.category(.agentWaiting).actions.last as? UNTextInputNotificationAction)?.textInputPlaceholder, "Write to the session")
+        let q = NoticeCenter.category(.question(options: [], approve: false, reply: true))
+        XCTAssertEqual((q.actions.last as? UNTextInputNotificationAction)?.textInputPlaceholder, "Write an answer")
+    }
+
+    func testContentCarriesTarget() {
+        let n = Notice(id: "x", title: "T", thread: "t", target: NoticeTarget(key: "K-1", repo: "o/r"))
+        XCTAssertEqual(NoticeTarget(userInfo: NoticeCenter.content(n).userInfo), n.target)
     }
 }

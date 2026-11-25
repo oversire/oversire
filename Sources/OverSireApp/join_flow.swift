@@ -219,14 +219,8 @@ protocol JoinNotifying {
 /// The user notification of a join request, with the actions Approve and Deny.
 struct UserJoinNotifier: JoinNotifying {
     static let category = "join-request"
-    static let approve = "approve"
-    static let deny = "deny"
-
-    static func register(on c: UNUserNotificationCenter = .current()) {
-        let actions = [UNNotificationAction(identifier: approve, title: "Approve", options: []),
-                       UNNotificationAction(identifier: deny, title: "Deny", options: [.destructive])]
-        c.setNotificationCategories([UNNotificationCategory(identifier: category, actions: actions, intentIdentifiers: [], options: [])])
-    }
+    static let approve = NoticeAction.approve.id
+    static let deny = NoticeAction.deny.id
 
     func post(_ r: JoinRequestFrame, group: String) {
         NoticeCenter(center: UNUserNotificationCenter.current()).post(.join(r, group: group))
