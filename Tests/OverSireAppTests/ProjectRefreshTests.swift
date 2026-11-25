@@ -24,6 +24,9 @@ final class ProjectRefreshTests: XCTestCase {
         private var seenLanes: [(project: String, lane: CallPriority)] = []
         var limited = false
         var failCreate = false
+        private var failing = 0
+        /// Each of the next `failReads` calls of items() throws at once.
+        var failReads: Int { get { lock.withLock { failing } } set { lock.withLock { failing = newValue } } }
         private var itemList: [Item] = []
         var list: [Item] { get { lock.withLock { itemList } } set { lock.withLock { itemList = newValue } } }
         var limits: [Int] { lock.withLock { seenLimits } }
@@ -49,6 +52,12 @@ final class ProjectRefreshTests: XCTestCase {
             return []
         }
         func items(_ p: ProjectRef, since: Date?, limit: Int) async throws -> [Item] {
+            let fails = lock.withLock { () -> Bool in
+                guard failing > 0 else { return false }
+                failing -= 1; count += 1
+                return true
+            }
+            if fails { throw ProviderError.transport("The request timed out.") }
             await withCheckedContinuation { c in lock.withLock {
                 count += 1; seenLimits.append(limit); seenLanes.append((p.id, CallPriority.current)); waiting.append((p.id, c))
             } }
@@ -61,7 +70,8 @@ final class ProjectRefreshTests: XCTestCase {
             let n = lock.withLock { created += 1; return created }
             return ItemRef(project: p, id: "i\(n)", key: "SLOW-\(n)", url: URL(string: "https://x/SLOW-\(n)")!)
         }
-        private var created = 0
+        /// The number of the last item that create() made.
+        var created = 0
         func update(_ i: ItemRef, _ patch: ItemPatch) async throws {}
         func comment(_ i: ItemRef, markdown: String) async throws {}
     }
@@ -328,6 +338,122 @@ final class ProjectRefreshTests: XCTestCase {
         XCTAssertNotNil(store.lastError)
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(t.calls, 0)
+    }
+
+
+    // MARK: Retry after a write (OVERSIRE-605)
+
+    private func waitForRetry(_ store: ProjectStore) { store.writeRetryWaits = [0.05, 0.05, 0.05] }
+
+    private func create(_ store: ProjectStore, _ key: String) {
+        store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:]), by: EventActor(type: .agent, name: "a")) { _ in }
+    }
+
+    private func tryLines(_ l: IOLogTests.Lines) -> [LogEntry] { l.all.filter { $0.message.contains("The read after a write failed") } }
+
+    func testFailedRefreshAfterCreateRetries() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        let (lines, restore) = capture()
+        defer { restore() }
+        t.failReads = 1
+        t.created = 1
+        await MainActor.run { waitForRetry(store); create(store, key) }
+        await until("the retry read runs", timeout: .seconds(2)) { t.blocked == 1 }
+        t.list = [slowItem("i1"), slowItem("i2")]
+        t.release()
+        await until("the item is in the snapshot", timeout: .seconds(2)) {
+            store.errors[key] == nil && store.snapshots[key]?.items.contains { $0.id == "i2" } == true
+        }
+        XCTAssertEqual(tryLines(lines).count, 1)
+        XCTAssertEqual(tryLines(lines).first?.level, .warn)
+        XCTAssertTrue(tryLines(lines).first?.message.contains("Try 1 of 3") == true)
+    }
+
+    func testRetryStopsAfterTheLastTry() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        t.failReads = 99
+        await MainActor.run { waitForRetry(store); create(store, key) }
+        await until("the first read and 3 retries run", timeout: .seconds(2)) { t.calls == 1 + 1 + 3 }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(t.calls, 5, "no fifth try")
+        XCTAssertNotNil(store.errors[key])
+    }
+
+    func testRetryStopsWhenAReadEndsWell() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        t.failReads = 1
+        await MainActor.run { store.writeRetryWaits = [0.4, 0.4, 0.4]; create(store, key) }
+        await until("the first read fails", timeout: .seconds(2)) { store.errors[key] != nil }
+        await MainActor.run { store.refresh([key], force: false) { _ in } }
+        await until("the poll reads", timeout: .seconds(2)) { t.blocked == 1 }
+        t.release()
+        await until("the poll ends well", timeout: .seconds(2)) { store.errors[key] == nil && store.refreshing.isEmpty }
+        try await Task.sleep(nanoseconds: 700_000_000)
+        XCTAssertEqual(t.calls, 3, "the load, the failed read and the poll")
+    }
+
+    func testRateLimitedWriteRefreshDoesNotRetry() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        let (lines, restore) = capture()
+        defer { restore() }
+        t.limited = true
+        await MainActor.run { waitForRetry(store); create(store, key) }
+        await until("the pause starts", timeout: .seconds(2)) { store.cooldown["ws"] != nil && store.refreshing.isEmpty }
+        let calls = t.calls
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(t.calls, calls, "no call in the pause")
+        XCTAssertTrue(tryLines(lines).isEmpty)
+    }
+
+    func testStatusWriteSharesTheRetry() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        t.failReads = 1
+        await MainActor.run { waitForRetry(store) }
+        let ok = await setStatus(store, "i1", "b")
+        XCTAssertTrue(ok)
+        await until("the retry read runs", timeout: .seconds(2)) { t.blocked == 1 }
+        t.list = [slowItem("i1", status: "b")]
+        t.release()
+        await until("the patch ends", timeout: .seconds(2)) { store.writeActors.isEmpty && store.errors[key] == nil }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(t.calls, 3, "the load, the failed read and one retry")
+    }
+
+    func testTwoWritesShareOneRetryPlan() async throws {
+        let t = SlowTracker()
+        let (store, _) = try await loaded(t)
+        t.failReads = 99
+        await MainActor.run { store.writeRetryWaits = [0.2, 0.2, 0.2] }
+        let first = await setStatus(store, "i1", "b")
+        XCTAssertTrue(first)
+        await until("the first read fails", timeout: .seconds(2)) { t.calls == 2 }
+        let second = await setStatus(store, "i1", "c")
+        XCTAssertTrue(second)
+        let before = t.calls
+        try await Task.sleep(nanoseconds: 1_200_000_000)
+        XCTAssertLessThanOrEqual(t.calls - before, 1 + 3, "the old plan stops")
+        XCTAssertGreaterThanOrEqual(t.calls - before, 1 + 3)
+    }
+
+    func testTriageAnswersWithTheFirstRefresh() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        t.failReads = 1
+        await MainActor.run { waitForRetry(store) }
+        let intake = IntakeItem(id: "n1", workItemId: "w1", name: "N", priority: nil, createdAt: Date(), author: nil, source: nil)
+        var answer: (ok: Bool, calls: Int)?
+        await MainActor.run {
+            store.triage(projectKey: key, item: intake, action: .delete) { answer = ($0, t.calls) }
+        }
+        await until("triage answers", timeout: .seconds(2)) { answer != nil }
+        XCTAssertEqual(answer?.ok, false)
+        XCTAssertEqual(answer?.calls, 2, "the answer comes after the first read, before the retry read")
+        await until("the retry read runs", timeout: .seconds(2)) { t.calls == 3 }
     }
 
     // MARK: Page view, wake and watchdog (OVERSIRE-463)

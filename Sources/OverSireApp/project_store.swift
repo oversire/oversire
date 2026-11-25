@@ -94,6 +94,11 @@ final class ProjectStore {
     private var reads: [String: Read] = [:]
     private var lastRefresh = 0
     private(set) var lastError: String?
+    /// The waits before the retries of a failed read after a write.
+    var writeRetryWaits: [TimeInterval] = [5, 15, 45]
+    /// Key → the retry plan of the last write, and the number of retries it started.
+    private var writeRetry: [String: (plan: Int, next: Int, lane: CallPriority)] = [:]
+    private var writeRetryPlans = 0
     /// Item id → a stub of an item that `create` made and no snapshot holds yet.
     private var madeItems: [String: (project: String, item: Item, at: Date)] = [:]
     private let madeKeep: TimeInterval = 120
@@ -365,6 +370,38 @@ final class ProjectStore {
                 self.lastError = error
                 done(error == nil)
             }
+        }
+    }
+
+    /// Forced refresh after a write. A failed read runs again after each wait of `writeRetryWaits`.
+    /// A new write of the key starts a new plan. `done` gets the result of the first read only.
+    func refreshAfterWrite(_ key: String, priority: CallPriority = .user, done: @escaping (Bool) -> Void = { _ in }) {
+        writeRetryPlans += 1
+        let plan = writeRetryPlans
+        writeRetry[key] = (plan, 0, priority)
+        refresh([key], force: true, priority: priority) { [weak self] ok in
+            done(ok)
+            self?.retryWriteRefresh(key, plan: plan)
+        }
+    }
+
+    private func retryWriteRefresh(_ key: String, plan: Int) {
+        guard let state = writeRetry[key], state.plan == plan else { return }
+        let ws = workspace(of: key)
+        let paused = ws.flatMap { cooldown[$0] }.map { $0 > now() } ?? false
+        guard errors[key] != nil, !paused, let ws, !client, trackers.tracker(ws) != nil, state.next < writeRetryWaits.count else {
+            writeRetry[key] = nil
+            return
+        }
+        let wait = writeRetryWaits[state.next]
+        writeRetry[key] = (plan, state.next + 1, state.lane)
+        let p = tracked.first { $0.ref.storeKey == key }
+        let name = p.map { ENV.trackerName($0.ref.account) } ?? "the tracker"
+        APP_LOG.write(LogEntry(level: .warn, area: .sync, job: "\(name) poll", subject: p?.identifier ?? key, host: ws,
+                               message: "The read after a write failed. Try \(state.next + 1) of \(writeRetryWaits.count) in \(Int(wait)) s."))
+        DispatchQueue.main.asyncAfter(wallDeadline: .now() + wait) { [weak self] in
+            guard let self, self.writeRetry[key]?.plan == plan, self.errors[key] != nil else { return }
+            self.refresh([key], force: true, priority: state.lane) { [weak self] _ in self?.retryWriteRefresh(key, plan: plan) }
         }
     }
 
@@ -1106,7 +1143,7 @@ final class ProjectStore {
                     self.lastError = e.message
                 }
                 done(result)
-                self.refresh([key], force: true, priority: .user) { _ in }
+                self.refreshAfterWrite(key)
             }
         }
     }
@@ -1171,7 +1208,7 @@ final class ProjectStore {
                 if failed > 0 { self.lastError = "Could not close \(failed) of \(refs.count) sub-items" }
                 self.record(LocalWrite(project: found.key, at: self.now(), marks: [], items: Dictionary(uniqueKeysWithValues: closed.map { ($0, [.status(state.id)]) }), epics: []))
                 done(failed == 0)
-                self.refresh([found.key], force: true, priority: .user) { _ in }
+                self.refreshAfterWrite(found.key)
             }
         }
     }
@@ -1204,7 +1241,7 @@ final class ProjectStore {
                 else { self.events.stateSet(found.item, in: snap, to: optionId, actor: actor) }
                 self.record(LocalWrite(project: found.key, at: self.now(), marks: [], items: Dictionary(uniqueKeysWithValues: changed.map { ($0, [.status(optionId)]) }), epics: []))
                 done(failed == 0)
-                self.refresh([found.key], force: true, priority: .user) { _ in }
+                self.refreshAfterWrite(found.key)
             }
         }
     }
@@ -1275,7 +1312,7 @@ final class ProjectStore {
                     if marked { self.record(LocalWrite(project: new.projectKey, at: self.now(), marks: [id], items: [:], epics: []), by: actor) }
                     self.madeItems[id] = (new.projectKey, self.stub(of: new, made.ref), self.now())
                     done(.success(made))
-                    self.refresh([new.projectKey], force: true, priority: .user) { _ in }
+                    self.refreshAfterWrite(new.projectKey)
                 }
             }
         }
@@ -1330,7 +1367,7 @@ final class ProjectStore {
                     self.record(LocalWrite(project: found.key, at: self.now(), marks: marked ? [itemId] : [], items: items, epics: []), by: actor)
                 }
                 done(result.isOk)
-                self.refresh([found.key], force: true, priority: .user) { _ in }
+                self.refreshAfterWrite(found.key)
             }
         }
     }
@@ -1545,7 +1582,7 @@ final class ProjectStore {
                 } else {
                     self.triaged(item, action, key: key, project: snap.summary.identifier, commented: text != nil, by: actor)
                 }
-                self.refresh([projectKey], force: true, priority: .user) { done($0 && r.isOk) }
+                self.refreshAfterWrite(projectKey) { done($0 && r.isOk) }
             }
         }
     }

@@ -34,7 +34,7 @@ struct GroomActions {
                         let undoable = await journal.last(pk) != nil
                         await MainActor.run {
                             for p in lines where out.written.contains(p.id) { Self.row(p, in: snap, by: a.caller.actor, store) }
-                            store.refresh([pk], force: true) { _ in }
+                            store.refreshAfterWrite(pk, priority: .background)
                             guard let body = try? MirrorCodec.body(out) else { done(.failed("OverSire cannot read the result of Groom.")); return }
                             done(.ok(summary: "Groom wrote \(out.written.count) of \(lines.count) lines in \(snap.summary.identifier).",
                                      data: .object(["outcome": body, "undoable": .bool(undoable)])))
@@ -63,7 +63,7 @@ struct GroomActions {
                                                 "Groom of \(ident) undone: \(out.undone.count) put back, \(out.left.count) left",
                                                 payload: ["project": .string(ident), "undone": .int(out.undone.count), "left": .int(out.left.count)],
                                                 actorType: a.caller.actor.type, actor: a.caller.actor.name, via: a.caller.actor.via)
-                            store.refresh([ref.storeKey], force: true) { _ in }
+                            store.refreshAfterWrite(ref.storeKey, priority: .background)
                             guard let body = try? MirrorCodec.body(out) else { done(.failed("OverSire cannot read the result of Undo.")); return }
                             done(.ok(summary: "Undo put back \(out.undone.count) item\(out.undone.count == 1 ? "" : "s") in \(ident).", data: body))
                         }
