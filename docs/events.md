@@ -43,7 +43,7 @@ An `epic.*` row has the epic as its `parent_item`. The key of the epic is `Epic.
 
 | Domain | Kinds |
 |---|---|
-| agent | `session.started`, `session.ended`, `turn.started`, `turn.ended`, `turn.interrupted`, `wait.started`, `wait.ended`, `context.compacted`, `subagent.ended`, `review.ready`, `groom.applied`, `groom.undone`, `sweep.applied`, `worker.started`, `worker.answered`, `worker.nudged`, `worker.escalated`, `worker.done` |
+| agent | `session.started`, `session.ended`, `session.claimed`, `turn.started`, `turn.ended`, `turn.interrupted`, `wait.started`, `wait.ended`, `context.compacted`, `subagent.ended`, `review.ready`, `groom.applied`, `groom.undone`, `sweep.applied`, `worker.started`, `worker.answered`, `worker.nudged`, `worker.escalated`, `worker.done` |
 | human | `prompt.submitted`*, `question.answered`, `review.submitted`, `review.approved`, `review.viewed`, `review.unviewed`, `item.shipped`, `plan.started`, `item.state_changed`, `item.areas_set`, `item.viewed`, `item.favorited`, `item.unfavorited`, `project.settings_changed`, `link.opened` |
 | git | `worktree.added`, `worktree.removed`, `git.commit`, `git.rebase`, `git.reset`, `git.merge`, `git.push` |
 | ci | `ci.queued`, `ci.started`, `ci.completed`, `ci.rerun`, `ci.cancelled`, `ci.dispatched`, `ci.approved` |
@@ -58,6 +58,8 @@ The CI writes of the app (`ci.rerun`, `ci.cancel`, `ci.dispatch`, `ci.approve`) 
 `oversire vendor run` writes one `vendor.call` row for each run of a vendor CLI. The summary has the CLI name, the subcommand words and the exit code, never the args. The app writes no row for a refused call.
 
 `oversire vendor skill` is a read. It writes no row.
+
+`oversire ticket new|plan|work` writes one `session.claimed` row when the start key of the session changes. A second bind with the same key writes no row.
 
 `oversire vendor install` writes one `vendor.installed` row for a new or updated OverSire copy of a vendor CLI, and `oversire vendor remove` writes one `vendor.removed` row. An install of the version that is there already, or a remove with no OverSire copy, writes no row.
 
