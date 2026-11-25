@@ -379,6 +379,7 @@ The Markdown renderer uses [markdown-it](https://github.com/markdown-it/markdown
 - Project snapshots come from the Plane REST API (`/api/v1`, with the `X-Api-Key` header). The list shows first. Then OverSire reads comments in the background. With live updates, it reads only the items that a comment event names. With polling, it reads your items with new activity, at most 20 for each poll. After more than a day away, the feed shows one line for each project, for example "12 items changed while you were away", and OverSire reads no comments. The first snapshot of a project creates no activity, so launch stays quiet.
 - Runs as a macOS accessory app (no Dock icon, no Cmd+Tab entry).
 - Notifications use the native `UserNotifications` framework — respects Do Not Disturb and Focus modes.
+- A passive notification (CI passed or started, a field change, no net change) makes no sound and goes only to Notification Center. A notification that needs you asks for the time-sensitive level. The app has no time-sensitive entitlement, so macOS shows it as a normal notification. When you open or read an item, its notifications go away. The end of a CI run replaces its start.
 
 ## Menu bar icon states
 

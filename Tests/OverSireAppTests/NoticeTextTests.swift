@@ -362,6 +362,57 @@ final class NoticeCenterTests: XCTestCase {
         XCTAssertEqual((q.actions.last as? UNTextInputNotificationAction)?.textInputPlaceholder, "Write an answer")
     }
 
+    func testPassiveHasNoSoundAndLowRelevance() {
+        let c = NoticeCenter.content(Notice(id: "x", title: "✓ CI passed · o/r", thread: "o/r", level: .passive))
+        XCTAssertEqual(c.interruptionLevel, .passive)
+        XCTAssertNil(c.sound)
+        XCTAssertEqual(c.relevanceScore, 0.1)
+        let a = NoticeCenter.content(Notice(id: "y", title: "✕ CI failed · o/r", thread: "o/r"))
+        XCTAssertEqual(a.interruptionLevel, .active)
+        XCTAssertNotNil(a.sound)
+        XCTAssertEqual(a.relevanceScore, 0.5)
+    }
+
+    func testTimeSensitiveLevel() {
+        let c = NoticeCenter.content(Notice(id: "agent:K-1", title: "⏸ Needs your input · K-1", thread: "a/p", level: .timeSensitive))
+        XCTAssertEqual(c.interruptionLevel, .timeSensitive)
+        XCTAssertNotNil(c.sound)
+        XCTAssertEqual(c.relevanceScore, 1)
+    }
+
+    func testThreadIdentifierFromNotice() {
+        let fake = FakeCenter()
+        NoticeCenter(center: fake).post(Notice(id: "project:1", title: "T", thread: "ocral/p1"))
+        XCTAssertEqual(fake.delivered.first?.content.threadIdentifier, "ocral/p1")
+    }
+
+    func testEndRemovesStart() {
+        let fake = FakeCenter()
+        let c = NoticeCenter(center: fake)
+        c.post(Notice(id: "start-https://gh/run/9", title: "▶ CI started · o/r", thread: "o/r", level: .passive))
+        c.post(Notice(id: "end-https://gh/run/9", title: "✓ CI passed · o/r", thread: "o/r", level: .passive))
+        XCTAssertEqual(fake.removed, [["start-https://gh/run/9"]])
+        XCTAssertEqual(fake.calls.suffix(1), ["add end-https://gh/run/9"])
+    }
+
+    func testClearRemovesItemIds() {
+        let fake = FakeCenter()
+        let c = NoticeCenter(center: fake)
+        c.clear(itemId: "i1", key: "K-1")
+        XCTAssertEqual(Set(fake.removed.last ?? []), ["project:i1", "agent:i1", "agent:K-1", "runbook:K-1",
+                                                     "failed:project:i1", "failed:agent:i1", "failed:agent:K-1", "failed:runbook:K-1"])
+        c.clear(itemId: nil, key: "K-2")
+        XCTAssertEqual(Set(fake.removed.last ?? []), ["agent:K-2", "runbook:K-2", "failed:agent:K-2", "failed:runbook:K-2"])
+        c.clear(itemId: nil, key: nil)
+        XCTAssertEqual(fake.removed.count, 2, "nothing to remove")
+    }
+
+    func testPresentationPassiveListOnly() {
+        XCTAssertEqual(NoticeCenter.presentation(.passive), [.list])
+        XCTAssertEqual(NoticeCenter.presentation(.active), [.banner, .list, .sound])
+        XCTAssertEqual(NoticeCenter.presentation(.timeSensitive), [.banner, .list, .sound])
+    }
+
     func testContentCarriesTarget() {
         let n = Notice(id: "x", title: "T", thread: "t", target: NoticeTarget(key: "K-1", repo: "o/r"))
         XCTAssertEqual(NoticeTarget(userInfo: NoticeCenter.content(n).userInfo), n.target)

@@ -212,7 +212,7 @@ enum NoticeRoute {
         if let s = after("project:") { return item(s).map { .item($0, .overview) } }
         if let s = after("agent:") { return item(s).map { .item($0, .session) } }
         if let s = after("runbook:") { return item(s).map { .item($0, .runbook) } }
-        if let url = after("start-") ?? after("end-") ?? after("rerun-") {
+        if let url = after(Notice.ciStartPrefix) ?? after(Notice.ciEndPrefix) ?? after("rerun-") {
             return run(url).map { .run(repo: $0.repo, id: $0.id) } ?? .runs(.all)
         }
         if id.hasPrefix("problem-") { return .settings(.logs) }
@@ -383,14 +383,17 @@ extension Notice {
 // MARK: - CI
 
 extension Notice {
+    static let ciStartPrefix = "start-"
+    static let ciEndPrefix = "end-"
+
     static func ciStarted(repo: String, _ run: Run) -> Notice {
-        Notice(id: "start-\(run.url)", title: "▶ CI started · \(repo)", subtitle: "\(run.workflowName ?? run.name) · \(run.headBranch)",
+        Notice(id: ciStartPrefix + run.url, title: "▶ CI started · \(repo)", subtitle: "\(run.workflowName ?? run.name) · \(run.headBranch)",
                thread: repo, level: .passive, target: NoticeTarget(repo: repo, run: run.id))
     }
 
     /// `failure`: the first failed job, when its jobs doc is in. `linked`: the item key of the run.
     static func ciEnded(repo: String, _ run: Run, failure: CIFailureView?, linked: String?) -> Notice {
-        var n = Notice(id: "end-\(run.url)", title: "", subtitle: ciSubtitle(run, duration: true), thread: repo, category: .open,
+        var n = Notice(id: ciEndPrefix + run.url, title: "", subtitle: ciSubtitle(run, duration: true), thread: repo, category: .open,
                        target: NoticeTarget(key: linked, repo: repo, run: run.id))
         switch run.conclusion ?? "" {
         case "success":

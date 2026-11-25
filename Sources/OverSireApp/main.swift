@@ -84,6 +84,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
         s.relayIsLive = { [weak self] in self?.relay.state == .live }
         s.feedIsLive = { [weak self] a in self?.relay.isFeedLive(a) ?? false }
         s.busy = busy
+        s.onSeen = { [weak self] id, key in self?.notices.clear(itemId: id, key: key) }
         s.onChange = { [weak self] c in
             self?.updateIcon()
             self?.reloadList(c)
@@ -1562,7 +1563,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler handler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        handler([.banner, .sound])
+        handler(NoticeCenter.presentation(notification.request.content.interruptionLevel))
     }
 
     // MARK: - Popover

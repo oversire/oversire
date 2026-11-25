@@ -96,6 +96,7 @@ final class ItemWindow: NSWindowController, NSWindowDelegate, NSTextFieldDelegat
 
     func open(_ id: String, push: Bool) {
         history = push ? history + [id] : [id]
+        store.seen(itemId: id)
         reset()
     }
 

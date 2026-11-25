@@ -403,7 +403,10 @@ final class AppWindow: NSWindowController, NSWindowDelegate, NSToolbarDelegate, 
         sidebar.onLive = { [weak self] in self?.router.go(.activity) }
         router.onChange = { [weak self] r in
             UILog.shown(r.title)
-            if case .item(let k, let t) = r { EVENTS.viewed(k, page: t.rawValue) }
+            if case .item(let k, let t) = r {
+                EVENTS.viewed(k, page: t.rawValue)
+                self?.data.projectStore.seen(key: k)
+            }
             self?.display(r)
         }
         router.holdLeave = { [weak self] _, proceed in

@@ -861,8 +861,21 @@ final class ProjectStore {
 
     func isUnread(itemId: String) -> Bool { unreadRows().items.contains(itemId) }
 
+    /// The user opened or read an item. Its notices go.
+    var onSeen: ((_ itemId: String?, _ key: String?) -> Void)?
+
+    func seen(key: String) {
+        let found = item(key: key)?.item
+        onSeen?(found?.id, found?.key ?? key)
+    }
+
+    func seen(itemId: String) { onSeen?(itemId, item(itemId)?.item.key) }
+
     func markRead(itemId: String) {
-        guard !itemId.isEmpty, readItems.insert(itemId).inserted else { return }
+        guard !itemId.isEmpty else { return }
+        // An item that is read already also clears its notices.
+        seen(itemId: itemId)
+        guard readItems.insert(itemId).inserted else { return }
         save()
         publish(DataChange(.projects, origin: .user))
     }

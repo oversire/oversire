@@ -33,6 +33,8 @@ final class NoticeCenter {
     }
 
     func post(_ n: Notice) {
+        // The end of a CI run takes the place of its start.
+        if n.id.hasPrefix(Notice.ciEndPrefix) { center.removeDelivered([Notice.ciStartPrefix + n.id.dropFirst(Notice.ciEndPrefix.count)]) }
         let request = UNNotificationRequest(identifier: n.id, content: Self.content(n), trigger: nil)
         guard let c = n.category, case .question = c, !questions.contains(c) else { center.deliver(request); return }
         questions.append(c)
@@ -44,6 +46,13 @@ final class NoticeCenter {
 
     func withdraw(_ ids: [String]) { center.removeDelivered(ids) }
 
+    /// Removes the delivered notices of an item that the user opened or read.
+    func clear(itemId: String?, key: String?) {
+        let names = [itemId.map { ["project:" + $0, "agent:" + $0] }, key.map { ["agent:" + $0, "runbook:" + $0] }].compactMap { $0 }.flatMap { $0 }
+        guard !names.isEmpty else { return }
+        center.removeDelivered(names + names.map { NoticeRoute.failedPrefix + $0 })
+    }
+
     static func content(_ n: Notice) -> UNMutableNotificationContent {
         let c = UNMutableNotificationContent()
         c.title = n.title
@@ -52,8 +61,25 @@ final class NoticeCenter {
         c.threadIdentifier = n.thread
         c.categoryIdentifier = n.category?.id ?? ""
         c.userInfo = n.target.userInfo
-        c.sound = .default
+        c.interruptionLevel = n.level.system
+        switch n.level {
+        case .passive:
+            c.relevanceScore = 0.1
+            c.sound = nil
+        case .active:
+            c.relevanceScore = 0.5
+            c.sound = .default
+        case .timeSensitive:
+            // Without the time-sensitive entitlement, macOS shows it as active.
+            c.relevanceScore = 1
+            c.sound = .default
+        }
         return c
+    }
+
+    /// How a notice shows while the app is in front. A passive notice goes only to the list.
+    static func presentation(_ level: UNNotificationInterruptionLevel) -> UNNotificationPresentationOptions {
+        level == .passive ? [.list] : [.banner, .list, .sound]
     }
 
     static func category(_ c: NoticeCategory) -> UNNotificationCategory {
@@ -66,5 +92,15 @@ final class NoticeCenter {
                                                  textInputPlaceholder: c.replyPlaceholder)
         }
         return UNNotificationCategory(identifier: c.id, actions: actions, intentIdentifiers: [], options: [])
+    }
+}
+
+extension Notice.Level {
+    var system: UNNotificationInterruptionLevel {
+        switch self {
+        case .passive: return .passive
+        case .active: return .active
+        case .timeSensitive: return .timeSensitive
+        }
     }
 }
