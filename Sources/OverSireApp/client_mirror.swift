@@ -191,12 +191,19 @@ extension NSView {
 final class ClientLinkBox: @unchecked Sendable {
     private let lock = NSLock()
     private var link: ClientLink?
+    private var source: String?
 
     init(_ link: ClientLink? = .waiting) { self.link = link }
 
     var value: ClientLink? {
         get { lock.withLock { link } }
         set { lock.withLock { link = newValue } }
+    }
+
+    /// The last `ClientMirror.name`. A failed send off the main thread puts it in its text.
+    var name: String? {
+        get { lock.withLock { source } }
+        set { lock.withLock { source = newValue } }
     }
 }
 
@@ -236,12 +243,15 @@ final class ClientMirror {
     private(set) var status: ClientLink = .waiting {
         didSet {
             box.value = status
+            box.name = name
             guard status != oldValue else { return }
             log.info("client link \(self.status.logText, privacy: .public)")
             onStatus?(status)
         }
     }
-    private(set) var sourceName: String?
+    private(set) var sourceName: String? {
+        didSet { box.name = name }
+    }
     private var running = false
     private var inFlight = false
     private var again = false
@@ -266,6 +276,7 @@ final class ClientMirror {
     func start() {
         guard !running else { return }
         running = true
+        box.name = name
         Task { [weak self] in
             guard let self else { return }
             let cached = await reader.cached()

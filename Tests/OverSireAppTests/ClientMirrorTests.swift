@@ -103,6 +103,16 @@ final class ClientMirrorTests: XCTestCase {
         XCTAssertTrue(m.status.canChange)
     }
 
+    func testBoxNameOffMain() async {
+        let feed = Feed()
+        let (m, _, _) = rig(feed)
+        m.homeName = { "box" }
+        let box = m.box
+        await m.run()
+        let name = await Task.detached { box.name }.value
+        XCTAssertEqual(name, "mbp")
+    }
+
     func testAppClosed() async {
         let feed = Feed()
         let (m, _, _) = rig(feed)

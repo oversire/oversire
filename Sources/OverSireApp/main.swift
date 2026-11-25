@@ -1280,8 +1280,10 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             guard let c = await home() else { throw ProviderError.transport("No home daemon.") }
             return try await c.memberCall(req)
         }
-        actions.sourceName = { [weak self] in MainActor.assumeIsolated { self?.clientName ?? "home" } }
-        if let box = MainActor.assumeIsolated({ clientMirror?.box }) { actions.linkState = { box.value } }
+        // A failed send calls sourceName off the main thread. It must not touch main state.
+        let box = MainActor.assumeIsolated { clientMirror?.box }
+        actions.sourceName = { box?.name ?? "home" }
+        if let box { actions.linkState = { box.value } }
         let settings = ClientSettings.shared
         settings.call = actions.forward
         settings.sourceName = actions.sourceName
