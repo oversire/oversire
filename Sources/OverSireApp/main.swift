@@ -39,6 +39,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     /// A poll with no change also means the data is current.
     var lastUpdate: Date { max(lastFetch, relay.lastPoll ?? .distantPast) }
     var closeTime = Date.distantPast
+    var notificationClickAt = Date.distantPast
     /// The open panel came from a right click, so the main window stays behind.
     var keptWindowBack = false
     var firstLoad = true
@@ -776,6 +777,8 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            // A notification click also sends a reopen. The click picks the page.
+            guard Date().timeIntervalSince(self.notificationClickAt) > 1 else { return }
             guard GENERAL.showIn.dock || self.statusItemIsPlaced else { self.showWindow(); return }
             // A .transient popover closes the moment the app is not active, and a
             // reopen does not activate an .accessory app on its own.
@@ -1484,6 +1487,7 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                                 withCompletionHandler handler: @escaping () -> Void) {
         let id = response.notification.request.identifier
         DispatchQueue.main.async {
+            self.notificationClickAt = Date()
             self.closeTime = .distantPast
             if id.hasPrefix("intake:") {
                 if self.popover.isShown { self.popover.close() }
@@ -1502,7 +1506,13 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
                 }
                 return
             }
+            if let route = self.notificationRoute(id) {
+                log.info("notification click \(id.prefix(while: { $0 != ":" && $0 != "-" }), privacy: .public) → \(route.path, privacy: .public)")
+                self.open(route)
+                return
+            }
             if id.hasPrefix("project:") || id.hasPrefix("agent:") {
+                log.info("notification click \(id.prefix(while: { $0 != ":" }), privacy: .public) → item window")
                 if self.popover.isShown { self.popover.close() }
                 ItemWindow.show(String(id.drop { $0 != ":" }.dropFirst()))
                 return
@@ -1510,6 +1520,21 @@ class GHActionsBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNo
             self.toggle()
         }
         handler()
+    }
+
+    /// The page that a notification id names. Nil when the target is not loaded.
+    func notificationRoute(_ id: String) -> Route? {
+        func after(_ prefix: String) -> String? { id.hasPrefix(prefix) ? String(id.dropFirst(prefix.count)) : nil }
+        func key(_ s: String) -> String? { (projectStore.item(s) ?? projectStore.item(key: s.uppercased()))?.item.key }
+        if let s = after("project:") { return key(s).map { .item($0, .overview) } }
+        if let s = after("agent:") { return key(s).map { .item($0, .session) } }
+        if let s = after("runbook:") { return key(s).map { .item($0, .runbook) } }
+        if let url = after("start-") ?? after("end-") {
+            for (repo, runs) in grouped { if let r = runs.first(where: { $0.url == url }) { return .run(repo: repo, id: r.id) } }
+            return .runs(.all)
+        }
+        if id.hasPrefix("problem-") { return .settings(.logs) }
+        return nil
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
