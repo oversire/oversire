@@ -93,13 +93,15 @@ final class ProjectRefreshTests: XCTestCase {
 
     private var lastState = ""
 
-    private func store(_ t: any Tracker) throws -> ProjectStore { try store(Trackers(t)) }
+    private func store(_ t: any Tracker, notify: @escaping (String) -> Void = { _ in }) throws -> ProjectStore {
+        try store(Trackers(t), notify: notify)
+    }
 
-    private func store(_ trackers: TrackerDirectory) throws -> ProjectStore {
+    private func store(_ trackers: TrackerDirectory, notify: @escaping (String) -> Void = { _ in }) throws -> ProjectStore {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("refresh-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         lastState = dir.path + "/state.json"
-        return ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, _ in }),
+        return ProjectStore(trackers: trackers, notifier: ProjectNotifier(post: { _, _, _, id in notify(id) }),
                             statePath: dir.path + "/state.json", activityPath: dir.path + "/activity.jsonl")
     }
 
@@ -157,9 +159,9 @@ final class ProjectRefreshTests: XCTestCase {
     private let robot = EventActor(type: .agent, name: "codex")
 
     /// A store with one read done: the snapshot holds item i1 with the status "a". No read runs.
-    private func loaded(_ t: SlowTracker) async throws -> (store: ProjectStore, key: String) {
+    private func loaded(_ t: SlowTracker, notify: @escaping (String) -> Void = { _ in }) async throws -> (store: ProjectStore, key: String) {
         t.list = [slowItem("i1")]
-        let store = try store(t)
+        let store = try store(t, notify: notify)
         let p = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
         let key = t.project.storeKey
         await MainActor.run { store.track([p], live: []) }
@@ -319,10 +321,137 @@ final class ProjectRefreshTests: XCTestCase {
         XCTAssertNotNil(marked)
         let found = await MainActor.run { store.item(key: "slow-1")?.item.id }
         XCTAssertEqual(found, m.ref.id, "the stub answers before a snapshot has the item")
+    }
+
+    func testCreateStubIsInTheSnapshotUntilAReadHoldsIt() async throws {
+        let t = SlowTracker()
+        let store = try store(t)
+        let key = t.project.storeKey
+        var made: Result<MadeItem, ProviderError>?
+        await MainActor.run { store.track([ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)], live: []) }
+        await until("the first read runs", timeout: .seconds(2)) { t.blocked == 1 }
+        t.release()
+        await until("the first read ends", timeout: .seconds(2)) { store.refreshing.isEmpty && store.snapshots[key] != nil }
+        await MainActor.run { store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:]), by: EventActor(type: .agent, name: "a")) { made = $0 } }
+        await until("create answers", timeout: .seconds(2)) { made != nil }
+        guard case .success(let m)? = made else { return XCTFail("\(String(describing: made))") }
+        await until("the refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        let stub = await MainActor.run { store.snapshots[key]?.items.first { $0.id == m.ref.id } }
+        XCTAssertEqual(stub?.pending, true)
+        XCTAssertEqual(stub?.author, "me")
+        await MainActor.run { store.flush() }
+        let disk = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: lastState))) as? [String: Any]
+        let saved = ((disk?["snapshots"] as? [String: Any])?[key] as? [String: Any])?["items"] as? [[String: Any]]
+        XCTAssertEqual(saved?.contains { $0["id"] as? String == m.ref.id }, false, "the disk holds the base")
+        t.list = [slowItem(m.ref.id)]
         t.release()
         await until("the mark ends with the refresh", timeout: .seconds(2)) { store.writeActors.isEmpty }
-        let after = await MainActor.run { store.item(m.ref.id) }
-        XCTAssertNotNil(after, "the stub stays until a snapshot holds the item or it expires")
+        let held = await MainActor.run { store.snapshots[key]?.items.filter { $0.id == m.ref.id } ?? [] }
+        XCTAssertEqual(held.count, 1)
+        XCTAssertNil(held.first?.pending)
+    }
+
+    func testCreateStubStaysWhenAReadDoesNotHoldIt() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        t.created = 1
+        await MainActor.run { create(store, key) }
+        await until("the refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        t.release()
+        await until("the read ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
+        let items = await MainActor.run { store.snapshots[key]?.items ?? [] }
+        XCTAssertEqual(items.filter { $0.pending == true }.map(\.id), ["i2"])
+        XCTAssertEqual(items.count, 2)
+    }
+
+    func testCreateStubMakesOneAddedRowAndNoNotification() async throws {
+        let t = SlowTracker()
+        var posted: [String] = []
+        let (store, key) = try await loaded(t, notify: { posted.append($0) })
+        t.created = 1
+        await MainActor.run { store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:])) { _ in } }
+        await until("the refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        let early = await MainActor.run { store.activityEntries.filter { $0.itemId == "i2" }.count }
+        XCTAssertEqual(early, 0, "the stub makes no row")
+        t.list = [slowItem("i1"), slowItem("i2")]
+        t.release()
+        await until("a read holds the item", timeout: .seconds(2)) { store.snapshots[key]?.items.contains { $0.id == "i2" && $0.pending == nil } == true }
+        let rows = await MainActor.run { store.activityEntries.filter { $0.itemId == "i2" } }
+        XCTAssertEqual(rows.count, 1)
+        if case .added? = rows.first?.change {} else { XCTFail("\(String(describing: rows.first?.change))") }
+        let unread = await MainActor.run { store.isUnread(itemId: "i2") }
+        XCTAssertFalse(unread, "a change made here is read")
+        XCTAssertTrue(posted.isEmpty)
+    }
+
+    func testCreateStubWritesNoEventRow() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        let outlet = DraftCount()
+        t.created = 1
+        await MainActor.run {
+            store.events = EventDesk(outlet: outlet)
+            store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:])) { _ in }
+        }
+        await until("the refresh waits", timeout: .seconds(2)) { t.blocked == 1 }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let drafts = await outlet.drafts
+        XCTAssertEqual(drafts, 0)
+    }
+
+    func testCreateStubLeavesAfterItsKeepTime() async throws {
+        let t = SlowTracker()
+        let (store, key) = try await loaded(t)
+        var changes: [DataChange] = []
+        var inView: Bool?
+        t.created = 1
+        await MainActor.run {
+            store.madeKeep = 0.3
+            store.onChange = { changes.append($0) }
+            store.create(NewItem(projectKey: key, title: "T", body: "", fieldOptions: [:])) { _ in
+                inView = store.snapshots[key]?.items.contains { $0.id == "i2" }
+            }
+        }
+        await until("create answers", timeout: .seconds(2)) { inView != nil }
+        XCTAssertEqual(inView, true)
+        await until("the stub leaves", timeout: .seconds(3)) { store.snapshots[key]?.items.contains { $0.id == "i2" } == false }
+        XCTAssertTrue(changes.contains { $0.domains.contains(.projects) && $0.projects.contains(key) && $0.origin == .event })
+        t.release()
+        await until("the read ends", timeout: .seconds(2)) { store.refreshing.isEmpty }
+        let removed = await MainActor.run { store.activityEntries.filter { if case .removed = $0.change { return true } else { return false } } }
+        XCTAssertTrue(removed.isEmpty)
+    }
+
+    func testPatchedAddsMadeItemsAndKeepsPending() throws {
+        let t = SlowTracker()
+        let ref = t.project
+        let summary = ProjectSummary(ref: ref, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        let snap = ProjectSnapshot(summary: summary, statusOptions: [], items: [slowItem("i1")], fetchedAt: Date())
+        var stub = slowItem("i2")
+        stub.pending = true
+        var twin = slowItem("i1", title: "Stub")
+        twin.pending = true
+        let w = LocalWrite(project: ref.storeKey, at: Date(), marks: [], items: ["i2": [.title("Changed")]], epics: [])
+        let out = ProjectStore.patched(snap, [w], made: [stub, twin])
+        XCTAssertEqual(out.items.map(\.id), ["i1", "i2"])
+        XCTAssertNil(out.items[0].pending)
+        XCTAssertEqual(out.items[0].title, "T", "the base item wins")
+        XCTAssertEqual(out.items[1].title, "Changed")
+        XCTAssertEqual(out.items[1].pending, true)
+    }
+
+    func testCarriedSkipsAPendingItem() throws {
+        let t = SlowTracker()
+        let summary = ProjectSummary(ref: t.project, identifier: "SLOW", title: "Slow", url: "https://x/SLOW", closed: false)
+        let read = ProjectSnapshot(summary: summary, statusOptions: [], items: [slowItem("i1"), slowItem("i2")], fetchedAt: Date())
+        var stub = slowItem("i1")
+        stub.pending = true
+        stub.commentCount = 7
+        var held = slowItem("i2")
+        held.commentCount = 3
+        let cur = ProjectSnapshot(summary: summary, statusOptions: [], items: [stub, held], fetchedAt: Date())
+        let out = ProjectStore.carried(read, from: cur)
+        XCTAssertEqual(out.items.map(\.commentCount), [0, 3])
     }
 
     func testCreateFailureStartsNoRefresh() async throws {
@@ -1136,6 +1265,50 @@ final class ProjectRefreshTests: XCTestCase {
         next.projects[mirrorRef.storeKey] = mirrorSnap()
         next.items[mirrorRef.storeKey] = [mirrorItem(2)]
         store.mirrored(next)
+        XCTAssertEqual(posted, ["project:i2"])
+    }
+
+    private func pendingItem(_ n: Int) -> Item {
+        var i = mirrorItem(n)
+        i.pending = true
+        return i
+    }
+
+    private func mirrorStep(_ items: [Item] = [], removed: [String] = []) -> MirrorDelta {
+        var d = MirrorDelta()
+        d.projects[mirrorRef.storeKey] = mirrorSnap()
+        d.items[mirrorRef.storeKey] = items
+        if !removed.isEmpty { d.removedItems[mirrorRef.storeKey] = removed }
+        return d
+    }
+
+    @MainActor
+    func testMirroredStubIsQuietAndTheRealItemNotifiesOnce() throws {
+        var posted: [String] = []
+        let (store, _) = try clientStore { posted.append($0) }
+        var first = mirrorStep([mirrorItem(1)])
+        first.reset = true
+        store.mirrored(first)
+        store.mirrored(mirrorStep([pendingItem(2)]))
+        XCTAssertTrue(posted.isEmpty, "a stub is quiet")
+        XCTAssertEqual(store.snapshots[mirrorRef.storeKey]?.items.map(\.id), ["i1", "i2"])
+        store.mirrored(mirrorStep([mirrorItem(2)]))
+        XCTAssertEqual(posted, ["project:i2"])
+        XCTAssertNil(store.snapshots[mirrorRef.storeKey]?.items.last?.pending)
+    }
+
+    @MainActor
+    func testMirroredStubTombstoneIsQuiet() throws {
+        var posted: [String] = []
+        let (store, _) = try clientStore { posted.append($0) }
+        var first = mirrorStep([mirrorItem(1)])
+        first.reset = true
+        store.mirrored(first)
+        store.mirrored(mirrorStep([pendingItem(2)]))
+        store.mirrored(mirrorStep(removed: ["i2"]))
+        XCTAssertTrue(posted.isEmpty)
+        XCTAssertEqual(store.snapshots[mirrorRef.storeKey]?.items.map(\.id), ["i1"])
+        store.mirrored(mirrorStep([mirrorItem(2)]))
         XCTAssertEqual(posted, ["project:i2"])
     }
 

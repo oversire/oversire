@@ -313,11 +313,11 @@ struct ItemActions {
                     if !names.isEmpty, !d.projectStore.has(.labels, in: snap) { done(ActionLink.unsupported(snap, "labels")); return }
                     let (when, refusal) = Self.schedule(a, d, snap)
                     if let refusal { done(refusal); return }
-                    let make = { (labelIds: [String]) in
+                    let make = { (labelIds: [String], labelNames: [String]) in
                         let new = NewItem(projectKey: snap.summary.ref.storeKey, title: a.string("title") ?? "", body: a.string("body") ?? "",
                                           fieldOptions: options, labels: labelIds, parent: parent?.id, epic: epic?.id,
                                           startDate: when.startDate.flatMap { $0.isEmpty ? nil : $0 }, dueDate: when.dueDate.flatMap { $0.isEmpty ? nil : $0 },
-                                          estimate: when.estimate.flatMap { $0.isEmpty ? nil : $0 })
+                                          estimate: when.estimate.flatMap { $0.isEmpty ? nil : $0 }, labelNames: labelNames)
                         d.projectStore.create(new, by: a.caller.actor) { r in
                             switch r {
                             case .failure(let e): done(.failed(e.message))
@@ -335,17 +335,17 @@ struct ItemActions {
                             }
                         }
                     }
-                    guard !names.isEmpty else { make([]); return }
+                    guard !names.isEmpty else { make([], []); return }
                     d.projectStore.labels(projectKey: snap.summary.ref.storeKey) { r in
                         switch r {
                         case .failure(let e): done(.failed(e.message))
                         case .success(let all):
-                            var ids: [String] = []
+                            var ids: [String] = [], found: [String] = []
                             for n in names {
                                 guard let l = all.find(n) else { done(.notAllowed("No label \(n). Use: \(all.names).")); return }
-                                if !ids.contains(l.id) { ids.append(l.id) }
+                                if !ids.contains(l.id) { ids.append(l.id); found.append(l.name) }
                             }
-                            make(ids)
+                            make(ids, found)
                         }
                     }
                 }

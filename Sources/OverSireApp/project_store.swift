@@ -13,6 +13,7 @@ struct NewItem {
     var startDate: String? = nil            // "YYYY-MM-DD"
     var dueDate: String? = nil
     var estimate: String? = nil
+    var labelNames: [String] = []           // the names of `labels`, for the stub
 }
 
 /// What `create` made. `epicError` is nil when there is no epic step or the step worked.
@@ -99,16 +100,16 @@ final class ProjectStore {
     /// Key → the retry plan of the last write, and the number of retries it started.
     private var writeRetry: [String: (plan: Int, next: Int, lane: CallPriority)] = [:]
     private var writeRetryPlans = 0
-    /// Item id → a stub of an item that `create` made and no snapshot holds yet.
+    /// Item id → a stub of an item that `create` made and no read holds yet. `rebuild` and `absorb` put it in the view.
     private var madeItems: [String: (project: String, item: Item, at: Date)] = [:]
-    private let madeKeep: TimeInterval = 120
+    var madeKeep: TimeInterval = 300
     /// Key → the last tracker read, only while the key has open local writes. `snapshots` then holds the view.
     private var polled: [String: ProjectSnapshot] = [:]
     private var localWrites: [LocalWrite] = []
     /// Id → the number of open writes that mark it in `writeActors`.
     private var markCounts: [String: Int] = [:]
     var localWriteKeep: TimeInterval = 300
-    private var expiryPending = false
+    private var expiryAt: Date?
     /// The last fetch error of each project, by store key. A good fetch clears it.
     private(set) var errors: [String: String] = [:]
     private(set) var tracked: [ProjectSummary] = []
@@ -326,7 +327,7 @@ final class ProjectStore {
         for at in waiting.keys { waiting[at]?.subtract(todo) }
         publish(force ? DataChange(.projects, projects: Set(todo), origin: .user) : nil)
         let jobs = ProjectStore.oldestFirst(tracked.filter { todo.contains($0.ref.storeKey) }, snapshots: snapshots).map { p in
-            (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey])
+            (p, trackers.tracker(p.ref.workspace), snapshots[p.ref.storeKey].map(ProjectStore.withoutPending))
         }
         let limit = snapshotLimit, minPause = cooldownMin
         limitUsed = limit
@@ -1260,6 +1261,7 @@ final class ProjectStore {
     func seed(_ snap: ProjectSnapshot) {
         let key = snap.summary.ref.storeKey
         drop(localWrites.filter { $0.project == key }, rebuild: false)
+        madeItems = madeItems.filter { $0.value.project != key }
         polled[key] = nil
         snapshots[key] = snap
         digests[key] = nil
@@ -1269,6 +1271,7 @@ final class ProjectStore {
     /// For `--uishots`: Plane is down and no snapshot is left. The next refresh replaces this.
     func seedDown(_ why: String) {
         drop(localWrites, rebuild: false)
+        madeItems = [:]
         polled = [:]
         snapshots = [:]
         digests = [:]
@@ -1277,7 +1280,7 @@ final class ProjectStore {
         publish(DataChange([.projects, .intake], origin: .event))
     }
 
-    /// Answers when the tracker has made the item. The refresh runs after the answer.
+    /// Answers when the tracker has made the item. The view holds a stub of it. The refresh runs after the answer.
     func create(_ new: NewItem, by actor: EventActor = .user, done: @escaping (Result<MadeItem, ProviderError>) -> Void) {
         guard let snap = snapshots[new.projectKey], let client = trackers.tracker(snap.summary.ref.workspace) else {
             done(.failure(.vendor(code: "store", message: "The project is not loaded yet"))); return
@@ -1310,7 +1313,10 @@ final class ProjectStore {
                     self.suppressNotify.insert(id)
                     let marked = actor.type != .human || new.epic != nil
                     if marked { self.record(LocalWrite(project: new.projectKey, at: self.now(), marks: [id], items: [:], epics: []), by: actor) }
-                    self.madeItems[id] = (new.projectKey, self.stub(of: new, made.ref), self.now())
+                    self.madeItems[id] = (new.projectKey, self.stub(of: new, made, in: snap), self.now())
+                    self.rebuild(new.projectKey)
+                    self.publish(DataChange(.projects, projects: [new.projectKey], origin: .user))
+                    self.scheduleExpiry()
                     done(.success(made))
                     self.refreshAfterWrite(new.projectKey)
                 }
@@ -1318,12 +1324,19 @@ final class ProjectStore {
         }
     }
 
-    private func stub(of new: NewItem, _ ref: ItemRef) -> Item {
+    /// The item as the view shows it until a read holds it.
+    private func stub(of new: NewItem, _ made: MadeItem, in snap: ProjectSnapshot) -> Item {
         let at = now()
-        return Item(id: ref.id, key: ref.key, title: new.title, url: ref.url.absoluteString,
-                    statusOptionId: new.fieldOptions[ProjectSnapshot.statusFieldId], fields: [:], assignees: [], labels: new.labels,
-                    author: nil, updatedBy: nil, updatedAt: at, activityAt: at, commentCount: 0, lastComment: nil, mentionsMe: false,
-                    body: new.body, parentId: new.parent, epicId: new.epic)
+        var fields: [String: String] = [:]
+        if snap.hasPriority, let id = new.fieldOptions[ProjectSnapshot.priorityFieldId], id != "none",
+           let o = StatusOption.priorities.first(where: { $0.id == id }) { fields["Priority"] = o.name }
+        for (name, value) in [(Item.startField, new.startDate), (Item.dueField, new.dueDate), (Item.estimateField, new.estimate)] {
+            if let value { fields[name] = value }
+        }
+        return Item(id: made.ref.id, key: made.ref.key, title: new.title, url: made.ref.url.absoluteString,
+                    statusOptionId: new.fieldOptions[ProjectSnapshot.statusFieldId], fields: fields, assignees: [], labels: new.labelNames,
+                    author: snap.me, updatedBy: nil, updatedAt: at, activityAt: at, commentCount: 0, lastComment: nil, mentionsMe: false,
+                    body: new.body, parentId: new.parent, epicId: made.epicError == nil ? new.epic : nil, createdAt: at, pending: true)
     }
 
     // Runs one change off the main queue, then reloads the project. A change made here is not news.
@@ -1399,12 +1412,15 @@ final class ProjectStore {
         }
     }
 
-    /// Sets the view of a key: the base and the open writes of the key.
+    private func stubs(of key: String) -> [Item] { madeItems.values.filter { $0.project == key }.map(\.item) }
+
+    /// Sets the view of a key: the base, the open writes and the stubs of the key.
     private func rebuild(_ key: String) {
         guard let base = polled[key] ?? snapshots[key] else { return }
         let open = localWrites.filter { $0.project == key }
-        polled[key] = open.isEmpty ? nil : base
-        snapshots[key] = open.isEmpty ? base : ProjectStore.patched(base, open)
+        let made = stubs(of: key)
+        polled[key] = open.isEmpty && made.isEmpty ? nil : base
+        snapshots[key] = open.isEmpty && made.isEmpty ? base : ProjectStore.patched(base, open, made: made)
         digests[key] = nil
     }
 
@@ -1420,20 +1436,29 @@ final class ProjectStore {
     private func expireLocalWrites() {
         let cutoff = now().addingTimeInterval(-localWriteKeep)
         let old = localWrites.filter { $0.at <= cutoff }
-        if !old.isEmpty {
-            drop(old)
-            publish(DataChange(.projects, projects: Set(old.map(\.project)), origin: .event))
+        let stale = madeItems.filter { now().timeIntervalSince($0.value.at) >= madeKeep }
+        var keys = Set(old.map(\.project))
+        if !old.isEmpty { drop(old, rebuild: false) }
+        if !stale.isEmpty {
+            stale.keys.forEach { madeItems[$0] = nil }
+            keys.formUnion(stale.values.map(\.project))
+        }
+        if !keys.isEmpty {
+            keys.forEach(rebuild)
+            publish(DataChange(.projects, projects: keys, origin: .event))
         }
         scheduleExpiry()
     }
 
     private func scheduleExpiry() {
-        guard !expiryPending, let first = localWrites.map(\.at).min() else { return }
-        expiryPending = true
-        let delay = max(0.01, first.addingTimeInterval(localWriteKeep).timeIntervalSince(now()))
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.expiryPending = false
-            self?.expireLocalWrites()
+        let due = localWrites.map { $0.at.addingTimeInterval(localWriteKeep) } + madeItems.values.map { $0.at.addingTimeInterval(madeKeep) }
+        guard let first = due.min() else { return }
+        if let at = expiryAt, at <= first { return }
+        expiryAt = first
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.01, first.timeIntervalSince(now()))) { [weak self] in
+            guard let self, self.expiryAt == first else { return }
+            self.expiryAt = nil
+            self.expireLocalWrites()
         }
     }
 
@@ -1702,13 +1727,8 @@ final class ProjectStore {
         for (key, snap) in snapshots {
             if let item = snap.items.first(where: { $0.id == id }) { return (key, snap, item) }
         }
-        if let made = madeItems[id], let snap = snapshots[made.project], fresh(made.at) {
-            return (made.project, snap, ProjectStore.patched(made.item, localChanges(of: id)))
-        }
         return nil
     }
-
-    private func fresh(_ at: Date) -> Bool { now().timeIntervalSince(at) < madeKeep }
 
     func item(key: String) -> (key: String, snap: ProjectSnapshot, item: Item)? {
         if keyIndex == nil {
@@ -1721,9 +1741,6 @@ final class ProjectStore {
             keyIndex = index
         }
         if let hit = keyIndex?[key.uppercased()], let snap = snapshots[hit.project] { return (hit.project, snap, snap.items[hit.at]) }
-        if let made = madeItems.values.first(where: { $0.item.key.uppercased() == key.uppercased() && fresh($0.at) }), let snap = snapshots[made.project] {
-            return (made.project, snap, ProjectStore.patched(made.item, localChanges(of: made.item.id)))
-        }
         return nil
     }
 
@@ -1852,11 +1869,12 @@ final class ProjectStore {
             return !back.contains(c.itemId)
         }
         seenItems.formUnion(snap.items.map(\.id))
-        madeItems = madeItems.filter { _, m in fresh(m.at) && (m.project != key || !snap.items.contains { $0.id == m.item.id }) }
+        madeItems = madeItems.filter { _, m in m.project != key || !snap.items.contains { $0.id == m.item.id } }
         let snap = ProjectStore.localized(snap)
         let open = localWrites.filter { $0.project == key }
-        polled[key] = open.isEmpty ? nil : snap
-        snapshots[key] = open.isEmpty ? snap : ProjectStore.patched(snap, open)
+        let made = stubs(of: key)
+        polled[key] = open.isEmpty && made.isEmpty ? nil : snap
+        snapshots[key] = open.isEmpty && made.isEmpty ? snap : ProjectStore.patched(snap, open, made: made)
         digests[key] = nil
         notifyIntake(old: old, new: snap)
         commentActors = commentActors.filter { $0.value.until > now() }
@@ -2062,8 +2080,9 @@ extension ProjectStore {
 }
 
 extension ProjectStore {
-    /// The base with the writes of its project applied in order. An item that the base does not hold is skipped.
-    static func patched(_ base: ProjectSnapshot, _ writes: [LocalWrite]) -> ProjectSnapshot {
+    /// The base with the stubs and the writes of its project applied in order. An item that the base does not hold is skipped.
+    /// A base item wins over a stub with the same id.
+    static func patched(_ base: ProjectSnapshot, _ writes: [LocalWrite], made: [Item] = []) -> ProjectSnapshot {
         let key = base.summary.ref.storeKey
         var changes: [String: [LocalChange]] = [:]
         var epics = base.epics
@@ -2075,7 +2094,9 @@ extension ProjectStore {
                 epics = all
             }
         }
-        var out = withItems(base, base.items.map { i in changes[i.id].map { patched(i, $0) } ?? i })
+        let held = Set(base.items.map(\.id))
+        let items = base.items + made.filter { !held.contains($0.id) }
+        var out = withItems(base, items.map { i in changes[i.id].map { patched(i, $0) } ?? i })
         out.epics = epics
         // An item that only the index holds still counts for its parent.
         if let index = base.index {
@@ -2121,6 +2142,7 @@ extension ProjectStore {
                         lastComment: out.lastComment, mentionsMe: out.mentionsMe, body: out.body, parentId: out.parentId,
                         epicId: out.epicId, otherEpicIds: out.otherEpicIds, createdAt: item.createdAt)
         copy.commentsAt = out.commentsAt
+        copy.pending = item.pending
         return copy
     }
 
@@ -2150,7 +2172,7 @@ extension ProjectStore {
         guard let cur else { return snap }
         let byId = Dictionary(cur.items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         return withItems(snap, snap.items.map { i in
-            guard let c = byId[i.id] else { return i }
+            guard let c = byId[i.id], c.pending != true else { return i }
             var i = i
             i.commentCount = c.commentCount
             i.lastComment = c.lastComment
@@ -2264,8 +2286,8 @@ extension ProjectStore {
             snapshots[key] = snap
             digests[key] = nil
             touched.insert(key)
-            if let prior, now().timeIntervalSince(prior.fetchedAt) <= awayAfter { notifyMirrored(old: prior, new: snap) }
-            seenItems.formUnion(items.map(\.id))
+            if let prior, now().timeIntervalSince(prior.fetchedAt) <= awayAfter { notifyMirrored(old: ProjectStore.withoutPending(prior), new: ProjectStore.withoutPending(snap)) }
+            seenItems.formUnion(items.filter { $0.pending != true }.map(\.id))
         }
         if !d.activity.isEmpty {
             // The first read is quiet, as the first snapshot of a poll is.
@@ -2275,6 +2297,11 @@ extension ProjectStore {
         guard !touched.isEmpty || !d.activity.isEmpty || d.reset else { return }
         save()
         publish(DataChange([.projects, .intake], projects: touched, origin: .poll))
+    }
+
+    /// A copy of the snapshot without its stubs.
+    static func withoutPending(_ s: ProjectSnapshot) -> ProjectSnapshot {
+        s.items.contains { $0.pending == true } ? withItems(s, s.items.filter { $0.pending != true }) : s
     }
 
     private func notifyMirrored(old: ProjectSnapshot, new snap: ProjectSnapshot) {

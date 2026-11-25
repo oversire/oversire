@@ -201,11 +201,17 @@ final class ItemCliActionsTests: XCTestCase {
 
     func testCreateWithLabelsAndParent() async throws {
         let rig = try await EpicRig()
-        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("Child"), "labels": .array([.string("bug")]),
+        rig.fake.freezeList()
+        let r = await run(rig, "item.create", ["project": .string("FAKE"), "title": .string("Child"), "labels": .array([.string("BUG")]),
                                                "parent": .string(rig.items[0].key)])
         guard case .ok(let summary, let data, _) = r, let key = data?["key"]?.string else { return XCTFail("\(r)") }
         XCTAssertEqual(summary, "\(key) is made under \(rig.items[0].key).")
-        await until("the snapshot has the item") { await rig.snapshot()?.items.contains { $0.key == key } == true }
+        let stub = await MainActor.run { rig.d.projectStore.item(key: key)?.item }
+        XCTAssertEqual(stub?.pending, true)
+        XCTAssertEqual(stub?.labels, ["bug"], "the stub has the label names")
+        rig.fake.thawList()
+        await rig.reload()
+        await until("a read holds the item") { await rig.d.projectStore.item(key: key)?.item.pending == nil }
         let made = await MainActor.run { rig.d.projectStore.item(key: key)?.item }
         XCTAssertEqual(made?.labels, ["l-bug"])
         XCTAssertEqual(made?.parentId, rig.items[0].id)

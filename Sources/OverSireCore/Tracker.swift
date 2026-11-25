@@ -140,11 +140,13 @@ public struct Item: Codable, Hashable, Sendable {
     public var otherEpicIds: [EpicID]? = nil
     /// When the tracker made the item. Nil when the tracker does not say.
     public var createdAt: Date? = nil
+    /// True on a stub that a write of this app made and that no read holds yet. Nil on each item from a tracker read.
+    public var pending: Bool? = nil
 
     public init(id: String, key: String, title: String, url: String, statusOptionId: String?, fields: [String: String],
                 assignees: [String], labels: [String], author: String?, updatedBy: String?, updatedAt: Date, activityAt: Date,
                 commentCount: Int, lastComment: Comment?, mentionsMe: Bool, body: String? = nil, parentId: String? = nil,
-                epicId: EpicID? = nil, otherEpicIds: [EpicID]? = nil, createdAt: Date? = nil) {
+                epicId: EpicID? = nil, otherEpicIds: [EpicID]? = nil, createdAt: Date? = nil, pending: Bool? = nil) {
         self.id = id
         self.key = key
         self.title = title
@@ -165,6 +167,7 @@ public struct Item: Codable, Hashable, Sendable {
         self.epicId = epicId
         self.otherEpicIds = otherEpicIds
         self.createdAt = createdAt
+        self.pending = pending
     }
 
     /// True when the item has activity that its comment fields do not cover yet.

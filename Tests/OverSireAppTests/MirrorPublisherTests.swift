@@ -377,6 +377,12 @@ final class MirrorPublisherTests: XCTestCase {
     }
 
     private func appDocs(caps: Set<Capability> = [.links, .priority], catalog: ProjectCatalog? = nil, repos: RepoCatalog? = nil) throws -> (AppMirrorDocs, ProjectStore, ProjectSummary) {
+        let r = try appRig(caps: caps, catalog: catalog, repos: repos)
+        return (r.docs, r.store, r.summary)
+    }
+
+    private func appRig(caps: Set<Capability> = [.links, .priority], catalog: ProjectCatalog? = nil,
+                        repos: RepoCatalog? = nil) throws -> (docs: AppMirrorDocs, store: ProjectStore, summary: ProjectSummary, tracker: FakeTracker) {
         let t = FakeTracker(account: "ws", capabilities: caps)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mirror-docs-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -387,7 +393,7 @@ final class MirrorPublisherTests: XCTestCase {
         let docs = AppMirrorDocs(store: store, runs: { [("o/r", [])] }, prs: { [] }, projects: { [summary] },
                                  layers: { $0 == .tracker ? caps : $0 == .ci ? [.rerun] : [] }, trackers: { ["ws"] },
                                  workspaces: { catalog?.mirrorWorkspaces() ?? [] }, repos: { repos?.mirrorRepos() })
-        return (docs, store, summary)
+        return (docs, store, summary, t)
     }
 
     func testProjectDocHasNoItems() throws {
@@ -407,6 +413,57 @@ final class MirrorPublisherTests: XCTestCase {
         let snap: ProjectSnapshot = try MirrorCodec.value(from: try XCTUnwrap(project.body))
         XCTAssertEqual(snap.summary.identifier, "FAKE")
         XCTAssertEqual(MirrorCodec.projectKey(ofItemDoc: items[0].id), summary.ref.storeKey)
+    }
+
+    // MARK: Stub of a new item (OVERSIRE-605)
+
+    private func make(_ store: ProjectStore, _ key: String, _ done: @escaping (Result<MadeItem, ProviderError>) -> Void) {
+        store.create(NewItem(projectKey: key, title: "New", body: "", fieldOptions: [:]), done: done)
+    }
+
+    func testStubGoesOutAsAnItemDoc() async throws {
+        let (docs, store, summary, t) = try appRig()
+        let key = summary.ref.storeKey
+        store.absorb(ProjectSnapshot(summary: summary, statusOptions: [], items: [item("u1", key: "FAKE-1")], fetchedAt: Date()))
+        t.freezeList()
+        var out: [MirrorDoc] = []
+        var id = ""
+        make(store, key) { r in
+            guard case .success(let m) = r else { return }
+            id = m.ref.id
+            out = docs.projectDocs([key])
+        }
+        await until("create answers") { !out.isEmpty }
+        let stub = try XCTUnwrap(out.first { $0.id == "\(key)/\(id)" })
+        let back: Item = try MirrorCodec.value(from: try XCTUnwrap(stub.body))
+        XCTAssertEqual(back.pending, true)
+        XCTAssertEqual(back.title, "New")
+    }
+
+    func testStubAndItsTombstoneGoOutOnBusChanges() async throws {
+        let (docs, store, summary, t) = try appRig()
+        let key = summary.ref.storeKey
+        let bus = ChangeBus(delay: 0, schedule: { _, f in f() })
+        store.onChange = { bus.post($0) }
+        store.absorb(ProjectSnapshot(summary: summary, statusOptions: [], items: [item("u1", key: "FAKE-1")], fetchedAt: Date()))
+        let h = FakeMirrorHome()
+        let c = client(h)
+        let p = MirrorPublisher(home: { c }, rehome: {}, docs: docs, bus: bus, appVersion: "1.0", source: "app-1", sourceName: "mbp",
+                                clock: { Date(timeIntervalSince1970: 1_000_000) }, debounce: 3600, withCI: { false })
+        p.start()
+        try await p.flush()
+        t.freezeList()
+        store.madeKeep = 0.4
+        var id = ""
+        make(store, key) { r in if case .success(let m) = r { id = m.ref.id } }
+        await until("create answers") { !id.isEmpty }
+        try await p.flush()
+        let sent = h.puts.flatMap(\.docs).filter { $0.id == "\(key)/\(id)" }
+        XCTAssertEqual(sent.map { $0.deleted ?? false }, [false], "the stub goes out")
+        await until("the tombstone goes out", timeout: .seconds(4)) {
+            try? await p.flush()
+            return h.puts.flatMap(\.docs).contains { $0.id == "\(key)/\(id)" && $0.deleted == true }
+        }
     }
 
     func testItemDocIsKeptWhenTheItemDoesNotChange() throws {

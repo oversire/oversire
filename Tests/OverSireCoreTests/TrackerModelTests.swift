@@ -22,6 +22,18 @@ final class TrackerModelTests: XCTestCase {
                                statusOptions: options, items: items, fetchedAt: Date())
     }
 
+    func testItemPendingIsOmittedWhenNil() throws {
+        let enc = JSONEncoder()
+        var i = item("1", status: nil)
+        let plain = try XCTUnwrap(String(data: enc.encode(i), encoding: .utf8))
+        XCTAssertFalse(plain.contains("pending"))
+        i.pending = true
+        let marked = try enc.encode(i)
+        XCTAssertTrue(try XCTUnwrap(String(data: marked, encoding: .utf8)).contains("\"pending\":true"))
+        XCTAssertEqual(try JSONDecoder().decode(Item.self, from: marked).pending, true)
+        XCTAssertNil(try JSONDecoder().decode(Item.self, from: enc.encode(item("1", status: nil))).pending)
+    }
+
     func testUnplannedOnlyInBacklogAndTriage() {
         let opts = [StatusOption(id: "bl", name: "Backlog", color: "", group: "backlog"),
                     StatusOption(id: "tr", name: "Triage", color: "", group: "triage"),
